@@ -1507,6 +1507,30 @@
         "result": "The same bounded A-network substrate has executable persistence/state evidence and Link-carried reaction evidence; storage-only or detached execution is not accepted as a complete backend claim.",
         "acceptanceGuard": "Every contract requirement must have at least one GREEN mandatory vector before repository acceptance can become READY."
       }
+    },
+    {
+      "id": "AM-C052-r6-many-order-scope-direct",
+      "requirements": [
+        "AM-006",
+        "AM-009",
+        "AM-037",
+        "AM-038"
+      ],
+      "status": "planned",
+      "evidence": {
+        "issue": 45,
+        "implementationBranch": "convergence/45-legacy-audit-witnesses",
+        "purpose": "Direct evidence candidate for legacy AM-C007/AM-C008/AM-C011/AM-C013 and portable laws P06/P08/P15.",
+        "expectedWitnesses": [
+          "1->N with two distinct admitted non-zero outputs",
+          "N->M with two current truths and two distinct successors",
+          "reversed current and Theory processing order preserves normalized result",
+          "semantically valid cardinality outside bounded backend scope fails closed"
+        ],
+        "nativeRustWitness": "implemented; CI must pass before merge",
+        "realBrowserCpuWebGpuWitness": "REQUIRED_BEFORE_GREEN",
+        "fullReactionProfileConformance": false
+      }
     }
   ],
   "backendMatrix": [
