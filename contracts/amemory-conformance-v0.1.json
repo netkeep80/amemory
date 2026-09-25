@@ -10,7 +10,7 @@
     "conformanceBlobSha": "de83242ae4c248727fefa791589c72c1ce31c8e0",
     "acceptedFoundationCommit": "440caf09558d4ff5cfda11805cb3ef97b48d1ad5"
   },
-  "coverageState": "planned",
+  "coverageState": "complete",
   "mandatoryVectors": [
     {
       "id": "AM-C001-exact-version-pin",
@@ -114,12 +114,29 @@
       "requirements": [
         "AM-006"
       ],
-      "status": "planned",
+      "status": "green",
       "reconciliation": {
         "issue": 45,
         "classification": "NEEDS_NEW_EXECUTABLE_WITNESS",
         "supportingVectors": [],
-        "note": "Requires a direct distinct MANY witness: one current truth with at least two admitted non-zero outputs."
+        "note": "Requires a direct distinct MANY witness: one current truth with at least two admitted non-zero outputs.",
+        "resolution": "PROVEN_BY_NEW_EXECUTABLE_WITNESS",
+        "resolvedBy": "AM-C052-r6-many-order-scope-direct",
+        "realBrowserWitnessComment": "https://github.com/netkeep80/amemory/issues/45#issuecomment-5839912846",
+        "observed": {
+          "cpu": [
+            "19816898",
+            "198998"
+          ],
+          "gpu": [
+            "19816898",
+            "198998"
+          ],
+          "matched": {
+            "cpu": 2,
+            "gpu": 2
+          }
+        }
       }
     },
     {
@@ -127,12 +144,25 @@
       "requirements": [
         "AM-006"
       ],
-      "status": "planned",
+      "status": "green",
       "reconciliation": {
         "issue": 45,
         "classification": "NEEDS_NEW_EXECUTABLE_WITNESS",
         "supportingVectors": [],
-        "note": "Requires a direct multi-current witness whose normalized successor has multiple distinct members."
+        "note": "Requires a direct multi-current witness whose normalized successor has multiple distinct members.",
+        "resolution": "PROVEN_BY_NEW_EXECUTABLE_WITNESS",
+        "resolvedBy": "AM-C052-r6-many-order-scope-direct",
+        "realBrowserWitnessComment": "https://github.com/netkeep80/amemory/issues/45#issuecomment-5839912846",
+        "observed": {
+          "cpu": [
+            "19816898",
+            "198998"
+          ],
+          "gpu": [
+            "19816898",
+            "198998"
+          ]
+        }
       }
     },
     {
@@ -173,12 +203,16 @@
       "requirements": [
         "AM-009"
       ],
-      "status": "planned",
+      "status": "green",
       "reconciliation": {
         "issue": 45,
         "classification": "NEEDS_NEW_EXECUTABLE_WITNESS",
         "supportingVectors": [],
-        "note": "Candidate reorder evidence is insufficient; requires reaction current/relation processing-order permutation with identical normalized result."
+        "note": "Candidate reorder evidence is insufficient; requires reaction current/relation processing-order permutation with identical normalized result.",
+        "resolution": "PROVEN_BY_NEW_EXECUTABLE_WITNESS",
+        "resolvedBy": "AM-C052-r6-many-order-scope-direct",
+        "realBrowserWitnessComment": "https://github.com/netkeep80/amemory/issues/45#issuecomment-5839912846",
+        "observed": "PASS reversed current + Theory order; normalized result unchanged on CPU/WASM and WebGPU"
       }
     },
     {
@@ -209,12 +243,19 @@
         "AM-001",
         "AM-009"
       ],
-      "status": "planned",
+      "status": "green",
       "reconciliation": {
         "issue": 45,
         "classification": "NEEDS_NEW_EXECUTABLE_WITNESS",
         "supportingVectors": [],
-        "note": "Malformed/foreign/capacity controls exist, but a direct semantically valid operation beyond each backend's declared bounded execution scope is still required."
+        "note": "Malformed/foreign/capacity controls exist, but a direct semantically valid operation beyond each backend's declared bounded execution scope is still required.",
+        "resolution": "PROVEN_BY_NEW_EXECUTABLE_WITNESS",
+        "resolvedBy": "AM-C052-r6-many-order-scope-direct",
+        "realBrowserWitnessComment": "https://github.com/netkeep80/amemory/issues/45#issuecomment-5839912846",
+        "observed": {
+          "cpu": "PASS valid cardinality 17 > 16 rejected",
+          "gpu": "PASS valid cardinality 5 > 4 rejected"
+        }
       }
     },
     {
@@ -956,8 +997,10 @@
           "AM-C016..AM-C043",
           "AM-C046..AM-C050"
         ],
-        "profileLawCoverageRule": "R1-R5 directly witness P01-P05,P07,P09-P14,P16-P17. Global audit #45 found that P06/P08 need a distinct MANY/exhaustiveness witness and P15 needs reaction-order variation; full-profile conformance remains pending until those direct witnesses exist.",
-        "currentAuditIssue": 45
+        "profileLawCoverageRule": "Historical guard satisfied: storage/supporting evidence was not promoted to full reaction-profile conformance before direct reaction witnesses existed. R1-R6 now directly cover P01-P17; R6 closes P06/P08/P15.",
+        "currentAuditIssue": 45,
+        "fullReactionProfileConformanceNow": true,
+        "r6WitnessComment": "https://github.com/netkeep80/amemory/issues/45#issuecomment-5839912846"
       }
     },
     {
@@ -966,7 +1009,7 @@
         "AM-037",
         "AM-038"
       ],
-      "status": "planned",
+      "status": "green",
       "evidence": {
         "profile": "minimal-portable-amemory-execution@0.1.0",
         "profileVersion": "0.1.0",
@@ -982,7 +1025,8 @@
           "AM-C047-r2-no-admitted-relation-quiescence",
           "AM-C048-r3-zero-and-duplicate-convergence",
           "AM-C049-r4-theory-admission-tplus1",
-          "AM-C050-r5-recurrence-and-end-not-halt"
+          "AM-C050-r5-recurrence-and-end-not-halt",
+          "AM-C052-r6-many-order-scope-direct"
         ],
         "portableLawCoverage": {
           "P01": "AM-C046",
@@ -990,39 +1034,36 @@
           "P03": "AM-C046",
           "P04": "AM-C046",
           "P05": "AM-C046",
-          "P06": "PENDING_DIRECT_MANY_EXHAUSTIVENESS_WITNESS",
+          "P06": "AM-C052",
           "P07": "AM-C047",
-          "P08": "PENDING_DIRECT_MANY_ALL_OUTPUTS_WITNESS",
+          "P08": "AM-C052",
           "P09": "AM-C048",
           "P10": "AM-C048",
           "P11": "AM-C046",
           "P12": "AM-C046",
           "P13": "AM-C047",
           "P14": "AM-C049",
-          "P15": "PENDING_REACTION_ORDER_VARIATION_WITNESS",
+          "P15": "AM-C052",
           "P16": "AM-C050",
           "P17": "AM-C050"
         },
-        "normalizedReactionDifferential": "PASS for directly witnessed R1-R5 slices",
-        "negativeMismatchControls": "PASS across directly witnessed R1-R5 slices",
+        "normalizedReactionDifferential": "PASS across R1-R6",
+        "negativeMismatchControls": "PASS across R1-R6 and supporting differential layers",
         "localHandlesNonSemantic": true,
-        "allPortableLawsCovered": false,
-        "fullReactionProfileConformance": false,
-        "note": "Global evidence audit #45 retired the previous full-profile GREEN claim: R1 proves ONE but not distinct MANY/exhaustiveness, and existing candidate reorder evidence is not a reaction-order witness.",
+        "allPortableLawsCovered": true,
+        "fullReactionProfileConformance": true,
+        "note": "Global audit #45 gaps are directly closed by real-browser R6 evidence: distinct MANY/exhaustiveness (P06/P08), reaction-order variation (P15), and bounded-scope fail-closed behavior.",
         "auditIssue": 45,
-        "auditGaps": [
-          "P06_EXHAUST_ALL_ADMITTED_RELATIONS",
-          "P08_ADMITTED_RELATIONS_REPLACE_BY_ALL_OUTPUTS",
-          "P15_PHYSICAL_SCHEDULE_AND_LOCAL_ADDRESSES_ARE_NONSEMANTIC"
-        ],
         "realBrowserDifferentialCompletedSlices": [
           "R1",
           "R2",
           "R3",
           "R4",
-          "R5"
+          "R5",
+          "R6"
         ],
-        "r6RealBrowserDifferential": false
+        "r6RealBrowserDifferential": true,
+        "r6BrowserWitnessComment": "https://github.com/netkeep80/amemory/issues/45#issuecomment-5839912846"
       }
     },
     {
@@ -1523,7 +1564,7 @@
         "AM-037",
         "AM-038"
       ],
-      "status": "planned",
+      "status": "green",
       "evidence": {
         "issue": 45,
         "purpose": "Direct evidence candidate for legacy AM-C007/AM-C008/AM-C011/AM-C013 and portable laws P06/P08/P15.",
@@ -1534,9 +1575,60 @@
           "semantically valid cardinality outside bounded backend scope fails closed"
         ],
         "nativeRustWitness": "implemented in repository and guarded by browser-reaction-check workflow",
-        "realBrowserCpuWebGpuWitness": "REQUIRED_BEFORE_GREEN",
+        "realBrowserCpuWebGpuWitness": "PASS",
         "fullReactionProfileConformance": false,
-        "implementationPr": 46
+        "implementationPr": 46,
+        "realBrowserWitnessComment": "https://github.com/netkeep80/amemory/issues/45#issuecomment-5839912846",
+        "pages": "https://netkeep80.github.io/amemory/",
+        "observed": {
+          "rustWasm": "LOADED",
+          "webgpu": "WEBGPU_AVAILABLE",
+          "gpuSmoke": "PASS [2, 3, 4, 5]",
+          "oneToN": {
+            "cpu": [
+              "19816898",
+              "198998"
+            ],
+            "gpu": [
+              "19816898",
+              "198998"
+            ],
+            "matched": {
+              "cpu": 2,
+              "gpu": 2
+            },
+            "normalizedDifferential": "PASS"
+          },
+          "nToM": {
+            "cpu": [
+              "19816898",
+              "198998"
+            ],
+            "gpu": [
+              "19816898",
+              "198998"
+            ],
+            "normalizedDifferential": "PASS"
+          },
+          "reactionOrderVariation": "PASS (reversed current + Theory order)",
+          "boundedScopeFailClosed": {
+            "cpu": "PASS rejected count 17 > 16",
+            "gpu": "PASS rejected count 5 > 4"
+          },
+          "normalizedCpuGpuDifferential": "PASS"
+        },
+        "coveredPortableLaws": [
+          "P06",
+          "P08",
+          "P15"
+        ],
+        "closesLegacyVectors": [
+          "AM-C007",
+          "AM-C008",
+          "AM-C011",
+          "AM-C013"
+        ],
+        "fullReactionProfileConformanceContribution": true
       }
     }
   ],
@@ -1567,7 +1659,7 @@
         "bounded R4 reaction-start TheorySnapshot t+1 visibility",
         "bounded R5 active recurrence through structural END"
       ],
-      "currentScopeMechanism": "R1-R5 IMPLEMENTED: bounded two-bank Scope arrays with one published bank selector; complete successor bank is prepared before selector handoff. Scope bank/selector are substrate-only.",
+      "currentScopeMechanism": "R1-R6 EVIDENCED: bounded two-bank Scope arrays with one published bank selector; complete successor bank is prepared before selector handoff. Scope bank/selector are substrate-only.",
       "oldPhysicalLinkRetentionPolicy": "R1 preserves the old physical Scope bank and previously materialized Links after publication; current semantic membership is determined only by the published bank.",
       "backendSubstrateBoundary": [
         "Rust local Link pool and local handles",
@@ -1607,7 +1699,8 @@
         "AM-C047",
         "AM-C048",
         "AM-C049",
-        "AM-C050"
+        "AM-C050",
+        "AM-C052"
       ],
       "profileLawCoverage": {
         "P01": "r1-green-real-browser-differential",
@@ -1615,20 +1708,20 @@
         "P03": "r1-green-real-browser-differential",
         "P04": "r1-green-real-browser-differential",
         "P05": "r1-green-real-browser-differential",
-        "P06": "pending-r6-direct-witness",
+        "P06": "r6-green-real-browser-differential",
         "P07": "r2-green-real-browser-differential",
-        "P08": "pending-r6-direct-witness",
+        "P08": "r6-green-real-browser-differential",
         "P09": "r3-green-real-browser-differential",
         "P10": "r3-green-real-browser-differential",
         "P11": "r1-green-real-browser-differential",
         "P12": "r1-green-real-browser-differential",
         "P13": "r2-green-real-browser-differential",
         "P14": "r4-green-real-browser-differential",
-        "P15": "pending-r6-direct-witness",
+        "P15": "r6-green-real-browser-differential",
         "P16": "r5-green-real-browser-differential",
         "P17": "r5-green-real-browser-differential"
       },
-      "fullProfileConformance": false
+      "fullProfileConformance": true
     },
     {
       "backendId": "browser-webgpu",
@@ -1654,7 +1747,7 @@
         "bounded R4 reaction-start TheorySnapshot t+1 visibility",
         "bounded R5 active recurrence through structural END"
       ],
-      "currentScopeMechanism": "R1-R5 IMPLEMENTED: bounded two-bank GPU Scope buffer plus atomic<u32> published selector; complete successor bank is written before the single selector store. Buffer/index layout is substrate-only.",
+      "currentScopeMechanism": "R1-R6 EVIDENCED: bounded two-bank GPU Scope buffer plus atomic<u32> published selector; complete successor bank is written before the single selector store. Buffer/index layout is substrate-only.",
       "oldPhysicalLinkRetentionPolicy": "R1 retains the old GPU Scope bank and Link-pool topology after publication; only the atomic published selector defines current semantic membership.",
       "backendSubstrateBoundary": [
         "WebGPU buffers and WGSL kernels",
@@ -1704,7 +1797,8 @@
         "AM-C047",
         "AM-C048",
         "AM-C049",
-        "AM-C050"
+        "AM-C050",
+        "AM-C052"
       ],
       "profileLawCoverage": {
         "P01": "r1-green-real-browser-differential",
@@ -1712,20 +1806,20 @@
         "P03": "r1-green-real-browser-differential",
         "P04": "r1-green-real-browser-differential",
         "P05": "r1-green-real-browser-differential",
-        "P06": "pending-r6-direct-witness",
+        "P06": "r6-green-real-browser-differential",
         "P07": "r2-green-real-browser-differential",
-        "P08": "pending-r6-direct-witness",
+        "P08": "r6-green-real-browser-differential",
         "P09": "r3-green-real-browser-differential",
         "P10": "r3-green-real-browser-differential",
         "P11": "r1-green-real-browser-differential",
         "P12": "r1-green-real-browser-differential",
         "P13": "r2-green-real-browser-differential",
         "P14": "r4-green-real-browser-differential",
-        "P15": "pending-r6-direct-witness",
+        "P15": "r6-green-real-browser-differential",
         "P16": "r5-green-real-browser-differential",
         "P17": "r5-green-real-browser-differential"
       },
-      "fullProfileConformance": false
+      "fullProfileConformance": true
     },
     {
       "backendId": "future-accelerator-family",
@@ -1776,7 +1870,7 @@
       "fullProfileConformance": false
     }
   ],
-  "acceptanceState": "NOT_READY",
+  "acceptanceState": "READY",
   "upstreamRequirements": {
     "lock": "contracts/upstream/mts-v0.13.lock.json",
     "projection": "contracts/upstream/mts-v0.13-requirements.json",
@@ -1865,6 +1959,50 @@
         "sampleGpuHandle": 60,
         "sampleCpuExport": "19868",
         "sampleGpuExport": "19868"
+      }
+    },
+    "browserReactionR6V01": {
+      "issue": 45,
+      "implementationPr": 46,
+      "mergedMainSha": "79be7e82f43a7b2841cc39f9b493177440e48644",
+      "browserWitnessComment": "https://github.com/netkeep80/amemory/issues/45#issuecomment-5839912846",
+      "pages": "https://netkeep80.github.io/amemory/",
+      "observed": {
+        "rustWasm": "LOADED",
+        "webgpu": "WEBGPU_AVAILABLE",
+        "gpuSmoke": "PASS [2, 3, 4, 5]",
+        "oneToN": {
+          "cpu": [
+            "19816898",
+            "198998"
+          ],
+          "gpu": [
+            "19816898",
+            "198998"
+          ],
+          "matched": {
+            "cpu": 2,
+            "gpu": 2
+          },
+          "normalizedDifferential": "PASS"
+        },
+        "nToM": {
+          "cpu": [
+            "19816898",
+            "198998"
+          ],
+          "gpu": [
+            "19816898",
+            "198998"
+          ],
+          "normalizedDifferential": "PASS"
+        },
+        "reactionOrderVariation": "PASS (reversed current + Theory order)",
+        "boundedScopeFailClosed": {
+          "cpu": "PASS rejected count 17 > 16",
+          "gpu": "PASS rejected count 5 > 4"
+        },
+        "normalizedCpuGpuDifferential": "PASS"
       }
     }
   },
