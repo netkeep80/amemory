@@ -228,7 +228,22 @@
         "AM-017",
         "AM-020"
       ],
-      "status": "browser-witness-required"
+      "status": "green",
+      "evidence": {
+        "issue": 14,
+        "implementationPr": 15,
+        "mergedMainSha": "33ee41f66123e1e0ee4ed48645c92bf2bbec937c",
+        "browserWitnessComment": "https://github.com/netkeep80/amemory/issues/14#issuecomment-5833197835",
+        "pages": "https://netkeep80.github.io/amemory/",
+        "observed": {
+          "canonicalizationCpu": "PASS [1, 4, 2, 4, 1, 2]",
+          "canonicalizationGpu": "PASS [1, 4, 2, 4, 1, 2]",
+          "canonicalNewPairsCpu": "PASS [(1,3), (4,5)]",
+          "canonicalNewPairsGpu": "PASS [(1,3), (4,5)]",
+          "differential": "PASS",
+          "negativeControl": "PASS (mismatches detected)"
+        }
+      }
     },
     {
       "id": "AM-C021-normalized-new-pair-set",
@@ -237,7 +252,22 @@
         "AM-018",
         "AM-020"
       ],
-      "status": "browser-witness-required"
+      "status": "green",
+      "evidence": {
+        "issue": 14,
+        "implementationPr": 15,
+        "mergedMainSha": "33ee41f66123e1e0ee4ed48645c92bf2bbec937c",
+        "browserWitnessComment": "https://github.com/netkeep80/amemory/issues/14#issuecomment-5833197835",
+        "pages": "https://netkeep80.github.io/amemory/",
+        "observed": {
+          "canonicalizationCpu": "PASS [1, 4, 2, 4, 1, 2]",
+          "canonicalizationGpu": "PASS [1, 4, 2, 4, 1, 2]",
+          "canonicalNewPairsCpu": "PASS [(1,3), (4,5)]",
+          "canonicalNewPairsGpu": "PASS [(1,3), (4,5)]",
+          "differential": "PASS",
+          "negativeControl": "PASS (mismatches detected)"
+        }
+      }
     },
     {
       "id": "AM-C022-existing-pair-never-new-commit",
@@ -245,7 +275,22 @@
         "AM-017",
         "AM-019"
       ],
-      "status": "ci-and-browser-witness-required"
+      "status": "green",
+      "evidence": {
+        "issue": 14,
+        "implementationPr": 15,
+        "mergedMainSha": "33ee41f66123e1e0ee4ed48645c92bf2bbec937c",
+        "browserWitnessComment": "https://github.com/netkeep80/amemory/issues/14#issuecomment-5833197835",
+        "pages": "https://netkeep80.github.io/amemory/",
+        "observed": {
+          "canonicalizationCpu": "PASS [1, 4, 2, 4, 1, 2]",
+          "canonicalizationGpu": "PASS [1, 4, 2, 4, 1, 2]",
+          "canonicalNewPairsCpu": "PASS [(1,3), (4,5)]",
+          "canonicalNewPairsGpu": "PASS [(1,3), (4,5)]",
+          "differential": "PASS",
+          "negativeControl": "PASS (mismatches detected)"
+        }
+      }
     },
     {
       "id": "AM-C023-reorder-preserves-semantic-new-pair-set",
@@ -253,7 +298,22 @@
         "AM-018",
         "AM-020"
       ],
-      "status": "ci-required"
+      "status": "green",
+      "evidence": {
+        "issue": 14,
+        "implementationPr": 15,
+        "mergedMainSha": "33ee41f66123e1e0ee4ed48645c92bf2bbec937c",
+        "browserWitnessComment": "https://github.com/netkeep80/amemory/issues/14#issuecomment-5833197835",
+        "pages": "https://netkeep80.github.io/amemory/",
+        "observed": {
+          "canonicalizationCpu": "PASS [1, 4, 2, 4, 1, 2]",
+          "canonicalizationGpu": "PASS [1, 4, 2, 4, 1, 2]",
+          "canonicalNewPairsCpu": "PASS [(1,3), (4,5)]",
+          "canonicalNewPairsGpu": "PASS [(1,3), (4,5)]",
+          "differential": "PASS",
+          "negativeControl": "PASS (mismatches detected)"
+        }
+      }
     },
     {
       "id": "AM-C024-canonicalization-negative-controls",
@@ -262,7 +322,22 @@
         "AM-015",
         "AM-017"
       ],
-      "status": "ci-and-browser-witness-required"
+      "status": "green",
+      "evidence": {
+        "issue": 14,
+        "implementationPr": 15,
+        "mergedMainSha": "33ee41f66123e1e0ee4ed48645c92bf2bbec937c",
+        "browserWitnessComment": "https://github.com/netkeep80/amemory/issues/14#issuecomment-5833197835",
+        "pages": "https://netkeep80.github.io/amemory/",
+        "observed": {
+          "canonicalizationCpu": "PASS [1, 4, 2, 4, 1, 2]",
+          "canonicalizationGpu": "PASS [1, 4, 2, 4, 1, 2]",
+          "canonicalNewPairsCpu": "PASS [(1,3), (4,5)]",
+          "canonicalNewPairsGpu": "PASS [(1,3), (4,5)]",
+          "differential": "PASS",
+          "negativeControl": "PASS (mismatches detected)"
+        }
+      }
     }
   ],
   "backendMatrix": [],
@@ -291,6 +366,21 @@
         "incidenceGpu": "PASS [7, 1, 2, 0, 7]",
         "differential": "PASS",
         "negativeControl": "PASS (mismatch detected)"
+      }
+    },
+    "browserCanonicalizationV01": {
+      "issue": 14,
+      "implementationPr": 15,
+      "mergedMainSha": "33ee41f66123e1e0ee4ed48645c92bf2bbec937c",
+      "browserWitnessComment": "https://github.com/netkeep80/amemory/issues/14#issuecomment-5833197835",
+      "pages": "https://netkeep80.github.io/amemory/",
+      "observed": {
+        "canonicalizationCpu": "PASS [1, 4, 2, 4, 1, 2]",
+        "canonicalizationGpu": "PASS [1, 4, 2, 4, 1, 2]",
+        "canonicalNewPairsCpu": "PASS [(1,3), (4,5)]",
+        "canonicalNewPairsGpu": "PASS [(1,3), (4,5)]",
+        "differential": "PASS",
+        "negativeControl": "PASS (mismatches detected)"
       }
     }
   }
