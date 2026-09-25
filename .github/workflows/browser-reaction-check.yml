@@ -1,4 +1,4 @@
-name: A-memory browser reaction R1 check
+name: A-memory browser reaction R1/R2 check
 
 on:
   pull_request:
@@ -36,7 +36,7 @@ jobs:
           node --check experiments/browser-accelerator/web/app.js
           node --check experiments/browser-accelerator/web/reaction.mjs
 
-      - name: Reaction R1 normalization positive/negative witnesses
+      - name: Reaction R1/R2 normalization and quiescence witnesses
         run: node experiments/browser-accelerator/tests/reaction.test.mjs
 
       - name: Portable Anum regression
