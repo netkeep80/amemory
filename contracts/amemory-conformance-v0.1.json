@@ -827,7 +827,7 @@
           "AM-C046"
         ],
         "fullReactionProfileConformanceClaimed": false,
-        "profileLawCoverageRule": "R1 is GREEN for P01,P02,P03,P04,P05,P06,P08,P11,P12,P15; R2 is GREEN for P07/P13; R3 is GREEN for P09/P10; R4 has executable candidate evidence for P14 but requires a real browser witness; P16/P17 remain not-yet-executed."
+        "profileLawCoverageRule": "R1 is GREEN for P01,P02,P03,P04,P05,P06,P08,P11,P12,P15; R2 is GREEN for P07/P13; R3 is GREEN for P09/P10; R4 is GREEN for P14; P16/P17 remain not-yet-executed."
       }
     },
     {
@@ -851,19 +851,18 @@
         "completedSlices": [
           "AM-C046-r1-one-reaction-cpu-webgpu",
           "AM-C047-r2-no-admitted-relation-quiescence",
-          "AM-C048-r3-zero-and-duplicate-convergence"
+          "AM-C048-r3-zero-and-duplicate-convergence",
+          "AM-C049-r4-theory-admission-tplus1"
         ],
         "R1": "green-real-browser-differential",
         "R2": "green-real-browser-differential",
         "R3": "green-real-browser-differential",
+        "R4": "green-real-browser-differential",
         "remainingPortableLaws": [
-          "P14",
           "P16",
           "P17"
         ],
-        "fullProfileConformance": false,
-        "currentSlice": "AM-C049-r4-theory-admission-tplus1",
-        "R4": "implementation-candidate-browser-witness-required"
+        "fullProfileConformance": false
       }
     },
     {
@@ -1121,9 +1120,14 @@
         "AM-042",
         "AM-045"
       ],
-      "status": "planned",
-      "evidenceRequired": {
+      "status": "green",
+      "evidence": {
         "issue": 37,
+        "implementationPr": 38,
+        "preflightFixPr": 39,
+        "mergedMainSha": "302734eb5c26d18b3f1a1abea7007250eec78407",
+        "browserWitnessComment": "https://github.com/netkeep80/amemory/issues/37#issuecomment-5839262722",
+        "pages": "https://netkeep80.github.io/amemory/",
         "profile": "minimal-portable-amemory-execution@0.1.0",
         "fixtures": {
           "K": "98",
@@ -1136,32 +1140,70 @@
           "relationBC": "116898998",
           "current2": "198998"
         },
-        "machine": [
-          "reaction JS R4 two-reaction trajectory witness",
-          "native Rust live-Theory versus snapshot isolation witness",
-          "stale-snapshot negative control",
-          "wasm32 compile",
-          "all prior browser-prototype regressions"
-        ],
-        "realBrowser": [
-          "Rust/WASM loaded",
-          "WebGPU available",
-          "reaction t before CPU=GPU=[19868]",
-          "snapshot_t count CPU=GPU=1",
-          "live Theory count after admission CPU=GPU=2 while snapshot_t remains 1",
-          "reaction t after CPU=GPU=[19816898]",
-          "reaction t matchedRelations CPU=GPU=1",
-          "reaction t handoffCount CPU=GPU=1",
-          "snapshot_t+1 count CPU=GPU=2",
-          "reaction t+1 before CPU=GPU=[19816898]",
-          "reaction t+1 after CPU=GPU=[198998]",
-          "reaction t+1 matchedRelations CPU=GPU=1",
-          "reaction t+1 handoffCount CPU=GPU=1",
-          "same-reaction isolation PASS",
-          "next-reaction visibility PASS",
-          "stale-snapshot control PASS",
-          "normalized CPU/GPU trajectory differential PASS"
-        ],
+        "observed": {
+          "rustWasm": "LOADED",
+          "webgpu": "WEBGPU_AVAILABLE",
+          "reactionT": {
+            "beforeCpu": [
+              "19868"
+            ],
+            "beforeGpu": [
+              "19868"
+            ],
+            "snapshotCount": {
+              "cpu": 1,
+              "gpu": 1
+            },
+            "liveTheoryCountAfterAdmission": {
+              "cpu": 2,
+              "gpu": 2
+            },
+            "afterCpu": [
+              "19816898"
+            ],
+            "afterGpu": [
+              "19816898"
+            ],
+            "matchedRelations": {
+              "cpu": 1,
+              "gpu": 1
+            },
+            "handoffCount": {
+              "cpu": 1,
+              "gpu": 1
+            }
+          },
+          "reactionTPlus1": {
+            "snapshotCount": {
+              "cpu": 2,
+              "gpu": 2
+            },
+            "beforeCpu": [
+              "19816898"
+            ],
+            "beforeGpu": [
+              "19816898"
+            ],
+            "afterCpu": [
+              "198998"
+            ],
+            "afterGpu": [
+              "198998"
+            ],
+            "matchedRelations": {
+              "cpu": 1,
+              "gpu": 1
+            },
+            "handoffCount": {
+              "cpu": 1,
+              "gpu": 1
+            }
+          },
+          "sameReactionIsolation": "PASS",
+          "nextReactionVisibility": "PASS",
+          "staleSnapshotControl": "PASS",
+          "normalizedTrajectoryDifferential": "PASS"
+        },
         "coveredPortableLaws": [
           "P14"
         ],
@@ -1236,7 +1278,8 @@
         "AM-C039",
         "AM-C046",
         "AM-C047",
-        "AM-C048"
+        "AM-C048",
+        "AM-C049"
       ],
       "profileLawCoverage": {
         "P01": "r1-green-real-browser-differential",
@@ -1252,7 +1295,7 @@
         "P11": "r1-green-real-browser-differential",
         "P12": "r1-green-real-browser-differential",
         "P13": "r2-green-real-browser-differential",
-        "P14": "r4-executable-browser-witness-required",
+        "P14": "r4-green-real-browser-differential",
         "P15": "r1-green-real-browser-differential",
         "P16": "not-yet-executed",
         "P17": "not-yet-executed"
@@ -1329,7 +1372,8 @@
         "AM-C039",
         "AM-C046",
         "AM-C047",
-        "AM-C048"
+        "AM-C048",
+        "AM-C049"
       ],
       "profileLawCoverage": {
         "P01": "r1-green-real-browser-differential",
@@ -1345,7 +1389,7 @@
         "P11": "r1-green-real-browser-differential",
         "P12": "r1-green-real-browser-differential",
         "P13": "r2-green-real-browser-differential",
-        "P14": "r4-executable-browser-witness-required",
+        "P14": "r4-green-real-browser-differential",
         "P15": "r1-green-real-browser-differential",
         "P16": "not-yet-executed",
         "P17": "not-yet-executed"
