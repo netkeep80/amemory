@@ -140,8 +140,17 @@ R1 fixture:
 
 R1 executable subset:
   P01 P02 P03 P04 P05 P06 P08 P11 P12 P15
-    -> implementation exists
-    -> real WebGPU browser witness required before GREEN conformance
+    -> GREEN on real browser CPU/WASM ↔ WebGPU differential
+
+Observed R1:
+  before CPU/GPU = [19868]
+  after  CPU/GPU = [19816898]
+  matchedRelations = 1 / 1
+  handoffCount = 1 / 1
+  TheorySnapshot isolation = PASS
+  old Scope retained physically = PASS
+  backend-local handles differ = PASS
+  negative mismatch/no-match/foreign controls = PASS
 
 P10
   -> supporting canonicalization evidence only
@@ -149,6 +158,8 @@ P10
 P07 P09 P13 P14 P16 P17
   -> not-yet-executed
 
+AM-C046 R1 = GREEN
+AM-C045 FULL PROFILE = PLANNED
 FULL_REACTION_PROFILE_CONFORMANCE = FALSE
 ```
 
@@ -158,7 +169,7 @@ Storage/incidence/Anum tests и даже R1 нельзя использоват�
 
 ## Следующие reaction slices
 
-После реального browser witness для R1 нужно последовательно закрыть:
+После закрытого GREEN R1 следующий этап — последовательно закрыть:
 
 ```text
 P07  NO_ADMITTED_RELATION
