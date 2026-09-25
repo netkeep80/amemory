@@ -38,7 +38,10 @@
       "experiments/browser-accelerator/tests/canonicalization.test.mjs",
       ".github/workflows/browser-state-store-check.yml",
       "experiments/browser-accelerator/web/state-store.mjs",
-      "experiments/browser-accelerator/tests/state-store.test.mjs"
+      "experiments/browser-accelerator/tests/state-store.test.mjs",
+      ".github/workflows/browser-anum-boundary-check.yml",
+      "experiments/browser-accelerator/web/anum-boundary.mjs",
+      "experiments/browser-accelerator/tests/anum-boundary.test.mjs"
     ],
     "operational_paths": []
   },

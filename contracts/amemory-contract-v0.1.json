@@ -157,6 +157,30 @@
     {
       "id": "AM-026",
       "statement": "Reference CPU and accelerator state transitions MUST agree after every observed step in their shared declared scope."
+    },
+    {
+      "id": "AM-027",
+      "statement": "Portable A-memory structural interchange MUST use canonical MTS structural Anum identity rather than backend-local handles."
+    },
+    {
+      "id": "AM-028",
+      "statement": "Importing the same canonical Anum into independently allocated Memories MUST reconstruct structurally equivalent Links despite different local handles."
+    },
+    {
+      "id": "AM-029",
+      "statement": "Exporting a supported well-founded local Link MUST produce the canonical accepted Anum for that Link."
+    },
+    {
+      "id": "AM-030",
+      "statement": "Malformed, truncated, trailing-garbage, unsupported or capacity-exceeding Anum import MUST fail closed before partial semantic publication."
+    },
+    {
+      "id": "AM-031",
+      "statement": "Local allocation order, local handle values and physical coordinates MUST NOT affect exported portable Anum identity."
+    },
+    {
+      "id": "AM-032",
+      "statement": "Repeated import of the same structural Link inside one Memory MUST reuse canonical local Link identity."
     }
   ],
   "acceptance": {

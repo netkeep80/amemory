@@ -12,6 +12,7 @@ import {
   formatStatePairs,
   matrixToPairs,
 } from "./state-store.mjs";
+import { runAnumBoundaryBrowser } from "./anum-boundary.mjs";
 
 const ui = {
   wasm: document.querySelector("#wasm"),
@@ -36,6 +37,14 @@ const ui = {
   stateR2Gpu: document.querySelector("#state-r2-gpu"),
   stateDiff: document.querySelector("#state-diff"),
   stateNegative: document.querySelector("#state-negative"),
+  anumImportCpu: document.querySelector("#anum-import-cpu"),
+  anumImportGpu: document.querySelector("#anum-import-gpu"),
+  anumExportCpu: document.querySelector("#anum-export-cpu"),
+  anumExportGpu: document.querySelector("#anum-export-gpu"),
+  anumDiff: document.querySelector("#anum-diff"),
+  anumHandles: document.querySelector("#anum-handles"),
+  anumReuse: document.querySelector("#anum-reuse"),
+  anumNegative: document.querySelector("#anum-negative"),
   details: document.querySelector("#details"),
 };
 
@@ -67,9 +76,20 @@ async function loadWasm() {
   const stateReset = instance.exports.amemory_state_reset;
   const stateCommit = instance.exports.amemory_state_commit;
   const stateGet = instance.exports.amemory_state_get;
+  const anumCpuResetPool = instance.exports.amemory_anum_cpu_reset_pool;
+  const anumCpuSetToken = instance.exports.amemory_anum_cpu_set_token;
+  const anumCpuImport = instance.exports.amemory_anum_cpu_import;
+  const anumCpuExport = instance.exports.amemory_anum_cpu_export;
+  const anumCpuOutputGet = instance.exports.amemory_anum_cpu_output_get;
+  const anumCpuPoolCount = instance.exports.amemory_anum_cpu_pool_count;
 
-  if ([probe, cpuStep, incidenceFlag, canonicalSetExisting, canonicalSetCandidate, canonicalFlag, stateReset, stateCommit, stateGet]
-      .some((fn) => typeof fn !== "function")) {
+  if ([
+    probe, cpuStep, incidenceFlag,
+    canonicalSetExisting, canonicalSetCandidate, canonicalFlag,
+    stateReset, stateCommit, stateGet,
+    anumCpuResetPool, anumCpuSetToken, anumCpuImport, anumCpuExport,
+    anumCpuOutputGet, anumCpuPoolCount,
+  ].some((fn) => typeof fn !== "function")) {
     throw new Error("Expected Rust/WASM exports are missing");
   }
 
@@ -88,7 +108,21 @@ async function loadWasm() {
   report(ui.cpu, "PASS (41 -> 42)", true);
   log(`wasm.cpu_step = ${cpuResult}`);
 
-  return { incidenceFlag, canonicalSetExisting, canonicalSetCandidate, canonicalFlag, stateReset, stateCommit, stateGet };
+  return {
+    incidenceFlag,
+    canonicalSetExisting,
+    canonicalSetCandidate,
+    canonicalFlag,
+    stateReset,
+    stateCommit,
+    stateGet,
+    anumCpuResetPool,
+    anumCpuSetToken,
+    anumCpuImport,
+    anumCpuExport,
+    anumCpuOutputGet,
+    anumCpuPoolCount,
+  };
 }
 
 async function initWebGpu() {
@@ -741,6 +775,14 @@ async function main() {
     report(ui.stateR2Gpu, "NOT_RUN", false);
     report(ui.stateDiff, "NOT_RUN", false);
     report(ui.stateNegative, "NOT_RUN", false);
+    report(ui.anumImportCpu, wasm ? "WAITING_FOR_GPU" : "NOT_RUN", false);
+    report(ui.anumImportGpu, "NOT_RUN", false);
+    report(ui.anumExportCpu, wasm ? "WAITING_FOR_GPU" : "NOT_RUN", false);
+    report(ui.anumExportGpu, "NOT_RUN", false);
+    report(ui.anumDiff, "NOT_RUN", false);
+    report(ui.anumHandles, "NOT_RUN", false);
+    report(ui.anumReuse, "NOT_RUN", false);
+    report(ui.anumNegative, "NOT_RUN", false);
     return;
   }
 
@@ -789,6 +831,37 @@ async function main() {
         if (element.textContent === "WAITING") report(element, "FAIL", false);
       }
       log(`State-store error: ${error?.stack || error}`);
+    }
+  }
+
+  if (wasm) {
+    try {
+      const anum = await runAnumBoundaryBrowser(wasm, device);
+      report(ui.anumImportCpu, "PASS", anum.cpuImport);
+      report(ui.anumImportGpu, "PASS", anum.gpuImport);
+      report(ui.anumExportCpu, "PASS", anum.cpuExport);
+      report(ui.anumExportGpu, "PASS", anum.gpuExport);
+      report(ui.anumDiff, "PASS", anum.differential);
+      report(
+        ui.anumHandles,
+        `PASS (CPU ${anum.sample.cpuHandle} != GPU ${anum.sample.gpuHandle})`,
+        anum.handlesDiffer,
+      );
+      report(ui.anumReuse, "PASS", anum.canonicalReuse);
+      report(
+        ui.anumNegative,
+        "PASS (malformed/truncated/trailing/foreign/capacity rejected)",
+        anum.negativeControls,
+      );
+      for (const line of anum.logs) log(line);
+    } catch (error) {
+      for (const element of [
+        ui.anumImportCpu, ui.anumImportGpu, ui.anumExportCpu, ui.anumExportGpu,
+        ui.anumDiff, ui.anumHandles, ui.anumReuse, ui.anumNegative,
+      ]) {
+        if (element.textContent === "WAITING") report(element, "FAIL", false);
+      }
+      log(`Anum-boundary error: ${error?.stack || error}`);
     }
   }
 
