@@ -254,6 +254,10 @@
     {
       "id": "AM-043",
       "statement": "A backend claiming quiescence MUST expose it as an explicit result of a successful complete reaction evaluation with zero applicable admitted relations; scheduler inactivity, host timeout, empty queues, END topology, malformed state or runtime failure MUST NOT be promoted to semantic quiescence."
+    },
+    {
+      "id": "AM-044",
+      "statement": "A backend claiming ZERO or duplicate-convergence support MUST treat a structurally admitted empty image as a matched relation with zero successor contribution, MUST NOT let ZERO veto sibling non-zero outputs, and MUST converge duplicate successor Links by canonical semantic identity before publication; ZERO-only success is active (non-quiescent) and may publish an empty successor Scope."
     }
   ],
   "acceptance": {
@@ -280,7 +284,7 @@
     "portableLawCount": 17,
     "semanticExtensionRequired": false,
     "acceptedMtsFoundationMutated": false,
-    "currentImplementationClaim": "partial-r1-green-r2-quiescence-candidate",
+    "currentImplementationClaim": "partial-r1-r2-green-r3-zero-duplicates-candidate",
     "fullReactionProfileConformanceClaimed": false
   }
 }
