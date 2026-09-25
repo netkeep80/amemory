@@ -1,5 +1,5 @@
 {
-  "schema": "amemory-upstream-mts-lock/v0.1",
+  "schema": "amemory-upstream-mts-lock/v0.2",
   "normative": true,
   "repository": "netkeep80/anum_docs",
   "acceptedMtsVersion": "mts-contract/v0.13",
@@ -24,5 +24,14 @@
     }
   },
   "generatedProjection": "contracts/upstream/mts-v0.13-requirements.json",
-  "upgradePolicy": "explicit-governance-only"
+  "upgradePolicy": "explicit-governance-only-foundation-and-profile-independent-pins",
+  "executionProfile": {
+    "repository": "netkeep80/anum_docs",
+    "commit": "af4e3dadbb9857fba7239a58f79ed2da59bc5c42",
+    "path": "profiles/amemory-execution-profile.json",
+    "blobSha": "e2c614e1556f31f6230cb69d686d1f22ab2c97e8",
+    "schema": "mts-amemory-execution-profile/v0.1",
+    "id": "minimal-portable-amemory-execution",
+    "profileVersion": "0.1.0"
+  }
 }

@@ -14,8 +14,18 @@
     "floatingMainIsAuthority": false,
     "upstreamLock": "contracts/upstream/mts-v0.13.lock.json",
     "requirementsProjection": "contracts/upstream/mts-v0.13-requirements.json",
-    "importPolicy": "exact-commit-and-git-blob-pinned-generated-projection",
-    "manualMtsLawCopyIsAuthority": false
+    "importPolicy": "independent-exact-foundation-and-execution-profile-pins-with-deterministic-generated-projection",
+    "manualMtsLawCopyIsAuthority": false,
+    "acceptedFoundationCommit": "440caf09558d4ff5cfda11805cb3ef97b48d1ad5",
+    "executionProfile": {
+      "path": "profiles/amemory-execution-profile.json",
+      "commit": "af4e3dadbb9857fba7239a58f79ed2da59bc5c42",
+      "blobSha": "e2c614e1556f31f6230cb69d686d1f22ab2c97e8",
+      "schema": "mts-amemory-execution-profile/v0.1",
+      "id": "minimal-portable-amemory-execution",
+      "profileVersion": "0.1.0",
+      "separateFromAcceptedMtsFoundation": true
+    }
   },
   "implementationFreedom": {
     "physicalDoubletRequired": false,
@@ -31,15 +41,34 @@
       "supportedMtsVersion",
       "normativeContractBlobSha",
       "normativeConformanceBlobSha",
+      "implementedProfileId",
+      "implementedProfileVersion",
+      "profilePinCommit",
+      "implementationStatus",
       "supportLevel",
-      "declaredScope"
+      "declaredScope",
+      "currentScopeMechanism",
+      "oldPhysicalLinkRetentionPolicy",
+      "backendSubstrateBoundary",
+      "nonSemanticSchedulingChoices",
+      "normalizedSemanticEquivalence",
+      "differentialEvidence"
     ],
     "supportLevels": [
       "partial",
       "full"
     ],
     "partialMustFailClosedOutsideDeclaredScope": true,
-    "fullClaimRequiresAllMandatoryAmemoryConformance": true
+    "fullClaimRequiresAllMandatoryAmemoryConformance": true,
+    "implementationStatuses": [
+      "planned",
+      "prototype",
+      "production"
+    ],
+    "profileSupportRule": "A backend may declare the pinned profile while supportLevel remains partial; full profile conformance requires executable evidence for every mandatory portable execution law and may not be inferred from storage-only witnesses.",
+    "unimplementedMechanismMustBeExplicit": true,
+    "controlFlowIsSemanticAuthority": false,
+    "layoutIsSemanticAuthority": false
   },
   "requirements": [
     {
@@ -181,6 +210,38 @@
     {
       "id": "AM-032",
       "statement": "Repeated import of the same structural Link inside one Memory MUST reuse canonical local Link identity."
+    },
+    {
+      "id": "AM-033",
+      "statement": "Every backend MUST declare the exact implemented A-memory execution profile id, version and immutable upstream profile pin in addition to the accepted MTS foundation revision."
+    },
+    {
+      "id": "AM-034",
+      "statement": "Every backend MUST declare how the current Scope is represented and atomically published; an unimplemented current-Scope mechanism MUST be stated explicitly rather than inferred from a host cursor or storage handle."
+    },
+    {
+      "id": "AM-035",
+      "statement": "Every backend MUST declare whether prior physical Links and prior Scope structures are retained, reclaimed or compacted; this physical retention policy MUST NOT redefine current semantic membership."
+    },
+    {
+      "id": "AM-036",
+      "statement": "Every backend MUST enumerate its substrate/layout and physical scheduling choices and MUST mark local handles, allocation order, thread order, work-group order, GPU-lane order and backend API shape as non-semantic."
+    },
+    {
+      "id": "AM-037",
+      "statement": "Every backend claiming execution-profile support MUST define normalized semantic observation and executable differential evidence against an independently executed reference/backend for the shared declared scope."
+    },
+    {
+      "id": "AM-038",
+      "statement": "Storage, incidence, canonicalization, persistence or Anum round-trip evidence MAY support profile invariants but MUST NOT be reported as full reaction-profile conformance until the required A-network reaction laws are executed and differentially verified."
+    },
+    {
+      "id": "AM-039",
+      "statement": "A-memory execution semantics MUST be consumed from the pinned machine-readable execution profile and its canonical semantic owner; implementation control flow in anum_docs or amemory MUST NOT become an alternate semantic authority."
+    },
+    {
+      "id": "AM-040",
+      "statement": "The accepted MTS v0.13 foundation pin and the post-v0.13 A-memory execution-profile pin MUST remain independently immutable and independently upgradable under explicit governance."
     }
   ],
   "acceptance": {
@@ -199,5 +260,15 @@
     ],
     "passiveStorageAloneIsAmemory": false,
     "executionWithoutPersistentNetworkModelIsAmemory": false
+  },
+  "executionProfileBoundary": {
+    "id": "minimal-portable-amemory-execution",
+    "profileVersion": "0.1.0",
+    "sourceProjection": "contracts/upstream/mts-v0.13-requirements.json#/executionProfile",
+    "portableLawCount": 17,
+    "semanticExtensionRequired": false,
+    "acceptedMtsFoundationMutated": false,
+    "currentImplementationClaim": "partial-pre-reaction",
+    "fullReactionProfileConformanceClaimed": false
   }
 }

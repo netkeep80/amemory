@@ -1,27 +1,35 @@
 {
-  "schema": "amemory-mts-requirements-projection/v0.1",
+  "schema": "amemory-mts-requirements-projection/v0.2",
   "generated": true,
   "generatedFrom": {
-    "repository": "netkeep80/anum_docs",
-    "commit": "440caf09558d4ff5cfda11805cb3ef97b48d1ad5",
-    "mtsVersion": "mts-contract/v0.13",
-    "artifacts": {
-      "contract": {
-        "path": "contracts/mts-contract-v0.13.json",
-        "blobSha": "f3ea773ad639448fe3d196d229bd6d9e29a38528"
-      },
-      "conformance": {
-        "path": "contracts/mts-conformance-v0.13.json",
-        "blobSha": "de83242ae4c248727fefa791589c72c1ce31c8e0"
-      },
-      "traceability": {
-        "path": "traceability/mts-v0.13.json",
-        "blobSha": "377e836378386f66753cad8e60cba765fdad9818"
-      },
-      "acceptance": {
-        "path": "cutover/typescript-c1-acceptance-v0.6.json",
-        "blobSha": "fe9ab38b3f55552d382536e636e33b7c72242e5a"
+    "foundation": {
+      "repository": "netkeep80/anum_docs",
+      "commit": "440caf09558d4ff5cfda11805cb3ef97b48d1ad5",
+      "mtsVersion": "mts-contract/v0.13",
+      "artifacts": {
+        "contract": {
+          "path": "contracts/mts-contract-v0.13.json",
+          "blobSha": "f3ea773ad639448fe3d196d229bd6d9e29a38528"
+        },
+        "conformance": {
+          "path": "contracts/mts-conformance-v0.13.json",
+          "blobSha": "de83242ae4c248727fefa791589c72c1ce31c8e0"
+        },
+        "traceability": {
+          "path": "traceability/mts-v0.13.json",
+          "blobSha": "377e836378386f66753cad8e60cba765fdad9818"
+        },
+        "acceptance": {
+          "path": "cutover/typescript-c1-acceptance-v0.6.json",
+          "blobSha": "fe9ab38b3f55552d382536e636e33b7c72242e5a"
+        }
       }
+    },
+    "executionProfile": {
+      "repository": "netkeep80/anum_docs",
+      "commit": "af4e3dadbb9857fba7239a58f79ed2da59bc5c42",
+      "path": "profiles/amemory-execution-profile.json",
+      "blobSha": "e2c614e1556f31f6230cb69d686d1f22ab2c97e8"
     }
   },
   "acceptance": {
@@ -371,6 +379,149 @@
       ]
     }
   },
+  "executionProfile": {
+    "schema": "mts-amemory-execution-profile/v0.1",
+    "id": "minimal-portable-amemory-execution",
+    "profileVersion": "0.1.0",
+    "status": "current-post-v0.13-profile",
+    "foundation": {
+      "mtsVersion": "v0.13",
+      "contract": "contracts/mts-contract-v0.13.json",
+      "conformance": "contracts/mts-conformance-v0.13.json",
+      "acceptedFoundationMutated": false
+    },
+    "classification": {
+      "V013_SUFFICIENT": false,
+      "V013_PLUS_EXECUTION_PROFILE": true,
+      "SEMANTIC_EXTENSION_REQUIRED": false
+    },
+    "authority": {
+      "canonicalSemanticOwner": "docs/specs/Апамять и управление сетью связей.md",
+      "machineReadableProjection": true,
+      "machineReadableProjectionIsCompetingSemanticOwner": false,
+      "issue": 1558
+    },
+    "state": {
+      "currentSemanticState": "members-of-single-published-scope",
+      "currentnessAuthority": "published-current-root",
+      "oldScopesMayRemainPhysically": true,
+      "oldTruthsMayRemainPhysically": true,
+      "physicalDeletionRequiredForSemanticReplacement": false
+    },
+    "theory": {
+      "authority": "selected-theory-admissions",
+      "visibility": "reaction-start-snapshot",
+      "sameSnapshotForAllCurrentMembers": true,
+      "sameReactionNewAdmissionExecutable": false,
+      "nextReactionNewAdmissionExecutable": true,
+      "snapshotIsMtsEntity": false
+    },
+    "reaction": {
+      "relationDiscovery": "exhaustive-over-selected-theory-snapshot",
+      "noAdmittedRelation": "preserve-current-truth",
+      "zeroImage": "zero-successor-contribution",
+      "oneImage": "one-canonical-successor",
+      "manyImages": "union-all-canonical-successors",
+      "duplicateOutputs": "converge-by-canonical-link-identity",
+      "notFoundEquivalentToNoAdmittedRelation": false,
+      "mixedZeroAndNonZero": "union-nonzero-outputs"
+    },
+    "publication": {
+      "fullSuccessorBuiltBeforePublication": true,
+      "atomicCurrentRootHandoff": true,
+      "matchedRelationsPositive": "publish-one-successor-scope",
+      "matchedRelationsZero": "no-handoff-quiescent"
+    },
+    "scheduling": {
+      "physicalScheduleIsSemanticAuthority": false,
+      "threadOrderIsSemanticAuthority": false,
+      "workGroupOrderIsSemanticAuthority": false,
+      "gpuLaneOrderIsSemanticAuthority": false,
+      "allocationOrderIsSemanticAuthority": false,
+      "normalizedSemanticResultMustBeScheduleIndependent": true
+    },
+    "liveness": {
+      "quiescence": "complete-logical-reaction-with-zero-matches-and-zero-handoffs",
+      "schedulerInactivityEqualsQuiescence": false,
+      "recurrenceAllowed": true,
+      "nonterminationAllowed": true,
+      "globalTerminationRequired": false,
+      "structuralEndImpliesGlobalHalt": false
+    },
+    "hierarchicalResult": {
+      "nestedLinkAsResult": "supported-by-minimal-reaction",
+      "dynamicHierarchicalResultConstruction": "INDEPENDENT_LATER_FEATURE",
+      "nestedContextResultLifecycle": "INDEPENDENT_LATER_FEATURE",
+      "persistentResultVersions": "INDEPENDENT_LATER_FEATURE",
+      "deferredResearchRetained": true
+    },
+    "substrate": {
+      "localHandleIsSemanticIdentity": false,
+      "allocationOrderIsSemanticAuthority": false,
+      "concreteMemoryApiIsMtsOntology": false,
+      "doubletsLayoutIsMtsOntology": false,
+      "arrayLayoutIsMtsOntology": false,
+      "gpuLayoutIsMtsOntology": false,
+      "layers": [
+        "link-carrier-substrate",
+        "execution-publication-substrate",
+        "representation-substrate"
+      ]
+    },
+    "selfHosting": {
+      "scopedLinkCarriedProgramSemantics": true,
+      "fullySelfHostedMtsSystem": false
+    },
+    "portableLaws": [
+      "P01_CURRENT_STATE_IS_PUBLISHED_SCOPE_MEMBERS",
+      "P02_PHYSICAL_HISTORY_MAY_REMAIN",
+      "P03_SELECTED_THEORY_IS_RELATION_AUTHORITY",
+      "P04_REACTION_START_THEORY_SNAPSHOT",
+      "P05_ONE_THEORY_SNAPSHOT_PER_REACTION",
+      "P06_EXHAUST_ALL_ADMITTED_RELATIONS",
+      "P07_NO_ADMITTED_RELATION_PRESERVES_TRUTH",
+      "P08_ADMITTED_RELATIONS_REPLACE_BY_ALL_OUTPUTS",
+      "P09_ZERO_CONTRIBUTES_NO_OUTPUT_AND_DOES_NOT_VETO",
+      "P10_DUPLICATES_CONVERGE_CANONICALLY",
+      "P11_BUILD_COMPLETE_SUCCESSOR_BEFORE_PUBLICATION",
+      "P12_POSITIVE_MATCH_PUBLISHES_ONE_ATOMIC_HANDOFF",
+      "P13_ZERO_MATCH_IS_QUIESCENT_WITHOUT_HANDOFF",
+      "P14_NEW_THEORY_ADMISSIONS_EXECUTE_NEXT_REACTION",
+      "P15_PHYSICAL_SCHEDULE_AND_LOCAL_ADDRESSES_ARE_NONSEMANTIC",
+      "P16_RECURRENCE_AND_NONTERMINATION_ARE_ALLOWED",
+      "P17_STRUCTURAL_END_IS_NOT_GLOBAL_HALT"
+    ],
+    "consumerRequirements": {
+      "declareImplementedProfileId": true,
+      "declareCurrentScopeMechanism": true,
+      "declareOldPhysicalLinkRetentionPolicy": true,
+      "declareBackendSubstrateBoundary": true,
+      "schedulingChoicesMustBeDocumentedAsNonSemantic": true,
+      "normalizedBackendEquivalenceTestsRequired": true,
+      "cpuAcceleratorDifferentialEvidenceExpected": true
+    },
+    "evidence": {
+      "sourceIssue": "https://github.com/netkeep80/anum_docs/issues/1558",
+      "witnesses": [
+        "W1",
+        "W2",
+        "W3",
+        "W4",
+        "W5",
+        "W6",
+        "W7"
+      ],
+      "semanticSlices": [
+        "E1",
+        "E2",
+        "E3",
+        "E4",
+        "E5",
+        "E6",
+        "E7"
+      ]
+    }
+  },
   "veto": {
     "runtimeOrStorageIdAsSemanticIdentity": false,
     "sourcePositionOccurrenceOrPathAsSemanticIdentity": false,
@@ -405,7 +556,7 @@
       "repository": "netkeep80/anum_docs",
       "issue": 1558,
       "normative": false,
-      "topic": "full executable A-network dynamics for A-memory"
+      "topic": "research history for the separately pinned A-memory execution profile"
     },
     {
       "repository": "netkeep80/anum_docs",
