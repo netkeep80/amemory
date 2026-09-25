@@ -7,7 +7,8 @@
   "normativeMts": {
     "version": "mts-contract/v0.13",
     "contractBlobSha": "f3ea773ad639448fe3d196d229bd6d9e29a38528",
-    "conformanceBlobSha": "de83242ae4c248727fefa791589c72c1ce31c8e0"
+    "conformanceBlobSha": "de83242ae4c248727fefa791589c72c1ce31c8e0",
+    "acceptedFoundationCommit": "440caf09558d4ff5cfda11805cb3ef97b48d1ad5"
   },
   "coverageState": "planned",
   "mandatoryVectors": [
@@ -756,16 +757,312 @@
           "sampleGpuExport": "19868"
         }
       }
+    },
+    {
+      "id": "AM-C040-independent-foundation-and-profile-pins",
+      "requirements": [
+        "AM-033",
+        "AM-040"
+      ],
+      "status": "green",
+      "evidence": {
+        "issue": 24,
+        "verifier": "scripts/test-mts-upstream-import.mjs + scripts/sync-mts-requirements.mjs",
+        "foundationCommit": "440caf09558d4ff5cfda11805cb3ef97b48d1ad5",
+        "profileCommit": "af4e3dadbb9857fba7239a58f79ed2da59bc5c42",
+        "profileBlobSha": "e2c614e1556f31f6230cb69d686d1f22ab2c97e8"
+      }
+    },
+    {
+      "id": "AM-C041-d7-backend-declarations-complete",
+      "requirements": [
+        "AM-033",
+        "AM-034",
+        "AM-035",
+        "AM-036",
+        "AM-037"
+      ],
+      "status": "green",
+      "evidence": {
+        "issue": 24,
+        "backendMatrix": "contracts/amemory-conformance-v0.1.json#/backendMatrix",
+        "requiredProfile": "minimal-portable-amemory-execution@0.1.0"
+      }
+    },
+    {
+      "id": "AM-C042-current-scope-and-retention-not-inferred",
+      "requirements": [
+        "AM-034",
+        "AM-035"
+      ],
+      "status": "green",
+      "evidence": {
+        "issue": 24,
+        "result": "Current reaction Scope is explicitly NOT_IMPLEMENTED in both current prototypes; physical state retention is separately declared and is not promoted to semantic currentness."
+      }
+    },
+    {
+      "id": "AM-C043-substrate-and-scheduling-declared-nonsemantic",
+      "requirements": [
+        "AM-036",
+        "AM-039"
+      ],
+      "status": "green",
+      "evidence": {
+        "issue": 24,
+        "result": "Rust/WASM and WebGPU declarations explicitly classify layout, local handles, allocation order, thread/work-group/lane order and API shape as substrate detail."
+      }
+    },
+    {
+      "id": "AM-C044-existing-evidence-is-partial-not-full-profile",
+      "requirements": [
+        "AM-038"
+      ],
+      "status": "green",
+      "evidence": {
+        "issue": 24,
+        "supportingEvidence": [
+          "AM-C016..AM-C039"
+        ],
+        "fullReactionProfileConformanceClaimed": false,
+        "profileLawCoverageRule": "P10/P15 supporting evidence only; remaining laws not yet executed"
+      }
+    },
+    {
+      "id": "AM-C045-cpu-webgpu-full-reaction-profile-differential",
+      "requirements": [
+        "AM-037",
+        "AM-038"
+      ],
+      "status": "planned",
+      "evidenceRequired": {
+        "profile": "minimal-portable-amemory-execution@0.1.0",
+        "laws": "P01-P17",
+        "backends": [
+          "rust-reference-cpu-wasm",
+          "browser-webgpu"
+        ],
+        "normalizedReactionDifferential": true,
+        "negativeMismatchControl": true
+      }
     }
   ],
-  "backendMatrix": [],
+  "backendMatrix": [
+    {
+      "backendId": "rust-reference-cpu-wasm",
+      "implementationStatus": "prototype",
+      "supportLevel": "partial",
+      "supportedMtsVersion": "mts-contract/v0.13",
+      "implementedProfileId": "minimal-portable-amemory-execution",
+      "implementedProfileVersion": "0.1.0",
+      "profilePinCommit": "af4e3dadbb9857fba7239a58f79ed2da59bc5c42",
+      "deploymentSurfaces": [
+        "native-rust-tests",
+        "wasm32-browser"
+      ],
+      "declaredScope": [
+        "bounded local Link pool",
+        "incidence observation",
+        "canonical pair convergence",
+        "stateful pre-authorized storage",
+        "portable Anum import/export"
+      ],
+      "currentScopeMechanism": "NOT_IMPLEMENTED_FOR_EXECUTION; browser state-store has persistent physical Link state but no semantic published Scope root yet",
+      "oldPhysicalLinkRetentionPolicy": "Physical Links are retained across bounded storage rounds; historical semantic Scope retention is not implemented because reaction Scope execution is not implemented yet.",
+      "backendSubstrateBoundary": [
+        "Rust local Link pool and local handles",
+        "native/WASM memory layout",
+        "WASM ABI and browser host calls",
+        "bounded capacity and allocation order"
+      ],
+      "nonSemanticSchedulingChoices": [
+        "single-threaded CPU iteration order",
+        "local handle values",
+        "allocation order",
+        "WASM linear-memory placement"
+      ],
+      "normalizedSemanticEquivalence": [
+        "canonical exported Anum",
+        "normalized canonical pair sets"
+      ],
+      "differentialEvidence": [
+        "AM-C016",
+        "AM-C020",
+        "AM-C021",
+        "AM-C023",
+        "AM-C025",
+        "AM-C030",
+        "AM-C032",
+        "AM-C033",
+        "AM-C034",
+        "AM-C035",
+        "AM-C039"
+      ],
+      "profileLawCoverage": {
+        "P01": "not-yet-executed",
+        "P02": "not-yet-executed",
+        "P03": "not-yet-executed",
+        "P04": "not-yet-executed",
+        "P05": "not-yet-executed",
+        "P06": "not-yet-executed",
+        "P07": "not-yet-executed",
+        "P08": "not-yet-executed",
+        "P09": "not-yet-executed",
+        "P10": "supporting-evidence-only-not-reaction-conformance",
+        "P11": "not-yet-executed",
+        "P12": "not-yet-executed",
+        "P13": "not-yet-executed",
+        "P14": "not-yet-executed",
+        "P15": "supporting-evidence-only-not-reaction-conformance",
+        "P16": "not-yet-executed",
+        "P17": "not-yet-executed"
+      },
+      "fullProfileConformance": false
+    },
+    {
+      "backendId": "browser-webgpu",
+      "implementationStatus": "prototype",
+      "supportLevel": "partial",
+      "supportedMtsVersion": "mts-contract/v0.13",
+      "implementedProfileId": "minimal-portable-amemory-execution",
+      "implementedProfileVersion": "0.1.0",
+      "profilePinCommit": "af4e3dadbb9857fba7239a58f79ed2da59bc5c42",
+      "deploymentSurfaces": [
+        "webgpu-browser"
+      ],
+      "declaredScope": [
+        "GPU incidence kernel",
+        "GPU canonicalization witness",
+        "GPU stateful pre-authorized storage",
+        "GPU portable Anum local Link pool"
+      ],
+      "currentScopeMechanism": "NOT_IMPLEMENTED_FOR_EXECUTION; GPU buffers preserve bounded physical storage state but do not yet publish semantic reaction Scope roots",
+      "oldPhysicalLinkRetentionPolicy": "Physical GPU Link/state data are retained across declared prototype rounds; historical semantic Scope retention is not yet applicable.",
+      "backendSubstrateBoundary": [
+        "WebGPU buffers and WGSL kernels",
+        "GPU local Link handles/indices",
+        "dispatch dimensions and work-groups",
+        "readback/staging buffers",
+        "bounded GPU pool capacity"
+      ],
+      "nonSemanticSchedulingChoices": [
+        "work-group order",
+        "GPU lane/invocation order",
+        "dispatch order",
+        "buffer address/index",
+        "local handle values",
+        "allocation order"
+      ],
+      "normalizedSemanticEquivalence": [
+        "CPU/GPU normalized incidence vectors",
+        "CPU/GPU canonical pair sets",
+        "CPU/GPU state snapshots",
+        "canonical exported Anum"
+      ],
+      "differentialEvidence": [
+        "AM-C016",
+        "AM-C017",
+        "AM-C018",
+        "AM-C019",
+        "AM-C020",
+        "AM-C021",
+        "AM-C023",
+        "AM-C024",
+        "AM-C025",
+        "AM-C030",
+        "AM-C031",
+        "AM-C032",
+        "AM-C033",
+        "AM-C034",
+        "AM-C038",
+        "AM-C039"
+      ],
+      "profileLawCoverage": {
+        "P01": "not-yet-executed",
+        "P02": "not-yet-executed",
+        "P03": "not-yet-executed",
+        "P04": "not-yet-executed",
+        "P05": "not-yet-executed",
+        "P06": "not-yet-executed",
+        "P07": "not-yet-executed",
+        "P08": "not-yet-executed",
+        "P09": "not-yet-executed",
+        "P10": "supporting-evidence-only-not-reaction-conformance",
+        "P11": "not-yet-executed",
+        "P12": "not-yet-executed",
+        "P13": "not-yet-executed",
+        "P14": "not-yet-executed",
+        "P15": "supporting-evidence-only-not-reaction-conformance",
+        "P16": "not-yet-executed",
+        "P17": "not-yet-executed"
+      },
+      "fullProfileConformance": false
+    },
+    {
+      "backendId": "future-accelerator-family",
+      "implementationStatus": "planned",
+      "supportLevel": "partial",
+      "supportedMtsVersion": "mts-contract/v0.13",
+      "implementedProfileId": "minimal-portable-amemory-execution",
+      "implementedProfileVersion": "0.1.0",
+      "profilePinCommit": "af4e3dadbb9857fba7239a58f79ed2da59bc5c42",
+      "deploymentSurfaces": [
+        "future-native-accelerator"
+      ],
+      "declaredScope": [
+        "NO_EXECUTABLE_SCOPE_YET"
+      ],
+      "currentScopeMechanism": "MUST_BE_DECLARED_BEFORE_IMPLEMENTATION; no host cursor/address may become semantic authority",
+      "oldPhysicalLinkRetentionPolicy": "MUST_BE_DECLARED_BEFORE_IMPLEMENTATION and kept distinct from current semantic Scope membership",
+      "backendSubstrateBoundary": [
+        "MUST_BE_DECLARED_BEFORE_IMPLEMENTATION"
+      ],
+      "nonSemanticSchedulingChoices": [
+        "thread/lane/work-group order MUST remain non-semantic",
+        "local addresses/handles/allocation order MUST remain non-semantic"
+      ],
+      "normalizedSemanticEquivalence": [
+        "MUST use normalized portable observation against the reference backend"
+      ],
+      "differentialEvidence": [],
+      "profileLawCoverage": {
+        "P01": "planned-no-executable-evidence",
+        "P02": "planned-no-executable-evidence",
+        "P03": "planned-no-executable-evidence",
+        "P04": "planned-no-executable-evidence",
+        "P05": "planned-no-executable-evidence",
+        "P06": "planned-no-executable-evidence",
+        "P07": "planned-no-executable-evidence",
+        "P08": "planned-no-executable-evidence",
+        "P09": "planned-no-executable-evidence",
+        "P10": "planned-no-executable-evidence",
+        "P11": "planned-no-executable-evidence",
+        "P12": "planned-no-executable-evidence",
+        "P13": "planned-no-executable-evidence",
+        "P14": "planned-no-executable-evidence",
+        "P15": "planned-no-executable-evidence",
+        "P16": "planned-no-executable-evidence",
+        "P17": "planned-no-executable-evidence"
+      },
+      "fullProfileConformance": false
+    }
+  ],
   "acceptanceState": "NOT_READY",
   "upstreamRequirements": {
     "lock": "contracts/upstream/mts-v0.13.lock.json",
     "projection": "contracts/upstream/mts-v0.13-requirements.json",
     "verificationWorkflow": ".github/workflows/mts-upstream-check.yml",
     "floatingUpstreamAllowed": false,
-    "manualProjectionEditsAllowed": false
+    "manualProjectionEditsAllowed": false,
+    "executionProfile": {
+      "id": "minimal-portable-amemory-execution",
+      "profileVersion": "0.1.0",
+      "exactCommit": "af4e3dadbb9857fba7239a58f79ed2da59bc5c42",
+      "exactBlobSha": "e2c614e1556f31f6230cb69d686d1f22ab2c97e8",
+      "generatedProjectionPointer": "#/executionProfile"
+    },
+    "acceptedFoundationCommit": "440caf09558d4ff5cfda11805cb3ef97b48d1ad5",
+    "independentPinsRequired": true
   },
   "evidenceSets": {
     "browserDifferentialV01": {
@@ -841,5 +1138,20 @@
         "sampleGpuExport": "19868"
       }
     }
+  },
+  "normativeExecutionProfile": {
+    "schema": "mts-amemory-execution-profile/v0.1",
+    "id": "minimal-portable-amemory-execution",
+    "profileVersion": "0.1.0",
+    "commit": "af4e3dadbb9857fba7239a58f79ed2da59bc5c42",
+    "path": "profiles/amemory-execution-profile.json",
+    "blobSha": "e2c614e1556f31f6230cb69d686d1f22ab2c97e8",
+    "classification": {
+      "V013_SUFFICIENT": false,
+      "V013_PLUS_EXECUTION_PROFILE": true,
+      "SEMANTIC_EXTENSION_REQUIRED": false
+    },
+    "portableLawCount": 17,
+    "sourceOfTruthProjection": "contracts/upstream/mts-v0.13-requirements.json#/executionProfile"
   }
 }
