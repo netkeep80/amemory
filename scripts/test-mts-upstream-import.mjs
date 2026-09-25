@@ -434,8 +434,8 @@ console.log("MTS_AND_AMEMORY_PROFILE_IMPORT_NEGATIVE_WITNESSES=GREEN");
     ]) {
       assert.equal(
         backend.profileLawCoverage[id],
-        "r1-executable-browser-witness-required",
-        `${backendId} R1 coverage mismatch for ${id}`,
+        "r1-green-real-browser-differential",
+        `${backendId} R1 GREEN coverage mismatch for ${id}`,
       );
     }
 
@@ -461,13 +461,19 @@ console.log("MTS_AND_AMEMORY_PROFILE_IMPORT_NEGATIVE_WITNESSES=GREEN");
       vector.id === "AM-C045-cpu-webgpu-full-reaction-profile-differential",
   );
   assert.equal(c045?.status, "planned");
-  assert.equal(c045?.progress?.currentSlice, "AM-C046-r1-one-reaction-cpu-webgpu");
+  assert.equal(c045?.progress?.R1, "green-real-browser-differential");
+  assert.equal(c045?.progress?.fullProfileConformance, false);
+  assert(c045?.progress?.completedSlices?.includes("AM-C046-r1-one-reaction-cpu-webgpu"));
 
   const c046 = conformance.mandatoryVectors.find(
     (vector) => vector.id === "AM-C046-r1-one-reaction-cpu-webgpu",
   );
-  assert.equal(c046?.status, "planned");
-  assert.equal(c046?.evidenceRequired?.fullReactionProfileConformance, false);
+  assert.equal(c046?.status, "green");
+  assert.equal(c046?.evidence?.mergedMainSha, "50ef0a36dc7b190730f2c2bea38ed8dd70f0117c");
+  assert.equal(c046?.evidence?.observed?.normalizedDifferential, "PASS");
+  assert.equal(c046?.evidence?.observed?.theorySnapshotIsolation, "PASS");
+  assert.equal(c046?.evidence?.observed?.oldScopeRetained, "PASS");
+  assert.equal(c046?.evidence?.fullReactionProfileConformance, false);
 
   assert.match(readme, /minimal-portable-amemory-execution/);
   assert.match(readme, /FULL_REACTION_PROFILE_CONFORMANCE = FALSE/);
