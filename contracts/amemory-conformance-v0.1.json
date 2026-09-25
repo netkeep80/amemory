@@ -827,7 +827,7 @@
           "AM-C046"
         ],
         "fullReactionProfileConformanceClaimed": false,
-        "profileLawCoverageRule": "R1 is GREEN for P01,P02,P03,P04,P05,P06,P08,P11,P12,P15; R2 is GREEN for P07/P13; R3 is GREEN for P09/P10; P14,P16,P17 remain not-yet-executed."
+        "profileLawCoverageRule": "R1 is GREEN for P01,P02,P03,P04,P05,P06,P08,P11,P12,P15; R2 is GREEN for P07/P13; R3 is GREEN for P09/P10; R4 has executable candidate evidence for P14 but requires a real browser witness; P16/P17 remain not-yet-executed."
       }
     },
     {
@@ -861,7 +861,9 @@
           "P16",
           "P17"
         ],
-        "fullProfileConformance": false
+        "fullProfileConformance": false,
+        "currentSlice": "AM-C049-r4-theory-admission-tplus1",
+        "R4": "implementation-candidate-browser-witness-required"
       }
     },
     {
@@ -1111,6 +1113,64 @@
         ],
         "fullReactionProfileConformance": false
       }
+    },
+    {
+      "id": "AM-C049-r4-theory-admission-tplus1",
+      "requirements": [
+        "AM-041",
+        "AM-042",
+        "AM-045"
+      ],
+      "status": "planned",
+      "evidenceRequired": {
+        "issue": 37,
+        "profile": "minimal-portable-amemory-execution@0.1.0",
+        "fixtures": {
+          "K": "98",
+          "A": "68",
+          "B": "16898",
+          "C": "998",
+          "current0": "19868",
+          "relationAB": "16816898",
+          "current1": "19816898",
+          "relationBC": "116898998",
+          "current2": "198998"
+        },
+        "machine": [
+          "reaction JS R4 two-reaction trajectory witness",
+          "native Rust live-Theory versus snapshot isolation witness",
+          "stale-snapshot negative control",
+          "wasm32 compile",
+          "all prior browser-prototype regressions"
+        ],
+        "realBrowser": [
+          "Rust/WASM loaded",
+          "WebGPU available",
+          "reaction t before CPU=GPU=[19868]",
+          "snapshot_t count CPU=GPU=1",
+          "live Theory count after admission CPU=GPU=2 while snapshot_t remains 1",
+          "reaction t after CPU=GPU=[19816898]",
+          "reaction t matchedRelations CPU=GPU=1",
+          "reaction t handoffCount CPU=GPU=1",
+          "snapshot_t+1 count CPU=GPU=2",
+          "reaction t+1 before CPU=GPU=[19816898]",
+          "reaction t+1 after CPU=GPU=[198998]",
+          "reaction t+1 matchedRelations CPU=GPU=1",
+          "reaction t+1 handoffCount CPU=GPU=1",
+          "same-reaction isolation PASS",
+          "next-reaction visibility PASS",
+          "stale-snapshot control PASS",
+          "normalized CPU/GPU trajectory differential PASS"
+        ],
+        "coveredPortableLaws": [
+          "P14"
+        ],
+        "doesNotClosePortableLaws": [
+          "P16",
+          "P17"
+        ],
+        "fullReactionProfileConformance": false
+      }
     }
   ],
   "backendMatrix": [
@@ -1136,7 +1196,8 @@
         "explicit two-bank published Scope substrate",
         "explicit reaction-start TheorySnapshot",
         "bounded R2 NO_ADMITTED_RELATION preservation and explicit quiescence",
-        "bounded R3 structural ZERO and canonical duplicate convergence"
+        "bounded R3 structural ZERO and canonical duplicate convergence",
+        "bounded R4 reaction-start TheorySnapshot t+1 visibility"
       ],
       "currentScopeMechanism": "R1 IMPLEMENTED: bounded two-bank Scope arrays with one published bank selector; complete successor bank is prepared before selector handoff. Scope bank/selector are substrate-only.",
       "oldPhysicalLinkRetentionPolicy": "R1 preserves the old physical Scope bank and previously materialized Links after publication; current semantic membership is determined only by the published bank.",
@@ -1158,7 +1219,8 @@
         "canonical Anum set for published reaction Scope members",
         "matchedRelations and handoffCount for bounded R1",
         "explicit quiescence result for bounded R2",
-        "ZERO-only and mixed duplicate-converged successor Scope for bounded R3"
+        "ZERO-only and mixed duplicate-converged successor Scope for bounded R3",
+        "two-reaction Theory admission visibility trajectory for bounded R4"
       ],
       "differentialEvidence": [
         "AM-C016",
@@ -1190,7 +1252,7 @@
         "P11": "r1-green-real-browser-differential",
         "P12": "r1-green-real-browser-differential",
         "P13": "r2-green-real-browser-differential",
-        "P14": "not-yet-executed",
+        "P14": "r4-executable-browser-witness-required",
         "P15": "r1-green-real-browser-differential",
         "P16": "not-yet-executed",
         "P17": "not-yet-executed"
@@ -1217,7 +1279,8 @@
         "explicit two-bank Scope storage plus atomic published selector",
         "explicit reaction-start TheorySnapshot buffer",
         "bounded R2 NO_ADMITTED_RELATION preservation and explicit quiescence",
-        "bounded R3 structural ZERO and canonical duplicate convergence"
+        "bounded R3 structural ZERO and canonical duplicate convergence",
+        "bounded R4 reaction-start TheorySnapshot t+1 visibility"
       ],
       "currentScopeMechanism": "R1 IMPLEMENTED: bounded two-bank GPU Scope buffer plus atomic<u32> published selector; complete successor bank is written before the single selector store. Buffer/index layout is substrate-only.",
       "oldPhysicalLinkRetentionPolicy": "R1 retains the old GPU Scope bank and Link-pool topology after publication; only the atomic published selector defines current semantic membership.",
@@ -1244,7 +1307,8 @@
         "canonical exported Anum set for published reaction Scope members",
         "matchedRelations and handoffCount for bounded R1",
         "explicit quiescence result for bounded R2",
-        "ZERO-only and mixed duplicate-converged successor Scope for bounded R3"
+        "ZERO-only and mixed duplicate-converged successor Scope for bounded R3",
+        "two-reaction Theory admission visibility trajectory for bounded R4"
       ],
       "differentialEvidence": [
         "AM-C016",
@@ -1281,7 +1345,7 @@
         "P11": "r1-green-real-browser-differential",
         "P12": "r1-green-real-browser-differential",
         "P13": "r2-green-real-browser-differential",
-        "P14": "not-yet-executed",
+        "P14": "r4-executable-browser-witness-required",
         "P15": "r1-green-real-browser-differential",
         "P16": "not-yet-executed",
         "P17": "not-yet-executed"

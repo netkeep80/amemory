@@ -31,6 +31,12 @@ export const R3_FIXTURE = Object.freeze({
   rootRelation: "1816898",
 });
 
+export const R4_FIXTURE = Object.freeze({
+  C: "998",
+  relationBC: "116898998",
+  successorC: "198998",
+});
+
 const NONE = 0xffffffff;
 const CAP = 4;
 
@@ -88,6 +94,16 @@ export function assertR3Fixture() {
   return true;
 }
 
+export function assertR4Fixture() {
+  const relationBC = splitPairAnum(R4_FIXTURE.relationBC);
+  const successorC = splitPairAnum(R4_FIXTURE.successorC);
+  must(relationBC.start === R1_FIXTURE.B && relationBC.end === R4_FIXTURE.C, "bad R4 B->C relation");
+  must(successorC.start === R1_FIXTURE.K && successorC.end === R4_FIXTURE.C, "bad R4 K->C successor");
+  must(pairAnum(R1_FIXTURE.B, R4_FIXTURE.C) === R4_FIXTURE.relationBC, "noncanonical R4 B->C");
+  must(pairAnum(R1_FIXTURE.K, R4_FIXTURE.C) === R4_FIXTURE.successorC, "noncanonical R4 K->C");
+  return true;
+}
+
 export function normalizeReactionState(anums) {
   return [...new Set(anums.map(normalizeAnum))].sort();
 }
@@ -119,7 +135,7 @@ export function perturbReactionState(anums) {
 function importCpuFixture(wasm) {
   cpuResetPool(wasm);
   const refs = {};
-  for (const [name, source] of Object.entries({ ...R1_FIXTURE, ...R3_FIXTURE })) {
+  for (const [name, source] of Object.entries({ ...R1_FIXTURE, ...R3_FIXTURE, ...R4_FIXTURE })) {
     const ref = cpuImportRaw(wasm, source);
     must(ref, "CPU rejected reaction Anum " + name + "=" + source);
     refs[name] = ref;
@@ -129,7 +145,7 @@ function importCpuFixture(wasm) {
 
 async function importGpuFixture(device, pool) {
   const refs = {};
-  for (const [name, source] of Object.entries({ ...R1_FIXTURE, ...R3_FIXTURE })) {
+  for (const [name, source] of Object.entries({ ...R1_FIXTURE, ...R3_FIXTURE, ...R4_FIXTURE })) {
     const ref = await gpuImport(device, pool, source);
     must(ref, "GPU rejected reaction Anum " + name + "=" + source);
     refs[name] = ref;
@@ -160,6 +176,12 @@ async function validateGpuFixtureTopology(device, pool, refs) {
     ["rootCurrent.end", topology.ends[handles.rootCurrent], handles.root],
     ["rootRelation.start", topology.starts[handles.rootRelation], handles.root],
     ["rootRelation.end", topology.ends[handles.rootRelation], handles.B],
+    ["C.start", topology.starts[handles.C], handles.C],
+    ["C.end", topology.ends[handles.C], handles.root],
+    ["relationBC.start", topology.starts[handles.relationBC], handles.B],
+    ["relationBC.end", topology.ends[handles.relationBC], handles.C],
+    ["successorC.start", topology.starts[handles.successorC], handles.K],
+    ["successorC.end", topology.ends[handles.successorC], handles.C],
   ];
   for (const [label, actual, expected] of checks) {
     must(actual === expected, "GPU topology preflight " + label + ": expected " + expected + ", got " + actual);
@@ -289,6 +311,65 @@ function runCpuMixedDuplicate(wasm, refs) {
   };
 }
 
+function runCpuTheoryTplus1(wasm, refs) {
+  cpuConfigureMany(wasm, [refs.current], [refs.relation]);
+  const tBefore = cpuCurrent(wasm);
+  const tSnapshotCount = wasmU32(wasm.reactionSnapshotCount());
+
+  must(
+    wasm.reactionSetTheoryRelation(1, requireLocalRef(refs.relationBC, "cpu-A")) === 1,
+    "CPU R4 live Theory admission rejected",
+  );
+  must(wasm.reactionSetTheoryCount(2) === 1, "CPU R4 live Theory count rejected");
+  const liveTheoryCount = wasmU32(wasm.reactionTheoryCount());
+  must(wasmU32(wasm.reactionSnapshotCount()) === 1, "CPU R4 snapshot_t leaked live Theory");
+
+  must(wasm.reactionRun() === 1, "CPU R4 reaction t failed");
+  const tAfter = cpuCurrent(wasm);
+  const tMatched = wasmU32(wasm.reactionMatchedRelations());
+  const tHandoff = wasmU32(wasm.reactionHandoffCount());
+  const tQuiescent = wasmU32(wasm.reactionQuiescent()) === 1;
+
+  const t1Before = cpuCurrent(wasm);
+  must(wasm.reactionSnapshotTheory() === 1, "CPU R4 t+1 snapshot failed");
+  const t1SnapshotCount = wasmU32(wasm.reactionSnapshotCount());
+  must(wasm.reactionRun() === 1, "CPU R4 reaction t+1 failed");
+  const t1After = cpuCurrent(wasm);
+  const t1Matched = wasmU32(wasm.reactionMatchedRelations());
+  const t1Handoff = wasmU32(wasm.reactionHandoffCount());
+  const t1Quiescent = wasmU32(wasm.reactionQuiescent()) === 1;
+
+  // Independent stale-snapshot negative control.
+  cpuConfigureMany(wasm, [refs.successor], [refs.relation]);
+  must(
+    wasm.reactionSetTheoryRelation(1, requireLocalRef(refs.relationBC, "cpu-A")) === 1,
+    "CPU R4 stale control admission rejected",
+  );
+  must(wasm.reactionSetTheoryCount(2) === 1, "CPU R4 stale control Theory count rejected");
+  must(wasmU32(wasm.reactionSnapshotCount()) === 1, "CPU R4 stale control snapshot leaked");
+  must(wasm.reactionRun() === 1, "CPU R4 stale control failed");
+  const staleState = cpuCurrent(wasm);
+  const staleMatched = wasmU32(wasm.reactionMatchedRelations());
+
+  return {
+    tBefore,
+    tSnapshotCount,
+    liveTheoryCount,
+    tAfter,
+    tMatched,
+    tHandoff,
+    tQuiescent,
+    t1Before,
+    t1SnapshotCount,
+    t1After,
+    t1Matched,
+    t1Handoff,
+    t1Quiescent,
+    staleState,
+    staleMatched,
+  };
+}
+
 function gpuUsage() {
   return GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST;
 }
@@ -331,6 +412,30 @@ function createGpuReactionState(device, currentHandleOrHandles, relationHandleOr
 
   const status = makeBuffer(device, 5, new Uint32Array([0, 0, 0, 900, 0]));
   return { selector, scope, theory, snapshot, status };
+}
+
+function writeGpuLiveTheory(device, state, handles) {
+  must(handles.length <= CAP, "GPU live Theory exceeds CAP");
+  const words = new Uint32Array(1 + CAP);
+  words.fill(NONE);
+  words[0] = handles.length;
+  handles.forEach((handle, index) => { words[1 + index] = handle; });
+  device.queue.writeBuffer(state.theory, 0, words);
+}
+
+async function captureGpuTheorySnapshot(device, state) {
+  const encoder = device.createCommandEncoder();
+  encoder.copyBufferToBuffer(state.theory, 0, state.snapshot, 0, (1 + CAP) * 4);
+  device.queue.submit([encoder.finish()]);
+  await device.queue.onSubmittedWorkDone();
+}
+
+async function gpuTheoryCounts(device, state) {
+  const [theory, snapshot] = await Promise.all([
+    readWords(device, state.theory, 1 + CAP),
+    readWords(device, state.snapshot, 1 + CAP),
+  ]);
+  return { live: theory[0], snapshot: snapshot[0] };
 }
 
 function destroyGpuState(state) {
@@ -661,10 +766,80 @@ async function runGpuMixedDuplicate(device, pool, refs) {
   }
 }
 
+
+async function runGpuTheoryTplus1(device, pool, refs) {
+  const relation = requireLocalRef(refs.relation, pool.memory);
+  const relationBC = requireLocalRef(refs.relationBC, pool.memory);
+  const state = createGpuReactionState(
+    device,
+    requireLocalRef(refs.current, pool.memory),
+    relation,
+  );
+  try {
+    const tBeforeObs = await gpuObserve(device, pool, state);
+    const initialCounts = await gpuTheoryCounts(device, state);
+
+    writeGpuLiveTheory(device, state, [relation, relationBC]);
+    await device.queue.onSubmittedWorkDone();
+    const liveCounts = await gpuTheoryCounts(device, state);
+
+    await gpuRun(device, pool, state);
+    const tAfterObs = await gpuObserve(device, pool, state);
+    must(tAfterObs.status === 1, "GPU R4 reaction t failed: diagnostic=" + tAfterObs.diagnostic);
+
+    const t1Before = tAfterObs.anums;
+    await captureGpuTheorySnapshot(device, state);
+    const t1Counts = await gpuTheoryCounts(device, state);
+    await gpuRun(device, pool, state);
+    const t1AfterObs = await gpuObserve(device, pool, state);
+    must(t1AfterObs.status === 1, "GPU R4 reaction t+1 failed: diagnostic=" + t1AfterObs.diagnostic);
+
+    // Independent stale-snapshot negative control.
+    const stale = createGpuReactionState(
+      device,
+      requireLocalRef(refs.successor, pool.memory),
+      relation,
+    );
+    try {
+      writeGpuLiveTheory(device, stale, [relation, relationBC]);
+      await device.queue.onSubmittedWorkDone();
+      const staleCounts = await gpuTheoryCounts(device, stale);
+      await gpuRun(device, pool, stale);
+      const staleObs = await gpuObserve(device, pool, stale);
+      must(staleObs.status === 1, "GPU R4 stale control failed: diagnostic=" + staleObs.diagnostic);
+
+      return {
+        tBefore: tBeforeObs.anums,
+        tSnapshotCount: initialCounts.snapshot,
+        liveTheoryCount: liveCounts.live,
+        postAdmissionSnapshotCount: liveCounts.snapshot,
+        tAfter: tAfterObs.anums,
+        tMatched: tAfterObs.matched,
+        tHandoff: tAfterObs.handoff,
+        tQuiescent: tAfterObs.quiescent,
+        t1Before,
+        t1SnapshotCount: t1Counts.snapshot,
+        t1After: t1AfterObs.anums,
+        t1Matched: t1AfterObs.matched,
+        t1Handoff: t1AfterObs.handoff,
+        t1Quiescent: t1AfterObs.quiescent,
+        staleState: staleObs.anums,
+        staleMatched: staleObs.matched,
+        staleSnapshotCount: staleCounts.snapshot,
+      };
+    } finally {
+      destroyGpuState(stale);
+    }
+  } finally {
+    destroyGpuState(state);
+  }
+}
+
 export async function runReactionBrowser(wasm, device) {
   assertR1Fixture();
   assertR2Fixture();
   assertR3Fixture();
+  assertR4Fixture();
   const logs = [];
   const cpuRefs = importCpuFixture(wasm);
   const gpuPool = createGpuAnumPool(device, "gpu-reaction-B");
@@ -727,6 +902,37 @@ export async function runReactionBrowser(wasm, device) {
     must(cpuMixed.handoff === 1 && gpuMixed.handoff === 1, "R3 mixed handoff mismatch");
     must(cpuMixed.quiescent === false && gpuMixed.quiescent === false, "R3 mixed incorrectly reported quiescence");
 
+    const cpuR4 = runCpuTheoryTplus1(wasm, cpuRefs);
+    const gpuR4 = await runGpuTheoryTplus1(device, gpuPool, gpuRefs);
+
+    assertReactionStateExact([R1_FIXTURE.current], cpuR4.tBefore, "CPU R4 t before");
+    assertReactionStateExact([R1_FIXTURE.current], gpuR4.tBefore, "GPU R4 t before");
+    must(cpuR4.tSnapshotCount === 1 && gpuR4.tSnapshotCount === 1, "R4 snapshot_t count mismatch");
+    must(cpuR4.liveTheoryCount === 2 && gpuR4.liveTheoryCount === 2, "R4 live Theory count mismatch");
+    must(gpuR4.postAdmissionSnapshotCount === 1, "GPU R4 live admission leaked into snapshot_t");
+
+    assertReactionStateExact([R1_FIXTURE.successor], cpuR4.tAfter, "CPU R4 t after");
+    assertReactionStateExact([R1_FIXTURE.successor], gpuR4.tAfter, "GPU R4 t after");
+    assertReactionStateExact(cpuR4.tAfter, gpuR4.tAfter, "CPU/GPU R4 reaction t differential");
+    must(cpuR4.tMatched === 1 && gpuR4.tMatched === 1, "R4 reaction t matched mismatch");
+    must(cpuR4.tHandoff === 1 && gpuR4.tHandoff === 1, "R4 reaction t handoff mismatch");
+    must(!cpuR4.tQuiescent && !gpuR4.tQuiescent, "R4 reaction t incorrectly quiescent");
+
+    assertReactionStateExact([R1_FIXTURE.successor], cpuR4.t1Before, "CPU R4 t+1 before");
+    assertReactionStateExact([R1_FIXTURE.successor], gpuR4.t1Before, "GPU R4 t+1 before");
+    must(cpuR4.t1SnapshotCount === 2 && gpuR4.t1SnapshotCount === 2, "R4 snapshot_t+1 count mismatch");
+    assertReactionStateExact([R4_FIXTURE.successorC], cpuR4.t1After, "CPU R4 t+1 after");
+    assertReactionStateExact([R4_FIXTURE.successorC], gpuR4.t1After, "GPU R4 t+1 after");
+    assertReactionStateExact(cpuR4.t1After, gpuR4.t1After, "CPU/GPU R4 trajectory differential");
+    must(cpuR4.t1Matched === 1 && gpuR4.t1Matched === 1, "R4 reaction t+1 matched mismatch");
+    must(cpuR4.t1Handoff === 1 && gpuR4.t1Handoff === 1, "R4 reaction t+1 handoff mismatch");
+    must(!cpuR4.t1Quiescent && !gpuR4.t1Quiescent, "R4 reaction t+1 incorrectly quiescent");
+
+    assertReactionStateExact([R1_FIXTURE.successor], cpuR4.staleState, "CPU R4 stale snapshot control");
+    assertReactionStateExact([R1_FIXTURE.successor], gpuR4.staleState, "GPU R4 stale snapshot control");
+    must(cpuR4.staleMatched === 0 && gpuR4.staleMatched === 0, "R4 stale snapshot saw new admission");
+    must(gpuR4.staleSnapshotCount === 1, "GPU R4 stale control snapshot mutated");
+
     let mismatchDetected = false;
     try {
       assertReactionStateExact(cpu.after, perturbReactionState(gpu.after), "deliberate mismatch");
@@ -781,6 +987,24 @@ export async function runReactionBrowser(wasm, device) {
     logs.push("reaction.r3.mixed.handoff = CPU " + cpuMixed.handoff + " / GPU " + gpuMixed.handoff);
     logs.push("reaction.r3.mixed.quiescent = CPU " + cpuMixed.quiescent + " / GPU " + gpuMixed.quiescent);
     logs.push("reaction.r3.duplicate-convergence = PASS single canonical " + R1_FIXTURE.successor);
+    logs.push("reaction.r4.t.before.cpu = [" + cpuR4.tBefore.join(", ") + "]");
+    logs.push("reaction.r4.t.before.gpu = [" + gpuR4.tBefore.join(", ") + "]");
+    logs.push("reaction.r4.t.snapshot-count = CPU " + cpuR4.tSnapshotCount + " / GPU " + gpuR4.tSnapshotCount);
+    logs.push("reaction.r4.live-theory-count = CPU " + cpuR4.liveTheoryCount + " / GPU " + gpuR4.liveTheoryCount);
+    logs.push("reaction.r4.t.after.cpu = [" + cpuR4.tAfter.join(", ") + "]");
+    logs.push("reaction.r4.t.after.gpu = [" + gpuR4.tAfter.join(", ") + "]");
+    logs.push("reaction.r4.t.matched = CPU " + cpuR4.tMatched + " / GPU " + gpuR4.tMatched);
+    logs.push("reaction.r4.t.handoff = CPU " + cpuR4.tHandoff + " / GPU " + gpuR4.tHandoff);
+    logs.push("reaction.r4.t+1.snapshot-count = CPU " + cpuR4.t1SnapshotCount + " / GPU " + gpuR4.t1SnapshotCount);
+    logs.push("reaction.r4.t+1.before.cpu = [" + cpuR4.t1Before.join(", ") + "]");
+    logs.push("reaction.r4.t+1.before.gpu = [" + gpuR4.t1Before.join(", ") + "]");
+    logs.push("reaction.r4.t+1.after.cpu = [" + cpuR4.t1After.join(", ") + "]");
+    logs.push("reaction.r4.t+1.after.gpu = [" + gpuR4.t1After.join(", ") + "]");
+    logs.push("reaction.r4.t+1.matched = CPU " + cpuR4.t1Matched + " / GPU " + gpuR4.t1Matched);
+    logs.push("reaction.r4.t+1.handoff = CPU " + cpuR4.t1Handoff + " / GPU " + gpuR4.t1Handoff);
+    logs.push("reaction.r4.same-reaction-isolation = PASS");
+    logs.push("reaction.r4.next-reaction-visibility = PASS");
+    logs.push("reaction.r4.stale-snapshot-control = PASS");
     logs.push("reaction.handles.current = CPU " + cpuRefs.current.value + " != GPU " + gpuRefs.current.value);
     logs.push("reaction.handles.successor = CPU " + cpuRefs.successor.value + " != GPU " + gpuRefs.successor.value);
     logs.push("reaction.snapshot.isolation = PASS");
@@ -830,6 +1054,32 @@ export async function runReactionBrowser(wasm, device) {
       r3MixedGpuQuiescent: gpuMixed.quiescent,
       r3DuplicateConvergence: cpuMixed.state.length === 1 && gpuMixed.state.length === 1,
       r3NormalizedDifferential: true,
+      r4TBeforeCpu: cpuR4.tBefore,
+      r4TBeforeGpu: gpuR4.tBefore,
+      r4TSnapshotCountCpu: cpuR4.tSnapshotCount,
+      r4TSnapshotCountGpu: gpuR4.tSnapshotCount,
+      r4LiveTheoryCountCpu: cpuR4.liveTheoryCount,
+      r4LiveTheoryCountGpu: gpuR4.liveTheoryCount,
+      r4TAfterCpu: cpuR4.tAfter,
+      r4TAfterGpu: gpuR4.tAfter,
+      r4TMatchedCpu: cpuR4.tMatched,
+      r4TMatchedGpu: gpuR4.tMatched,
+      r4THandoffCpu: cpuR4.tHandoff,
+      r4THandoffGpu: gpuR4.tHandoff,
+      r4T1SnapshotCountCpu: cpuR4.t1SnapshotCount,
+      r4T1SnapshotCountGpu: gpuR4.t1SnapshotCount,
+      r4T1BeforeCpu: cpuR4.t1Before,
+      r4T1BeforeGpu: gpuR4.t1Before,
+      r4T1AfterCpu: cpuR4.t1After,
+      r4T1AfterGpu: gpuR4.t1After,
+      r4T1MatchedCpu: cpuR4.t1Matched,
+      r4T1MatchedGpu: gpuR4.t1Matched,
+      r4T1HandoffCpu: cpuR4.t1Handoff,
+      r4T1HandoffGpu: gpuR4.t1Handoff,
+      r4SameReactionIsolation: true,
+      r4NextReactionVisibility: true,
+      r4StaleSnapshotControl: cpuR4.staleMatched === 0 && gpuR4.staleMatched === 0,
+      r4NormalizedTrajectoryDifferential: true,
       negativeControls: true,
       logs,
     };

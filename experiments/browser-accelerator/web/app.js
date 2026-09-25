@@ -77,6 +77,21 @@ const ui = {
   reactionR3MixedQuiescence: document.querySelector("#reaction-r3-mixed-quiescence"),
   reactionR3Duplicates: document.querySelector("#reaction-r3-duplicates"),
   reactionR3Diff: document.querySelector("#reaction-r3-diff"),
+  reactionR4TBefore: document.querySelector("#reaction-r4-t-before"),
+  reactionR4TSnapshot: document.querySelector("#reaction-r4-t-snapshot"),
+  reactionR4LiveTheory: document.querySelector("#reaction-r4-live-theory"),
+  reactionR4TAfter: document.querySelector("#reaction-r4-t-after"),
+  reactionR4TMatched: document.querySelector("#reaction-r4-t-matched"),
+  reactionR4THandoff: document.querySelector("#reaction-r4-t-handoff"),
+  reactionR4T1Snapshot: document.querySelector("#reaction-r4-t1-snapshot"),
+  reactionR4T1Before: document.querySelector("#reaction-r4-t1-before"),
+  reactionR4T1After: document.querySelector("#reaction-r4-t1-after"),
+  reactionR4T1Matched: document.querySelector("#reaction-r4-t1-matched"),
+  reactionR4T1Handoff: document.querySelector("#reaction-r4-t1-handoff"),
+  reactionR4Isolation: document.querySelector("#reaction-r4-isolation"),
+  reactionR4Visibility: document.querySelector("#reaction-r4-visibility"),
+  reactionR4Stale: document.querySelector("#reaction-r4-stale"),
+  reactionR4Diff: document.querySelector("#reaction-r4-diff"),
   details: document.querySelector("#details"),
 };
 
@@ -126,6 +141,7 @@ async function loadWasm() {
   const reactionCurrentMember = instance.exports.amemory_reaction_current_member;
   const reactionBankCount = instance.exports.amemory_reaction_bank_count;
   const reactionBankMember = instance.exports.amemory_reaction_bank_member;
+  const reactionTheoryCount = instance.exports.amemory_reaction_theory_count;
   const reactionSnapshotCount = instance.exports.amemory_reaction_snapshot_count;
   const reactionMatchedRelations = instance.exports.amemory_reaction_matched_relations;
   const reactionHandoffCount = instance.exports.amemory_reaction_handoff_count;
@@ -140,7 +156,7 @@ async function loadWasm() {
     reactionReset, reactionSetCurrentMember, reactionSetCurrentCount,
     reactionSetTheoryRelation, reactionSetTheoryCount, reactionSnapshotTheory,
     reactionRun, reactionCurrentBank, reactionCurrentCount, reactionCurrentMember,
-    reactionBankCount, reactionBankMember, reactionSnapshotCount,
+    reactionBankCount, reactionBankMember, reactionTheoryCount, reactionSnapshotCount,
     reactionMatchedRelations, reactionHandoffCount, reactionQuiescent,
   ].some((fn) => typeof fn !== "function")) {
     throw new Error("Expected Rust/WASM exports are missing");
@@ -187,6 +203,7 @@ async function loadWasm() {
     reactionCurrentMember,
     reactionBankCount,
     reactionBankMember,
+    reactionTheoryCount,
     reactionSnapshotCount,
     reactionMatchedRelations,
     reactionHandoffCount,
@@ -862,6 +879,10 @@ async function main() {
       ui.reactionR3ZeroQuiescence, ui.reactionR3ZeroOldScope, ui.reactionR3MixedCpu, ui.reactionR3MixedGpu,
       ui.reactionR3MixedMatched, ui.reactionR3MixedHandoff, ui.reactionR3MixedQuiescence,
       ui.reactionR3Duplicates, ui.reactionR3Diff,
+      ui.reactionR4TBefore, ui.reactionR4TSnapshot, ui.reactionR4LiveTheory, ui.reactionR4TAfter,
+      ui.reactionR4TMatched, ui.reactionR4THandoff, ui.reactionR4T1Snapshot, ui.reactionR4T1Before,
+      ui.reactionR4T1After, ui.reactionR4T1Matched, ui.reactionR4T1Handoff, ui.reactionR4Isolation,
+      ui.reactionR4Visibility, ui.reactionR4Stale, ui.reactionR4Diff,
     ]) report(element, wasm ? "WAITING_FOR_GPU" : "NOT_RUN", false);
     return;
   }
@@ -1047,6 +1068,65 @@ async function main() {
         reaction.r3DuplicateConvergence,
       );
       report(ui.reactionR3Diff, "PASS", reaction.r3NormalizedDifferential);
+      report(
+        ui.reactionR4TBefore,
+        "PASS (CPU [" + reaction.r4TBeforeCpu.join(", ") + "] / GPU [" + reaction.r4TBeforeGpu.join(", ") + "])",
+        true,
+      );
+      report(
+        ui.reactionR4TSnapshot,
+        "PASS (CPU " + reaction.r4TSnapshotCountCpu + " / GPU " + reaction.r4TSnapshotCountGpu + ")",
+        reaction.r4TSnapshotCountCpu === 1 && reaction.r4TSnapshotCountGpu === 1,
+      );
+      report(
+        ui.reactionR4LiveTheory,
+        "PASS (CPU " + reaction.r4LiveTheoryCountCpu + " / GPU " + reaction.r4LiveTheoryCountGpu + ")",
+        reaction.r4LiveTheoryCountCpu === 2 && reaction.r4LiveTheoryCountGpu === 2,
+      );
+      report(
+        ui.reactionR4TAfter,
+        "PASS (CPU [" + reaction.r4TAfterCpu.join(", ") + "] / GPU [" + reaction.r4TAfterGpu.join(", ") + "])",
+        true,
+      );
+      report(
+        ui.reactionR4TMatched,
+        "PASS (CPU " + reaction.r4TMatchedCpu + " / GPU " + reaction.r4TMatchedGpu + ")",
+        reaction.r4TMatchedCpu === 1 && reaction.r4TMatchedGpu === 1,
+      );
+      report(
+        ui.reactionR4THandoff,
+        "PASS (CPU " + reaction.r4THandoffCpu + " / GPU " + reaction.r4THandoffGpu + ")",
+        reaction.r4THandoffCpu === 1 && reaction.r4THandoffGpu === 1,
+      );
+      report(
+        ui.reactionR4T1Snapshot,
+        "PASS (CPU " + reaction.r4T1SnapshotCountCpu + " / GPU " + reaction.r4T1SnapshotCountGpu + ")",
+        reaction.r4T1SnapshotCountCpu === 2 && reaction.r4T1SnapshotCountGpu === 2,
+      );
+      report(
+        ui.reactionR4T1Before,
+        "PASS (CPU [" + reaction.r4T1BeforeCpu.join(", ") + "] / GPU [" + reaction.r4T1BeforeGpu.join(", ") + "])",
+        true,
+      );
+      report(
+        ui.reactionR4T1After,
+        "PASS (CPU [" + reaction.r4T1AfterCpu.join(", ") + "] / GPU [" + reaction.r4T1AfterGpu.join(", ") + "])",
+        true,
+      );
+      report(
+        ui.reactionR4T1Matched,
+        "PASS (CPU " + reaction.r4T1MatchedCpu + " / GPU " + reaction.r4T1MatchedGpu + ")",
+        reaction.r4T1MatchedCpu === 1 && reaction.r4T1MatchedGpu === 1,
+      );
+      report(
+        ui.reactionR4T1Handoff,
+        "PASS (CPU " + reaction.r4T1HandoffCpu + " / GPU " + reaction.r4T1HandoffGpu + ")",
+        reaction.r4T1HandoffCpu === 1 && reaction.r4T1HandoffGpu === 1,
+      );
+      report(ui.reactionR4Isolation, "PASS", reaction.r4SameReactionIsolation);
+      report(ui.reactionR4Visibility, "PASS", reaction.r4NextReactionVisibility);
+      report(ui.reactionR4Stale, "PASS (new admission invisible without new snapshot)", reaction.r4StaleSnapshotControl);
+      report(ui.reactionR4Diff, "PASS", reaction.r4NormalizedTrajectoryDifferential);
       for (const line of reaction.logs) log(line);
     } catch (error) {
       for (const element of [
@@ -1059,10 +1139,14 @@ async function main() {
         ui.reactionR3ZeroQuiescence, ui.reactionR3ZeroOldScope, ui.reactionR3MixedCpu, ui.reactionR3MixedGpu,
         ui.reactionR3MixedMatched, ui.reactionR3MixedHandoff, ui.reactionR3MixedQuiescence,
         ui.reactionR3Duplicates, ui.reactionR3Diff,
+        ui.reactionR4TBefore, ui.reactionR4TSnapshot, ui.reactionR4LiveTheory, ui.reactionR4TAfter,
+        ui.reactionR4TMatched, ui.reactionR4THandoff, ui.reactionR4T1Snapshot, ui.reactionR4T1Before,
+        ui.reactionR4T1After, ui.reactionR4T1Matched, ui.reactionR4T1Handoff, ui.reactionR4Isolation,
+        ui.reactionR4Visibility, ui.reactionR4Stale, ui.reactionR4Diff,
       ]) {
         if (element.textContent === "WAITING") report(element, "FAIL", false);
       }
-      log("Reaction R1/R2/R3 error: " + (error?.stack || error));
+      log("Reaction R1/R2/R3/R4 error: " + (error?.stack || error));
     }
   }
 

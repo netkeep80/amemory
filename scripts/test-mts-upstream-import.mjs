@@ -453,7 +453,12 @@ console.log("MTS_AND_AMEMORY_PROFILE_IMPORT_NEGATIVE_WITNESSES=GREEN");
         `${backendId} R3 GREEN coverage mismatch for ${id}`,
       );
     }
-    for (const id of ["P14","P16","P17"]) {
+    assert.equal(
+      backend.profileLawCoverage.P14,
+      "r4-executable-browser-witness-required",
+      `${backendId} R4 coverage mismatch for P14`,
+    );
+    for (const id of ["P16","P17"]) {
       assert.equal(
         backend.profileLawCoverage[id],
         "not-yet-executed",
@@ -474,6 +479,8 @@ console.log("MTS_AND_AMEMORY_PROFILE_IMPORT_NEGATIVE_WITNESSES=GREEN");
   assert.equal(c045?.progress?.R1, "green-real-browser-differential");
   assert.equal(c045?.progress?.R2, "green-real-browser-differential");
   assert.equal(c045?.progress?.R3, "green-real-browser-differential");
+  assert.equal(c045?.progress?.R4, "implementation-candidate-browser-witness-required");
+  assert.equal(c045?.progress?.currentSlice, "AM-C049-r4-theory-admission-tplus1");
   assert.equal(c045?.progress?.fullProfileConformance, false);
   assert(c045?.progress?.completedSlices?.includes("AM-C046-r1-one-reaction-cpu-webgpu"));
   assert(c045?.progress?.completedSlices?.includes("AM-C047-r2-no-admitted-relation-quiescence"));
@@ -515,6 +522,14 @@ console.log("MTS_AND_AMEMORY_PROFILE_IMPORT_NEGATIVE_WITNESSES=GREEN");
   assert.equal(c048?.evidence?.observed?.mixed?.duplicateConvergence, "PASS single canonical 19816898");
   assert.deepEqual(c048?.evidence?.coveredPortableLaws, ["P09", "P10"]);
   assert.equal(c048?.evidence?.fullReactionProfileConformance, false);
+
+  const c049 = conformance.mandatoryVectors.find(
+    (vector) => vector.id === "AM-C049-r4-theory-admission-tplus1",
+  );
+  assert.equal(c049?.status, "planned");
+  assert.deepEqual(c049?.evidenceRequired?.coveredPortableLaws, ["P14"]);
+  assert.deepEqual(c049?.evidenceRequired?.doesNotClosePortableLaws, ["P16", "P17"]);
+  assert.equal(c049?.evidenceRequired?.fullReactionProfileConformance, false);
 
   assert.match(readme, /minimal-portable-amemory-execution/);
   assert.match(readme, /FULL_REACTION_PROFILE_CONFORMANCE = FALSE/);

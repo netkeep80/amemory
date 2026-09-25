@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import {
   R1_FIXTURE,
   R3_FIXTURE,
+  R4_FIXTURE,
   assertR1Fixture,
   assertR2Fixture,
   assertR3Fixture,
+  assertR4Fixture,
   assertReactionStateExact,
   normalizeReactionState,
   pairAnum,
@@ -15,6 +17,7 @@ import {
 assert.equal(assertR1Fixture(), true);
 assert.equal(assertR2Fixture(), true);
 assert.equal(assertR3Fixture(), true);
+assert.equal(assertR4Fixture(), true);
 
 assert.deepEqual(splitPairAnum(R1_FIXTURE.current), {
   start: R1_FIXTURE.K,
@@ -35,6 +38,8 @@ assert.equal(pairAnum(R1_FIXTURE.K, R1_FIXTURE.B), R1_FIXTURE.successor);
 assert.equal(pairAnum(R1_FIXTURE.A, R3_FIXTURE.root), R3_FIXTURE.zeroRelation);
 assert.equal(pairAnum(R1_FIXTURE.K, R3_FIXTURE.root), R3_FIXTURE.rootCurrent);
 assert.equal(pairAnum(R3_FIXTURE.root, R1_FIXTURE.B), R3_FIXTURE.rootRelation);
+assert.equal(pairAnum(R1_FIXTURE.B, R4_FIXTURE.C), R4_FIXTURE.relationBC);
+assert.equal(pairAnum(R1_FIXTURE.K, R4_FIXTURE.C), R4_FIXTURE.successorC);
 
 assert.deepEqual(
   normalizeReactionState([R1_FIXTURE.successor, R1_FIXTURE.current]),
@@ -77,4 +82,4 @@ assert.throws(
   /mismatch/,
 );
 
-console.log("AMEMORY_REACTION_R1_R2_R3_UNIT_WITNESSES=GREEN");
+console.log("AMEMORY_REACTION_R1_R2_R3_R4_UNIT_WITNESSES=GREEN");
