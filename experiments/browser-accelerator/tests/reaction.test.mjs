@@ -4,12 +4,14 @@ import {
   R3_FIXTURE,
   R4_FIXTURE,
   R5_FIXTURE,
+  R6_FIXTURE,
   R5_OBSERVATION_STEPS,
   assertR1Fixture,
   assertR2Fixture,
   assertR3Fixture,
   assertR4Fixture,
   assertR5Fixture,
+  assertR6Fixture,
   assertReactionStateExact,
   normalizeReactionState,
   pairAnum,
@@ -22,6 +24,7 @@ assert.equal(assertR2Fixture(), true);
 assert.equal(assertR3Fixture(), true);
 assert.equal(assertR4Fixture(), true);
 assert.equal(assertR5Fixture(), true);
+assert.equal(assertR6Fixture(), true);
 
 assert.deepEqual(splitPairAnum(R1_FIXTURE.current), {
   start: R1_FIXTURE.K,
@@ -48,6 +51,8 @@ assert.equal(pairAnum(R5_FIXTURE.context, R5_FIXTURE.startValue), R5_FIXTURE.sta
 assert.equal(pairAnum(R5_FIXTURE.context, R5_FIXTURE.endValue), R5_FIXTURE.stateEnd);
 assert.equal(pairAnum(R5_FIXTURE.startValue, R5_FIXTURE.endValue), R5_FIXTURE.relationStartEnd);
 assert.equal(pairAnum(R5_FIXTURE.endValue, R5_FIXTURE.startValue), R5_FIXTURE.relationEndStart);
+assert.equal(pairAnum(R1_FIXTURE.A, R4_FIXTURE.C), R6_FIXTURE.relationAC);
+assert.equal(pairAnum(R3_FIXTURE.root, R4_FIXTURE.C), R6_FIXTURE.rootRelationC);
 assert.equal(R5_OBSERVATION_STEPS, 4);
 
 assert.deepEqual(
