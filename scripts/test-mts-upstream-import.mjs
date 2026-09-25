@@ -423,24 +423,27 @@ console.log("MTS_AND_AMEMORY_PROFILE_IMPORT_NEGATIVE_WITNESSES=GREEN");
       "af4e3dadbb9857fba7239a58f79ed2da59bc5c42",
     );
     assert.equal(backend.fullProfileConformance, false);
-    assert.match(backend.currentScopeMechanism, /^NOT_IMPLEMENTED_FOR_EXECUTION/);
+    assert.match(backend.currentScopeMechanism, /^R1 IMPLEMENTED:/);
     assert(backend.backendSubstrateBoundary.length > 0);
     assert(backend.nonSemanticSchedulingChoices.length > 0);
     assert(backend.normalizedSemanticEquivalence.length > 0);
     assert(backend.differentialEvidence.length > 0);
 
+    for (const id of [
+      "P01","P02","P03","P04","P05","P06","P08","P11","P12","P15",
+    ]) {
+      assert.equal(
+        backend.profileLawCoverage[id],
+        "r1-executable-browser-witness-required",
+        `${backendId} R1 coverage mismatch for ${id}`,
+      );
+    }
+
     assert.equal(
       backend.profileLawCoverage.P10,
       "supporting-evidence-only-not-reaction-conformance",
     );
-    assert.equal(
-      backend.profileLawCoverage.P15,
-      "supporting-evidence-only-not-reaction-conformance",
-    );
-    for (const id of [
-      "P01","P02","P03","P04","P05","P06","P07","P08","P09",
-      "P11","P12","P13","P14","P16","P17",
-    ]) {
+    for (const id of ["P07","P09","P13","P14","P16","P17"]) {
       assert.equal(
         backend.profileLawCoverage[id],
         "not-yet-executed",
@@ -458,10 +461,17 @@ console.log("MTS_AND_AMEMORY_PROFILE_IMPORT_NEGATIVE_WITNESSES=GREEN");
       vector.id === "AM-C045-cpu-webgpu-full-reaction-profile-differential",
   );
   assert.equal(c045?.status, "planned");
+  assert.equal(c045?.progress?.currentSlice, "AM-C046-r1-one-reaction-cpu-webgpu");
+
+  const c046 = conformance.mandatoryVectors.find(
+    (vector) => vector.id === "AM-C046-r1-one-reaction-cpu-webgpu",
+  );
+  assert.equal(c046?.status, "planned");
+  assert.equal(c046?.evidenceRequired?.fullReactionProfileConformance, false);
 
   assert.match(readme, /minimal-portable-amemory-execution/);
   assert.match(readme, /FULL_REACTION_PROFILE_CONFORMANCE = FALSE/);
-  assert.match(readme, /NOT_IMPLEMENTED_FOR_EXECUTION|ещё не реализован/);
+  assert.match(readme, /R1|reaction/);
 }
 
 console.log("D7_BACKEND_PROFILE_DECLARATIONS=GREEN");
