@@ -528,6 +528,14 @@ fn reaction_pair_poles(pool: &AnumCpuPool, handle: u32) -> Option<(u32, u32)> {
     Some((start, end))
 }
 
+fn reaction_is_root(pool: &AnumCpuPool, handle: u32) -> bool {
+    if !pool.valid(handle) {
+        return false;
+    }
+    let i = handle as usize;
+    pool.start[i] == handle && pool.end[i] == handle
+}
+
 fn reaction_append_unique(
     values: &mut [u32; REACTION_SCOPE_CAP],
     count: &mut usize,
@@ -666,9 +674,9 @@ pub extern "C" fn amemory_reaction_snapshot_theory() -> u32 {
 /// and the current-bank selector is switched exactly once.
 ///
 /// For matchedRelations == 0, the published Scope is unchanged and no handoff
-/// occurs. This behavior is useful as a fail-closed control in R1, while the
-/// complete NO_ADMITTED_RELATION/quiescence profile remains a later AM-C045
-/// slice.
+/// occurs (P07/P13). A matched relation whose image is structural ROOT denotes
+/// the canonical empty ExactSequence() for the bounded R3 ZERO witness: it counts
+/// as an admitted match but contributes no successor member.
 #[no_mangle]
 pub extern "C" fn amemory_reaction_run() -> u32 {
     // Quiescence is a semantic result of a successful complete reaction evaluation,
@@ -735,14 +743,20 @@ pub extern "C" fn amemory_reaction_run() -> u32 {
                 matched = matched.saturating_add(1);
                 member_matches = member_matches.saturating_add(1);
 
-                let Some(candidate) = pool.find_pair(context, output) else {
-                    // R1 requires the canonical result Link to exist physically
-                    // before semantic publication. Missing substrate support
-                    // fails closed without switching the current Scope.
-                    return 0;
-                };
-                if !reaction_append_unique(&mut successor, &mut successor_count, candidate) {
-                    return 0;
+                // P09 bounded ZERO witness: ExactSequence() is ROOT. ZERO is an
+                // admitted match, so the current truth is replaced, but it adds
+                // no successor contribution and does not veto sibling matches.
+                if !reaction_is_root(&pool, output) {
+                    let Some(candidate) = pool.find_pair(context, output) else {
+                        // The bounded prototype requires result Links to exist
+                        // physically before semantic publication.
+                        return 0;
+                    };
+                    // P10: canonical Link identity makes duplicate logical
+                    // contributions converge before successor publication.
+                    if !reaction_append_unique(&mut successor, &mut successor_count, candidate) {
+                        return 0;
+                    }
                 }
             }
             relation_index += 1;
@@ -1029,6 +1043,56 @@ mod anum_boundary_tests {
         assert_eq!(amemory_reaction_snapshot_theory(), 1);
         assert_eq!(amemory_reaction_run(), 0);
         assert_eq!(amemory_reaction_quiescent(), 0);
+
+        // R3 ZERO: A -> ExactSequence() is encoded structurally as A -> ROOT.
+        let root = import("8");
+        let zero_relation = import("1688");
+        assert_ne!(root, ANUM_CPU_NONE);
+        assert_ne!(zero_relation, ANUM_CPU_NONE);
+
+        amemory_reaction_reset();
+        assert_eq!(amemory_reaction_set_current_member(0, current), 1);
+        assert_eq!(amemory_reaction_set_current_count(1), 1);
+        assert_eq!(amemory_reaction_set_theory_relation(0, zero_relation), 1);
+        assert_eq!(amemory_reaction_set_theory_count(1), 1);
+        assert_eq!(amemory_reaction_snapshot_theory(), 1);
+        let zero_old_bank = amemory_reaction_current_bank();
+
+        assert_eq!(amemory_reaction_run(), 1);
+        assert_eq!(amemory_reaction_matched_relations(), 1);
+        assert_eq!(amemory_reaction_handoff_count(), 1);
+        assert_eq!(amemory_reaction_quiescent(), 0);
+        assert_eq!(amemory_reaction_current_count(), 0);
+        assert_ne!(amemory_reaction_current_bank(), zero_old_bank);
+        assert_eq!(amemory_reaction_bank_count(zero_old_bank), 1);
+        assert_eq!(export(amemory_reaction_bank_member(zero_old_bank, 0)), "19868");
+        assert_eq!(export(current), "19868");
+
+        // R3 mixed ZERO + duplicate convergence:
+        //   current = [K->A, K->R]
+        //   theory  = [A->R(ZERO), A->B, R->B]
+        // Both non-zero branches derive the same K->B and must converge.
+        let current_root = import("1988");
+        let root_to_b = import("1816898");
+        assert_ne!(current_root, ANUM_CPU_NONE);
+        assert_ne!(root_to_b, ANUM_CPU_NONE);
+
+        amemory_reaction_reset();
+        assert_eq!(amemory_reaction_set_current_member(0, current), 1);
+        assert_eq!(amemory_reaction_set_current_member(1, current_root), 1);
+        assert_eq!(amemory_reaction_set_current_count(2), 1);
+        assert_eq!(amemory_reaction_set_theory_relation(0, zero_relation), 1);
+        assert_eq!(amemory_reaction_set_theory_relation(1, relation), 1);
+        assert_eq!(amemory_reaction_set_theory_relation(2, root_to_b), 1);
+        assert_eq!(amemory_reaction_set_theory_count(3), 1);
+        assert_eq!(amemory_reaction_snapshot_theory(), 1);
+
+        assert_eq!(amemory_reaction_run(), 1);
+        assert_eq!(amemory_reaction_matched_relations(), 3);
+        assert_eq!(amemory_reaction_handoff_count(), 1);
+        assert_eq!(amemory_reaction_quiescent(), 0);
+        assert_eq!(amemory_reaction_current_count(), 1);
+        assert_eq!(export(amemory_reaction_current_member(0)), "19816898");
     }
 
 }
