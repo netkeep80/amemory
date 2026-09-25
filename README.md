@@ -147,6 +147,13 @@ Audit #45:
   P08 = replace by all outputs            -> нужен direct MANY witness
   P15 = schedule/order non-semantic       -> нужен reaction-order permutation witness
 
+R6 implementation candidate:
+  1→N distinct MANY                       -> implemented in Rust/WASM + WebGPU harness
+  N→M                                     -> implemented in Rust/WASM + WebGPU harness
+  reversed current/Theory order           -> implemented
+  bounded-scope fail-closed               -> implemented
+  real browser CPU/WASM ↔ WebGPU evidence -> REQUIRED BEFORE GREEN
+
 Observed R1:
   before CPU/GPU = [19868]
   after  CPU/GPU = [19816898]
