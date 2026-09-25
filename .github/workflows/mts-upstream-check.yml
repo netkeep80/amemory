@@ -11,7 +11,6 @@ on:
       - ".github/workflows/mts-upstream-check.yml"
       - "repo-policy.json"
       - "README.md"
-      - "README.md"
   push:
     branches: [main]
     paths:
@@ -22,6 +21,7 @@ on:
       - "scripts/test-mts-upstream-import.mjs"
       - ".github/workflows/mts-upstream-check.yml"
       - "repo-policy.json"
+      - "README.md"
   workflow_dispatch:
 
 permissions:
