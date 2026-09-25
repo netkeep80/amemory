@@ -106,8 +106,8 @@ contracts/amemory-conformance-v0.1.json#/backendMatrix
 
 | Backend | Статус | Current Scope | Физическая история | Нормализованное сравнение | Полный профиль |
 |---|---|---|---|---|---|
-| Rust reference CPU / WASM | prototype / partial | ещё не реализован для реакции | bounded Link state сохраняется между storage rounds | canonical Anum + canonical pair set | **нет** |
-| WebGPU browser | prototype / partial | ещё не реализован для реакции | GPU state сохраняется в пределах prototype rounds | incidence/pair/state/Anum differential | **нет** |
+| Rust reference CPU / WASM | prototype / partial | R1: bounded two-bank Scope + published selector | old R1 Scope bank и Links сохраняются физически | canonical Anum reaction Scope + matched/handoff | **нет** |
+| WebGPU browser | prototype / partial | R1: two-bank Scope buffer + atomic published selector | old R1 GPU Scope bank и Link pool сохраняются | canonical Anum reaction Scope + matched/handoff | **нет** |
 | future accelerator family | planned | должен быть объявлен до реализации | должен быть объявлен отдельно от semantic currentness | обязательный differential против reference | **нет** |
 
 Rust native tests и WASM browser используют одну текущую reference-кодовую базу; это разные поверхности исполнения одного prototype backend, а не разные семантики.
@@ -126,47 +126,51 @@ Rust native tests и WASM browser используют одну текущую r
 
 Но это **не равно полной реализации реакции A-сети**.
 
-Текущая классификация:
+Текущая классификация после реализации bounded R1:
 
 ```text
-P10 canonical convergence
-  -> supporting evidence exists
+R1 fixture:
+  K = 98
+  A = 68
+  B = 16898
 
-P15 physical schedule/local address non-authority
-  -> supporting evidence exists
+  K ⟼ A = 19868
+  A ⟼ B = 16816898
+  K ⟼ B = 19816898
 
-P01-P09, P11-P14, P16-P17
-  -> reaction-level executable evidence ещё требуется
+R1 executable subset:
+  P01 P02 P03 P04 P05 P06 P08 P11 P12 P15
+    -> implementation exists
+    -> real WebGPU browser witness required before GREEN conformance
+
+P10
+  -> supporting canonicalization evidence only
+
+P07 P09 P13 P14 P16 P17
+  -> not-yet-executed
 
 FULL_REACTION_PROFILE_CONFORMANCE = FALSE
 ```
 
-Storage/incidence/Anum tests нельзя использовать для объявления, что profile `P01-P17` уже реализован целиком.
+R1 использует explicit published Scope и reaction-start `TheorySnapshot`, а CPU/WASM и WebGPU сравниваются по canonical Anum, не по локальным handles.
 
-## Следующий implementation slice
+Storage/incidence/Anum tests и даже R1 нельзя использовать для объявления, что profile `P01-P17` уже реализован целиком.
 
-Следующий шаг — одна и та же настоящая реакция A-сети в reference CPU/WASM и WebGPU:
+## Следующие reaction slices
+
+После реального browser witness для R1 нужно последовательно закрыть:
 
 ```text
-published Scope_t
-TheorySnapshot_t
-current K ⟼ A
-admitted A ⟼ outputs
-
-        |
-        v
-
-complete successor Scope_(t+1)
-        |
-        +--> normalized CPU observation
-        +--> normalized WebGPU observation
-        |
-        v
-
-exact differential
+P07  NO_ADMITTED_RELATION
+P09  ZERO / mixed ZERO
+P10  duplicate convergence inside reaction
+P13  quiescence
+P14  Theory admission visibility t+1
+P16  recurrence / nontermination
+P17  structural END != halt
 ```
 
-Реализация должна потреблять machine profile, а не копировать смысл из control flow `anum_docs/ts/src/v013-grounded-execution.ts`.
+Реализация продолжает потреблять machine profile, а не копировать смысл из control flow `anum_docs/ts/src/v013-grounded-execution.ts`.
 
 ## Conformance
 
