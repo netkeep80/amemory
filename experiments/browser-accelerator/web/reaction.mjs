@@ -175,6 +175,7 @@ function runCpuPositive(wasm, refs) {
     oldPhysical: cpuBank(wasm, oldBank),
     matched: wasmU32(wasm.reactionMatchedRelations()),
     handoff: wasmU32(wasm.reactionHandoffCount()),
+    quiescent: wasmU32(wasm.reactionQuiescent()) === 1,
     snapshotCount: wasmU32(wasm.reactionSnapshotCount()),
   };
 }
@@ -188,6 +189,21 @@ function runCpuNoMatch(wasm, refs) {
     beforeBank,
     afterBank: wasmU32(wasm.reactionCurrentBank()),
     matched: wasmU32(wasm.reactionMatchedRelations()),
+    handoff: wasmU32(wasm.reactionHandoffCount()),
+    quiescent: wasmU32(wasm.reactionQuiescent()) === 1,
+  };
+}
+
+function runCpuInvalidFailure(wasm, refs) {
+  wasm.reactionReset();
+  must(wasm.reactionSetCurrentCount(1) === 1, "CPU invalid-control count rejected");
+  must(wasm.reactionSetTheoryRelation(0, requireLocalRef(refs.successor, "cpu-A")) === 1, "CPU invalid-control relation rejected");
+  must(wasm.reactionSetTheoryCount(1) === 1, "CPU invalid-control theory count rejected");
+  must(wasm.reactionSnapshotTheory() === 1, "CPU invalid-control snapshot failed");
+  const result = wasm.reactionRun();
+  return {
+    result,
+    quiescent: wasmU32(wasm.reactionQuiescent()) === 1,
     handoff: wasmU32(wasm.reactionHandoffCount()),
   };
 }
@@ -223,7 +239,7 @@ function createGpuReactionState(device, currentHandle, relationHandle) {
   snapshotWords[1] = relationHandle;
   const snapshot = makeBuffer(device, snapshotWords.length, snapshotWords);
 
-  const status = makeBuffer(device, 4, new Uint32Array([0, 0, 0, 900]));
+  const status = makeBuffer(device, 5, new Uint32Array([0, 0, 0, 900, 0]));
   return { selector, scope, theory, snapshot, status };
 }
 
@@ -276,7 +292,7 @@ const R1_WGSL = [
   "@compute @workgroup_size(1)",
   "fn main(@builtin(global_invocation_id) id: vec3<u32>) {",
   "  if (id.x != 0u) { return; }",
-  "  status[0] = 0u; status[1] = 0u; status[2] = 0u; status[3] = 100u;",
+  "  status[0] = 0u; status[1] = 0u; status[2] = 0u; status[3] = 100u; status[4] = 0u;",
   "  let bank = atomicLoad(&published[0]);",
   "  if (bank > 1u) { status[3] = 101u; return; }",
   "  let current_count = scope[bank];",
@@ -313,7 +329,7 @@ const R1_WGSL = [
   "    mi = mi + 1u;",
   "  }",
   "  status[1] = matched;",
-  "  if (matched == 0u) { status[0] = 1u; status[3] = 200u + bank; return; }",
+  "  if (matched == 0u) { status[0] = 1u; status[3] = 200u + bank; status[4] = 1u; return; }",
   "  scope[target_bank] = out_count;",
   "  atomicStore(&published[0], target_bank);",
   "  status[0] = 1u; status[2] = 1u; status[3] = 210u + target_bank;",
@@ -363,7 +379,7 @@ async function gpuObserve(device, pool, state) {
   const [selector, scope, status] = await Promise.all([
     readWords(device, state.selector, 1),
     readWords(device, state.scope, 2 + CAP * 2),
-    readWords(device, state.status, 4),
+    readWords(device, state.status, 5),
   ]);
   const bank = selector[0];
   must(bank <= 1, "GPU invalid current bank");
@@ -381,6 +397,7 @@ async function gpuObserve(device, pool, state) {
     matched: status[1],
     handoff: status[2],
     diagnostic: status[3],
+    quiescent: status[4] === 1,
   };
 }
 
@@ -420,6 +437,7 @@ async function runGpuPositive(device, pool, refs) {
       oldPhysical: await gpuBank(device, pool, state, oldBank),
       matched: after.matched,
       handoff: after.handoff,
+      quiescent: after.quiescent,
       snapshotCount: 1,
     };
   } finally {
@@ -444,11 +462,37 @@ async function runGpuNoMatch(device, pool, refs) {
       afterBank: after.bank,
       matched: after.matched,
       handoff: after.handoff,
+      quiescent: after.quiescent,
     };
   } finally {
     destroyGpuState(state);
   }
 }
+
+async function runGpuInvalidFailure(device, pool, refs) {
+  const state = createGpuReactionState(
+    device,
+    requireLocalRef(refs.current, pool.memory),
+    requireLocalRef(refs.successor, pool.memory),
+  );
+  try {
+    // Corrupt only the substrate current-member slot after constructing an
+    // otherwise valid state. The kernel must fail closed and must not publish
+    // semantic quiescence merely because no handoff occurs.
+    device.queue.writeBuffer(state.scope, 8, new Uint32Array([NONE]));
+    await gpuRun(device, pool, state);
+    const status = await readWords(device, state.status, 5);
+    return {
+      result: status[0],
+      handoff: status[2],
+      diagnostic: status[3],
+      quiescent: status[4] === 1,
+    };
+  } finally {
+    destroyGpuState(state);
+  }
+}
+
 
 export async function runReactionBrowser(wasm, device) {
   assertR1Fixture();
@@ -472,6 +516,7 @@ export async function runReactionBrowser(wasm, device) {
 
     must(cpu.matched === 1 && gpu.matched === 1, "matchedRelations mismatch");
     must(cpu.handoff === 1 && gpu.handoff === 1, "handoffCount mismatch");
+    must(cpu.quiescent === false && gpu.quiescent === false, "positive R1 incorrectly reported quiescence");
     must(cpu.snapshotCount === 1 && gpu.snapshotCount === 1, "snapshot count mismatch");
 
     const cpuNoMatch = runCpuNoMatch(wasm, cpuRefs);
@@ -480,8 +525,16 @@ export async function runReactionBrowser(wasm, device) {
     assertReactionStateExact([R1_FIXTURE.current], gpuNoMatch.state, "GPU no-match");
     must(cpuNoMatch.matched === 0 && gpuNoMatch.matched === 0, "no-match relation was admitted");
     must(cpuNoMatch.handoff === 0 && gpuNoMatch.handoff === 0, "no-match performed handoff");
+    must(cpuNoMatch.quiescent === true && gpuNoMatch.quiescent === true, "no-match did not report semantic quiescence");
     must(cpuNoMatch.beforeBank === cpuNoMatch.afterBank, "CPU no-match changed current Scope");
     must(gpuNoMatch.beforeBank === gpuNoMatch.afterBank, "GPU no-match changed current Scope");
+    assertReactionStateExact(cpuNoMatch.state, gpuNoMatch.state, "CPU/GPU R2 quiescent differential");
+
+    const cpuInvalid = runCpuInvalidFailure(wasm, cpuRefs);
+    const gpuInvalid = await runGpuInvalidFailure(device, gpuPool, gpuRefs);
+    must(cpuInvalid.result === 0 && gpuInvalid.result === 0, "invalid reaction unexpectedly succeeded");
+    must(cpuInvalid.quiescent === false && gpuInvalid.quiescent === false, "failed reaction was misclassified as quiescent");
+    must(cpuInvalid.handoff === 0 && gpuInvalid.handoff === 0, "failed reaction performed handoff");
 
     let mismatchDetected = false;
     try {
@@ -516,6 +569,15 @@ export async function runReactionBrowser(wasm, device) {
     logs.push("reaction.gpu.matched = " + gpu.matched);
     logs.push("reaction.cpu.handoff = " + cpu.handoff);
     logs.push("reaction.gpu.handoff = " + gpu.handoff);
+    logs.push("reaction.r1.cpu.quiescent = " + cpu.quiescent);
+    logs.push("reaction.r1.gpu.quiescent = " + gpu.quiescent);
+    logs.push("reaction.r2.scope.cpu = [" + cpuNoMatch.state.join(", ") + "]");
+    logs.push("reaction.r2.scope.gpu = [" + gpuNoMatch.state.join(", ") + "]");
+    logs.push("reaction.r2.matched = CPU " + cpuNoMatch.matched + " / GPU " + gpuNoMatch.matched);
+    logs.push("reaction.r2.handoff = CPU " + cpuNoMatch.handoff + " / GPU " + gpuNoMatch.handoff);
+    logs.push("reaction.r2.quiescent = CPU " + cpuNoMatch.quiescent + " / GPU " + gpuNoMatch.quiescent);
+    logs.push("reaction.r2.bank-unchanged = CPU " + cpuNoMatch.beforeBank + "->" + cpuNoMatch.afterBank + " / GPU " + gpuNoMatch.beforeBank + "->" + gpuNoMatch.afterBank);
+    logs.push("reaction.r2.invalid-failure-quiescent = CPU " + cpuInvalid.quiescent + " / GPU " + gpuInvalid.quiescent);
     logs.push("reaction.handles.current = CPU " + cpuRefs.current.value + " != GPU " + gpuRefs.current.value);
     logs.push("reaction.handles.successor = CPU " + cpuRefs.successor.value + " != GPU " + gpuRefs.successor.value);
     logs.push("reaction.snapshot.isolation = PASS");
@@ -534,6 +596,18 @@ export async function runReactionBrowser(wasm, device) {
       handlesDiffer,
       snapshotIsolation: true,
       oldScopeRetained: true,
+      r2CpuState: cpuNoMatch.state,
+      r2GpuState: gpuNoMatch.state,
+      r2CpuMatched: cpuNoMatch.matched,
+      r2GpuMatched: gpuNoMatch.matched,
+      r2CpuHandoff: cpuNoMatch.handoff,
+      r2GpuHandoff: gpuNoMatch.handoff,
+      r2CpuQuiescent: cpuNoMatch.quiescent,
+      r2GpuQuiescent: gpuNoMatch.quiescent,
+      r2CpuBankUnchanged: cpuNoMatch.beforeBank === cpuNoMatch.afterBank,
+      r2GpuBankUnchanged: gpuNoMatch.beforeBank === gpuNoMatch.afterBank,
+      r2NormalizedDifferential: true,
+      r2FailureNotQuiescent: cpuInvalid.quiescent === false && gpuInvalid.quiescent === false,
       negativeControls: true,
       logs,
     };
