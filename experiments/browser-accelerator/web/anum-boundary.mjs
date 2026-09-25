@@ -10,6 +10,10 @@ export const ANUM_FIXTURES = Object.freeze([
 
 export const LOCAL_HANDLE_NONE = 0xffffffff;
 export const LOCAL_HANDLE_MAX = 63;
+
+export function wasmU32(value) {
+  return value >>> 0;
+}
 export const GPU_ROOT_HANDLE = 63;
 const GPU_BUFFER_WORDS = 64 * 3;
 const GPU_BUFFER_BYTES = GPU_BUFFER_WORDS * Uint32Array.BYTES_PER_ELEMENT;
@@ -177,18 +181,18 @@ export function cpuImportRaw(wasm, source, memory = "cpu-A") {
   for (let i = 0; i < tokens.length; i += 1) {
     if (wasm.anumCpuSetToken(i, tokens[i]) !== 1) return null;
   }
-  const handle = wasm.anumCpuImport(tokens.length);
+  const handle = wasmU32(wasm.anumCpuImport(tokens.length));
   if (handle === LOCAL_HANDLE_NONE) return null;
   return localRef(memory, handle);
 }
 
 export function cpuExport(wasm, ref, memory = "cpu-A") {
   const handle = requireLocalRef(ref, memory);
-  const length = wasm.anumCpuExport(handle);
+  const length = wasmU32(wasm.anumCpuExport(handle));
   if (length === LOCAL_HANDLE_NONE) throw new Error("CPU export rejected local topology");
   let result = "";
   for (let i = 0; i < length; i += 1) {
-    const token = wasm.anumCpuOutputGet(i);
+    const token = wasmU32(wasm.anumCpuOutputGet(i));
     if (![1, 6, 8, 9].includes(token)) {
       throw new Error(`CPU export emitted invalid token ${token}`);
     }
