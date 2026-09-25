@@ -177,7 +177,7 @@ async function validateGpuFixtureTopology(device, pool, refs) {
     ["rootRelation.start", topology.starts[handles.rootRelation], handles.root],
     ["rootRelation.end", topology.ends[handles.rootRelation], handles.B],
     ["C.start", topology.starts[handles.C], handles.C],
-    ["C.end", topology.ends[handles.C], handles.root],
+    ["C.end", topology.ends[handles.C], handles.K],
     ["relationBC.start", topology.starts[handles.relationBC], handles.B],
     ["relationBC.end", topology.ends[handles.relationBC], handles.C],
     ["successorC.start", topology.starts[handles.successorC], handles.K],
