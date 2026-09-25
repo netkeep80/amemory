@@ -32,7 +32,10 @@
       ".github/workflows/mts-upstream-check.yml",
       ".github/workflows/browser-differential-check.yml",
       "experiments/browser-accelerator/web/differential.mjs",
-      "experiments/browser-accelerator/tests/differential.test.mjs"
+      "experiments/browser-accelerator/tests/differential.test.mjs",
+      ".github/workflows/browser-canonicalization-check.yml",
+      "experiments/browser-accelerator/web/canonicalization.mjs",
+      "experiments/browser-accelerator/tests/canonicalization.test.mjs"
     ],
     "operational_paths": []
   },
