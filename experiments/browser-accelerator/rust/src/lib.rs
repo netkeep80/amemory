@@ -879,6 +879,11 @@ pub extern "C" fn amemory_reaction_handoff_count() -> u32 {
 #[cfg(test)]
 mod anum_boundary_tests {
     use super::*;
+    use std::sync::Mutex;
+
+    // All current prototype Rust/WASM witnesses share one bounded static pool.
+    // Serialize tests so test-runner scheduling cannot become accidental state authority.
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
 
     fn import(source: &str) -> u32 {
         for (i, byte) in source.bytes().enumerate() {
@@ -904,6 +909,7 @@ mod anum_boundary_tests {
 
     #[test]
     fn portable_anum_cpu_boundary() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         amemory_anum_cpu_reset_pool();
 
         let fixtures = ["8", "98", "68", "19868", "16898", "198698", "119868968"];
@@ -940,6 +946,7 @@ mod anum_boundary_tests {
 
     #[test]
     fn minimal_grounded_reaction_r1() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         amemory_anum_cpu_reset_pool();
 
         let k = import("98");
