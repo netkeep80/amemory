@@ -13,6 +13,7 @@ import {
   matrixToPairs,
 } from "./state-store.mjs";
 import { runAnumBoundaryBrowser } from "./anum-boundary.mjs";
+import { runReactionBrowser } from "./reaction.mjs";
 
 const ui = {
   wasm: document.querySelector("#wasm"),
@@ -45,6 +46,16 @@ const ui = {
   anumHandles: document.querySelector("#anum-handles"),
   anumReuse: document.querySelector("#anum-reuse"),
   anumNegative: document.querySelector("#anum-negative"),
+  reactionBeforeCpu: document.querySelector("#reaction-before-cpu"),
+  reactionBeforeGpu: document.querySelector("#reaction-before-gpu"),
+  reactionAfterCpu: document.querySelector("#reaction-after-cpu"),
+  reactionAfterGpu: document.querySelector("#reaction-after-gpu"),
+  reactionMatched: document.querySelector("#reaction-matched"),
+  reactionHandoff: document.querySelector("#reaction-handoff"),
+  reactionDiff: document.querySelector("#reaction-diff"),
+  reactionHandles: document.querySelector("#reaction-handles"),
+  reactionScope: document.querySelector("#reaction-scope"),
+  reactionNegative: document.querySelector("#reaction-negative"),
   details: document.querySelector("#details"),
 };
 
@@ -82,6 +93,21 @@ async function loadWasm() {
   const anumCpuExport = instance.exports.amemory_anum_cpu_export;
   const anumCpuOutputGet = instance.exports.amemory_anum_cpu_output_get;
   const anumCpuPoolCount = instance.exports.amemory_anum_cpu_pool_count;
+  const reactionReset = instance.exports.amemory_reaction_reset;
+  const reactionSetCurrentMember = instance.exports.amemory_reaction_set_current_member;
+  const reactionSetCurrentCount = instance.exports.amemory_reaction_set_current_count;
+  const reactionSetTheoryRelation = instance.exports.amemory_reaction_set_theory_relation;
+  const reactionSetTheoryCount = instance.exports.amemory_reaction_set_theory_count;
+  const reactionSnapshotTheory = instance.exports.amemory_reaction_snapshot_theory;
+  const reactionRun = instance.exports.amemory_reaction_run;
+  const reactionCurrentBank = instance.exports.amemory_reaction_current_bank;
+  const reactionCurrentCount = instance.exports.amemory_reaction_current_count;
+  const reactionCurrentMember = instance.exports.amemory_reaction_current_member;
+  const reactionBankCount = instance.exports.amemory_reaction_bank_count;
+  const reactionBankMember = instance.exports.amemory_reaction_bank_member;
+  const reactionSnapshotCount = instance.exports.amemory_reaction_snapshot_count;
+  const reactionMatchedRelations = instance.exports.amemory_reaction_matched_relations;
+  const reactionHandoffCount = instance.exports.amemory_reaction_handoff_count;
 
   if ([
     probe, cpuStep, incidenceFlag,
@@ -89,6 +115,11 @@ async function loadWasm() {
     stateReset, stateCommit, stateGet,
     anumCpuResetPool, anumCpuSetToken, anumCpuImport, anumCpuExport,
     anumCpuOutputGet, anumCpuPoolCount,
+    reactionReset, reactionSetCurrentMember, reactionSetCurrentCount,
+    reactionSetTheoryRelation, reactionSetTheoryCount, reactionSnapshotTheory,
+    reactionRun, reactionCurrentBank, reactionCurrentCount, reactionCurrentMember,
+    reactionBankCount, reactionBankMember, reactionSnapshotCount,
+    reactionMatchedRelations, reactionHandoffCount,
   ].some((fn) => typeof fn !== "function")) {
     throw new Error("Expected Rust/WASM exports are missing");
   }
@@ -122,6 +153,21 @@ async function loadWasm() {
     anumCpuExport,
     anumCpuOutputGet,
     anumCpuPoolCount,
+    reactionReset,
+    reactionSetCurrentMember,
+    reactionSetCurrentCount,
+    reactionSetTheoryRelation,
+    reactionSetTheoryCount,
+    reactionSnapshotTheory,
+    reactionRun,
+    reactionCurrentBank,
+    reactionCurrentCount,
+    reactionCurrentMember,
+    reactionBankCount,
+    reactionBankMember,
+    reactionSnapshotCount,
+    reactionMatchedRelations,
+    reactionHandoffCount,
   };
 }
 
@@ -783,6 +829,11 @@ async function main() {
     report(ui.anumHandles, "NOT_RUN", false);
     report(ui.anumReuse, "NOT_RUN", false);
     report(ui.anumNegative, "NOT_RUN", false);
+    for (const element of [
+      ui.reactionBeforeCpu, ui.reactionBeforeGpu, ui.reactionAfterCpu, ui.reactionAfterGpu,
+      ui.reactionMatched, ui.reactionHandoff, ui.reactionDiff, ui.reactionHandles,
+      ui.reactionScope, ui.reactionNegative,
+    ]) report(element, wasm ? "WAITING_FOR_GPU" : "NOT_RUN", false);
     return;
   }
 
@@ -862,6 +913,48 @@ async function main() {
         if (element.textContent === "WAITING") report(element, "FAIL", false);
       }
       log(`Anum-boundary error: ${error?.stack || error}`);
+    }
+  }
+
+  if (wasm) {
+    try {
+      const reaction = await runReactionBrowser(wasm, device);
+      report(ui.reactionBeforeCpu, "PASS [" + reaction.cpuBefore.join(", ") + "]", true);
+      report(ui.reactionBeforeGpu, "PASS [" + reaction.gpuBefore.join(", ") + "]", true);
+      report(ui.reactionAfterCpu, "PASS [" + reaction.cpuAfter.join(", ") + "]", true);
+      report(ui.reactionAfterGpu, "PASS [" + reaction.gpuAfter.join(", ") + "]", true);
+      report(
+        ui.reactionMatched,
+        "PASS (CPU " + reaction.cpuMatched + " / GPU " + reaction.gpuMatched + ")",
+        reaction.cpuMatched === 1 && reaction.gpuMatched === 1,
+      );
+      report(
+        ui.reactionHandoff,
+        "PASS (CPU " + reaction.cpuHandoff + " / GPU " + reaction.gpuHandoff + ")",
+        reaction.cpuHandoff === 1 && reaction.gpuHandoff === 1,
+      );
+      report(ui.reactionDiff, "PASS", reaction.normalizedDifferential);
+      report(ui.reactionHandles, "PASS (backend-local handles differ)", reaction.handlesDiffer);
+      report(
+        ui.reactionScope,
+        "PASS (snapshot isolated / old Scope retained)",
+        reaction.snapshotIsolation && reaction.oldScopeRetained,
+      );
+      report(
+        ui.reactionNegative,
+        "PASS (mismatch/no-match/foreign detected)",
+        reaction.negativeControls,
+      );
+      for (const line of reaction.logs) log(line);
+    } catch (error) {
+      for (const element of [
+        ui.reactionBeforeCpu, ui.reactionBeforeGpu, ui.reactionAfterCpu, ui.reactionAfterGpu,
+        ui.reactionMatched, ui.reactionHandoff, ui.reactionDiff, ui.reactionHandles,
+        ui.reactionScope, ui.reactionNegative,
+      ]) {
+        if (element.textContent === "WAITING") report(element, "FAIL", false);
+      }
+      log("Reaction R1 error: " + (error?.stack || error));
     }
   }
 
