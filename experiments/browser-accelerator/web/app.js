@@ -1,8 +1,14 @@
+import { assertExactU32, perturbFirst } from "./differential.mjs";
+
 const ui = {
   wasm: document.querySelector("#wasm"),
   cpu: document.querySelector("#cpu"),
   webgpu: document.querySelector("#webgpu"),
   compute: document.querySelector("#compute"),
+  incidenceCpu: document.querySelector("#incidence-cpu"),
+  incidenceGpu: document.querySelector("#incidence-gpu"),
+  differential: document.querySelector("#differential"),
+  negative: document.querySelector("#negative"),
   details: document.querySelector("#details"),
 };
 
@@ -21,16 +27,15 @@ function log(line) {
 
 async function loadWasm() {
   const response = await fetch("./amemory_browser_probe.wasm", { cache: "no-store" });
-  if (!response.ok) {
-    throw new Error(`WASM fetch failed: HTTP ${response.status}`);
-  }
+  if (!response.ok) throw new Error(`WASM fetch failed: HTTP ${response.status}`);
 
   const bytes = await response.arrayBuffer();
   const { instance } = await WebAssembly.instantiate(bytes, {});
   const probe = instance.exports.amemory_probe;
   const cpuStep = instance.exports.amemory_cpu_step;
+  const incidenceFlag = instance.exports.amemory_incidence_flag;
 
-  if (typeof probe !== "function" || typeof cpuStep !== "function") {
+  if ([probe, cpuStep, incidenceFlag].some((fn) => typeof fn !== "function")) {
     throw new Error("Expected Rust/WASM exports are missing");
   }
 
@@ -46,17 +51,16 @@ async function loadWasm() {
   if (cpuResult !== 42) {
     throw new Error(`WASM CPU control failed: expected 42, got ${cpuResult}`);
   }
-
   report(ui.cpu, "PASS (41 -> 42)", true);
   log(`wasm.cpu_step = ${cpuResult}`);
+
+  return { incidenceFlag };
 }
 
-async function runWebGpu() {
+async function initWebGpu() {
   if (!("gpu" in navigator)) {
     report(ui.webgpu, "WEBGPU_UNAVAILABLE", false);
-    report(ui.compute, "NOT_RUN", false);
-    log("navigator.gpu is not available in this browser.");
-    return;
+    return null;
   }
 
   let adapter;
@@ -64,32 +68,30 @@ async function runWebGpu() {
     adapter = await navigator.gpu.requestAdapter();
   } catch (error) {
     report(ui.webgpu, "WEBGPU_INIT_FAILED", false);
-    report(ui.compute, "NOT_RUN", false);
     log(`requestAdapter failed: ${error}`);
-    return;
+    return null;
   }
 
   if (!adapter) {
     report(ui.webgpu, "WEBGPU_UNAVAILABLE", false);
-    report(ui.compute, "NOT_RUN", false);
     log("WebGPU exists, but no GPUAdapter was returned.");
-    return;
+    return null;
   }
 
-  let device;
   try {
-    device = await adapter.requestDevice();
+    const device = await adapter.requestDevice();
+    report(ui.webgpu, "WEBGPU_AVAILABLE", true);
+    log(`adapter.features = ${[...adapter.features].join(", ") || "(none exposed)"}`);
+    log(`device.features = ${[...device.features].join(", ") || "(none exposed)"}`);
+    return device;
   } catch (error) {
     report(ui.webgpu, "WEBGPU_INIT_FAILED", false);
-    report(ui.compute, "NOT_RUN", false);
     log(`requestDevice failed: ${error}`);
-    return;
+    return null;
   }
+}
 
-  report(ui.webgpu, "WEBGPU_AVAILABLE", true);
-  log(`adapter.features = ${[...adapter.features].join(", ") || "(none exposed)"}`);
-  log(`device.features = ${[...device.features].join(", ") || "(none exposed)"}`);
-
+async function runSmoke(device) {
   const input = new Uint32Array([1, 2, 3, 4]);
   const expected = new Uint32Array([2, 3, 4, 5]);
   const byteLength = input.byteLength;
@@ -98,12 +100,10 @@ async function runWebGpu() {
     size: byteLength,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
   });
-
   const outputBuffer = device.createBuffer({
     size: byteLength,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
   });
-
   const readbackBuffer = device.createBuffer({
     size: byteLength,
     usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
@@ -113,11 +113,8 @@ async function runWebGpu() {
 
   const shader = device.createShaderModule({
     code: `
-      @group(0) @binding(0)
-      var<storage, read> input_data: array<u32>;
-
-      @group(0) @binding(1)
-      var<storage, read_write> output_data: array<u32>;
+      @group(0) @binding(0) var<storage, read> input_data: array<u32>;
+      @group(0) @binding(1) var<storage, read_write> output_data: array<u32>;
 
       @compute @workgroup_size(64)
       fn main(@builtin(global_invocation_id) id: vec3<u32>) {
@@ -131,12 +128,8 @@ async function runWebGpu() {
 
   const pipeline = device.createComputePipeline({
     layout: "auto",
-    compute: {
-      module: shader,
-      entryPoint: "main",
-    },
+    compute: { module: shader, entryPoint: "main" },
   });
-
   const bindGroup = device.createBindGroup({
     layout: pipeline.getBindGroupLayout(0),
     entries: [
@@ -151,55 +144,202 @@ async function runWebGpu() {
   pass.setBindGroup(0, bindGroup);
   pass.dispatchWorkgroups(1);
   pass.end();
-
   encoder.copyBufferToBuffer(outputBuffer, 0, readbackBuffer, 0, byteLength);
   device.queue.submit([encoder.finish()]);
 
   await readbackBuffer.mapAsync(GPUMapMode.READ, 0, byteLength);
-  const copy = readbackBuffer.getMappedRange(0, byteLength).slice(0);
+  const actual = new Uint32Array(readbackBuffer.getMappedRange(0, byteLength).slice(0));
   readbackBuffer.unmap();
 
-  const actual = new Uint32Array(copy);
-  const passResult =
-    actual.length === expected.length &&
-    actual.every((value, index) => value === expected[index]);
-
-  if (!passResult) {
-    report(ui.compute, `FAIL [${[...actual].join(", ")}]`, false);
-    log(`gpu.actual = [${[...actual].join(", ")}]`);
-    log(`gpu.expected = [${[...expected].join(", ")}]`);
-    return;
-  }
-
+  assertExactU32(expected, actual, "GPU smoke");
   report(ui.compute, `PASS [${[...actual].join(", ")}]`, true);
-  log(`gpu.input = [${[...input].join(", ")}]`);
-  log(`gpu.output = [${[...actual].join(", ")}]`);
+  log(`gpu.smoke.output = [${[...actual].join(", ")}]`);
 
   inputBuffer.destroy();
   outputBuffer.destroy();
   readbackBuffer.destroy();
-  device.destroy();
+}
+
+function cpuIncidence(wasm, fixture) {
+  return Uint32Array.from(
+    fixture.links.map(([start, end]) =>
+      wasm.incidenceFlag(start, end, fixture.queryStart, fixture.queryEnd)
+    ),
+  );
+}
+
+async function gpuIncidence(device, fixture) {
+  const flatLinks = new Uint32Array(fixture.links.flat());
+  const query = new Uint32Array([fixture.queryStart, fixture.queryEnd]);
+  const outputBytes = fixture.links.length * Uint32Array.BYTES_PER_ELEMENT;
+
+  const linksBuffer = device.createBuffer({
+    size: flatLinks.byteLength,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+  });
+  const queryBuffer = device.createBuffer({
+    size: query.byteLength,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+  });
+  const outputBuffer = device.createBuffer({
+    size: outputBytes,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+  });
+  const readbackBuffer = device.createBuffer({
+    size: outputBytes,
+    usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+  });
+
+  device.queue.writeBuffer(linksBuffer, 0, flatLinks);
+  device.queue.writeBuffer(queryBuffer, 0, query);
+
+  const shader = device.createShaderModule({
+    code: `
+      @group(0) @binding(0) var<storage, read> links: array<u32>;
+      @group(0) @binding(1) var<storage, read> query: array<u32>;
+      @group(0) @binding(2) var<storage, read_write> flags: array<u32>;
+
+      @compute @workgroup_size(64)
+      fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+        let i = id.x;
+        if (i < ${fixture.links.length}u) {
+          let start = links[i * 2u];
+          let end = links[i * 2u + 1u];
+          var f = 0u;
+
+          if (start == query[0]) {
+            f = f | 1u;
+          }
+          if (end == query[1]) {
+            f = f | 2u;
+          }
+          if ((f & 3u) == 3u) {
+            f = f | 4u;
+          }
+          flags[i] = f;
+        }
+      }
+    `,
+  });
+
+  const pipeline = device.createComputePipeline({
+    layout: "auto",
+    compute: { module: shader, entryPoint: "main" },
+  });
+  const bindGroup = device.createBindGroup({
+    layout: pipeline.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: linksBuffer } },
+      { binding: 1, resource: { buffer: queryBuffer } },
+      { binding: 2, resource: { buffer: outputBuffer } },
+    ],
+  });
+
+  const encoder = device.createCommandEncoder();
+  const pass = encoder.beginComputePass();
+  pass.setPipeline(pipeline);
+  pass.setBindGroup(0, bindGroup);
+  pass.dispatchWorkgroups(Math.ceil(fixture.links.length / 64));
+  pass.end();
+  encoder.copyBufferToBuffer(outputBuffer, 0, readbackBuffer, 0, outputBytes);
+  device.queue.submit([encoder.finish()]);
+
+  await readbackBuffer.mapAsync(GPUMapMode.READ, 0, outputBytes);
+  const result = new Uint32Array(readbackBuffer.getMappedRange(0, outputBytes).slice(0));
+  readbackBuffer.unmap();
+
+  linksBuffer.destroy();
+  queryBuffer.destroy();
+  outputBuffer.destroy();
+  readbackBuffer.destroy();
+
+  return result;
+}
+
+async function runDifferential(wasm, device) {
+  const fixture = {
+    links: [
+      [1, 2],
+      [1, 3],
+      [4, 2],
+      [4, 5],
+      [1, 2],
+    ],
+    queryStart: 1,
+    queryEnd: 2,
+  };
+  const expected = new Uint32Array([7, 1, 2, 0, 7]);
+
+  const cpu = cpuIncidence(wasm, fixture);
+  assertExactU32(expected, cpu, "Rust/WASM incidence oracle");
+  report(ui.incidenceCpu, `PASS [${[...cpu].join(", ")}]`, true);
+
+  const gpu = await gpuIncidence(device, fixture);
+  assertExactU32(expected, gpu, "WebGPU incidence");
+  report(ui.incidenceGpu, `PASS [${[...gpu].join(", ")}]`, true);
+
+  assertExactU32(cpu, gpu, "CPU/GPU differential");
+  report(ui.differential, "PASS", true);
+
+  let mismatchDetected = false;
+  try {
+    assertExactU32(cpu, perturbFirst(gpu), "negative control");
+  } catch (error) {
+    mismatchDetected = true;
+    log(`negative.control = ${error.message}`);
+  }
+  if (!mismatchDetected) {
+    throw new Error("negative control failed: deliberate mismatch was accepted");
+  }
+  report(ui.negative, "PASS (mismatch detected)", true);
+
+  log(`incidence.cpu = [${[...cpu].join(", ")}]`);
+  log(`incidence.gpu = [${[...gpu].join(", ")}]`);
 }
 
 async function main() {
   log(`secureContext = ${window.isSecureContext}`);
   log(`location = ${location.href}`);
 
+  let wasm = null;
   try {
-    await loadWasm();
+    wasm = await loadWasm();
   } catch (error) {
     report(ui.wasm, "FAILED", false);
     report(ui.cpu, "NOT_RUN", false);
+    report(ui.incidenceCpu, "NOT_RUN", false);
     log(`WASM error: ${error?.stack || error}`);
   }
 
-  try {
-    await runWebGpu();
-  } catch (error) {
-    report(ui.webgpu, "WEBGPU_INIT_FAILED", false);
-    report(ui.compute, "FAILED", false);
-    log(`WebGPU error: ${error?.stack || error}`);
+  const device = await initWebGpu();
+  if (!device) {
+    report(ui.compute, "NOT_RUN", false);
+    report(ui.incidenceGpu, "NOT_RUN", false);
+    report(ui.differential, "NOT_RUN", false);
+    report(ui.negative, "NOT_RUN", false);
+    return;
   }
+
+  try {
+    await runSmoke(device);
+  } catch (error) {
+    report(ui.compute, "FAILED", false);
+    log(`GPU smoke error: ${error?.stack || error}`);
+  }
+
+  if (wasm) {
+    try {
+      await runDifferential(wasm, device);
+    } catch (error) {
+      report(ui.differential, "FAIL", false);
+      if (ui.incidenceCpu.textContent === "WAITING") report(ui.incidenceCpu, "FAIL", false);
+      if (ui.incidenceGpu.textContent === "WAITING") report(ui.incidenceGpu, "FAIL", false);
+      if (ui.negative.textContent === "WAITING") report(ui.negative, "FAIL", false);
+      log(`Differential error: ${error?.stack || error}`);
+    }
+  }
+
+  device.destroy();
 }
 
 main();
