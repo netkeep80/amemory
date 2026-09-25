@@ -1156,6 +1156,62 @@ mod anum_boundary_tests {
         assert_eq!(amemory_reaction_handoff_count(), 0);
         assert_eq!(amemory_reaction_quiescent(), 1);
         assert_eq!(export(amemory_reaction_current_member(0)), "19816898");
+
+        // R5 P16/P17: bounded observation of an active recurrence through
+        // structural END. The unchanged TheorySnapshot contains both
+        // directions, so the same semantic states can repeat indefinitely
+        // without ever becoming quiescent. END is ordinary structural data,
+        // not a global halt condition.
+        let r5_context = import("998");
+        let r5_start_value = import("98");
+        let r5_end_value = import("68");
+        let r5_state_start = import("199898");
+        let r5_state_end = import("199868");
+        let r5_relation_start_end = import("19868");
+        let r5_relation_end_start = import("16898");
+        for handle in [
+            r5_context,
+            r5_start_value,
+            r5_end_value,
+            r5_state_start,
+            r5_state_end,
+            r5_relation_start_end,
+            r5_relation_end_start,
+        ] {
+            assert_ne!(handle, ANUM_CPU_NONE);
+        }
+
+        let pool = AnumCpuPool::snapshot();
+        assert_eq!(pool.end[r5_end_value as usize], r5_end_value);
+        assert_ne!(pool.start[r5_end_value as usize], r5_end_value);
+        assert_eq!(export(r5_end_value), "68");
+
+        amemory_reaction_reset();
+        assert_eq!(amemory_reaction_set_current_member(0, r5_state_start), 1);
+        assert_eq!(amemory_reaction_set_current_count(1), 1);
+        assert_eq!(amemory_reaction_set_theory_relation(0, r5_relation_start_end), 1);
+        assert_eq!(amemory_reaction_set_theory_relation(1, r5_relation_end_start), 1);
+        assert_eq!(amemory_reaction_set_theory_count(2), 1);
+        assert_eq!(amemory_reaction_snapshot_theory(), 1);
+        assert_eq!(amemory_reaction_snapshot_count(), 2);
+
+        let expected = ["199898", "199868", "199898", "199868", "199898"];
+        assert_eq!(export(amemory_reaction_current_member(0)), expected[0]);
+        for step in 0..4 {
+            assert_eq!(amemory_reaction_run(), 1);
+            assert_eq!(amemory_reaction_matched_relations(), 1);
+            assert_eq!(amemory_reaction_handoff_count(), 1);
+            assert_eq!(amemory_reaction_quiescent(), 0);
+            assert_eq!(export(amemory_reaction_current_member(0)), expected[step + 1]);
+        }
+
+        // S0=S2=S4 and S1=S3 semantically, with active transitions between.
+        // In particular S1 contains K->END and still transitions to S2.
+        assert_eq!(expected[0], expected[2]);
+        assert_eq!(expected[2], expected[4]);
+        assert_eq!(expected[1], expected[3]);
+        assert_eq!(expected[1], "199868");
+        assert_eq!(expected[2], "199898");
     }
 
 }
