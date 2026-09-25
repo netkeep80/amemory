@@ -56,6 +56,14 @@ const ui = {
   reactionHandles: document.querySelector("#reaction-handles"),
   reactionScope: document.querySelector("#reaction-scope"),
   reactionNegative: document.querySelector("#reaction-negative"),
+  reactionR2Cpu: document.querySelector("#reaction-r2-cpu"),
+  reactionR2Gpu: document.querySelector("#reaction-r2-gpu"),
+  reactionR2Matched: document.querySelector("#reaction-r2-matched"),
+  reactionR2Handoff: document.querySelector("#reaction-r2-handoff"),
+  reactionR2Quiescence: document.querySelector("#reaction-r2-quiescence"),
+  reactionR2Bank: document.querySelector("#reaction-r2-bank"),
+  reactionR2Diff: document.querySelector("#reaction-r2-diff"),
+  reactionR2Failure: document.querySelector("#reaction-r2-failure"),
   details: document.querySelector("#details"),
 };
 
@@ -108,6 +116,7 @@ async function loadWasm() {
   const reactionSnapshotCount = instance.exports.amemory_reaction_snapshot_count;
   const reactionMatchedRelations = instance.exports.amemory_reaction_matched_relations;
   const reactionHandoffCount = instance.exports.amemory_reaction_handoff_count;
+  const reactionQuiescent = instance.exports.amemory_reaction_quiescent;
 
   if ([
     probe, cpuStep, incidenceFlag,
@@ -119,7 +128,7 @@ async function loadWasm() {
     reactionSetTheoryRelation, reactionSetTheoryCount, reactionSnapshotTheory,
     reactionRun, reactionCurrentBank, reactionCurrentCount, reactionCurrentMember,
     reactionBankCount, reactionBankMember, reactionSnapshotCount,
-    reactionMatchedRelations, reactionHandoffCount,
+    reactionMatchedRelations, reactionHandoffCount, reactionQuiescent,
   ].some((fn) => typeof fn !== "function")) {
     throw new Error("Expected Rust/WASM exports are missing");
   }
@@ -168,6 +177,7 @@ async function loadWasm() {
     reactionSnapshotCount,
     reactionMatchedRelations,
     reactionHandoffCount,
+    reactionQuiescent,
   };
 }
 
@@ -833,6 +843,8 @@ async function main() {
       ui.reactionBeforeCpu, ui.reactionBeforeGpu, ui.reactionAfterCpu, ui.reactionAfterGpu,
       ui.reactionMatched, ui.reactionHandoff, ui.reactionDiff, ui.reactionHandles,
       ui.reactionScope, ui.reactionNegative,
+      ui.reactionR2Cpu, ui.reactionR2Gpu, ui.reactionR2Matched, ui.reactionR2Handoff,
+      ui.reactionR2Quiescence, ui.reactionR2Bank, ui.reactionR2Diff, ui.reactionR2Failure,
     ]) report(element, wasm ? "WAITING_FOR_GPU" : "NOT_RUN", false);
     return;
   }
@@ -945,16 +957,46 @@ async function main() {
         "PASS (mismatch/no-match/foreign detected)",
         reaction.negativeControls,
       );
+      report(ui.reactionR2Cpu, "PASS [" + reaction.r2CpuState.join(", ") + "]", true);
+      report(ui.reactionR2Gpu, "PASS [" + reaction.r2GpuState.join(", ") + "]", true);
+      report(
+        ui.reactionR2Matched,
+        "PASS (CPU " + reaction.r2CpuMatched + " / GPU " + reaction.r2GpuMatched + ")",
+        reaction.r2CpuMatched === 0 && reaction.r2GpuMatched === 0,
+      );
+      report(
+        ui.reactionR2Handoff,
+        "PASS (CPU " + reaction.r2CpuHandoff + " / GPU " + reaction.r2GpuHandoff + ")",
+        reaction.r2CpuHandoff === 0 && reaction.r2GpuHandoff === 0,
+      );
+      report(
+        ui.reactionR2Quiescence,
+        "PASS (CPU " + reaction.r2CpuQuiescent + " / GPU " + reaction.r2GpuQuiescent + ")",
+        reaction.r2CpuQuiescent && reaction.r2GpuQuiescent,
+      );
+      report(
+        ui.reactionR2Bank,
+        "PASS (published Scope unchanged)",
+        reaction.r2CpuBankUnchanged && reaction.r2GpuBankUnchanged,
+      );
+      report(ui.reactionR2Diff, "PASS", reaction.r2NormalizedDifferential);
+      report(
+        ui.reactionR2Failure,
+        "PASS (runtime failure != quiescence)",
+        reaction.r2FailureNotQuiescent,
+      );
       for (const line of reaction.logs) log(line);
     } catch (error) {
       for (const element of [
         ui.reactionBeforeCpu, ui.reactionBeforeGpu, ui.reactionAfterCpu, ui.reactionAfterGpu,
         ui.reactionMatched, ui.reactionHandoff, ui.reactionDiff, ui.reactionHandles,
         ui.reactionScope, ui.reactionNegative,
+        ui.reactionR2Cpu, ui.reactionR2Gpu, ui.reactionR2Matched, ui.reactionR2Handoff,
+        ui.reactionR2Quiescence, ui.reactionR2Bank, ui.reactionR2Diff, ui.reactionR2Failure,
       ]) {
         if (element.textContent === "WAITING") report(element, "FAIL", false);
       }
-      log("Reaction R1 error: " + (error?.stack || error));
+      log("Reaction R1/R2 error: " + (error?.stack || error));
     }
   }
 
