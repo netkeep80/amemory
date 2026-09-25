@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>A-memory browser accelerator prototype</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; line-height: 1.45; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .row { padding: .6rem 0; border-bottom: 1px solid #ddd; }
+    .ok { font-weight: 700; }
+    .fail { font-weight: 700; }
+    pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+  </style>
+</head>
+<body>
+  <h1>A-memory browser accelerator prototype</h1>
+  <p>This is a launch witness only. It does not implement MTS semantics yet.</p>
+
+  <div class="row">Rust/WASM: <span id="wasm">STARTING</span></div>
+  <div class="row">CPU control: <span id="cpu">WAITING</span></div>
+  <div class="row">WebGPU: <span id="webgpu">WAITING</span></div>
+  <div class="row">GPU compute: <span id="compute">WAITING</span></div>
+
+  <h2>Details</h2>
+  <pre id="details"></pre>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
