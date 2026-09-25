@@ -482,6 +482,7 @@ console.log("MTS_AND_AMEMORY_PROFILE_IMPORT_NEGATIVE_WITNESSES=GREEN");
   assert.equal(c045?.evidence?.negativeMismatchControls, "PASS across R1-R5");
   assert.equal(c045?.evidence?.allPortableLawsCovered, true);
   assert.equal(c045?.evidence?.fullReactionProfileConformance, true);
+  assert.equal(c045?.progress, undefined);
   assert.deepEqual(
     Object.keys(c045?.evidence?.portableLawCoverage ?? {}).sort(),
     Array.from({ length: 17 }, (_, i) => `P${String(i + 1).padStart(2, "0")}`),
