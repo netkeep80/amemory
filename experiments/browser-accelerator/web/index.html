@@ -15,7 +15,7 @@
 </head>
 <body>
   <h1>A-memory browser accelerator prototype</h1>
-  <p>Browser launch + first CPU/WASM ↔ WebGPU A-memory differential witness.</p>
+  <p>Browser CPU/WASM ↔ WebGPU A-memory differential witnesses.</p>
 
   <div class="row">Rust/WASM: <span id="wasm">STARTING</span></div>
   <div class="row">CPU control: <span id="cpu">WAITING</span></div>
@@ -25,6 +25,12 @@
   <div class="row">A-memory incidence GPU: <span id="incidence-gpu">WAITING</span></div>
   <div class="row">CPU/GPU differential: <span id="differential">WAITING</span></div>
   <div class="row">Negative control: <span id="negative">WAITING</span></div>
+  <div class="row">Canonicalization CPU: <span id="canonical-cpu">WAITING</span></div>
+  <div class="row">Canonicalization GPU: <span id="canonical-gpu">WAITING</span></div>
+  <div class="row">Canonical new pairs CPU: <span id="canonical-pairs-cpu">WAITING</span></div>
+  <div class="row">Canonical new pairs GPU: <span id="canonical-pairs-gpu">WAITING</span></div>
+  <div class="row">CPU/GPU canonicalization differential: <span id="canonical-diff">WAITING</span></div>
+  <div class="row">Canonicalization negative control: <span id="canonical-negative">WAITING</span></div>
 
   <h2>Details</h2>
   <pre id="details"></pre>
