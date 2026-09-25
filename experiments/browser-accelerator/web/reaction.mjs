@@ -37,6 +37,17 @@ export const R4_FIXTURE = Object.freeze({
   successorC: "198998",
 });
 
+export const R5_FIXTURE = Object.freeze({
+  context: "998",
+  startValue: "98",
+  endValue: "68",
+  stateStart: "199898",
+  stateEnd: "199868",
+  relationStartEnd: "19868",
+  relationEndStart: "16898",
+  observationSteps: 4,
+});
+
 const NONE = 0xffffffff;
 const CAP = 4;
 
@@ -104,6 +115,31 @@ export function assertR4Fixture() {
   return true;
 }
 
+export function assertR5Fixture() {
+  const stateStart = splitPairAnum(R5_FIXTURE.stateStart);
+  const stateEnd = splitPairAnum(R5_FIXTURE.stateEnd);
+  const relationStartEnd = splitPairAnum(R5_FIXTURE.relationStartEnd);
+  const relationEndStart = splitPairAnum(R5_FIXTURE.relationEndStart);
+  const endNode = parseAnum(R5_FIXTURE.endValue);
+
+  must(stateStart.start === R5_FIXTURE.context && stateStart.end === R5_FIXTURE.startValue, "bad R5 S_A");
+  must(stateEnd.start === R5_FIXTURE.context && stateEnd.end === R5_FIXTURE.endValue, "bad R5 S_C");
+  must(
+    relationStartEnd.start === R5_FIXTURE.startValue && relationStartEnd.end === R5_FIXTURE.endValue,
+    "bad R5 A->C relation",
+  );
+  must(
+    relationEndStart.start === R5_FIXTURE.endValue && relationEndStart.end === R5_FIXTURE.startValue,
+    "bad R5 C->A relation",
+  );
+  must(endNode.kind === "END", "R5 endValue must be structural END");
+  must(pairAnum(R5_FIXTURE.context, R5_FIXTURE.startValue) === R5_FIXTURE.stateStart, "noncanonical R5 S_A");
+  must(pairAnum(R5_FIXTURE.context, R5_FIXTURE.endValue) === R5_FIXTURE.stateEnd, "noncanonical R5 S_C");
+  must(pairAnum(R5_FIXTURE.startValue, R5_FIXTURE.endValue) === R5_FIXTURE.relationStartEnd, "noncanonical R5 A->C");
+  must(pairAnum(R5_FIXTURE.endValue, R5_FIXTURE.startValue) === R5_FIXTURE.relationEndStart, "noncanonical R5 C->A");
+  return true;
+}
+
 export function normalizeReactionState(anums) {
   return [...new Set(anums.map(normalizeAnum))].sort();
 }
@@ -135,7 +171,7 @@ export function perturbReactionState(anums) {
 function importCpuFixture(wasm) {
   cpuResetPool(wasm);
   const refs = {};
-  for (const [name, source] of Object.entries({ ...R1_FIXTURE, ...R3_FIXTURE, ...R4_FIXTURE })) {
+  for (const [name, source] of Object.entries({ ...R1_FIXTURE, ...R3_FIXTURE, ...R4_FIXTURE, ...R5_FIXTURE })) {
     const ref = cpuImportRaw(wasm, source);
     must(ref, "CPU rejected reaction Anum " + name + "=" + source);
     refs[name] = ref;
@@ -145,7 +181,7 @@ function importCpuFixture(wasm) {
 
 async function importGpuFixture(device, pool) {
   const refs = {};
-  for (const [name, source] of Object.entries({ ...R1_FIXTURE, ...R3_FIXTURE, ...R4_FIXTURE })) {
+  for (const [name, source] of Object.entries({ ...R1_FIXTURE, ...R3_FIXTURE, ...R4_FIXTURE, ...R5_FIXTURE })) {
     const ref = await gpuImport(device, pool, source);
     must(ref, "GPU rejected reaction Anum " + name + "=" + source);
     refs[name] = ref;
@@ -182,6 +218,16 @@ async function validateGpuFixtureTopology(device, pool, refs) {
     ["relationBC.end", topology.ends[handles.relationBC], handles.C],
     ["successorC.start", topology.starts[handles.successorC], handles.K],
     ["successorC.end", topology.ends[handles.successorC], handles.C],
+    ["R5.endValue.start", topology.starts[handles.endValue], handles.root],
+    ["R5.endValue.end", topology.ends[handles.endValue], handles.endValue],
+    ["R5.stateStart.start", topology.starts[handles.stateStart], handles.context],
+    ["R5.stateStart.end", topology.ends[handles.stateStart], handles.startValue],
+    ["R5.stateEnd.start", topology.starts[handles.stateEnd], handles.context],
+    ["R5.stateEnd.end", topology.ends[handles.stateEnd], handles.endValue],
+    ["R5.relationStartEnd.start", topology.starts[handles.relationStartEnd], handles.startValue],
+    ["R5.relationStartEnd.end", topology.ends[handles.relationStartEnd], handles.endValue],
+    ["R5.relationEndStart.start", topology.starts[handles.relationEndStart], handles.endValue],
+    ["R5.relationEndStart.end", topology.ends[handles.relationEndStart], handles.startValue],
   ];
   for (const [label, actual, expected] of checks) {
     must(actual === expected, "GPU topology preflight " + label + ": expected " + expected + ", got " + actual);
@@ -369,6 +415,39 @@ function runCpuTheoryTplus1(wasm, refs) {
     staleMatched,
   };
 }
+
+function runCpuRecurrenceEnd(wasm, refs) {
+  cpuConfigureMany(
+    wasm,
+    [refs.stateStart],
+    [refs.relationStartEnd, refs.relationEndStart],
+  );
+  const states = [cpuCurrent(wasm)];
+  const matched = [];
+  const handoffs = [];
+  const quiescent = [];
+  const banks = [wasmU32(wasm.reactionCurrentBank())];
+
+  for (let step = 0; step < R5_FIXTURE.observationSteps; step += 1) {
+    must(wasm.reactionRun() === 1, "CPU R5 reaction failed at step " + step);
+    states.push(cpuCurrent(wasm));
+    matched.push(wasmU32(wasm.reactionMatchedRelations()));
+    handoffs.push(wasmU32(wasm.reactionHandoffCount()));
+    quiescent.push(wasmU32(wasm.reactionQuiescent()) === 1);
+    banks.push(wasmU32(wasm.reactionCurrentBank()));
+  }
+
+  return {
+    states,
+    matched,
+    handoffs,
+    quiescent,
+    banks,
+    snapshotCount: wasmU32(wasm.reactionSnapshotCount()),
+    boundedReturn: true,
+  };
+}
+
 
 function gpuUsage() {
   return GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST;
@@ -835,11 +914,56 @@ async function runGpuTheoryTplus1(device, pool, refs) {
   }
 }
 
+
+async function runGpuRecurrenceEnd(device, pool, refs) {
+  const state = createGpuReactionState(
+    device,
+    requireLocalRef(refs.stateStart, pool.memory),
+    [
+      requireLocalRef(refs.relationStartEnd, pool.memory),
+      requireLocalRef(refs.relationEndStart, pool.memory),
+    ],
+  );
+  try {
+    const initial = await gpuObserve(device, pool, state);
+    const states = [initial.anums];
+    const matched = [];
+    const handoffs = [];
+    const quiescent = [];
+    const banks = [initial.bank];
+
+    for (let step = 0; step < R5_FIXTURE.observationSteps; step += 1) {
+      await gpuRun(device, pool, state);
+      const observed = await gpuObserve(device, pool, state);
+      must(observed.status === 1, "GPU R5 reaction failed at step " + step + ": diagnostic=" + observed.diagnostic);
+      states.push(observed.anums);
+      matched.push(observed.matched);
+      handoffs.push(observed.handoff);
+      quiescent.push(observed.quiescent);
+      banks.push(observed.bank);
+    }
+
+    const counts = await gpuTheoryCounts(device, state);
+    return {
+      states,
+      matched,
+      handoffs,
+      quiescent,
+      banks,
+      snapshotCount: counts.snapshot,
+      boundedReturn: true,
+    };
+  } finally {
+    destroyGpuState(state);
+  }
+}
+
 export async function runReactionBrowser(wasm, device) {
   assertR1Fixture();
   assertR2Fixture();
   assertR3Fixture();
   assertR4Fixture();
+  assertR5Fixture();
   const logs = [];
   const cpuRefs = importCpuFixture(wasm);
   const gpuPool = createGpuAnumPool(device, "gpu-reaction-B");
@@ -933,6 +1057,45 @@ export async function runReactionBrowser(wasm, device) {
     must(cpuR4.staleMatched === 0 && gpuR4.staleMatched === 0, "R4 stale snapshot saw new admission");
     must(gpuR4.staleSnapshotCount === 1, "GPU R4 stale control snapshot mutated");
 
+    const cpuR5 = runCpuRecurrenceEnd(wasm, cpuRefs);
+    const gpuR5 = await runGpuRecurrenceEnd(device, gpuPool, gpuRefs);
+    const expectedR5 = [
+      [R5_FIXTURE.stateStart],
+      [R5_FIXTURE.stateEnd],
+      [R5_FIXTURE.stateStart],
+      [R5_FIXTURE.stateEnd],
+      [R5_FIXTURE.stateStart],
+    ];
+
+    for (let i = 0; i < expectedR5.length; i += 1) {
+      assertReactionStateExact(expectedR5[i], cpuR5.states[i], "CPU R5 S" + i);
+      assertReactionStateExact(expectedR5[i], gpuR5.states[i], "GPU R5 S" + i);
+      assertReactionStateExact(cpuR5.states[i], gpuR5.states[i], "CPU/GPU R5 S" + i + " differential");
+    }
+    must(cpuR5.snapshotCount === 2 && gpuR5.snapshotCount === 2, "R5 fixed TheorySnapshot count mismatch");
+    must(cpuR5.matched.every((value) => value === 1) && gpuR5.matched.every((value) => value === 1), "R5 active-step matched mismatch");
+    must(cpuR5.handoffs.every((value) => value === 1) && gpuR5.handoffs.every((value) => value === 1), "R5 active-step handoff mismatch");
+    must(cpuR5.quiescent.every((value) => value === false) && gpuR5.quiescent.every((value) => value === false), "R5 recurrent cycle incorrectly quiescent");
+    must(
+      normalizeReactionState(cpuR5.states[0]).join("|") === normalizeReactionState(cpuR5.states[2]).join("|") &&
+      normalizeReactionState(cpuR5.states[2]).join("|") === normalizeReactionState(cpuR5.states[4]).join("|") &&
+      normalizeReactionState(gpuR5.states[0]).join("|") === normalizeReactionState(gpuR5.states[2]).join("|") &&
+      normalizeReactionState(gpuR5.states[2]).join("|") === normalizeReactionState(gpuR5.states[4]).join("|"),
+      "R5 semantic recurrence missing",
+    );
+    must(
+      normalizeReactionState(cpuR5.states[1]).join("|") === normalizeReactionState(cpuR5.states[3]).join("|") &&
+      normalizeReactionState(gpuR5.states[1]).join("|") === normalizeReactionState(gpuR5.states[3]).join("|"),
+      "R5 END-state recurrence missing",
+    );
+    must(parseAnum(R5_FIXTURE.endValue).kind === "END", "R5 END fixture lost structural END aspect");
+    must(
+      cpuR5.states[1][0] === R5_FIXTURE.stateEnd && cpuR5.states[2][0] === R5_FIXTURE.stateStart &&
+      gpuR5.states[1][0] === R5_FIXTURE.stateEnd && gpuR5.states[2][0] === R5_FIXTURE.stateStart,
+      "R5 structural END incorrectly halted execution",
+    );
+    must(cpuR5.boundedReturn && gpuR5.boundedReturn, "R5 bounded witness did not return");
+
     let mismatchDetected = false;
     try {
       assertReactionStateExact(cpu.after, perturbReactionState(gpu.after), "deliberate mismatch");
@@ -1005,6 +1168,18 @@ export async function runReactionBrowser(wasm, device) {
     logs.push("reaction.r4.same-reaction-isolation = PASS");
     logs.push("reaction.r4.next-reaction-visibility = PASS");
     logs.push("reaction.r4.stale-snapshot-control = PASS");
+    for (let i = 0; i < cpuR5.states.length; i += 1) {
+      logs.push("reaction.r5.S" + i + ".cpu = [" + cpuR5.states[i].join(", ") + "]");
+      logs.push("reaction.r5.S" + i + ".gpu = [" + gpuR5.states[i].join(", ") + "]");
+    }
+    logs.push("reaction.r5.snapshot-count = CPU " + cpuR5.snapshotCount + " / GPU " + gpuR5.snapshotCount);
+    logs.push("reaction.r5.matched = CPU [" + cpuR5.matched.join(", ") + "] / GPU [" + gpuR5.matched.join(", ") + "]");
+    logs.push("reaction.r5.handoff = CPU [" + cpuR5.handoffs.join(", ") + "] / GPU [" + gpuR5.handoffs.join(", ") + "]");
+    logs.push("reaction.r5.quiescent = CPU [" + cpuR5.quiescent.join(", ") + "] / GPU [" + gpuR5.quiescent.join(", ") + "]");
+    logs.push("reaction.r5.recurrence = PASS S0=S2=S4 and S1=S3");
+    logs.push("reaction.r5.end-structure = PASS C=68 is END");
+    logs.push("reaction.r5.end-continuation = PASS K->C -> K->A remains active");
+    logs.push("reaction.r5.bounded-return = PASS");
     logs.push("reaction.handles.current = CPU " + cpuRefs.current.value + " != GPU " + gpuRefs.current.value);
     logs.push("reaction.handles.successor = CPU " + cpuRefs.successor.value + " != GPU " + gpuRefs.successor.value);
     logs.push("reaction.snapshot.isolation = PASS");
@@ -1080,6 +1255,21 @@ export async function runReactionBrowser(wasm, device) {
       r4NextReactionVisibility: true,
       r4StaleSnapshotControl: cpuR4.staleMatched === 0 && gpuR4.staleMatched === 0,
       r4NormalizedTrajectoryDifferential: true,
+      r5StatesCpu: cpuR5.states,
+      r5StatesGpu: gpuR5.states,
+      r5SnapshotCountCpu: cpuR5.snapshotCount,
+      r5SnapshotCountGpu: gpuR5.snapshotCount,
+      r5MatchedCpu: cpuR5.matched,
+      r5MatchedGpu: gpuR5.matched,
+      r5HandoffCpu: cpuR5.handoffs,
+      r5HandoffGpu: gpuR5.handoffs,
+      r5QuiescentCpu: cpuR5.quiescent,
+      r5QuiescentGpu: gpuR5.quiescent,
+      r5Recurrence: true,
+      r5EndStructure: true,
+      r5EndContinuation: true,
+      r5BoundedReturn: cpuR5.boundedReturn && gpuR5.boundedReturn,
+      r5NormalizedTrajectoryDifferential: true,
       negativeControls: true,
       logs,
     };
