@@ -152,13 +152,26 @@ Observed R1:
   backend-local handles differ = PASS
   negative mismatch/no-match/foreign controls = PASS
 
+R2 executable subset:
+  P07 P13
+    -> GREEN on real browser CPU/WASM ↔ WebGPU differential
+
+Observed R2:
+  Scope CPU/GPU = [19868]
+  matchedRelations = 0 / 0
+  handoffCount = 0 / 0
+  quiescent = true / true
+  published Scope unchanged = PASS
+  runtime failure != quiescence = PASS
+
 P10
   -> supporting canonicalization evidence only
 
-P07 P09 P13 P14 P16 P17
+P09 P14 P16 P17
   -> not-yet-executed
 
 AM-C046 R1 = GREEN
+AM-C047 R2 = GREEN
 AM-C045 FULL PROFILE = PLANNED
 FULL_REACTION_PROFILE_CONFORMANCE = FALSE
 ```
@@ -169,13 +182,11 @@ Storage/incidence/Anum tests и даже R1 нельзя использоват�
 
 ## Следующие reaction slices
 
-После закрытого GREEN R1 следующий этап — последовательно закрыть:
+После закрытых GREEN R1 и R2 следующий этап — последовательно закрыть:
 
 ```text
-P07  NO_ADMITTED_RELATION
 P09  ZERO / mixed ZERO
 P10  duplicate convergence inside reaction
-P13  quiescence
 P14  Theory admission visibility t+1
 P16  recurrence / nontermination
 P17  structural END != halt
