@@ -1,0 +1,46 @@
+name: Контракт изменения
+description: Предложить изменение реализации или контракта A-memory.
+title: "[change] "
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Описание
+      description: Что меняется и зачем?
+    validations:
+      required: true
+  - type: textarea
+    id: contract
+    attributes:
+      label: ChangeIntent
+      description: Намерение изменения и его границы.
+      value: |
+        ```repo-guard-yaml
+        change_type: feature
+        scope:
+          - src/**
+        budgets: {}
+        anchors:
+          affects: []
+          implements: []
+          verifies: []
+        must_touch: []
+        must_not_touch:
+          - contracts/**
+        expected_effects:
+          - Опишите наблюдаемый эффект
+        ```
+    validations:
+      required: true
+  - type: textarea
+    id: governance
+    attributes:
+      label: GovernanceGrant
+      description: Заполняется только если задача явно разрешает изменение governance/contract authority.
+      value: |
+        ```repo-guard-grant
+        authorized_governance_paths: []
+        allow_policy_relaxation: []
+        ```
+    validations:
+      required: false
