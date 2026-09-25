@@ -31,6 +31,11 @@ jobs:
         with:
           node-version: 24
 
+      - name: Parse browser JavaScript
+        run: |
+          node --check experiments/browser-accelerator/web/app.js
+          node --check experiments/browser-accelerator/web/canonicalization.mjs
+
       - name: Canonicalization positive/negative witnesses
         run: node experiments/browser-accelerator/tests/canonicalization.test.mjs
 
