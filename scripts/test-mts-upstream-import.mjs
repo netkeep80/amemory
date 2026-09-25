@@ -422,8 +422,8 @@ console.log("MTS_AND_AMEMORY_PROFILE_IMPORT_NEGATIVE_WITNESSES=GREEN");
       backend.profilePinCommit,
       "af4e3dadbb9857fba7239a58f79ed2da59bc5c42",
     );
-    assert.equal(backend.fullProfileConformance, false);
-    assert.match(backend.currentScopeMechanism, /^R1-R5 IMPLEMENTED:/);
+    assert.equal(backend.fullProfileConformance, true);
+    assert.match(backend.currentScopeMechanism, /^R1-R6 EVIDENCED:/);
     assert(backend.backendSubstrateBoundary.length > 0);
     assert(backend.nonSemanticSchedulingChoices.length > 0);
     assert(backend.normalizedSemanticEquivalence.length > 0);
@@ -439,8 +439,8 @@ console.log("MTS_AND_AMEMORY_PROFILE_IMPORT_NEGATIVE_WITNESSES=GREEN");
     for (const id of ["P06","P08","P15"]) {
       assert.equal(
         backend.profileLawCoverage[id],
-        "pending-r6-direct-witness",
-        `${backendId} audit gap mismatch for ${id}`,
+        "r6-green-real-browser-differential",
+        `${backendId} R6 GREEN coverage mismatch for ${id}`,
       );
     }
 
@@ -480,30 +480,30 @@ console.log("MTS_AND_AMEMORY_PROFILE_IMPORT_NEGATIVE_WITNESSES=GREEN");
     (vector) =>
       vector.id === "AM-C045-cpu-webgpu-full-reaction-profile-differential",
   );
-  assert.equal(c045?.status, "planned");
+  assert.equal(c045?.status, "green");
   assert.deepEqual(c045?.evidence?.backends, ["rust-reference-cpu-wasm", "browser-webgpu"]);
-  assert.deepEqual(c045?.evidence?.realBrowserDifferentialCompletedSlices, ["R1","R2","R3","R4","R5"]);
-  assert.equal(c045?.evidence?.r6RealBrowserDifferential, false);
-  assert.equal(c045?.evidence?.normalizedReactionDifferential, "PASS for directly witnessed R1-R5 slices");
-  assert.equal(c045?.evidence?.negativeMismatchControls, "PASS across directly witnessed R1-R5 slices");
-  assert.equal(c045?.evidence?.allPortableLawsCovered, false);
-  assert.equal(c045?.evidence?.fullReactionProfileConformance, false);
+  assert.deepEqual(c045?.evidence?.realBrowserDifferentialCompletedSlices, ["R1","R2","R3","R4","R5","R6"]);
+  assert.equal(c045?.evidence?.r6RealBrowserDifferential, true);
+  assert.equal(c045?.evidence?.normalizedReactionDifferential, "PASS across R1-R6");
+  assert.equal(c045?.evidence?.negativeMismatchControls, "PASS across R1-R6 and supporting differential layers");
+  assert.equal(c045?.evidence?.allPortableLawsCovered, true);
+  assert.equal(c045?.evidence?.fullReactionProfileConformance, true);
   assert.equal(c045?.progress, undefined);
   assert.deepEqual(
     Object.keys(c045?.evidence?.portableLawCoverage ?? {}).sort(),
     Array.from({ length: 17 }, (_, i) => `P${String(i + 1).padStart(2, "0")}`),
   );
-  assert.deepEqual(c045?.evidence?.auditGaps, [
-    "P06_EXHAUST_ALL_ADMITTED_RELATIONS",
-    "P08_ADMITTED_RELATIONS_REPLACE_BY_ALL_OUTPUTS",
-    "P15_PHYSICAL_SCHEDULE_AND_LOCAL_ADDRESSES_ARE_NONSEMANTIC",
-  ]);
+  assert.equal(c045?.evidence?.r6BrowserWitnessComment, "https://github.com/netkeep80/amemory/issues/45#issuecomment-5839912846");
+  assert.equal(c045?.evidence?.portableLawCoverage?.P06, "AM-C052");
+  assert.equal(c045?.evidence?.portableLawCoverage?.P08, "AM-C052");
+  assert.equal(c045?.evidence?.portableLawCoverage?.P15, "AM-C052");
   assert.deepEqual(c045?.evidence?.completedSlices, [
     "AM-C046-r1-one-reaction-cpu-webgpu",
     "AM-C047-r2-no-admitted-relation-quiescence",
     "AM-C048-r3-zero-and-duplicate-convergence",
     "AM-C049-r4-theory-admission-tplus1",
     "AM-C050-r5-recurrence-and-end-not-halt",
+    "AM-C052-r6-many-order-scope-direct",
   ]);
 
   const c046 = conformance.mandatoryVectors.find(
@@ -591,7 +591,11 @@ console.log("MTS_AND_AMEMORY_PROFILE_IMPORT_NEGATIVE_WITNESSES=GREEN");
     const vector = conformance.mandatoryVectors.find((candidate) => candidate.id === id);
     assert.equal(vector?.reconciliation?.issue, 45, `${id} missing #45 reconciliation`);
     assert.equal(vector?.reconciliation?.classification, classification, `${id} classification drift`);
-    assert.equal(vector?.status, classification === "PROVEN_BY_EXISTING_GREEN_EVIDENCE" ? "green" : "planned");
+    assert.equal(vector?.status, "green");
+    if (classification === "NEEDS_NEW_EXECUTABLE_WITNESS") {
+      assert.equal(vector?.reconciliation?.resolution, "PROVEN_BY_NEW_EXECUTABLE_WITNESS");
+      assert.equal(vector?.reconciliation?.resolvedBy, "AM-C052-r6-many-order-scope-direct");
+    }
   }
 
   const c003 = conformance.mandatoryVectors.find((vector) => vector.id === "AM-C003-root-start-end-pair-canonicality");
@@ -601,21 +605,36 @@ console.log("MTS_AND_AMEMORY_PROFILE_IMPORT_NEGATIVE_WITNESSES=GREEN");
   assert.equal(c051?.status, "green");
   assert.deepEqual(c051?.requirements, ["AM-000"]);
 
+  const c052 = conformance.mandatoryVectors.find((vector) => vector.id === "AM-C052-r6-many-order-scope-direct");
+  assert.equal(c052?.status, "green");
+  assert.equal(c052?.evidence?.realBrowserCpuWebGpuWitness, "PASS");
+  assert.equal(c052?.evidence?.observed?.oneToN?.matched?.cpu, 2);
+  assert.equal(c052?.evidence?.observed?.oneToN?.matched?.gpu, 2);
+  assert.equal(c052?.evidence?.observed?.reactionOrderVariation, "PASS (reversed current + Theory order)");
+  assert.match(c052?.evidence?.observed?.boundedScopeFailClosed?.cpu ?? "", /17 > 16/);
+  assert.match(c052?.evidence?.observed?.boundedScopeFailClosed?.gpu ?? "", /5 > 4/);
+
   const greenRequirementCoverage = new Set(
     conformance.mandatoryVectors
       .filter((vector) => vector.status === "green")
       .flatMap((vector) => vector.requirements ?? []),
   );
+  assert.equal(conformance.coverageState, "complete");
+  assert.equal(conformance.acceptanceState, "READY");
+  assert.equal(conformance.mandatoryVectors.every((vector) => vector.status === "green"), true);
   for (const requirement of contract.requirements) {
-    if (conformance.acceptanceState === "READY") {
-      assert(greenRequirementCoverage.has(requirement.id), `READY without GREEN coverage for ${requirement.id}`);
-    }
+    assert(greenRequirementCoverage.has(requirement.id), `READY without GREEN coverage for ${requirement.id}`);
   }
   assert(greenRequirementCoverage.has("AM-000"), "AM-000 storage+execution integrity has no GREEN vector");
 
+  assert.equal(contract.accepted, false);
+  assert.equal(contract.status, "candidate");
+  assert.equal(contract.executionProfileBoundary.fullReactionProfileConformanceClaimed, true);
+  assert.match(contract.executionProfileBoundary.currentImplementationClaim, /full-p01-p17-green-ready-candidate/);
+
   assert.match(readme, /minimal-portable-amemory-execution/);
-  assert.match(readme, /FULL_REACTION_PROFILE_CONFORMANCE = FALSE/);
-  assert.match(readme, /P06.*P08.*P15|P06\/P08\/P15/s);
+  assert.match(readme, /FULL_REACTION_PROFILE_CONFORMANCE = TRUE/);
+  assert.match(readme, /acceptanceState = READY/);
   assert.match(readme, /R1|reaction/);
 }
 
