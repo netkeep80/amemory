@@ -292,7 +292,7 @@
     "portableLawCount": 17,
     "semanticExtensionRequired": false,
     "acceptedMtsFoundationMutated": false,
-    "currentImplementationClaim": "partial-r1-r2-r3-r4-green-r5-recurrence-end-candidate",
-    "fullReactionProfileConformanceClaimed": false
+    "currentImplementationClaim": "full-p01-p17-green-ready-candidate",
+    "fullReactionProfileConformanceClaimed": true
   }
 }
