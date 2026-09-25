@@ -220,7 +220,11 @@ impl AnumCpuPool {
         let mut handle = 1;
         while handle <= ANUM_CPU_MAX_HANDLE {
             let i = handle as usize;
-            if self.used[i] != 0 && self.start[i] == handle && self.end[i] == child {
+            if self.used[i] != 0
+                && self.start[i] == handle
+                && self.end[i] == child
+                && self.end[i] != handle
+            {
                 return Some(handle);
             }
             handle += 1;
@@ -232,7 +236,11 @@ impl AnumCpuPool {
         let mut handle = 1;
         while handle <= ANUM_CPU_MAX_HANDLE {
             let i = handle as usize;
-            if self.used[i] != 0 && self.start[i] == child && self.end[i] == handle {
+            if self.used[i] != 0
+                && self.start[i] == child
+                && self.end[i] == handle
+                && self.start[i] != handle
+            {
                 return Some(handle);
             }
             handle += 1;
@@ -244,7 +252,12 @@ impl AnumCpuPool {
         let mut handle = 1;
         while handle <= ANUM_CPU_MAX_HANDLE {
             let i = handle as usize;
-            if self.used[i] != 0 && self.start[i] == start && self.end[i] == end {
+            if self.used[i] != 0
+                && self.start[i] == start
+                && self.end[i] == end
+                && self.start[i] != handle
+                && self.end[i] != handle
+            {
                 return Some(handle);
             }
             handle += 1;
