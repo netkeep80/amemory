@@ -1093,6 +1093,52 @@ mod anum_boundary_tests {
         assert_eq!(amemory_reaction_quiescent(), 0);
         assert_eq!(amemory_reaction_current_count(), 1);
         assert_eq!(export(amemory_reaction_current_member(0)), "19816898");
+
+        // R4 P14: a new live Theory admission added after snapshot_t is
+        // invisible to reaction t and becomes executable only after the next
+        // explicit reaction-start snapshot.
+        let c = import("9");
+        let relation_bc = import("1168989");
+        let successor_c = import("1989");
+        for handle in [c, relation_bc, successor_c] {
+            assert_ne!(handle, ANUM_CPU_NONE);
+        }
+
+        amemory_reaction_reset();
+        assert_eq!(amemory_reaction_set_current_member(0, current), 1);
+        assert_eq!(amemory_reaction_set_current_count(1), 1);
+        assert_eq!(amemory_reaction_set_theory_relation(0, relation), 1);
+        assert_eq!(amemory_reaction_set_theory_count(1), 1);
+        assert_eq!(amemory_reaction_snapshot_theory(), 1);
+        assert_eq!(amemory_reaction_snapshot_count(), 1);
+
+        // Add B->C to live Theory only. Snapshot_t remains [A->B].
+        assert_eq!(amemory_reaction_set_theory_relation(1, relation_bc), 1);
+        assert_eq!(amemory_reaction_set_theory_count(2), 1);
+        assert_eq!(amemory_reaction_snapshot_count(), 1);
+
+        // reaction t: K->A -> K->B. The new B->C admission must not leak.
+        assert_eq!(amemory_reaction_run(), 1);
+        assert_eq!(amemory_reaction_matched_relations(), 1);
+        assert_eq!(amemory_reaction_handoff_count(), 1);
+        assert_eq!(amemory_reaction_quiescent(), 0);
+        assert_eq!(export(amemory_reaction_current_member(0)), "19816898");
+
+        // Without a new snapshot, the added admission is still invisible.
+        assert_eq!(amemory_reaction_run(), 1);
+        assert_eq!(amemory_reaction_matched_relations(), 0);
+        assert_eq!(amemory_reaction_handoff_count(), 0);
+        assert_eq!(amemory_reaction_quiescent(), 1);
+        assert_eq!(export(amemory_reaction_current_member(0)), "19816898");
+
+        // reaction t+1 starts with a fresh snapshot and now B->C is visible.
+        assert_eq!(amemory_reaction_snapshot_theory(), 1);
+        assert_eq!(amemory_reaction_snapshot_count(), 2);
+        assert_eq!(amemory_reaction_run(), 1);
+        assert_eq!(amemory_reaction_matched_relations(), 1);
+        assert_eq!(amemory_reaction_handoff_count(), 1);
+        assert_eq!(amemory_reaction_quiescent(), 0);
+        assert_eq!(export(amemory_reaction_current_member(0)), "1989");
     }
 
 }
