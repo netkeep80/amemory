@@ -35,7 +35,10 @@
       "experiments/browser-accelerator/tests/differential.test.mjs",
       ".github/workflows/browser-canonicalization-check.yml",
       "experiments/browser-accelerator/web/canonicalization.mjs",
-      "experiments/browser-accelerator/tests/canonicalization.test.mjs"
+      "experiments/browser-accelerator/tests/canonicalization.test.mjs",
+      ".github/workflows/browser-state-store-check.yml",
+      "experiments/browser-accelerator/web/state-store.mjs",
+      "experiments/browser-accelerator/tests/state-store.test.mjs"
     ],
     "operational_paths": []
   },

@@ -113,3 +113,48 @@ pub extern "C" fn amemory_canonical_flag(index: u32, existing_count: u32) -> u32
     }
     flags
 }
+
+const STATE_SIDE: u32 = 16;
+const STATE_CELLS: usize = (STATE_SIDE as usize) * (STATE_SIDE as usize);
+static mut STATE_CELLS_DATA: [u32; STATE_CELLS] = [0; STATE_CELLS];
+
+fn state_index(start: u32, end: u32) -> Option<usize> {
+    if start >= STATE_SIDE || end >= STATE_SIDE {
+        None
+    } else {
+        Some((start * STATE_SIDE + end) as usize)
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_state_reset() {
+    unsafe {
+        let mut i = 0;
+        while i < STATE_CELLS {
+            STATE_CELLS_DATA[i] = 0;
+            i += 1;
+        }
+    }
+}
+
+/// Commit a pair that has already passed semantic authorization above this storage boundary.
+/// Returns 1 on commit/idempotent replay and 0 when the physical prototype scope is exceeded.
+#[no_mangle]
+pub extern "C" fn amemory_state_commit(start: u32, end: u32) -> u32 {
+    let Some(index) = state_index(start, end) else {
+        return 0;
+    };
+    unsafe {
+        STATE_CELLS_DATA[index] = 1;
+    }
+    1
+}
+
+/// Returns 1/0 for an in-scope pair and u32::MAX for an out-of-scope physical query.
+#[no_mangle]
+pub extern "C" fn amemory_state_get(start: u32, end: u32) -> u32 {
+    let Some(index) = state_index(start, end) else {
+        return u32::MAX;
+    };
+    unsafe { STATE_CELLS_DATA[index] }
+}

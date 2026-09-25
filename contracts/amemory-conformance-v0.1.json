@@ -338,6 +338,59 @@
           "negativeControl": "PASS (mismatches detected)"
         }
       }
+    },
+    {
+      "id": "AM-C025-state-persists-across-rounds",
+      "requirements": [
+        "AM-021",
+        "AM-026"
+      ],
+      "status": "browser-witness-required"
+    },
+    {
+      "id": "AM-C026-authorized-union-exactness",
+      "requirements": [
+        "AM-022",
+        "AM-025"
+      ],
+      "status": "browser-witness-required"
+    },
+    {
+      "id": "AM-C027-duplicate-commit-idempotence",
+      "requirements": [
+        "AM-023"
+      ],
+      "status": "ci-and-browser-witness-required"
+    },
+    {
+      "id": "AM-C028-physical-cell-non-authority",
+      "requirements": [
+        "AM-024"
+      ],
+      "status": "ci-required"
+    },
+    {
+      "id": "AM-C029-preauthorized-only-and-range-fail-closed",
+      "requirements": [
+        "AM-025"
+      ],
+      "status": "ci-and-browser-witness-required"
+    },
+    {
+      "id": "AM-C030-cpu-gpu-state-step-equivalence",
+      "requirements": [
+        "AM-026"
+      ],
+      "status": "browser-witness-required"
+    },
+    {
+      "id": "AM-C031-state-loss-negative-control",
+      "requirements": [
+        "AM-014",
+        "AM-015",
+        "AM-021"
+      ],
+      "status": "ci-and-browser-witness-required"
     }
   ],
   "backendMatrix": [],
