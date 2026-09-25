@@ -74,3 +74,32 @@ aprover
 ```
 
 `amemory` может выявлять проблемы или новые гипотезы, но изменение семантики MTS должно возвращаться в `anum_docs`.
+
+
+## Upstream-исследования и границы реализации
+
+У `amemory` сейчас есть две независимые теоретические зависимости в `anum_docs`:
+
+1. **netkeep80/anum_docs#1558 — полная динамика исполняемой A-сети.**
+
+   Отвечает на вопрос, что именно значит исполнять долгоживущую A-сеть: semantic current state, переходы состояния, ZERO/ONE/MANY, параллельные реакции, live Theory mutation, quiescence/recurrence и граница между логическим состоянием и физической историей Links.
+
+   Эта задача относится ко **всем полным реализациям A-memory**. До её классификации реализации могут поддерживать accepted/scoped execution MTS v0.13, но не должны молча объявлять более сильную семантику нормативной.
+
+2. **netkeep80/anum_docs#1332 — преобразование MTS Aset <-> Doublets Aset.**
+
+   Отвечает на вопрос корректного отображения между semantic Link identity MTS и identity элементов сети дуплетов, включая root/acorn, membership, shared topology, cycles, duplicate-pair identity и contextual isolation.
+
+   Эта задача относится прежде всего к **Links/Doublets backend**. Она не блокирует reference CPU, purpose-built CPU или associative accelerator backend.
+
+Итого:
+
+```text
+#1558  execution semantics
+        └─ влияет на полноту A-memory как исполняемой системы
+
+#1332  representation/substrate mapping
+        └─ влияет на полноту Links/Doublets backend
+```
+
+Если реализация обнаруживает новый семантический пробел, он возвращается в `anum_docs`, а не закрепляется локально как новая семантика `amemory`.
