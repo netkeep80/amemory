@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   R1_FIXTURE,
   assertR1Fixture,
+  assertR2Fixture,
   assertReactionStateExact,
   normalizeReactionState,
   pairAnum,
@@ -10,6 +11,7 @@ import {
 } from "../web/reaction.mjs";
 
 assert.equal(assertR1Fixture(), true);
+assert.equal(assertR2Fixture(), true);
 
 assert.deepEqual(splitPairAnum(R1_FIXTURE.current), {
   start: R1_FIXTURE.K,
@@ -69,4 +71,4 @@ assert.throws(
   /mismatch/,
 );
 
-console.log("AMEMORY_REACTION_R1_UNIT_WITNESSES=GREEN");
+console.log("AMEMORY_REACTION_R1_R2_UNIT_WITNESSES=GREEN");

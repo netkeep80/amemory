@@ -509,6 +509,7 @@ static mut REACTION_SNAPSHOT_COUNT: u32 = 0;
 
 static mut REACTION_MATCHED_RELATIONS: u32 = 0;
 static mut REACTION_HANDOFF_COUNT: u32 = 0;
+static mut REACTION_QUIESCENT: u32 = 0;
 
 fn reaction_pair_poles(pool: &AnumCpuPool, handle: u32) -> Option<(u32, u32)> {
     if !pool.valid(handle) {
@@ -565,6 +566,7 @@ pub extern "C" fn amemory_reaction_reset() {
         REACTION_SNAPSHOT_COUNT = 0;
         REACTION_MATCHED_RELATIONS = 0;
         REACTION_HANDOFF_COUNT = 0;
+        REACTION_QUIESCENT = 0;
     }
 }
 
@@ -669,6 +671,10 @@ pub extern "C" fn amemory_reaction_snapshot_theory() -> u32 {
 /// slice.
 #[no_mangle]
 pub extern "C" fn amemory_reaction_run() -> u32 {
+    // Quiescence is a semantic result of a successful complete reaction evaluation,
+    // never a stale scheduler/runtime condition. Clear it before any fail-closed exit.
+    unsafe { REACTION_QUIESCENT = 0; }
+
     let pool = AnumCpuPool::snapshot();
 
     let current_bank = unsafe { REACTION_CURRENT_BANK };
@@ -757,6 +763,10 @@ pub extern "C" fn amemory_reaction_run() -> u32 {
     }
 
     if matched == 0 {
+        // P07/P13: a complete successful evaluation with no applicable admitted
+        // relation preserves the published Scope, performs no handoff, and is
+        // explicitly quiescent. No scheduler or END-state inference is involved.
+        unsafe { REACTION_QUIESCENT = 1; }
         return 1;
     }
 
@@ -875,6 +885,11 @@ pub extern "C" fn amemory_reaction_handoff_count() -> u32 {
     unsafe { REACTION_HANDOFF_COUNT }
 }
 
+#[no_mangle]
+pub extern "C" fn amemory_reaction_quiescent() -> u32 {
+    unsafe { REACTION_QUIESCENT }
+}
+
 
 #[cfg(test)]
 mod anum_boundary_tests {
@@ -981,6 +996,7 @@ mod anum_boundary_tests {
         assert_eq!(amemory_reaction_run(), 1);
         assert_eq!(amemory_reaction_matched_relations(), 1);
         assert_eq!(amemory_reaction_handoff_count(), 1);
+        assert_eq!(amemory_reaction_quiescent(), 0);
         assert_eq!(amemory_reaction_current_bank(), 1);
         assert_eq!(amemory_reaction_current_count(), 1);
         assert_eq!(export(amemory_reaction_current_member(0)), "19816898");
@@ -990,7 +1006,8 @@ mod anum_boundary_tests {
         assert_eq!(export(amemory_reaction_bank_member(0, 0)), "19868");
         assert_eq!(export(current), "19868");
 
-        // Negative no-match control: wrong antecedent cannot authorize successor.
+        // R2 P07/P13: a valid admitted relation with the wrong antecedent
+        // yields NO_ADMITTED_RELATION for this current truth.
         amemory_reaction_reset();
         assert_eq!(amemory_reaction_set_current_member(0, current), 1);
         assert_eq!(amemory_reaction_set_current_count(1), 1);
@@ -1000,8 +1017,18 @@ mod anum_boundary_tests {
         assert_eq!(amemory_reaction_run(), 1);
         assert_eq!(amemory_reaction_matched_relations(), 0);
         assert_eq!(amemory_reaction_handoff_count(), 0);
+        assert_eq!(amemory_reaction_quiescent(), 1);
         assert_eq!(amemory_reaction_current_bank(), 0);
         assert_eq!(export(amemory_reaction_current_member(0)), "19868");
+
+        // Runtime/fail-closed failure is not semantic quiescence.
+        amemory_reaction_reset();
+        assert_eq!(amemory_reaction_set_current_count(1), 1);
+        assert_eq!(amemory_reaction_set_theory_relation(0, successor), 1);
+        assert_eq!(amemory_reaction_set_theory_count(1), 1);
+        assert_eq!(amemory_reaction_snapshot_theory(), 1);
+        assert_eq!(amemory_reaction_run(), 0);
+        assert_eq!(amemory_reaction_quiescent(), 0);
     }
 
 }

@@ -250,6 +250,10 @@
     {
       "id": "AM-042",
       "statement": "Cross-backend reaction evidence MUST compare normalized portable structural observations of current/successor Scope membership, matched relations and publication handoff, and MUST include negative mismatch/no-match controls; backend-local handles MUST NOT be compared as semantic output."
+    },
+    {
+      "id": "AM-043",
+      "statement": "A backend claiming quiescence MUST expose it as an explicit result of a successful complete reaction evaluation with zero applicable admitted relations; scheduler inactivity, host timeout, empty queues, END topology, malformed state or runtime failure MUST NOT be promoted to semantic quiescence."
     }
   ],
   "acceptance": {
@@ -276,7 +280,7 @@
     "portableLawCount": 17,
     "semanticExtensionRequired": false,
     "acceptedMtsFoundationMutated": false,
-    "currentImplementationClaim": "partial-r1-one-reaction-candidate",
+    "currentImplementationClaim": "partial-r1-green-r2-quiescence-candidate",
     "fullReactionProfileConformanceClaimed": false
   }
 }
