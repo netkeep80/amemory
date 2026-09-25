@@ -24,6 +24,13 @@ export const R1_FIXTURE = Object.freeze({
   successor: "19816898",
 });
 
+export const R3_FIXTURE = Object.freeze({
+  root: "8",
+  zeroRelation: "1688",
+  rootCurrent: "1988",
+  rootRelation: "1816898",
+});
+
 const NONE = 0xffffffff;
 const CAP = 4;
 
@@ -68,6 +75,19 @@ export function assertR2Fixture() {
   return true;
 }
 
+export function assertR3Fixture() {
+  const zero = splitPairAnum(R3_FIXTURE.zeroRelation);
+  const rootCurrent = splitPairAnum(R3_FIXTURE.rootCurrent);
+  const rootRelation = splitPairAnum(R3_FIXTURE.rootRelation);
+  must(zero.start === R1_FIXTURE.A && zero.end === R3_FIXTURE.root, "bad R3 ZERO relation");
+  must(rootCurrent.start === R1_FIXTURE.K && rootCurrent.end === R3_FIXTURE.root, "bad R3 root current");
+  must(rootRelation.start === R3_FIXTURE.root && rootRelation.end === R1_FIXTURE.B, "bad R3 root relation");
+  must(pairAnum(R1_FIXTURE.A, R3_FIXTURE.root) === R3_FIXTURE.zeroRelation, "noncanonical R3 ZERO");
+  must(pairAnum(R1_FIXTURE.K, R3_FIXTURE.root) === R3_FIXTURE.rootCurrent, "noncanonical R3 root current");
+  must(pairAnum(R3_FIXTURE.root, R1_FIXTURE.B) === R3_FIXTURE.rootRelation, "noncanonical R3 root relation");
+  return true;
+}
+
 export function normalizeReactionState(anums) {
   return [...new Set(anums.map(normalizeAnum))].sort();
 }
@@ -99,9 +119,9 @@ export function perturbReactionState(anums) {
 function importCpuFixture(wasm) {
   cpuResetPool(wasm);
   const refs = {};
-  for (const [name, source] of Object.entries(R1_FIXTURE)) {
+  for (const [name, source] of Object.entries({ ...R1_FIXTURE, ...R3_FIXTURE })) {
     const ref = cpuImportRaw(wasm, source);
-    must(ref, "CPU rejected R1 Anum " + name + "=" + source);
+    must(ref, "CPU rejected reaction Anum " + name + "=" + source);
     refs[name] = ref;
   }
   return refs;
@@ -109,9 +129,9 @@ function importCpuFixture(wasm) {
 
 async function importGpuFixture(device, pool) {
   const refs = {};
-  for (const [name, source] of Object.entries(R1_FIXTURE)) {
+  for (const [name, source] of Object.entries({ ...R1_FIXTURE, ...R3_FIXTURE })) {
     const ref = await gpuImport(device, pool, source);
-    must(ref, "GPU rejected R1 Anum " + name + "=" + source);
+    must(ref, "GPU rejected reaction Anum " + name + "=" + source);
     refs[name] = ref;
   }
   return refs;
@@ -132,6 +152,14 @@ async function validateGpuFixtureTopology(device, pool, refs) {
     ["relation.end", topology.ends[handles.relation], handles.B],
     ["successor.start", topology.starts[handles.successor], handles.K],
     ["successor.end", topology.ends[handles.successor], handles.B],
+    ["root.start", topology.starts[handles.root], handles.root],
+    ["root.end", topology.ends[handles.root], handles.root],
+    ["zeroRelation.start", topology.starts[handles.zeroRelation], handles.A],
+    ["zeroRelation.end", topology.ends[handles.zeroRelation], handles.root],
+    ["rootCurrent.start", topology.starts[handles.rootCurrent], handles.K],
+    ["rootCurrent.end", topology.ends[handles.rootCurrent], handles.root],
+    ["rootRelation.start", topology.starts[handles.rootRelation], handles.root],
+    ["rootRelation.end", topology.ends[handles.rootRelation], handles.B],
   ];
   for (const [label, actual, expected] of checks) {
     must(actual === expected, "GPU topology preflight " + label + ": expected " + expected + ", got " + actual);
@@ -139,14 +167,28 @@ async function validateGpuFixtureTopology(device, pool, refs) {
   return handles;
 }
 
-function cpuConfigure(wasm, currentRef, relationRef) {
+function cpuConfigureMany(wasm, currentRefs, relationRefs) {
   wasm.reactionReset();
-  must(wasm.reactionSetCurrentMember(0, requireLocalRef(currentRef, "cpu-A")) === 1, "CPU current rejected");
-  must(wasm.reactionSetCurrentCount(1) === 1, "CPU current count rejected");
-  must(wasm.reactionSetTheoryRelation(0, requireLocalRef(relationRef, "cpu-A")) === 1, "CPU relation rejected");
-  must(wasm.reactionSetTheoryCount(1) === 1, "CPU theory count rejected");
+  currentRefs.forEach((ref, index) => {
+    must(
+      wasm.reactionSetCurrentMember(index, requireLocalRef(ref, "cpu-A")) === 1,
+      "CPU current rejected at " + index,
+    );
+  });
+  must(wasm.reactionSetCurrentCount(currentRefs.length) === 1, "CPU current count rejected");
+  relationRefs.forEach((ref, index) => {
+    must(
+      wasm.reactionSetTheoryRelation(index, requireLocalRef(ref, "cpu-A")) === 1,
+      "CPU relation rejected at " + index,
+    );
+  });
+  must(wasm.reactionSetTheoryCount(relationRefs.length) === 1, "CPU theory count rejected");
   must(wasm.reactionSnapshotTheory() === 1, "CPU snapshot failed");
-  must(wasm.reactionSnapshotCount() === 1, "CPU snapshot count mismatch");
+  must(wasm.reactionSnapshotCount() === relationRefs.length, "CPU snapshot count mismatch");
+}
+
+function cpuConfigure(wasm, currentRef, relationRef) {
+  cpuConfigureMany(wasm, [currentRef], [relationRef]);
 }
 
 function cpuCurrent(wasm) {
@@ -217,6 +259,36 @@ function runCpuInvalidFailure(wasm, refs) {
   };
 }
 
+function runCpuZero(wasm, refs) {
+  cpuConfigureMany(wasm, [refs.current], [refs.zeroRelation]);
+  const oldBank = wasmU32(wasm.reactionCurrentBank());
+  must(wasm.reactionRun() === 1, "CPU R3 ZERO failed");
+  return {
+    state: cpuCurrent(wasm),
+    oldPhysical: cpuBank(wasm, oldBank),
+    matched: wasmU32(wasm.reactionMatchedRelations()),
+    handoff: wasmU32(wasm.reactionHandoffCount()),
+    quiescent: wasmU32(wasm.reactionQuiescent()) === 1,
+    oldBank,
+    newBank: wasmU32(wasm.reactionCurrentBank()),
+  };
+}
+
+function runCpuMixedDuplicate(wasm, refs) {
+  cpuConfigureMany(
+    wasm,
+    [refs.current, refs.rootCurrent],
+    [refs.zeroRelation, refs.relation, refs.rootRelation],
+  );
+  must(wasm.reactionRun() === 1, "CPU R3 mixed/duplicate failed");
+  return {
+    state: cpuCurrent(wasm),
+    matched: wasmU32(wasm.reactionMatchedRelations()),
+    handoff: wasmU32(wasm.reactionHandoffCount()),
+    quiescent: wasmU32(wasm.reactionQuiescent()) === 1,
+  };
+}
+
 function gpuUsage() {
   return GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST;
 }
@@ -227,25 +299,34 @@ function makeBuffer(device, words, data = null) {
   return buffer;
 }
 
-function createGpuReactionState(device, currentHandle, relationHandle) {
+function createGpuReactionState(device, currentHandleOrHandles, relationHandleOrHandles) {
+  const currentHandles = Array.isArray(currentHandleOrHandles)
+    ? currentHandleOrHandles
+    : [currentHandleOrHandles];
+  const relationHandles = Array.isArray(relationHandleOrHandles)
+    ? relationHandleOrHandles
+    : [relationHandleOrHandles];
+  must(currentHandles.length <= CAP, "GPU current fixture exceeds CAP");
+  must(relationHandles.length <= CAP, "GPU theory fixture exceeds CAP");
+
   const selector = makeBuffer(device, 1, new Uint32Array([0]));
   const scopeWords = new Uint32Array(2 + CAP * 2);
   scopeWords.fill(NONE);
-  scopeWords[0] = 1;
+  scopeWords[0] = currentHandles.length;
   scopeWords[1] = 0;
-  scopeWords[2] = currentHandle;
+  currentHandles.forEach((handle, index) => { scopeWords[2 + index] = handle; });
   const scope = makeBuffer(device, scopeWords.length, scopeWords);
 
   const theoryWords = new Uint32Array(1 + CAP);
   theoryWords.fill(NONE);
-  theoryWords[0] = 1;
-  theoryWords[1] = relationHandle;
+  theoryWords[0] = relationHandles.length;
+  relationHandles.forEach((handle, index) => { theoryWords[1 + index] = handle; });
   const theory = makeBuffer(device, theoryWords.length, theoryWords);
 
   const snapshotWords = new Uint32Array(1 + CAP);
   snapshotWords.fill(NONE);
-  snapshotWords[0] = 1;
-  snapshotWords[1] = relationHandle;
+  snapshotWords[0] = relationHandles.length;
+  relationHandles.forEach((handle, index) => { snapshotWords[1 + index] = handle; });
   const snapshot = makeBuffer(device, snapshotWords.length, snapshotWords);
 
   const status = makeBuffer(device, 5, new Uint32Array([0, 0, 0, 900, 0]));
@@ -288,6 +369,9 @@ const R1_WGSL = [
   "  let s = pool[h]; let e = pool[END_BASE + h];",
   "  return s != h && e != h && valid(s) && valid(e);",
   "}",
+  "fn root_record(h: u32) -> bool {",
+  "  return valid(h) && pool[h] == h && pool[END_BASE + h] == h;",
+  "}",
   "fn base(bank: u32) -> u32 { return 2u + bank * CAP; }",
   "fn find_pair(s: u32, e: u32) -> u32 {",
   "  var h = 1u;",
@@ -323,17 +407,37 @@ const R1_WGSL = [
   "      let relation = snapshot[1u + ri];",
   "      if (!pair_record(relation)) { status[3] = 104u; return; }",
   "      if (pool[relation] == antecedent) {",
-  "        let candidate = find_pair(context, pool[END_BASE + relation]);",
-  "        if (candidate == NONE) { status[3] = 105u; return; }",
-  "        if (out_count >= CAP) { status[3] = 106u; return; }",
-  "        scope[target_base + out_count] = candidate;",
-  "        out_count = out_count + 1u; matched = matched + 1u; member_matches = member_matches + 1u;",
+  "        let output = pool[END_BASE + relation];",
+  "        matched = matched + 1u; member_matches = member_matches + 1u;",
+  "        if (!root_record(output)) {",
+  "          let candidate = find_pair(context, output);",
+  "          if (candidate == NONE) { status[3] = 105u; return; }",
+  "          var duplicate = false; var oi = 0u;",
+  "          loop {",
+  "            if (oi >= out_count) { break; }",
+  "            if (scope[target_base + oi] == candidate) { duplicate = true; break; }",
+  "            oi = oi + 1u;",
+  "          }",
+  "          if (!duplicate) {",
+  "            if (out_count >= CAP) { status[3] = 106u; return; }",
+  "            scope[target_base + out_count] = candidate;",
+  "            out_count = out_count + 1u;",
+  "          }",
+  "        }",
   "      }",
   "      ri = ri + 1u;",
   "    }",
   "    if (member_matches == 0u) {",
-  "      if (out_count >= CAP) { status[3] = 107u; return; }",
-  "      scope[target_base + out_count] = member; out_count = out_count + 1u;",
+  "      var duplicate_member = false; var pi = 0u;",
+  "      loop {",
+  "        if (pi >= out_count) { break; }",
+  "        if (scope[target_base + pi] == member) { duplicate_member = true; break; }",
+  "        pi = pi + 1u;",
+  "      }",
+  "      if (!duplicate_member) {",
+  "        if (out_count >= CAP) { status[3] = 107u; return; }",
+  "        scope[target_base + out_count] = member; out_count = out_count + 1u;",
+  "      }",
   "    }",
   "    mi = mi + 1u;",
   "  }",
@@ -503,9 +607,64 @@ async function runGpuInvalidFailure(device, pool, refs) {
 }
 
 
+
+async function runGpuZero(device, pool, refs) {
+  const state = createGpuReactionState(
+    device,
+    requireLocalRef(refs.current, pool.memory),
+    requireLocalRef(refs.zeroRelation, pool.memory),
+  );
+  try {
+    const before = await gpuObserve(device, pool, state);
+    await gpuRun(device, pool, state);
+    const after = await gpuObserve(device, pool, state);
+    must(after.status === 1, "GPU R3 ZERO failed: diagnostic=" + after.diagnostic);
+    return {
+      state: after.anums,
+      oldPhysical: await gpuBank(device, pool, state, before.bank),
+      matched: after.matched,
+      handoff: after.handoff,
+      quiescent: after.quiescent,
+      oldBank: before.bank,
+      newBank: after.bank,
+    };
+  } finally {
+    destroyGpuState(state);
+  }
+}
+
+async function runGpuMixedDuplicate(device, pool, refs) {
+  const state = createGpuReactionState(
+    device,
+    [
+      requireLocalRef(refs.current, pool.memory),
+      requireLocalRef(refs.rootCurrent, pool.memory),
+    ],
+    [
+      requireLocalRef(refs.zeroRelation, pool.memory),
+      requireLocalRef(refs.relation, pool.memory),
+      requireLocalRef(refs.rootRelation, pool.memory),
+    ],
+  );
+  try {
+    await gpuRun(device, pool, state);
+    const after = await gpuObserve(device, pool, state);
+    must(after.status === 1, "GPU R3 mixed/duplicate failed: diagnostic=" + after.diagnostic);
+    return {
+      state: after.anums,
+      matched: after.matched,
+      handoff: after.handoff,
+      quiescent: after.quiescent,
+    };
+  } finally {
+    destroyGpuState(state);
+  }
+}
+
 export async function runReactionBrowser(wasm, device) {
   assertR1Fixture();
   assertR2Fixture();
+  assertR3Fixture();
   const logs = [];
   const cpuRefs = importCpuFixture(wasm);
   const gpuPool = createGpuAnumPool(device, "gpu-reaction-B");
@@ -545,6 +704,28 @@ export async function runReactionBrowser(wasm, device) {
     must(cpuInvalid.result === 0 && gpuInvalid.result === 0, "invalid reaction unexpectedly succeeded");
     must(cpuInvalid.quiescent === false && gpuInvalid.quiescent === false, "failed reaction was misclassified as quiescent");
     must(cpuInvalid.handoff === 0 && gpuInvalid.handoff === 0, "failed reaction performed handoff");
+
+    const cpuZero = runCpuZero(wasm, cpuRefs);
+    const gpuZero = await runGpuZero(device, gpuPool, gpuRefs);
+    assertReactionStateExact([], cpuZero.state, "CPU R3 ZERO successor");
+    assertReactionStateExact([], gpuZero.state, "GPU R3 ZERO successor");
+    assertReactionStateExact(cpuZero.state, gpuZero.state, "CPU/GPU R3 ZERO differential");
+    assertReactionStateExact([R1_FIXTURE.current], cpuZero.oldPhysical, "CPU R3 ZERO old Scope");
+    assertReactionStateExact([R1_FIXTURE.current], gpuZero.oldPhysical, "GPU R3 ZERO old Scope");
+    must(cpuZero.matched === 1 && gpuZero.matched === 1, "R3 ZERO matchedRelations mismatch");
+    must(cpuZero.handoff === 1 && gpuZero.handoff === 1, "R3 ZERO handoff mismatch");
+    must(cpuZero.quiescent === false && gpuZero.quiescent === false, "R3 ZERO incorrectly reported quiescence");
+    must(cpuZero.oldBank !== cpuZero.newBank && gpuZero.oldBank !== gpuZero.newBank, "R3 ZERO did not publish empty successor Scope");
+
+    const cpuMixed = runCpuMixedDuplicate(wasm, cpuRefs);
+    const gpuMixed = await runGpuMixedDuplicate(device, gpuPool, gpuRefs);
+    assertReactionStateExact([R1_FIXTURE.successor], cpuMixed.state, "CPU R3 mixed successor");
+    assertReactionStateExact([R1_FIXTURE.successor], gpuMixed.state, "GPU R3 mixed successor");
+    assertReactionStateExact(cpuMixed.state, gpuMixed.state, "CPU/GPU R3 mixed differential");
+    must(cpuMixed.state.length === 1 && gpuMixed.state.length === 1, "R3 duplicate outputs were not canonically converged");
+    must(cpuMixed.matched === 3 && gpuMixed.matched === 3, "R3 mixed matchedRelations mismatch");
+    must(cpuMixed.handoff === 1 && gpuMixed.handoff === 1, "R3 mixed handoff mismatch");
+    must(cpuMixed.quiescent === false && gpuMixed.quiescent === false, "R3 mixed incorrectly reported quiescence");
 
     let mismatchDetected = false;
     try {
@@ -588,6 +769,18 @@ export async function runReactionBrowser(wasm, device) {
     logs.push("reaction.r2.quiescent = CPU " + cpuNoMatch.quiescent + " / GPU " + gpuNoMatch.quiescent);
     logs.push("reaction.r2.bank-unchanged = CPU " + cpuNoMatch.beforeBank + "->" + cpuNoMatch.afterBank + " / GPU " + gpuNoMatch.beforeBank + "->" + gpuNoMatch.afterBank);
     logs.push("reaction.r2.invalid-failure-quiescent = CPU " + cpuInvalid.quiescent + " / GPU " + gpuInvalid.quiescent);
+    logs.push("reaction.r3.zero.scope.cpu = [" + cpuZero.state.join(", ") + "]");
+    logs.push("reaction.r3.zero.scope.gpu = [" + gpuZero.state.join(", ") + "]");
+    logs.push("reaction.r3.zero.matched = CPU " + cpuZero.matched + " / GPU " + gpuZero.matched);
+    logs.push("reaction.r3.zero.handoff = CPU " + cpuZero.handoff + " / GPU " + gpuZero.handoff);
+    logs.push("reaction.r3.zero.quiescent = CPU " + cpuZero.quiescent + " / GPU " + gpuZero.quiescent);
+    logs.push("reaction.r3.zero.old-scope-retained = PASS");
+    logs.push("reaction.r3.mixed.scope.cpu = [" + cpuMixed.state.join(", ") + "]");
+    logs.push("reaction.r3.mixed.scope.gpu = [" + gpuMixed.state.join(", ") + "]");
+    logs.push("reaction.r3.mixed.matched = CPU " + cpuMixed.matched + " / GPU " + gpuMixed.matched);
+    logs.push("reaction.r3.mixed.handoff = CPU " + cpuMixed.handoff + " / GPU " + gpuMixed.handoff);
+    logs.push("reaction.r3.mixed.quiescent = CPU " + cpuMixed.quiescent + " / GPU " + gpuMixed.quiescent);
+    logs.push("reaction.r3.duplicate-convergence = PASS single canonical " + R1_FIXTURE.successor);
     logs.push("reaction.handles.current = CPU " + cpuRefs.current.value + " != GPU " + gpuRefs.current.value);
     logs.push("reaction.handles.successor = CPU " + cpuRefs.successor.value + " != GPU " + gpuRefs.successor.value);
     logs.push("reaction.snapshot.isolation = PASS");
@@ -618,6 +811,25 @@ export async function runReactionBrowser(wasm, device) {
       r2GpuBankUnchanged: gpuNoMatch.beforeBank === gpuNoMatch.afterBank,
       r2NormalizedDifferential: true,
       r2FailureNotQuiescent: cpuInvalid.quiescent === false && gpuInvalid.quiescent === false,
+      r3ZeroCpuState: cpuZero.state,
+      r3ZeroGpuState: gpuZero.state,
+      r3ZeroCpuMatched: cpuZero.matched,
+      r3ZeroGpuMatched: gpuZero.matched,
+      r3ZeroCpuHandoff: cpuZero.handoff,
+      r3ZeroGpuHandoff: gpuZero.handoff,
+      r3ZeroCpuQuiescent: cpuZero.quiescent,
+      r3ZeroGpuQuiescent: gpuZero.quiescent,
+      r3ZeroOldScopeRetained: true,
+      r3MixedCpuState: cpuMixed.state,
+      r3MixedGpuState: gpuMixed.state,
+      r3MixedCpuMatched: cpuMixed.matched,
+      r3MixedGpuMatched: gpuMixed.matched,
+      r3MixedCpuHandoff: cpuMixed.handoff,
+      r3MixedGpuHandoff: gpuMixed.handoff,
+      r3MixedCpuQuiescent: cpuMixed.quiescent,
+      r3MixedGpuQuiescent: gpuMixed.quiescent,
+      r3DuplicateConvergence: cpuMixed.state.length === 1 && gpuMixed.state.length === 1,
+      r3NormalizedDifferential: true,
       negativeControls: true,
       logs,
     };
