@@ -491,3 +491,67 @@ pub extern "C" fn amemory_anum_cpu_pool_count() -> u32 {
     }
     count
 }
+
+
+#[cfg(test)]
+mod anum_boundary_tests {
+    use super::*;
+
+    fn import(source: &str) -> u32 {
+        for (i, byte) in source.bytes().enumerate() {
+            let token = if byte.is_ascii_digit() {
+                (byte - b'0') as u32
+            } else {
+                255
+            };
+            assert_eq!(amemory_anum_cpu_set_token(i as u32, token), 1);
+        }
+        amemory_anum_cpu_import(source.len() as u32)
+    }
+
+    fn export(handle: u32) -> String {
+        let len = amemory_anum_cpu_export(handle);
+        assert_ne!(len, ANUM_CPU_NONE);
+        let mut out = String::new();
+        for i in 0..len {
+            out.push(char::from_digit(amemory_anum_cpu_output_get(i), 10).unwrap());
+        }
+        out
+    }
+
+    #[test]
+    fn portable_anum_cpu_boundary() {
+        amemory_anum_cpu_reset_pool();
+
+        let fixtures = ["8", "98", "68", "19868", "16898", "198698", "119868968"];
+        let mut handles = [0_u32; 7];
+        for (i, source) in fixtures.iter().enumerate() {
+            let handle = import(source);
+            assert_ne!(handle, ANUM_CPU_NONE, "valid fixture rejected: {source}");
+            assert_eq!(export(handle), *source);
+            handles[i] = handle;
+        }
+
+        // ROOT must not be mistaken for START or END merely because ROOT=(self,self).
+        assert_ne!(handles[0], handles[1]);
+        assert_ne!(handles[0], handles[2]);
+        assert_eq!(export(handles[0]), "8");
+        assert_eq!(export(handles[1]), "98");
+        assert_eq!(export(handles[2]), "68");
+
+        // Canonical local reuse.
+        assert_eq!(import("19868"), handles[3]);
+
+        // Invalid/truncated/trailing forms are transactional.
+        let stable_count = amemory_anum_cpu_pool_count();
+        for source in ["5", "1", "9", "88", "19868x"] {
+            assert_eq!(import(source), ANUM_CPU_NONE, "invalid fixture accepted: {source}");
+            assert_eq!(amemory_anum_cpu_pool_count(), stable_count);
+        }
+
+        // A valid but out-of-prototype chain must fail without partial publication.
+        let capacity = format!("{}8", "9".repeat(70));
+        assert_eq!(import(&capacity), ANUM_CPU_NONE);
+        assert_eq!(amemory_anum_cpu_pool_count(), stable_count);
+    }
+}
