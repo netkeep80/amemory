@@ -24,7 +24,12 @@
       ".github/PULL_REQUEST_TEMPLATE.md",
       ".github/ISSUE_TEMPLATE/change-contract.yml",
       "contracts/amemory-contract-v0.1.json",
-      "contracts/amemory-conformance-v0.1.json"
+      "contracts/amemory-conformance-v0.1.json",
+      "contracts/upstream/mts-v0.13.lock.json",
+      "contracts/upstream/mts-v0.13-requirements.json",
+      "scripts/sync-mts-requirements.mjs",
+      "scripts/test-mts-upstream-import.mjs",
+      ".github/workflows/mts-upstream-check.yml"
     ],
     "operational_paths": []
   },
@@ -47,6 +52,13 @@
       "members": [
         "contracts/amemory-contract-v0.1.json",
         "contracts/amemory-conformance-v0.1.json"
+      ]
+    },
+    {
+      "id": "mts-upstream-lock-projection",
+      "members": [
+        "contracts/upstream/mts-v0.13.lock.json",
+        "contracts/upstream/mts-v0.13-requirements.json"
       ]
     }
   ]
