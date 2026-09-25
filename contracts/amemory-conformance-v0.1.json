@@ -837,25 +837,6 @@
         "AM-038"
       ],
       "status": "green",
-      "progress": {
-        "completedSlices": [
-          "AM-C046-r1-one-reaction-cpu-webgpu",
-          "AM-C047-r2-no-admitted-relation-quiescence",
-          "AM-C048-r3-zero-and-duplicate-convergence",
-          "AM-C049-r4-theory-admission-tplus1"
-        ],
-        "R1": "green-real-browser-differential",
-        "R2": "green-real-browser-differential",
-        "R3": "green-real-browser-differential",
-        "R4": "green-real-browser-differential",
-        "remainingPortableLaws": [
-          "P16",
-          "P17"
-        ],
-        "fullProfileConformance": false,
-        "currentSlice": "AM-C050-r5-recurrence-and-end-not-halt",
-        "R5": "implementation-candidate-browser-witness-required"
-      },
       "evidence": {
         "profile": "minimal-portable-amemory-execution@0.1.0",
         "profileVersion": "0.1.0",
