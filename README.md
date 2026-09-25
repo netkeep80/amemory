@@ -164,14 +164,30 @@ Observed R2:
   published Scope unchanged = PASS
   runtime failure != quiescence = PASS
 
-P10
-  -> supporting canonicalization evidence only
+R3 executable subset:
+  P09 P10
+    -> GREEN on real browser CPU/WASM ↔ WebGPU differential
 
-P09 P14 P16 P17
+Observed R3 ZERO:
+  Scope CPU/GPU = []
+  matchedRelations = 1 / 1
+  handoffCount = 1 / 1
+  quiescent = false / false
+  old Scope retained physically = PASS
+
+Observed R3 mixed ZERO + duplicate convergence:
+  Scope CPU/GPU = [19816898]
+  matchedRelations = 3 / 3
+  handoffCount = 1 / 1
+  quiescent = false / false
+  duplicate convergence = PASS (single canonical successor)
+
+P14 P16 P17
   -> not-yet-executed
 
 AM-C046 R1 = GREEN
 AM-C047 R2 = GREEN
+AM-C048 R3 = GREEN
 AM-C045 FULL PROFILE = PLANNED
 FULL_REACTION_PROFILE_CONFORMANCE = FALSE
 ```
@@ -182,11 +198,9 @@ Storage/incidence/Anum tests и даже R1 нельзя использоват�
 
 ## Следующие reaction slices
 
-После закрытых GREEN R1 и R2 следующий этап — последовательно закрыть:
+После закрытых GREEN R1, R2 и R3 следующий этап — последовательно закрыть:
 
 ```text
-P09  ZERO / mixed ZERO
-P10  duplicate convergence inside reaction
 P14  Theory admission visibility t+1
 P16  recurrence / nontermination
 P17  structural END != halt
