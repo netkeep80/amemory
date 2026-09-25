@@ -1,4 +1,4 @@
-name: MTS upstream contract check
+name: MTS foundation + A-memory profile check
 
 on:
   pull_request:
@@ -10,6 +10,8 @@ on:
       - "scripts/test-mts-upstream-import.mjs"
       - ".github/workflows/mts-upstream-check.yml"
       - "repo-policy.json"
+      - "README.md"
+      - "README.md"
   push:
     branches: [main]
     paths:
@@ -35,8 +37,8 @@ jobs:
         with:
           node-version: 24
 
-      - name: Negative and positive importer tests
+      - name: Importer + D7 declaration positive/negative tests
         run: node scripts/test-mts-upstream-import.mjs
 
-      - name: Verify exact pinned MTS projection
+      - name: Verify exact pinned MTS foundation + execution profile projection
         run: node scripts/sync-mts-requirements.mjs --check
