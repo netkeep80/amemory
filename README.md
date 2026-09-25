@@ -182,12 +182,27 @@ Observed R3 mixed ZERO + duplicate convergence:
   quiescent = false / false
   duplicate convergence = PASS (single canonical successor)
 
-P14 P16 P17
+R4 executable subset:
+  P14
+    -> GREEN on real browser CPU/WASM ↔ WebGPU trajectory differential
+
+Observed R4:
+  snapshot_t = [A⟼B]
+  live Theory after admission = [A⟼B, B⟼C]
+  reaction t: K⟼A -> K⟼B
+  same-reaction visibility of B⟼C = false
+  snapshot_t+1 sees both relations
+  reaction t+1: K⟼B -> K⟼C
+  stale-snapshot control = PASS
+  normalized CPU/GPU trajectory = PASS
+
+P16 P17
   -> not-yet-executed
 
 AM-C046 R1 = GREEN
 AM-C047 R2 = GREEN
 AM-C048 R3 = GREEN
+AM-C049 R4 = GREEN
 AM-C045 FULL PROFILE = PLANNED
 FULL_REACTION_PROFILE_CONFORMANCE = FALSE
 ```
@@ -198,10 +213,9 @@ Storage/incidence/Anum tests и даже R1 нельзя использоват�
 
 ## Следующие reaction slices
 
-После закрытых GREEN R1, R2 и R3 следующий этап — последовательно закрыть:
+После закрытых GREEN R1, R2, R3 и R4 следующий этап — закрыть оставшиеся:
 
 ```text
-P14  Theory admission visibility t+1
 P16  recurrence / nontermination
 P17  structural END != halt
 ```
