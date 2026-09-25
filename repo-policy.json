@@ -29,7 +29,10 @@
       "contracts/upstream/mts-v0.13-requirements.json",
       "scripts/sync-mts-requirements.mjs",
       "scripts/test-mts-upstream-import.mjs",
-      ".github/workflows/mts-upstream-check.yml"
+      ".github/workflows/mts-upstream-check.yml",
+      ".github/workflows/browser-differential-check.yml",
+      "experiments/browser-accelerator/web/differential.mjs",
+      "experiments/browser-accelerator/tests/differential.test.mjs"
     ],
     "operational_paths": []
   },
