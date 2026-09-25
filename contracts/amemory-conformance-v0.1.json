@@ -517,7 +517,30 @@
         "AM-027",
         "AM-029"
       ],
-      "status": "ci-and-browser-witness-required"
+      "status": "green",
+      "evidence": {
+        "issue": 20,
+        "implementationPr": 21,
+        "abiFixPr": 22,
+        "mergedMainSha": "581cc89b8cd0c01f4119b74598815329531f67ba",
+        "browserWitnessComment": "https://github.com/netkeep80/amemory/issues/20#issuecomment-5834105222",
+        "pages": "https://netkeep80.github.io/amemory/",
+        "observed": {
+          "anumImportCpu": "PASS",
+          "anumImportGpu": "PASS",
+          "anumExportCpu": "PASS",
+          "anumExportGpu": "PASS",
+          "twoMemoryDifferential": "PASS",
+          "localHandlesDiffer": "PASS (CPU 4 != GPU 60)",
+          "canonicalLocalReuse": "PASS",
+          "negativeControls": "PASS (malformed/truncated/trailing/foreign/capacity rejected)",
+          "sampleSource": "19868",
+          "sampleCpuHandle": 4,
+          "sampleGpuHandle": 60,
+          "sampleCpuExport": "19868",
+          "sampleGpuExport": "19868"
+        }
+      }
     },
     {
       "id": "AM-C033-two-memory-structural-equivalence",
@@ -525,7 +548,30 @@
         "AM-028",
         "AM-031"
       ],
-      "status": "browser-witness-required"
+      "status": "green",
+      "evidence": {
+        "issue": 20,
+        "implementationPr": 21,
+        "abiFixPr": 22,
+        "mergedMainSha": "581cc89b8cd0c01f4119b74598815329531f67ba",
+        "browserWitnessComment": "https://github.com/netkeep80/amemory/issues/20#issuecomment-5834105222",
+        "pages": "https://netkeep80.github.io/amemory/",
+        "observed": {
+          "anumImportCpu": "PASS",
+          "anumImportGpu": "PASS",
+          "anumExportCpu": "PASS",
+          "anumExportGpu": "PASS",
+          "twoMemoryDifferential": "PASS",
+          "localHandlesDiffer": "PASS (CPU 4 != GPU 60)",
+          "canonicalLocalReuse": "PASS",
+          "negativeControls": "PASS (malformed/truncated/trailing/foreign/capacity rejected)",
+          "sampleSource": "19868",
+          "sampleCpuHandle": 4,
+          "sampleGpuHandle": 60,
+          "sampleCpuExport": "19868",
+          "sampleGpuExport": "19868"
+        }
+      }
     },
     {
       "id": "AM-C034-local-handle-inequality-non-authority",
@@ -534,21 +580,90 @@
         "AM-028",
         "AM-031"
       ],
-      "status": "ci-and-browser-witness-required"
+      "status": "green",
+      "evidence": {
+        "issue": 20,
+        "implementationPr": 21,
+        "abiFixPr": 22,
+        "mergedMainSha": "581cc89b8cd0c01f4119b74598815329531f67ba",
+        "browserWitnessComment": "https://github.com/netkeep80/amemory/issues/20#issuecomment-5834105222",
+        "pages": "https://netkeep80.github.io/amemory/",
+        "observed": {
+          "anumImportCpu": "PASS",
+          "anumImportGpu": "PASS",
+          "anumExportCpu": "PASS",
+          "anumExportGpu": "PASS",
+          "twoMemoryDifferential": "PASS",
+          "localHandlesDiffer": "PASS (CPU 4 != GPU 60)",
+          "canonicalLocalReuse": "PASS",
+          "negativeControls": "PASS (malformed/truncated/trailing/foreign/capacity rejected)",
+          "sampleSource": "19868",
+          "sampleCpuHandle": 4,
+          "sampleGpuHandle": 60,
+          "sampleCpuExport": "19868",
+          "sampleGpuExport": "19868"
+        }
+      }
     },
     {
       "id": "AM-C035-canonical-local-reuse",
       "requirements": [
         "AM-032"
       ],
-      "status": "ci-and-browser-witness-required"
+      "status": "green",
+      "evidence": {
+        "issue": 20,
+        "implementationPr": 21,
+        "abiFixPr": 22,
+        "mergedMainSha": "581cc89b8cd0c01f4119b74598815329531f67ba",
+        "browserWitnessComment": "https://github.com/netkeep80/amemory/issues/20#issuecomment-5834105222",
+        "pages": "https://netkeep80.github.io/amemory/",
+        "observed": {
+          "anumImportCpu": "PASS",
+          "anumImportGpu": "PASS",
+          "anumExportCpu": "PASS",
+          "anumExportGpu": "PASS",
+          "twoMemoryDifferential": "PASS",
+          "localHandlesDiffer": "PASS (CPU 4 != GPU 60)",
+          "canonicalLocalReuse": "PASS",
+          "negativeControls": "PASS (malformed/truncated/trailing/foreign/capacity rejected)",
+          "sampleSource": "19868",
+          "sampleCpuHandle": 4,
+          "sampleGpuHandle": 60,
+          "sampleCpuExport": "19868",
+          "sampleGpuExport": "19868"
+        }
+      }
     },
     {
       "id": "AM-C036-malformed-truncated-trailing-fail-closed",
       "requirements": [
         "AM-030"
       ],
-      "status": "ci-and-browser-witness-required"
+      "status": "green",
+      "evidence": {
+        "issue": 20,
+        "implementationPr": 21,
+        "abiFixPr": 22,
+        "mergedMainSha": "581cc89b8cd0c01f4119b74598815329531f67ba",
+        "browserWitnessComment": "https://github.com/netkeep80/amemory/issues/20#issuecomment-5834105222",
+        "pages": "https://netkeep80.github.io/amemory/",
+        "observed": {
+          "anumImportCpu": "PASS",
+          "anumImportGpu": "PASS",
+          "anumExportCpu": "PASS",
+          "anumExportGpu": "PASS",
+          "twoMemoryDifferential": "PASS",
+          "localHandlesDiffer": "PASS (CPU 4 != GPU 60)",
+          "canonicalLocalReuse": "PASS",
+          "negativeControls": "PASS (malformed/truncated/trailing/foreign/capacity rejected)",
+          "sampleSource": "19868",
+          "sampleCpuHandle": 4,
+          "sampleGpuHandle": 60,
+          "sampleCpuExport": "19868",
+          "sampleGpuExport": "19868"
+        }
+      }
     },
     {
       "id": "AM-C037-foreign-local-handle-rejected",
@@ -556,14 +671,60 @@
         "AM-027",
         "AM-031"
       ],
-      "status": "ci-and-browser-witness-required"
+      "status": "green",
+      "evidence": {
+        "issue": 20,
+        "implementationPr": 21,
+        "abiFixPr": 22,
+        "mergedMainSha": "581cc89b8cd0c01f4119b74598815329531f67ba",
+        "browserWitnessComment": "https://github.com/netkeep80/amemory/issues/20#issuecomment-5834105222",
+        "pages": "https://netkeep80.github.io/amemory/",
+        "observed": {
+          "anumImportCpu": "PASS",
+          "anumImportGpu": "PASS",
+          "anumExportCpu": "PASS",
+          "anumExportGpu": "PASS",
+          "twoMemoryDifferential": "PASS",
+          "localHandlesDiffer": "PASS (CPU 4 != GPU 60)",
+          "canonicalLocalReuse": "PASS",
+          "negativeControls": "PASS (malformed/truncated/trailing/foreign/capacity rejected)",
+          "sampleSource": "19868",
+          "sampleCpuHandle": 4,
+          "sampleGpuHandle": 60,
+          "sampleCpuExport": "19868",
+          "sampleGpuExport": "19868"
+        }
+      }
     },
     {
       "id": "AM-C038-capacity-exhaustion-atomic-fail-closed",
       "requirements": [
         "AM-030"
       ],
-      "status": "ci-and-browser-witness-required"
+      "status": "green",
+      "evidence": {
+        "issue": 20,
+        "implementationPr": 21,
+        "abiFixPr": 22,
+        "mergedMainSha": "581cc89b8cd0c01f4119b74598815329531f67ba",
+        "browserWitnessComment": "https://github.com/netkeep80/amemory/issues/20#issuecomment-5834105222",
+        "pages": "https://netkeep80.github.io/amemory/",
+        "observed": {
+          "anumImportCpu": "PASS",
+          "anumImportGpu": "PASS",
+          "anumExportCpu": "PASS",
+          "anumExportGpu": "PASS",
+          "twoMemoryDifferential": "PASS",
+          "localHandlesDiffer": "PASS (CPU 4 != GPU 60)",
+          "canonicalLocalReuse": "PASS",
+          "negativeControls": "PASS (malformed/truncated/trailing/foreign/capacity rejected)",
+          "sampleSource": "19868",
+          "sampleCpuHandle": 4,
+          "sampleGpuHandle": 60,
+          "sampleCpuExport": "19868",
+          "sampleGpuExport": "19868"
+        }
+      }
     },
     {
       "id": "AM-C039-allocation-order-preserves-portable-anum",
@@ -571,7 +732,30 @@
         "AM-028",
         "AM-031"
       ],
-      "status": "ci-and-browser-witness-required"
+      "status": "green",
+      "evidence": {
+        "issue": 20,
+        "implementationPr": 21,
+        "abiFixPr": 22,
+        "mergedMainSha": "581cc89b8cd0c01f4119b74598815329531f67ba",
+        "browserWitnessComment": "https://github.com/netkeep80/amemory/issues/20#issuecomment-5834105222",
+        "pages": "https://netkeep80.github.io/amemory/",
+        "observed": {
+          "anumImportCpu": "PASS",
+          "anumImportGpu": "PASS",
+          "anumExportCpu": "PASS",
+          "anumExportGpu": "PASS",
+          "twoMemoryDifferential": "PASS",
+          "localHandlesDiffer": "PASS (CPU 4 != GPU 60)",
+          "canonicalLocalReuse": "PASS",
+          "negativeControls": "PASS (malformed/truncated/trailing/foreign/capacity rejected)",
+          "sampleSource": "19868",
+          "sampleCpuHandle": 4,
+          "sampleGpuHandle": 60,
+          "sampleCpuExport": "19868",
+          "sampleGpuExport": "19868"
+        }
+      }
     }
   ],
   "backendMatrix": [],
@@ -632,6 +816,29 @@
         "round2Gpu": "PASS [(1,2), (1,3), (4,5), (9,9)]",
         "persistenceDifferential": "PASS",
         "negativeControls": "PASS (state loss/range/extra pair detected)"
+      }
+    },
+    "browserPortableAnumV01": {
+      "issue": 20,
+      "implementationPr": 21,
+      "abiFixPr": 22,
+      "mergedMainSha": "581cc89b8cd0c01f4119b74598815329531f67ba",
+      "browserWitnessComment": "https://github.com/netkeep80/amemory/issues/20#issuecomment-5834105222",
+      "pages": "https://netkeep80.github.io/amemory/",
+      "observed": {
+        "anumImportCpu": "PASS",
+        "anumImportGpu": "PASS",
+        "anumExportCpu": "PASS",
+        "anumExportGpu": "PASS",
+        "twoMemoryDifferential": "PASS",
+        "localHandlesDiffer": "PASS (CPU 4 != GPU 60)",
+        "canonicalLocalReuse": "PASS",
+        "negativeControls": "PASS (malformed/truncated/trailing/foreign/capacity rejected)",
+        "sampleSource": "19868",
+        "sampleCpuHandle": 4,
+        "sampleGpuHandle": 60,
+        "sampleCpuExport": "19868",
+        "sampleGpuExport": "19868"
       }
     }
   }
