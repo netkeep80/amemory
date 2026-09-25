@@ -4,6 +4,7 @@ import {
   R3_FIXTURE,
   R4_FIXTURE,
   R5_FIXTURE,
+  R5_OBSERVATION_STEPS,
   assertR1Fixture,
   assertR2Fixture,
   assertR3Fixture,
@@ -47,7 +48,7 @@ assert.equal(pairAnum(R5_FIXTURE.context, R5_FIXTURE.startValue), R5_FIXTURE.sta
 assert.equal(pairAnum(R5_FIXTURE.context, R5_FIXTURE.endValue), R5_FIXTURE.stateEnd);
 assert.equal(pairAnum(R5_FIXTURE.startValue, R5_FIXTURE.endValue), R5_FIXTURE.relationStartEnd);
 assert.equal(pairAnum(R5_FIXTURE.endValue, R5_FIXTURE.startValue), R5_FIXTURE.relationEndStart);
-assert.equal(R5_FIXTURE.observationSteps, 4);
+assert.equal(R5_OBSERVATION_STEPS, 4);
 
 assert.deepEqual(
   normalizeReactionState([R1_FIXTURE.successor, R1_FIXTURE.current]),
