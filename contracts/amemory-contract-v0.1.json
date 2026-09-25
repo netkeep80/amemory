@@ -117,6 +117,22 @@
     {
       "id": "AM-016",
       "statement": "The actual execution backend path MUST be observable; CPU fallback MUST NOT be reported as accelerator/GPU execution."
+    },
+    {
+      "id": "AM-017",
+      "statement": "Parallel candidate occurrences with equal pole pairs MUST converge to one canonical commit request for that pair."
+    },
+    {
+      "id": "AM-018",
+      "statement": "Physical representative selection, accelerator lane id, occurrence index and allocation order MUST NOT become portable semantic Link identity."
+    },
+    {
+      "id": "AM-019",
+      "statement": "Candidate canonicalization MUST complete before semantic materialization; candidate presence or duplicate convergence alone MUST NOT authorize semantic target creation."
+    },
+    {
+      "id": "AM-020",
+      "statement": "CPU/reference and accelerator canonicalization implementations MUST agree on normalized pair-set observations for their shared declared scope."
     }
   ],
   "acceptance": {
