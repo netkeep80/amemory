@@ -117,6 +117,37 @@
         "AM-012"
       ],
       "status": "planned"
+    },
+    {
+      "id": "AM-C016-cpu-gpu-incidence-equivalence",
+      "requirements": [
+        "AM-003",
+        "AM-009",
+        "AM-010",
+        "AM-013"
+      ],
+      "status": "browser-witness-required"
+    },
+    {
+      "id": "AM-C017-differential-mismatch-fails-closed",
+      "requirements": [
+        "AM-014"
+      ],
+      "status": "ci-and-browser-witness-required"
+    },
+    {
+      "id": "AM-C018-negative-control-detects-perturbation",
+      "requirements": [
+        "AM-015"
+      ],
+      "status": "ci-and-browser-witness-required"
+    },
+    {
+      "id": "AM-C019-backend-path-observable",
+      "requirements": [
+        "AM-016"
+      ],
+      "status": "browser-witness-required"
     }
   ],
   "backendMatrix": [],
