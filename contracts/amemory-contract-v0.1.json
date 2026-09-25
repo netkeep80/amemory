@@ -101,6 +101,22 @@
     {
       "id": "AM-012",
       "statement": "No A-memory backend is normative authority for MTS; semantic changes discovered during implementation MUST return to anum_docs for theory-level acceptance."
+    },
+    {
+      "id": "AM-013",
+      "statement": "Every accelerated operation in a claimed scope MUST have an executable differential witness against an independently executed reference backend or oracle."
+    },
+    {
+      "id": "AM-014",
+      "statement": "A backend mismatch MUST fail closed; a divergent accelerator result MUST NOT be reported as conformant or successful for that operation."
+    },
+    {
+      "id": "AM-015",
+      "statement": "Differential validation MUST include a negative control that deliberately perturbs a result and proves the checker detects the mismatch."
+    },
+    {
+      "id": "AM-016",
+      "statement": "The actual execution backend path MUST be observable; CPU fallback MUST NOT be reported as accelerator/GPU execution."
     }
   ],
   "acceptance": {
