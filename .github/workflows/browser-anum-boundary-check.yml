@@ -53,6 +53,9 @@ jobs:
           rustup toolchain install 1.98.1 --profile minimal
           rustup target add --toolchain 1.98.1 wasm32-unknown-unknown
 
+      - name: Native Rust Anum positive/negative witnesses
+        run: cargo +1.98.1 test --manifest-path experiments/browser-accelerator/rust/Cargo.toml
+
       - name: Compile Rust/WASM Anum oracle
         run: |
           cargo +1.98.1 build \
