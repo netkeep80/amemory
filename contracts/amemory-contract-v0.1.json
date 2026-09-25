@@ -133,6 +133,30 @@
     {
       "id": "AM-020",
       "statement": "CPU/reference and accelerator canonicalization implementations MUST agree on normalized pair-set observations for their shared declared scope."
+    },
+    {
+      "id": "AM-021",
+      "statement": "A stateful backend MUST preserve committed A-memory storage state across declared execution/storage steps within its declared physical scope."
+    },
+    {
+      "id": "AM-022",
+      "statement": "For pre-authorized canonical pair commits, successor storage MUST contain exactly the union of prior stored pairs and authorized commits within the backend's declared physical scope."
+    },
+    {
+      "id": "AM-023",
+      "statement": "Repeated and duplicate authorized commits for the same pair MUST be idempotent in portable observation."
+    },
+    {
+      "id": "AM-024",
+      "statement": "Physical storage coordinates, matrix cells, local handles and accelerator addresses MUST NOT become portable semantic Link identity."
+    },
+    {
+      "id": "AM-025",
+      "statement": "The storage primitive MUST NOT infer MTS materialization authority; only explicitly pre-authorized requests may enter semantic storage through this boundary."
+    },
+    {
+      "id": "AM-026",
+      "statement": "Reference CPU and accelerator state transitions MUST agree after every observed step in their shared declared scope."
     }
   ],
   "acceptance": {
