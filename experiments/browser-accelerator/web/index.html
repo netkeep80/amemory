@@ -15,12 +15,16 @@
 </head>
 <body>
   <h1>A-memory browser accelerator prototype</h1>
-  <p>This is a launch witness only. It does not implement MTS semantics yet.</p>
+  <p>Browser launch + first CPU/WASM ↔ WebGPU A-memory differential witness.</p>
 
   <div class="row">Rust/WASM: <span id="wasm">STARTING</span></div>
   <div class="row">CPU control: <span id="cpu">WAITING</span></div>
   <div class="row">WebGPU: <span id="webgpu">WAITING</span></div>
-  <div class="row">GPU compute: <span id="compute">WAITING</span></div>
+  <div class="row">GPU smoke compute: <span id="compute">WAITING</span></div>
+  <div class="row">A-memory incidence CPU: <span id="incidence-cpu">WAITING</span></div>
+  <div class="row">A-memory incidence GPU: <span id="incidence-gpu">WAITING</span></div>
+  <div class="row">CPU/GPU differential: <span id="differential">WAITING</span></div>
+  <div class="row">Negative control: <span id="negative">WAITING</span></div>
 
   <h2>Details</h2>
   <pre id="details"></pre>
