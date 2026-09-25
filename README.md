@@ -106,8 +106,8 @@ contracts/amemory-conformance-v0.1.json#/backendMatrix
 
 | Backend | Статус | Current Scope | Физическая история | Нормализованное сравнение | Полный профиль |
 |---|---|---|---|---|---|
-| Rust reference CPU / WASM | prototype / partial | R1–R5: bounded two-bank Scope + published selector | старые Scope bank и Links сохраняются физически | canonical Anum reaction Scope + matched/handoff | **нет — audit #45: P06/P08/P15 ждут R6** |
-| WebGPU browser | prototype / partial | R1–R5: two-bank Scope buffer + atomic published selector | старые GPU Scope bank и Link pool сохраняются | canonical Anum reaction Scope + matched/handoff | **нет — audit #45: P06/P08/P15 ждут R6** |
+| Rust reference CPU / WASM | prototype / partial | R1–R6: bounded two-bank Scope + published selector | старые Scope bank и Links сохраняются физически | canonical Anum reaction Scope + matched/handoff | **да — P01–P17** |
+| WebGPU browser | prototype / partial | R1–R6: two-bank Scope buffer + atomic published selector | старые GPU Scope bank и Link pool сохраняются | canonical Anum reaction Scope + matched/handoff | **да — P01–P17** |
 | future accelerator family | planned | должен быть объявлен до реализации | должен быть объявлен отдельно от semantic currentness | обязательный differential против reference | **нет** |
 
 Rust native tests и WASM browser используют одну текущую reference-кодовую базу; это разные поверхности исполнения одного prototype backend, а не разные семантики.
@@ -142,17 +142,17 @@ R1 executable subset:
   P01 P02 P03 P04 P05 P11 P12
     -> GREEN on real browser CPU/WASM ↔ WebGPU differential
 
-Audit #45:
-  P06 = exhaustive admitted relations     -> нужен direct MANY witness
-  P08 = replace by all outputs            -> нужен direct MANY witness
-  P15 = schedule/order non-semantic       -> нужен reaction-order permutation witness
+Audit #45 + real browser R6:
+  P06 = exhaustive admitted relations     -> GREEN (1→N distinct MANY)
+  P08 = replace by all outputs            -> GREEN (1→N / N→M)
+  P15 = schedule/order non-semantic       -> GREEN (reversed current + Theory order)
 
-R6 implementation candidate:
-  1→N distinct MANY                       -> implemented in Rust/WASM + WebGPU harness
-  N→M                                     -> implemented in Rust/WASM + WebGPU harness
-  reversed current/Theory order           -> implemented
-  bounded-scope fail-closed               -> implemented
-  real browser CPU/WASM ↔ WebGPU evidence -> REQUIRED BEFORE GREEN
+R6 real browser CPU/WASM ↔ WebGPU:
+  1→N distinct MANY                       -> PASS
+  N→M                                     -> PASS
+  reversed current/Theory order           -> PASS
+  bounded-scope fail-closed               -> PASS
+  normalized CPU/GPU differential         -> PASS
 
 Observed R1:
   before CPU/GPU = [19868]
@@ -230,13 +230,13 @@ AM-C047 R2 = GREEN
 AM-C048 R3 = GREEN
 AM-C049 R4 = GREEN
 AM-C050 R5 = GREEN
-AM-C045 FULL PROFILE = PENDING R6 DIRECT WITNESSES
-FULL_REACTION_PROFILE_CONFORMANCE = FALSE
+AM-C045 FULL PROFILE = GREEN
+FULL_REACTION_PROFILE_CONFORMANCE = TRUE
 ```
 
-Для двух объявленных prototype-backends — Rust/CPU/WASM и browser WebGPU — R1–R5 дают сильное реальное browser differential evidence, но глобальный аудит #45 обнаружил три закона, которым нужен отдельный прямой witness: `P06`, `P08`, `P15`. До R6 полный профиль не заявляется.
+Для двух объявленных prototype-backends — Rust/CPU/WASM и browser WebGPU — реальный browser differential chain R1–R6 напрямую покрывает весь pinned `minimal-portable-amemory-execution@0.1.0`: `P01–P17`. R6 отдельно закрывает `P06`, `P08`, `P15` и bounded-scope fail-closed.
 
-Это не означает, что весь репозиторий принят целиком: repository-wide `acceptanceState` остаётся независимым и может сохранять `NOT_READY` из-за других planned conformance vectors.
+Все mandatory conformance vectors теперь GREEN, поэтому repository-wide `acceptanceState = READY`. Сам контракт остаётся `candidate / accepted=false` до отдельного явного решения о принятии.
 
 Реализация продолжает потреблять machine profile, а не копировать смысл из control flow `anum_docs/ts/src/v013-grounded-execution.ts`.
 
