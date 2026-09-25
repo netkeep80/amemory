@@ -1099,12 +1099,81 @@ mod anum_boundary_tests {
         assert_eq!(amemory_reaction_current_count(), 1);
         assert_eq!(export(amemory_reaction_current_member(0)), "19816898");
 
+        // R6 direct MANY/exhaustiveness witness:
+        //   1->N: [K->A] with [A->B, A->C] -> [K->B, K->C]
+        //   N->M: [K->A, K->ROOT] with [A->B, ROOT->C] -> [K->B, K->C]
+        // Reversing both physical iteration orders must preserve the normalized result.
+        let c = import("998");
+        let relation_ac = import("168998");
+        let root_to_c = import("18998");
+        let successor_c = import("198998");
+        for handle in [c, relation_ac, root_to_c, successor_c] {
+            assert_ne!(handle, ANUM_CPU_NONE);
+        }
+
+        amemory_reaction_reset();
+        assert_eq!(amemory_reaction_set_current_member(0, current), 1);
+        assert_eq!(amemory_reaction_set_current_count(1), 1);
+        assert_eq!(amemory_reaction_set_theory_relation(0, relation), 1);
+        assert_eq!(amemory_reaction_set_theory_relation(1, relation_ac), 1);
+        assert_eq!(amemory_reaction_set_theory_count(2), 1);
+        assert_eq!(amemory_reaction_snapshot_theory(), 1);
+        assert_eq!(amemory_reaction_run(), 1);
+        assert_eq!(amemory_reaction_matched_relations(), 2);
+        assert_eq!(amemory_reaction_handoff_count(), 1);
+        assert_eq!(amemory_reaction_current_count(), 2);
+        let mut one_to_n = [
+            export(amemory_reaction_current_member(0)),
+            export(amemory_reaction_current_member(1)),
+        ];
+        one_to_n.sort();
+        assert_eq!(one_to_n, ["19816898".to_string(), "198998".to_string()]);
+
+        amemory_reaction_reset();
+        assert_eq!(amemory_reaction_set_current_member(0, current), 1);
+        assert_eq!(amemory_reaction_set_current_member(1, current_root), 1);
+        assert_eq!(amemory_reaction_set_current_count(2), 1);
+        assert_eq!(amemory_reaction_set_theory_relation(0, relation), 1);
+        assert_eq!(amemory_reaction_set_theory_relation(1, root_to_c), 1);
+        assert_eq!(amemory_reaction_set_theory_count(2), 1);
+        assert_eq!(amemory_reaction_snapshot_theory(), 1);
+        assert_eq!(amemory_reaction_run(), 1);
+        assert_eq!(amemory_reaction_matched_relations(), 2);
+        assert_eq!(amemory_reaction_current_count(), 2);
+        let mut n_to_m = [
+            export(amemory_reaction_current_member(0)),
+            export(amemory_reaction_current_member(1)),
+        ];
+        n_to_m.sort();
+        assert_eq!(n_to_m, ["19816898".to_string(), "198998".to_string()]);
+
+        amemory_reaction_reset();
+        assert_eq!(amemory_reaction_set_current_member(0, current_root), 1);
+        assert_eq!(amemory_reaction_set_current_member(1, current), 1);
+        assert_eq!(amemory_reaction_set_current_count(2), 1);
+        assert_eq!(amemory_reaction_set_theory_relation(0, root_to_c), 1);
+        assert_eq!(amemory_reaction_set_theory_relation(1, relation), 1);
+        assert_eq!(amemory_reaction_set_theory_count(2), 1);
+        assert_eq!(amemory_reaction_snapshot_theory(), 1);
+        assert_eq!(amemory_reaction_run(), 1);
+        let mut reordered = [
+            export(amemory_reaction_current_member(0)),
+            export(amemory_reaction_current_member(1)),
+        ];
+        reordered.sort();
+        assert_eq!(reordered, n_to_m);
+
+        // Valid semantic cardinality outside this bounded CPU prototype scope
+        // is rejected at the substrate boundary with no handoff/publication.
+        amemory_reaction_reset();
+        assert_eq!(amemory_reaction_set_current_count(17), 0);
+        assert_eq!(amemory_reaction_current_count(), 0);
+        assert_eq!(amemory_reaction_handoff_count(), 0);
+
         // R4 P14: a new live Theory admission added after snapshot_t is
         // invisible to reaction t and becomes executable only after the next
         // explicit reaction-start snapshot.
-        let c = import("998");
         let relation_bc = import("116898998");
-        let successor_c = import("198998");
         for handle in [c, relation_bc, successor_c] {
             assert_ne!(handle, ANUM_CPU_NONE);
         }

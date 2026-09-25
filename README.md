@@ -106,8 +106,8 @@ contracts/amemory-conformance-v0.1.json#/backendMatrix
 
 | Backend | Статус | Current Scope | Физическая история | Нормализованное сравнение | Полный профиль |
 |---|---|---|---|---|---|
-| Rust reference CPU / WASM | prototype / partial | R1: bounded two-bank Scope + published selector | old R1 Scope bank и Links сохраняются физически | canonical Anum reaction Scope + matched/handoff | **нет** |
-| WebGPU browser | prototype / partial | R1: two-bank Scope buffer + atomic published selector | old R1 GPU Scope bank и Link pool сохраняются | canonical Anum reaction Scope + matched/handoff | **нет** |
+| Rust reference CPU / WASM | prototype / partial | R1–R5: bounded two-bank Scope + published selector | старые Scope bank и Links сохраняются физически | canonical Anum reaction Scope + matched/handoff | **нет — audit #45: P06/P08/P15 ждут R6** |
+| WebGPU browser | prototype / partial | R1–R5: two-bank Scope buffer + atomic published selector | старые GPU Scope bank и Link pool сохраняются | canonical Anum reaction Scope + matched/handoff | **нет — audit #45: P06/P08/P15 ждут R6** |
 | future accelerator family | planned | должен быть объявлен до реализации | должен быть объявлен отдельно от semantic currentness | обязательный differential против reference | **нет** |
 
 Rust native tests и WASM browser используют одну текущую reference-кодовую базу; это разные поверхности исполнения одного prototype backend, а не разные семантики.
@@ -126,7 +126,7 @@ Rust native tests и WASM browser используют одну текущую r
 
 Но это **не равно полной реализации реакции A-сети**.
 
-Текущая классификация после реализации bounded R1:
+Текущая классификация после глобального evidence-аудита #45:
 
 ```text
 R1 fixture:
@@ -139,8 +139,20 @@ R1 fixture:
   K ⟼ B = 19816898
 
 R1 executable subset:
-  P01 P02 P03 P04 P05 P06 P08 P11 P12 P15
+  P01 P02 P03 P04 P05 P11 P12
     -> GREEN on real browser CPU/WASM ↔ WebGPU differential
+
+Audit #45:
+  P06 = exhaustive admitted relations     -> нужен direct MANY witness
+  P08 = replace by all outputs            -> нужен direct MANY witness
+  P15 = schedule/order non-semantic       -> нужен reaction-order permutation witness
+
+R6 implementation candidate:
+  1→N distinct MANY                       -> implemented in Rust/WASM + WebGPU harness
+  N→M                                     -> implemented in Rust/WASM + WebGPU harness
+  reversed current/Theory order           -> implemented
+  bounded-scope fail-closed               -> implemented
+  real browser CPU/WASM ↔ WebGPU evidence -> REQUIRED BEFORE GREEN
 
 Observed R1:
   before CPU/GPU = [19868]
@@ -218,11 +230,11 @@ AM-C047 R2 = GREEN
 AM-C048 R3 = GREEN
 AM-C049 R4 = GREEN
 AM-C050 R5 = GREEN
-AM-C045 FULL PROFILE = GREEN
-FULL_REACTION_PROFILE_CONFORMANCE = TRUE
+AM-C045 FULL PROFILE = PENDING R6 DIRECT WITNESSES
+FULL_REACTION_PROFILE_CONFORMANCE = FALSE
 ```
 
-Для двух объявленных prototype-backends — Rust/CPU/WASM и browser WebGPU — весь pinned profile `minimal-portable-amemory-execution@0.1.0` покрыт реальными browser differential witnesses R1–R5 по законам `P01-P17`.
+Для двух объявленных prototype-backends — Rust/CPU/WASM и browser WebGPU — R1–R5 дают сильное реальное browser differential evidence, но глобальный аудит #45 обнаружил три закона, которым нужен отдельный прямой witness: `P06`, `P08`, `P15`. До R6 полный профиль не заявляется.
 
 Это не означает, что весь репозиторий принят целиком: repository-wide `acceptanceState` остаётся независимым и может сохранять `NOT_READY` из-за других planned conformance vectors.
 
