@@ -1,0 +1,47 @@
+name: A-memory browser differential check
+
+on:
+  pull_request:
+    paths:
+      - "experiments/browser-accelerator/**"
+      - "contracts/amemory-contract-v0.1.json"
+      - "contracts/amemory-conformance-v0.1.json"
+      - "repo-policy.json"
+      - ".github/workflows/browser-differential-check.yml"
+  push:
+    branches: [main]
+    paths:
+      - "experiments/browser-accelerator/**"
+      - "contracts/amemory-contract-v0.1.json"
+      - "contracts/amemory-conformance-v0.1.json"
+      - "repo-policy.json"
+      - ".github/workflows/browser-differential-check.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Differential checker positive/negative witnesses
+        run: node experiments/browser-accelerator/tests/differential.test.mjs
+
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup toolchain install 1.98.1 --profile minimal
+          rustup target add --toolchain 1.98.1 wasm32-unknown-unknown
+
+      - name: Compile Rust/WASM CPU oracle
+        run: |
+          cargo +1.98.1 build \
+            --manifest-path experiments/browser-accelerator/rust/Cargo.toml \
+            --target wasm32-unknown-unknown \
+            --release
