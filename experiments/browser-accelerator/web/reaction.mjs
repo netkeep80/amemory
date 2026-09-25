@@ -59,6 +59,15 @@ export function assertR1Fixture() {
   return true;
 }
 
+export function assertR2Fixture() {
+  const current = splitPairAnum(R1_FIXTURE.current);
+  const wrongRelation = splitPairAnum(R1_FIXTURE.successor);
+  must(current.end === R1_FIXTURE.A, "bad R2 current antecedent");
+  must(wrongRelation.start === R1_FIXTURE.K, "bad R2 wrong-relation antecedent");
+  must(wrongRelation.start !== current.end, "R2 relation unexpectedly applicable");
+  return true;
+}
+
 export function normalizeReactionState(anums) {
   return [...new Set(anums.map(normalizeAnum))].sort();
 }
@@ -496,6 +505,7 @@ async function runGpuInvalidFailure(device, pool, refs) {
 
 export async function runReactionBrowser(wasm, device) {
   assertR1Fixture();
+  assertR2Fixture();
   const logs = [];
   const cpuRefs = importCpuFixture(wasm);
   const gpuPool = createGpuAnumPool(device, "gpu-reaction-B");
