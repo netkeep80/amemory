@@ -827,7 +827,7 @@
           "AM-C046"
         ],
         "fullReactionProfileConformanceClaimed": false,
-        "profileLawCoverageRule": "R1 is GREEN for P01,P02,P03,P04,P05,P06,P08,P11,P12,P15; R2 has executable candidate evidence for P07/P13 but requires a real browser witness; P10 remains supporting evidence only and P09,P14,P16,P17 remain not-yet-executed."
+        "profileLawCoverageRule": "R1 is GREEN for P01,P02,P03,P04,P05,P06,P08,P11,P12,P15; R2 is GREEN for P07/P13; P10 remains supporting evidence only and P09,P14,P16,P17 remain not-yet-executed."
       }
     },
     {
@@ -849,21 +849,19 @@
       },
       "progress": {
         "completedSlices": [
-          "AM-C046-r1-one-reaction-cpu-webgpu"
+          "AM-C046-r1-one-reaction-cpu-webgpu",
+          "AM-C047-r2-no-admitted-relation-quiescence"
         ],
         "R1": "green-real-browser-differential",
+        "R2": "green-real-browser-differential",
         "remainingPortableLaws": [
-          "P07",
           "P09",
           "P10",
-          "P13",
           "P14",
           "P16",
           "P17"
         ],
-        "fullProfileConformance": false,
-        "currentSlice": "AM-C047-r2-no-admitted-relation-quiescence",
-        "R2": "implementation-candidate-browser-witness-required"
+        "fullProfileConformance": false
       }
     },
     {
@@ -975,33 +973,53 @@
         "AM-042",
         "AM-043"
       ],
-      "status": "planned",
-      "evidenceRequired": {
+      "status": "green",
+      "evidence": {
         "issue": 31,
+        "implementationPr": 32,
+        "mergedMainSha": "e02b3be9e28dfaba445d121e920aea2636bd1996",
+        "browserWitnessComment": "https://github.com/netkeep80/amemory/issues/31#issuecomment-5838004439",
+        "pages": "https://netkeep80.github.io/amemory/",
         "profile": "minimal-portable-amemory-execution@0.1.0",
         "fixture": {
           "current": "19868",
           "nonApplicableRelation": "19816898"
         },
-        "machine": [
-          "reaction JS R2 fixture witness",
-          "native Rust explicit quiescence witness",
-          "wasm32 compile",
-          "all prior browser-prototype regressions"
-        ],
-        "realBrowser": [
-          "Rust/WASM loaded",
-          "WebGPU available",
-          "CPU R2 Scope PASS [19868]",
-          "GPU R2 Scope PASS [19868]",
-          "matchedRelations CPU=GPU=0",
-          "handoffCount CPU=GPU=0",
-          "quiescent CPU=GPU=true",
-          "published Scope bank/selector unchanged",
-          "normalized CPU/GPU R2 differential PASS",
-          "runtime failure does not report quiescence",
-          "R1 regression still reports quiescent=false"
-        ],
+        "observed": {
+          "rustWasm": "LOADED",
+          "webgpu": "WEBGPU_AVAILABLE",
+          "scopeCpu": [
+            "19868"
+          ],
+          "scopeGpu": [
+            "19868"
+          ],
+          "matchedRelations": {
+            "cpu": 0,
+            "gpu": 0
+          },
+          "handoffCount": {
+            "cpu": 0,
+            "gpu": 0
+          },
+          "quiescent": {
+            "cpu": true,
+            "gpu": true
+          },
+          "publishedScopeUnchanged": {
+            "cpu": "0->0",
+            "gpu": "0->0"
+          },
+          "normalizedDifferential": "PASS",
+          "r1QuiescentRegression": {
+            "cpu": false,
+            "gpu": false
+          },
+          "invalidFailureQuiescent": {
+            "cpu": false,
+            "gpu": false
+          }
+        },
         "coveredPortableLaws": [
           "P07",
           "P13"
@@ -1074,7 +1092,8 @@
         "AM-C034",
         "AM-C035",
         "AM-C039",
-        "AM-C046"
+        "AM-C046",
+        "AM-C047"
       ],
       "profileLawCoverage": {
         "P01": "r1-green-real-browser-differential",
@@ -1083,13 +1102,13 @@
         "P04": "r1-green-real-browser-differential",
         "P05": "r1-green-real-browser-differential",
         "P06": "r1-green-real-browser-differential",
-        "P07": "r2-executable-browser-witness-required",
+        "P07": "r2-green-real-browser-differential",
         "P08": "r1-green-real-browser-differential",
         "P09": "not-yet-executed",
         "P10": "supporting-evidence-only-not-reaction-conformance",
         "P11": "r1-green-real-browser-differential",
         "P12": "r1-green-real-browser-differential",
-        "P13": "r2-executable-browser-witness-required",
+        "P13": "r2-green-real-browser-differential",
         "P14": "not-yet-executed",
         "P15": "r1-green-real-browser-differential",
         "P16": "not-yet-executed",
@@ -1161,7 +1180,8 @@
         "AM-C034",
         "AM-C038",
         "AM-C039",
-        "AM-C046"
+        "AM-C046",
+        "AM-C047"
       ],
       "profileLawCoverage": {
         "P01": "r1-green-real-browser-differential",
@@ -1170,13 +1190,13 @@
         "P04": "r1-green-real-browser-differential",
         "P05": "r1-green-real-browser-differential",
         "P06": "r1-green-real-browser-differential",
-        "P07": "r2-executable-browser-witness-required",
+        "P07": "r2-green-real-browser-differential",
         "P08": "r1-green-real-browser-differential",
         "P09": "not-yet-executed",
         "P10": "supporting-evidence-only-not-reaction-conformance",
         "P11": "r1-green-real-browser-differential",
         "P12": "r1-green-real-browser-differential",
-        "P13": "r2-executable-browser-witness-required",
+        "P13": "r2-green-real-browser-differential",
         "P14": "not-yet-executed",
         "P15": "r1-green-real-browser-differential",
         "P16": "not-yet-executed",
