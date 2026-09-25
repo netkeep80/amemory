@@ -345,7 +345,24 @@
         "AM-021",
         "AM-026"
       ],
-      "status": "browser-witness-required"
+      "status": "green",
+      "evidence": {
+        "issue": 17,
+        "implementationPr": 18,
+        "mergedMainSha": "6a19e5a81f5522a28602147e4965942b6df2ee09",
+        "browserWitnessComment": "https://github.com/netkeep80/amemory/issues/17#issuecomment-5833340922",
+        "pages": "https://netkeep80.github.io/amemory/",
+        "observed": {
+          "round0Cpu": "PASS [(1,2)]",
+          "round0Gpu": "PASS [(1,2)]",
+          "round1Cpu": "PASS [(1,2), (1,3), (4,5)]",
+          "round1Gpu": "PASS [(1,2), (1,3), (4,5)]",
+          "round2Cpu": "PASS [(1,2), (1,3), (4,5), (9,9)]",
+          "round2Gpu": "PASS [(1,2), (1,3), (4,5), (9,9)]",
+          "persistenceDifferential": "PASS",
+          "negativeControls": "PASS (state loss/range/extra pair detected)"
+        }
+      }
     },
     {
       "id": "AM-C026-authorized-union-exactness",
@@ -353,35 +370,120 @@
         "AM-022",
         "AM-025"
       ],
-      "status": "browser-witness-required"
+      "status": "green",
+      "evidence": {
+        "issue": 17,
+        "implementationPr": 18,
+        "mergedMainSha": "6a19e5a81f5522a28602147e4965942b6df2ee09",
+        "browserWitnessComment": "https://github.com/netkeep80/amemory/issues/17#issuecomment-5833340922",
+        "pages": "https://netkeep80.github.io/amemory/",
+        "observed": {
+          "round0Cpu": "PASS [(1,2)]",
+          "round0Gpu": "PASS [(1,2)]",
+          "round1Cpu": "PASS [(1,2), (1,3), (4,5)]",
+          "round1Gpu": "PASS [(1,2), (1,3), (4,5)]",
+          "round2Cpu": "PASS [(1,2), (1,3), (4,5), (9,9)]",
+          "round2Gpu": "PASS [(1,2), (1,3), (4,5), (9,9)]",
+          "persistenceDifferential": "PASS",
+          "negativeControls": "PASS (state loss/range/extra pair detected)"
+        }
+      }
     },
     {
       "id": "AM-C027-duplicate-commit-idempotence",
       "requirements": [
         "AM-023"
       ],
-      "status": "ci-and-browser-witness-required"
+      "status": "green",
+      "evidence": {
+        "issue": 17,
+        "implementationPr": 18,
+        "mergedMainSha": "6a19e5a81f5522a28602147e4965942b6df2ee09",
+        "browserWitnessComment": "https://github.com/netkeep80/amemory/issues/17#issuecomment-5833340922",
+        "pages": "https://netkeep80.github.io/amemory/",
+        "observed": {
+          "round0Cpu": "PASS [(1,2)]",
+          "round0Gpu": "PASS [(1,2)]",
+          "round1Cpu": "PASS [(1,2), (1,3), (4,5)]",
+          "round1Gpu": "PASS [(1,2), (1,3), (4,5)]",
+          "round2Cpu": "PASS [(1,2), (1,3), (4,5), (9,9)]",
+          "round2Gpu": "PASS [(1,2), (1,3), (4,5), (9,9)]",
+          "persistenceDifferential": "PASS",
+          "negativeControls": "PASS (state loss/range/extra pair detected)"
+        }
+      }
     },
     {
       "id": "AM-C028-physical-cell-non-authority",
       "requirements": [
         "AM-024"
       ],
-      "status": "ci-required"
+      "status": "green",
+      "evidence": {
+        "issue": 17,
+        "implementationPr": 18,
+        "mergedMainSha": "6a19e5a81f5522a28602147e4965942b6df2ee09",
+        "browserWitnessComment": "https://github.com/netkeep80/amemory/issues/17#issuecomment-5833340922",
+        "pages": "https://netkeep80.github.io/amemory/",
+        "observed": {
+          "round0Cpu": "PASS [(1,2)]",
+          "round0Gpu": "PASS [(1,2)]",
+          "round1Cpu": "PASS [(1,2), (1,3), (4,5)]",
+          "round1Gpu": "PASS [(1,2), (1,3), (4,5)]",
+          "round2Cpu": "PASS [(1,2), (1,3), (4,5), (9,9)]",
+          "round2Gpu": "PASS [(1,2), (1,3), (4,5), (9,9)]",
+          "persistenceDifferential": "PASS",
+          "negativeControls": "PASS (state loss/range/extra pair detected)"
+        }
+      }
     },
     {
       "id": "AM-C029-preauthorized-only-and-range-fail-closed",
       "requirements": [
         "AM-025"
       ],
-      "status": "ci-and-browser-witness-required"
+      "status": "green",
+      "evidence": {
+        "issue": 17,
+        "implementationPr": 18,
+        "mergedMainSha": "6a19e5a81f5522a28602147e4965942b6df2ee09",
+        "browserWitnessComment": "https://github.com/netkeep80/amemory/issues/17#issuecomment-5833340922",
+        "pages": "https://netkeep80.github.io/amemory/",
+        "observed": {
+          "round0Cpu": "PASS [(1,2)]",
+          "round0Gpu": "PASS [(1,2)]",
+          "round1Cpu": "PASS [(1,2), (1,3), (4,5)]",
+          "round1Gpu": "PASS [(1,2), (1,3), (4,5)]",
+          "round2Cpu": "PASS [(1,2), (1,3), (4,5), (9,9)]",
+          "round2Gpu": "PASS [(1,2), (1,3), (4,5), (9,9)]",
+          "persistenceDifferential": "PASS",
+          "negativeControls": "PASS (state loss/range/extra pair detected)"
+        }
+      }
     },
     {
       "id": "AM-C030-cpu-gpu-state-step-equivalence",
       "requirements": [
         "AM-026"
       ],
-      "status": "browser-witness-required"
+      "status": "green",
+      "evidence": {
+        "issue": 17,
+        "implementationPr": 18,
+        "mergedMainSha": "6a19e5a81f5522a28602147e4965942b6df2ee09",
+        "browserWitnessComment": "https://github.com/netkeep80/amemory/issues/17#issuecomment-5833340922",
+        "pages": "https://netkeep80.github.io/amemory/",
+        "observed": {
+          "round0Cpu": "PASS [(1,2)]",
+          "round0Gpu": "PASS [(1,2)]",
+          "round1Cpu": "PASS [(1,2), (1,3), (4,5)]",
+          "round1Gpu": "PASS [(1,2), (1,3), (4,5)]",
+          "round2Cpu": "PASS [(1,2), (1,3), (4,5), (9,9)]",
+          "round2Gpu": "PASS [(1,2), (1,3), (4,5), (9,9)]",
+          "persistenceDifferential": "PASS",
+          "negativeControls": "PASS (state loss/range/extra pair detected)"
+        }
+      }
     },
     {
       "id": "AM-C031-state-loss-negative-control",
@@ -390,7 +492,24 @@
         "AM-015",
         "AM-021"
       ],
-      "status": "ci-and-browser-witness-required"
+      "status": "green",
+      "evidence": {
+        "issue": 17,
+        "implementationPr": 18,
+        "mergedMainSha": "6a19e5a81f5522a28602147e4965942b6df2ee09",
+        "browserWitnessComment": "https://github.com/netkeep80/amemory/issues/17#issuecomment-5833340922",
+        "pages": "https://netkeep80.github.io/amemory/",
+        "observed": {
+          "round0Cpu": "PASS [(1,2)]",
+          "round0Gpu": "PASS [(1,2)]",
+          "round1Cpu": "PASS [(1,2), (1,3), (4,5)]",
+          "round1Gpu": "PASS [(1,2), (1,3), (4,5)]",
+          "round2Cpu": "PASS [(1,2), (1,3), (4,5), (9,9)]",
+          "round2Gpu": "PASS [(1,2), (1,3), (4,5), (9,9)]",
+          "persistenceDifferential": "PASS",
+          "negativeControls": "PASS (state loss/range/extra pair detected)"
+        }
+      }
     }
   ],
   "backendMatrix": [],
@@ -434,6 +553,23 @@
         "canonicalNewPairsGpu": "PASS [(1,3), (4,5)]",
         "differential": "PASS",
         "negativeControl": "PASS (mismatches detected)"
+      }
+    },
+    "browserStatefulStoreV01": {
+      "issue": 17,
+      "implementationPr": 18,
+      "mergedMainSha": "6a19e5a81f5522a28602147e4965942b6df2ee09",
+      "browserWitnessComment": "https://github.com/netkeep80/amemory/issues/17#issuecomment-5833340922",
+      "pages": "https://netkeep80.github.io/amemory/",
+      "observed": {
+        "round0Cpu": "PASS [(1,2)]",
+        "round0Gpu": "PASS [(1,2)]",
+        "round1Cpu": "PASS [(1,2), (1,3), (4,5)]",
+        "round1Gpu": "PASS [(1,2), (1,3), (4,5)]",
+        "round2Cpu": "PASS [(1,2), (1,3), (4,5), (9,9)]",
+        "round2Gpu": "PASS [(1,2), (1,3), (4,5), (9,9)]",
+        "persistenceDifferential": "PASS",
+        "negativeControls": "PASS (state loss/range/extra pair detected)"
       }
     }
   }
