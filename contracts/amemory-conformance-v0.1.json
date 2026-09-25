@@ -126,28 +126,100 @@
         "AM-010",
         "AM-013"
       ],
-      "status": "browser-witness-required"
+      "status": "green",
+      "evidence": {
+        "issue": 9,
+        "implementationPr": 12,
+        "mergedMainSha": "d0178ab5126f02072131ca21300ce5a43cb11fa8",
+        "machineEvidenceComment": "https://github.com/netkeep80/amemory/issues/9#issuecomment-5832811978",
+        "browserWitnessComment": "https://github.com/netkeep80/amemory/issues/9#issuecomment-5833014375",
+        "pages": "https://netkeep80.github.io/amemory/",
+        "observed": {
+          "rustWasm": "LOADED",
+          "cpuControl": "PASS (41 -> 42)",
+          "webgpu": "WEBGPU_AVAILABLE",
+          "gpuSmoke": "PASS [2, 3, 4, 5]",
+          "incidenceCpu": "PASS [7, 1, 2, 0, 7]",
+          "incidenceGpu": "PASS [7, 1, 2, 0, 7]",
+          "differential": "PASS",
+          "negativeControl": "PASS (mismatch detected)"
+        }
+      }
     },
     {
       "id": "AM-C017-differential-mismatch-fails-closed",
       "requirements": [
         "AM-014"
       ],
-      "status": "ci-and-browser-witness-required"
+      "status": "green",
+      "evidence": {
+        "issue": 9,
+        "implementationPr": 12,
+        "mergedMainSha": "d0178ab5126f02072131ca21300ce5a43cb11fa8",
+        "machineEvidenceComment": "https://github.com/netkeep80/amemory/issues/9#issuecomment-5832811978",
+        "browserWitnessComment": "https://github.com/netkeep80/amemory/issues/9#issuecomment-5833014375",
+        "pages": "https://netkeep80.github.io/amemory/",
+        "observed": {
+          "rustWasm": "LOADED",
+          "cpuControl": "PASS (41 -> 42)",
+          "webgpu": "WEBGPU_AVAILABLE",
+          "gpuSmoke": "PASS [2, 3, 4, 5]",
+          "incidenceCpu": "PASS [7, 1, 2, 0, 7]",
+          "incidenceGpu": "PASS [7, 1, 2, 0, 7]",
+          "differential": "PASS",
+          "negativeControl": "PASS (mismatch detected)"
+        }
+      }
     },
     {
       "id": "AM-C018-negative-control-detects-perturbation",
       "requirements": [
         "AM-015"
       ],
-      "status": "ci-and-browser-witness-required"
+      "status": "green",
+      "evidence": {
+        "issue": 9,
+        "implementationPr": 12,
+        "mergedMainSha": "d0178ab5126f02072131ca21300ce5a43cb11fa8",
+        "machineEvidenceComment": "https://github.com/netkeep80/amemory/issues/9#issuecomment-5832811978",
+        "browserWitnessComment": "https://github.com/netkeep80/amemory/issues/9#issuecomment-5833014375",
+        "pages": "https://netkeep80.github.io/amemory/",
+        "observed": {
+          "rustWasm": "LOADED",
+          "cpuControl": "PASS (41 -> 42)",
+          "webgpu": "WEBGPU_AVAILABLE",
+          "gpuSmoke": "PASS [2, 3, 4, 5]",
+          "incidenceCpu": "PASS [7, 1, 2, 0, 7]",
+          "incidenceGpu": "PASS [7, 1, 2, 0, 7]",
+          "differential": "PASS",
+          "negativeControl": "PASS (mismatch detected)"
+        }
+      }
     },
     {
       "id": "AM-C019-backend-path-observable",
       "requirements": [
         "AM-016"
       ],
-      "status": "browser-witness-required"
+      "status": "green",
+      "evidence": {
+        "issue": 9,
+        "implementationPr": 12,
+        "mergedMainSha": "d0178ab5126f02072131ca21300ce5a43cb11fa8",
+        "machineEvidenceComment": "https://github.com/netkeep80/amemory/issues/9#issuecomment-5832811978",
+        "browserWitnessComment": "https://github.com/netkeep80/amemory/issues/9#issuecomment-5833014375",
+        "pages": "https://netkeep80.github.io/amemory/",
+        "observed": {
+          "rustWasm": "LOADED",
+          "cpuControl": "PASS (41 -> 42)",
+          "webgpu": "WEBGPU_AVAILABLE",
+          "gpuSmoke": "PASS [2, 3, 4, 5]",
+          "incidenceCpu": "PASS [7, 1, 2, 0, 7]",
+          "incidenceGpu": "PASS [7, 1, 2, 0, 7]",
+          "differential": "PASS",
+          "negativeControl": "PASS (mismatch detected)"
+        }
+      }
     }
   ],
   "backendMatrix": [],
@@ -158,5 +230,25 @@
     "verificationWorkflow": ".github/workflows/mts-upstream-check.yml",
     "floatingUpstreamAllowed": false,
     "manualProjectionEditsAllowed": false
+  },
+  "evidenceSets": {
+    "browserDifferentialV01": {
+      "issue": 9,
+      "implementationPr": 12,
+      "mergedMainSha": "d0178ab5126f02072131ca21300ce5a43cb11fa8",
+      "machineEvidenceComment": "https://github.com/netkeep80/amemory/issues/9#issuecomment-5832811978",
+      "browserWitnessComment": "https://github.com/netkeep80/amemory/issues/9#issuecomment-5833014375",
+      "pages": "https://netkeep80.github.io/amemory/",
+      "observed": {
+        "rustWasm": "LOADED",
+        "cpuControl": "PASS (41 -> 42)",
+        "webgpu": "WEBGPU_AVAILABLE",
+        "gpuSmoke": "PASS [2, 3, 4, 5]",
+        "incidenceCpu": "PASS [7, 1, 2, 0, 7]",
+        "incidenceGpu": "PASS [7, 1, 2, 0, 7]",
+        "differential": "PASS",
+        "negativeControl": "PASS (mismatch detected)"
+      }
+    }
   }
 }
