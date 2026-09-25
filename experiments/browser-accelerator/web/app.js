@@ -4,6 +4,14 @@ import {
   newPairsFromFlags,
   normalizePairSet,
 } from "./canonicalization.mjs";
+import {
+  STATE_CELLS,
+  STATE_SIDE,
+  assertStateExact,
+  assertStatePreserved,
+  formatStatePairs,
+  matrixToPairs,
+} from "./state-store.mjs";
 
 const ui = {
   wasm: document.querySelector("#wasm"),
@@ -20,6 +28,14 @@ const ui = {
   canonicalPairsGpu: document.querySelector("#canonical-pairs-gpu"),
   canonicalDiff: document.querySelector("#canonical-diff"),
   canonicalNegative: document.querySelector("#canonical-negative"),
+  stateR0Cpu: document.querySelector("#state-r0-cpu"),
+  stateR0Gpu: document.querySelector("#state-r0-gpu"),
+  stateR1Cpu: document.querySelector("#state-r1-cpu"),
+  stateR1Gpu: document.querySelector("#state-r1-gpu"),
+  stateR2Cpu: document.querySelector("#state-r2-cpu"),
+  stateR2Gpu: document.querySelector("#state-r2-gpu"),
+  stateDiff: document.querySelector("#state-diff"),
+  stateNegative: document.querySelector("#state-negative"),
   details: document.querySelector("#details"),
 };
 
@@ -48,8 +64,11 @@ async function loadWasm() {
   const canonicalSetExisting = instance.exports.amemory_canonical_set_existing;
   const canonicalSetCandidate = instance.exports.amemory_canonical_set_candidate;
   const canonicalFlag = instance.exports.amemory_canonical_flag;
+  const stateReset = instance.exports.amemory_state_reset;
+  const stateCommit = instance.exports.amemory_state_commit;
+  const stateGet = instance.exports.amemory_state_get;
 
-  if ([probe, cpuStep, incidenceFlag, canonicalSetExisting, canonicalSetCandidate, canonicalFlag]
+  if ([probe, cpuStep, incidenceFlag, canonicalSetExisting, canonicalSetCandidate, canonicalFlag, stateReset, stateCommit, stateGet]
       .some((fn) => typeof fn !== "function")) {
     throw new Error("Expected Rust/WASM exports are missing");
   }
@@ -69,7 +88,7 @@ async function loadWasm() {
   report(ui.cpu, "PASS (41 -> 42)", true);
   log(`wasm.cpu_step = ${cpuResult}`);
 
-  return { incidenceFlag, canonicalSetExisting, canonicalSetCandidate, canonicalFlag };
+  return { incidenceFlag, canonicalSetExisting, canonicalSetCandidate, canonicalFlag, stateReset, stateCommit, stateGet };
 }
 
 async function initWebGpu() {
@@ -498,6 +517,202 @@ async function runCanonicalization(wasm, device) {
   log(`canonical.new = ${formatPairs(cpuPairs)}`);
 }
 
+function cpuStatePairs(wasm) {
+  const pairs = [];
+  for (let start = 0; start < STATE_SIDE; start += 1) {
+    for (let end = 0; end < STATE_SIDE; end += 1) {
+      const value = wasm.stateGet(start, end);
+      if (value === 0xffffffff) {
+        throw new Error("WASM state query unexpectedly exceeded physical scope");
+      }
+      if (value !== 0) pairs.push([start, end]);
+    }
+  }
+  return pairs;
+}
+
+function cpuStateCommitBatch(wasm, pairs) {
+  return Uint32Array.from(
+    pairs.map(([start, end]) => wasm.stateCommit(start, end)),
+  );
+}
+
+function createGpuState(device) {
+  const state = device.createBuffer({
+    size: STATE_CELLS * Uint32Array.BYTES_PER_ELEMENT,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+  });
+  device.queue.writeBuffer(state, 0, new Uint32Array(STATE_CELLS));
+  return state;
+}
+
+async function gpuStateCommitBatch(device, stateBuffer, pairs) {
+  const requests = new Uint32Array(pairs.flat());
+  const statusesBytes = pairs.length * Uint32Array.BYTES_PER_ELEMENT;
+
+  const requestsBuffer = device.createBuffer({
+    size: Math.max(requests.byteLength, 4),
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+  });
+  const statusesBuffer = device.createBuffer({
+    size: Math.max(statusesBytes, 4),
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+  });
+  const readbackBuffer = device.createBuffer({
+    size: Math.max(statusesBytes, 4),
+    usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+  });
+
+  if (requests.byteLength > 0) device.queue.writeBuffer(requestsBuffer, 0, requests);
+
+  const shader = device.createShaderModule({
+    code: `
+      @group(0) @binding(0) var<storage, read_write> state_cells: array<atomic<u32>>;
+      @group(0) @binding(1) var<storage, read> requests: array<u32>;
+      @group(0) @binding(2) var<storage, read_write> statuses: array<u32>;
+
+      @compute @workgroup_size(64)
+      fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+        let i = id.x;
+        if (i < ${pairs.length}u) {
+          let start = requests[i * 2u];
+          let end = requests[i * 2u + 1u];
+
+          if (start < ${STATE_SIDE}u && end < ${STATE_SIDE}u) {
+            let cell = start * ${STATE_SIDE}u + end;
+            atomicStore(&state_cells[cell], 1u);
+            statuses[i] = 1u;
+          } else {
+            statuses[i] = 0u;
+          }
+        }
+      }
+    `,
+  });
+
+  const pipeline = device.createComputePipeline({
+    layout: "auto",
+    compute: { module: shader, entryPoint: "main" },
+  });
+  const bindGroup = device.createBindGroup({
+    layout: pipeline.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: stateBuffer } },
+      { binding: 1, resource: { buffer: requestsBuffer } },
+      { binding: 2, resource: { buffer: statusesBuffer } },
+    ],
+  });
+
+  if (pairs.length > 0) {
+    const encoder = device.createCommandEncoder();
+    const pass = encoder.beginComputePass();
+    pass.setPipeline(pipeline);
+    pass.setBindGroup(0, bindGroup);
+    pass.dispatchWorkgroups(Math.ceil(pairs.length / 64));
+    pass.end();
+    encoder.copyBufferToBuffer(statusesBuffer, 0, readbackBuffer, 0, statusesBytes);
+    device.queue.submit([encoder.finish()]);
+    await readbackBuffer.mapAsync(GPUMapMode.READ, 0, statusesBytes);
+    const statuses = new Uint32Array(readbackBuffer.getMappedRange(0, statusesBytes).slice(0));
+    readbackBuffer.unmap();
+
+    requestsBuffer.destroy();
+    statusesBuffer.destroy();
+    readbackBuffer.destroy();
+    return statuses;
+  }
+
+  requestsBuffer.destroy();
+  statusesBuffer.destroy();
+  readbackBuffer.destroy();
+  return new Uint32Array();
+}
+
+async function gpuStatePairs(device, stateBuffer) {
+  const byteLength = STATE_CELLS * Uint32Array.BYTES_PER_ELEMENT;
+  const readback = device.createBuffer({
+    size: byteLength,
+    usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+  });
+  const encoder = device.createCommandEncoder();
+  encoder.copyBufferToBuffer(stateBuffer, 0, readback, 0, byteLength);
+  device.queue.submit([encoder.finish()]);
+  await readback.mapAsync(GPUMapMode.READ, 0, byteLength);
+  const cells = new Uint32Array(readback.getMappedRange(0, byteLength).slice(0));
+  readback.unmap();
+  readback.destroy();
+  return matrixToPairs(cells);
+}
+
+async function runStatefulStore(wasm, device) {
+  wasm.stateReset();
+  const gpuState = createGpuState(device);
+
+  const observe = async (expected, cpuEl, gpuEl, label) => {
+    const cpuPairs = cpuStatePairs(wasm);
+    const gpuPairs = await gpuStatePairs(device, gpuState);
+    assertStateExact(expected, cpuPairs, label + " CPU");
+    assertStateExact(expected, gpuPairs, label + " GPU");
+    assertStateExact(cpuPairs, gpuPairs, label + " differential");
+    report(cpuEl, `PASS ${formatStatePairs(cpuPairs)}`, true);
+    report(gpuEl, `PASS ${formatStatePairs(gpuPairs)}`, true);
+    return { cpuPairs, gpuPairs };
+  };
+
+  const initial = [[1,2]];
+  assertExactU32(new Uint32Array([1]), cpuStateCommitBatch(wasm, initial), "CPU state round0 status");
+  assertExactU32(new Uint32Array([1]), await gpuStateCommitBatch(device, gpuState, initial), "GPU state round0 status");
+  const r0 = await observe(initial, ui.stateR0Cpu, ui.stateR0Gpu, "round0");
+
+  const round1Commits = [[4,5],[1,3],[4,5]];
+  assertExactU32(new Uint32Array([1,1,1]), cpuStateCommitBatch(wasm, round1Commits), "CPU state round1 status");
+  assertExactU32(new Uint32Array([1,1,1]), await gpuStateCommitBatch(device, gpuState, round1Commits), "GPU state round1 status");
+  const expected1 = [[1,2],[1,3],[4,5]];
+  const r1 = await observe(expected1, ui.stateR1Cpu, ui.stateR1Gpu, "round1");
+  assertStatePreserved(r0.cpuPairs, r1.cpuPairs, "CPU round0->1");
+  assertStatePreserved(r0.gpuPairs, r1.gpuPairs, "GPU round0->1");
+
+  const round2Commits = [[1,3],[9,9]];
+  assertExactU32(new Uint32Array([1,1]), cpuStateCommitBatch(wasm, round2Commits), "CPU state round2 status");
+  assertExactU32(new Uint32Array([1,1]), await gpuStateCommitBatch(device, gpuState, round2Commits), "GPU state round2 status");
+  const expected2 = [[1,2],[1,3],[4,5],[9,9]];
+  const r2 = await observe(expected2, ui.stateR2Cpu, ui.stateR2Gpu, "round2");
+  assertStatePreserved(r1.cpuPairs, r2.cpuPairs, "CPU round1->2");
+  assertStatePreserved(r1.gpuPairs, r2.gpuPairs, "GPU round1->2");
+  report(ui.stateDiff, "PASS", true);
+
+  // Out-of-scope commits must fail closed and leave state unchanged.
+  assertExactU32(new Uint32Array([0]), cpuStateCommitBatch(wasm, [[16,1]]), "CPU out-of-range status");
+  assertExactU32(new Uint32Array([0]), await gpuStateCommitBatch(device, gpuState, [[16,1]]), "GPU out-of-range status");
+  assertStateExact(expected2, cpuStatePairs(wasm), "CPU range fail-closed");
+  assertStateExact(expected2, await gpuStatePairs(device, gpuState), "GPU range fail-closed");
+
+  // Deliberate state-loss witness: a recreated state containing only round2 commits must fail.
+  let lossDetected = false;
+  try {
+    assertStatePreserved(r1.gpuPairs, [[1,3],[9,9]], "state-loss negative control");
+  } catch (error) {
+    lossDetected = true;
+    log(`state.negative.loss = ${error.message}`);
+  }
+  if (!lossDetected) throw new Error("state loss negative control was accepted");
+
+  // Deliberate unauthorized extra pair must fail exact comparison.
+  let unauthorizedDetected = false;
+  try {
+    assertStateExact(expected2, [...r2.gpuPairs,[7,7]], "unauthorized pair negative");
+  } catch (error) {
+    unauthorizedDetected = true;
+    log(`state.negative.unauthorized = ${error.message}`);
+  }
+  if (!unauthorizedDetected) throw new Error("unauthorized pair negative control was accepted");
+
+  report(ui.stateNegative, "PASS (state loss/range/extra pair detected)", true);
+  log(`state.round2 = ${formatStatePairs(r2.gpuPairs)}`);
+
+  gpuState.destroy();
+}
+
 async function main() {
   log(`secureContext = ${window.isSecureContext}`);
   log(`location = ${location.href}`);
@@ -521,6 +736,11 @@ async function main() {
     report(ui.canonicalGpu, "NOT_RUN", false);
     report(ui.canonicalDiff, "NOT_RUN", false);
     report(ui.canonicalNegative, "NOT_RUN", false);
+    report(ui.stateR0Gpu, "NOT_RUN", false);
+    report(ui.stateR1Gpu, "NOT_RUN", false);
+    report(ui.stateR2Gpu, "NOT_RUN", false);
+    report(ui.stateDiff, "NOT_RUN", false);
+    report(ui.stateNegative, "NOT_RUN", false);
     return;
   }
 
@@ -554,6 +774,21 @@ async function main() {
       if (ui.canonicalPairsGpu.textContent === "WAITING") report(ui.canonicalPairsGpu, "FAIL", false);
       if (ui.canonicalNegative.textContent === "WAITING") report(ui.canonicalNegative, "FAIL", false);
       log(`Canonicalization error: ${error?.stack || error}`);
+    }
+  }
+
+  if (wasm) {
+    try {
+      await runStatefulStore(wasm, device);
+    } catch (error) {
+      report(ui.stateDiff, "FAIL", false);
+      for (const element of [
+        ui.stateR0Cpu, ui.stateR0Gpu, ui.stateR1Cpu, ui.stateR1Gpu,
+        ui.stateR2Cpu, ui.stateR2Gpu, ui.stateNegative,
+      ]) {
+        if (element.textContent === "WAITING") report(element, "FAIL", false);
+      }
+      log(`State-store error: ${error?.stack || error}`);
     }
   }
 
