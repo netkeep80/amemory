@@ -7,6 +7,9 @@ import {
   normalizeAnum,
   requireLocalRef,
   topologyCount,
+  cpuExport,
+  cpuImportRaw,
+  wasmU32,
 } from "../web/anum-boundary.mjs";
 
 for (const source of ANUM_FIXTURES) {
@@ -71,3 +74,24 @@ cycle.ends[6] = 5;
 assert.throws(() => exportLocalTopology(cycle, 5), /non-well-founded/);
 
 console.log("PORTABLE_ANUM_BOUNDARY_NEGATIVE_WITNESSES=GREEN");
+
+
+// WebAssembly JS exposes i32 results as signed Numbers. Rust u32::MAX therefore
+// crosses the ABI as -1 and must be normalized before sentinel comparison.
+assert.equal(wasmU32(-1), 0xffffffff);
+assert.equal(wasmU32(0xffffffff), 0xffffffff);
+assert.equal(wasmU32(63), 63);
+
+const rejectingWasm = {
+  anumCpuSetToken: () => 1,
+  anumCpuImport: () => -1,
+};
+assert.equal(cpuImportRaw(rejectingWasm, "5"), null);
+
+const rejectingExportWasm = {
+  anumCpuExport: () => -1,
+};
+assert.throws(
+  () => cpuExport(rejectingExportWasm, localRef("cpu-A", 1)),
+  /CPU export rejected local topology/,
+);
