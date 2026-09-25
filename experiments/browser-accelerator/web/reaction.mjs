@@ -47,6 +47,11 @@ export const R5_FIXTURE = Object.freeze({
   relationEndStart: "16898",
 });
 
+export const R6_FIXTURE = Object.freeze({
+  relationAC: "168998",
+  rootRelationC: "18998",
+});
+
 export const R5_OBSERVATION_STEPS = 4;
 
 const NONE = 0xffffffff;
@@ -116,6 +121,16 @@ export function assertR4Fixture() {
   return true;
 }
 
+export function assertR6Fixture() {
+  const relationAC = splitPairAnum(R6_FIXTURE.relationAC);
+  const rootRelationC = splitPairAnum(R6_FIXTURE.rootRelationC);
+  must(relationAC.start === R1_FIXTURE.A && relationAC.end === R4_FIXTURE.C, "bad R6 A->C relation");
+  must(rootRelationC.start === R3_FIXTURE.root && rootRelationC.end === R4_FIXTURE.C, "bad R6 ROOT->C relation");
+  must(pairAnum(R1_FIXTURE.A, R4_FIXTURE.C) === R6_FIXTURE.relationAC, "noncanonical R6 A->C");
+  must(pairAnum(R3_FIXTURE.root, R4_FIXTURE.C) === R6_FIXTURE.rootRelationC, "noncanonical R6 ROOT->C");
+  return true;
+}
+
 export function assertR5Fixture() {
   const stateStart = splitPairAnum(R5_FIXTURE.stateStart);
   const stateEnd = splitPairAnum(R5_FIXTURE.stateEnd);
@@ -172,7 +187,7 @@ export function perturbReactionState(anums) {
 function importCpuFixture(wasm) {
   cpuResetPool(wasm);
   const refs = {};
-  for (const [name, source] of Object.entries({ ...R1_FIXTURE, ...R3_FIXTURE, ...R4_FIXTURE, ...R5_FIXTURE })) {
+  for (const [name, source] of Object.entries({ ...R1_FIXTURE, ...R3_FIXTURE, ...R4_FIXTURE, ...R5_FIXTURE, ...R6_FIXTURE })) {
     const ref = cpuImportRaw(wasm, source);
     must(ref, "CPU rejected reaction Anum " + name + "=" + source);
     refs[name] = ref;
@@ -182,7 +197,7 @@ function importCpuFixture(wasm) {
 
 async function importGpuFixture(device, pool) {
   const refs = {};
-  for (const [name, source] of Object.entries({ ...R1_FIXTURE, ...R3_FIXTURE, ...R4_FIXTURE, ...R5_FIXTURE })) {
+  for (const [name, source] of Object.entries({ ...R1_FIXTURE, ...R3_FIXTURE, ...R4_FIXTURE, ...R5_FIXTURE, ...R6_FIXTURE })) {
     const ref = await gpuImport(device, pool, source);
     must(ref, "GPU rejected reaction Anum " + name + "=" + source);
     refs[name] = ref;
@@ -219,6 +234,10 @@ async function validateGpuFixtureTopology(device, pool, refs) {
     ["relationBC.end", topology.ends[handles.relationBC], handles.C],
     ["successorC.start", topology.starts[handles.successorC], handles.K],
     ["successorC.end", topology.ends[handles.successorC], handles.C],
+    ["R6.relationAC.start", topology.starts[handles.relationAC], handles.A],
+    ["R6.relationAC.end", topology.ends[handles.relationAC], handles.C],
+    ["R6.rootRelationC.start", topology.starts[handles.rootRelationC], handles.root],
+    ["R6.rootRelationC.end", topology.ends[handles.rootRelationC], handles.C],
     ["R5.endValue.start", topology.starts[handles.endValue], handles.root],
     ["R5.endValue.end", topology.ends[handles.endValue], handles.endValue],
     ["R5.stateStart.start", topology.starts[handles.stateStart], handles.context],
@@ -353,6 +372,28 @@ function runCpuMixedDuplicate(wasm, refs) {
   return {
     state: cpuCurrent(wasm),
     matched: wasmU32(wasm.reactionMatchedRelations()),
+    handoff: wasmU32(wasm.reactionHandoffCount()),
+    quiescent: wasmU32(wasm.reactionQuiescent()) === 1,
+  };
+}
+
+function runCpuBatch(wasm, currentRefs, relationRefs) {
+  cpuConfigureMany(wasm, currentRefs, relationRefs);
+  must(wasm.reactionRun() === 1, "CPU R6 batch reaction failed");
+  return {
+    state: cpuCurrent(wasm),
+    matched: wasmU32(wasm.reactionMatchedRelations()),
+    handoff: wasmU32(wasm.reactionHandoffCount()),
+    quiescent: wasmU32(wasm.reactionQuiescent()) === 1,
+  };
+}
+
+function runCpuOutOfScope(wasm) {
+  wasm.reactionReset();
+  const accepted = wasm.reactionSetCurrentCount(17);
+  return {
+    rejected: accepted === 0,
+    currentCount: wasmU32(wasm.reactionCurrentCount()),
     handoff: wasmU32(wasm.reactionHandoffCount()),
     quiescent: wasmU32(wasm.reactionQuiescent()) === 1,
   };
@@ -847,6 +888,51 @@ async function runGpuMixedDuplicate(device, pool, refs) {
 }
 
 
+async function runGpuBatch(device, pool, currentRefs, relationRefs) {
+  const state = createGpuReactionState(
+    device,
+    currentRefs.map((ref) => requireLocalRef(ref, pool.memory)),
+    relationRefs.map((ref) => requireLocalRef(ref, pool.memory)),
+  );
+  try {
+    await gpuRun(device, pool, state);
+    const after = await gpuObserve(device, pool, state);
+    must(after.status === 1, "GPU R6 batch reaction failed: diagnostic=" + after.diagnostic);
+    return {
+      state: after.anums,
+      matched: after.matched,
+      handoff: after.handoff,
+      quiescent: after.quiescent,
+    };
+  } finally {
+    destroyGpuState(state);
+  }
+}
+
+function runGpuOutOfScope(device, pool, refs) {
+  const fiveDistinctValidPairs = [
+    refs.current,
+    refs.rootCurrent,
+    refs.successor,
+    refs.relation,
+    refs.successorC,
+  ].map((ref) => requireLocalRef(ref, pool.memory));
+  try {
+    const state = createGpuReactionState(
+      device,
+      fiveDistinctValidPairs,
+      [requireLocalRef(refs.relation, pool.memory)],
+    );
+    destroyGpuState(state);
+    return { rejected: false };
+  } catch (error) {
+    return {
+      rejected: /exceeds CAP/.test(String(error?.message ?? error)),
+      message: String(error?.message ?? error),
+    };
+  }
+}
+
 async function runGpuTheoryTplus1(device, pool, refs) {
   const relation = requireLocalRef(refs.relation, pool.memory);
   const relationBC = requireLocalRef(refs.relationBC, pool.memory);
@@ -965,6 +1051,7 @@ export async function runReactionBrowser(wasm, device) {
   assertR3Fixture();
   assertR4Fixture();
   assertR5Fixture();
+  assertR6Fixture();
   const logs = [];
   const cpuRefs = importCpuFixture(wasm);
   const gpuPool = createGpuAnumPool(device, "gpu-reaction-B");
@@ -1097,6 +1184,41 @@ export async function runReactionBrowser(wasm, device) {
     );
     must(cpuR5.boundedReturn && gpuR5.boundedReturn, "R5 bounded witness did not return");
 
+    // R6 closes the direct-evidence gaps found by global audit #45.
+    // 1->N: one current truth must exhaust both admitted non-zero relations.
+    const cpuR6OneToN = runCpuBatch(wasm, [cpuRefs.current], [cpuRefs.relation, cpuRefs.relationAC]);
+    const gpuR6OneToN = await runGpuBatch(device, gpuPool, [gpuRefs.current], [gpuRefs.relation, gpuRefs.relationAC]);
+    const r6Expected = [R1_FIXTURE.successor, R4_FIXTURE.successorC];
+    assertReactionStateExact(r6Expected, cpuR6OneToN.state, "CPU R6 1->N");
+    assertReactionStateExact(r6Expected, gpuR6OneToN.state, "GPU R6 1->N");
+    assertReactionStateExact(cpuR6OneToN.state, gpuR6OneToN.state, "CPU/GPU R6 1->N differential");
+    must(cpuR6OneToN.matched === 2 && gpuR6OneToN.matched === 2, "R6 1->N did not exhaust both admitted relations");
+    must(cpuR6OneToN.handoff === 1 && gpuR6OneToN.handoff === 1, "R6 1->N handoff mismatch");
+
+    // N->M: two current truths produce two distinct normalized successors.
+    const cpuR6NToM = runCpuBatch(wasm, [cpuRefs.current, cpuRefs.rootCurrent], [cpuRefs.relation, cpuRefs.rootRelationC]);
+    const gpuR6NToM = await runGpuBatch(device, gpuPool, [gpuRefs.current, gpuRefs.rootCurrent], [gpuRefs.relation, gpuRefs.rootRelationC]);
+    assertReactionStateExact(r6Expected, cpuR6NToM.state, "CPU R6 N->M");
+    assertReactionStateExact(r6Expected, gpuR6NToM.state, "GPU R6 N->M");
+    assertReactionStateExact(cpuR6NToM.state, gpuR6NToM.state, "CPU/GPU R6 N->M differential");
+    must(cpuR6NToM.matched === 2 && gpuR6NToM.matched === 2, "R6 N->M matched count mismatch");
+
+    // P15 direct witness for this bounded prototype: reverse both physical
+    // current iteration and Theory relation order; normalized semantics must not change.
+    const cpuR6Reordered = runCpuBatch(wasm, [cpuRefs.rootCurrent, cpuRefs.current], [cpuRefs.rootRelationC, cpuRefs.relation]);
+    const gpuR6Reordered = await runGpuBatch(device, gpuPool, [gpuRefs.rootCurrent, gpuRefs.current], [gpuRefs.rootRelationC, gpuRefs.relation]);
+    assertReactionStateExact(cpuR6NToM.state, cpuR6Reordered.state, "CPU R6 reaction-order variation");
+    assertReactionStateExact(gpuR6NToM.state, gpuR6Reordered.state, "GPU R6 reaction-order variation");
+    assertReactionStateExact(cpuR6Reordered.state, gpuR6Reordered.state, "CPU/GPU R6 reordered differential");
+
+    // Partial backends must reject structurally valid execution cardinalities
+    // beyond their declared bounded substrate scope before semantic publication.
+    const cpuR6OutOfScope = runCpuOutOfScope(wasm);
+    const gpuR6OutOfScope = runGpuOutOfScope(device, gpuPool, gpuRefs);
+    must(cpuR6OutOfScope.rejected && cpuR6OutOfScope.currentCount === 0 && cpuR6OutOfScope.handoff === 0,
+      "CPU R6 out-of-scope execution did not fail closed");
+    must(gpuR6OutOfScope.rejected, "GPU R6 out-of-scope execution did not fail closed");
+
     let mismatchDetected = false;
     try {
       assertReactionStateExact(cpu.after, perturbReactionState(gpu.after), "deliberate mismatch");
@@ -1181,6 +1303,14 @@ export async function runReactionBrowser(wasm, device) {
     logs.push("reaction.r5.end-structure = PASS C=68 is END");
     logs.push("reaction.r5.end-continuation = PASS K->C -> K->A remains active");
     logs.push("reaction.r5.bounded-return = PASS");
+    logs.push("reaction.r6.1-to-N.cpu = [" + cpuR6OneToN.state.join(", ") + "]");
+    logs.push("reaction.r6.1-to-N.gpu = [" + gpuR6OneToN.state.join(", ") + "]");
+    logs.push("reaction.r6.1-to-N.matched = CPU " + cpuR6OneToN.matched + " / GPU " + gpuR6OneToN.matched);
+    logs.push("reaction.r6.N-to-M.cpu = [" + cpuR6NToM.state.join(", ") + "]");
+    logs.push("reaction.r6.N-to-M.gpu = [" + gpuR6NToM.state.join(", ") + "]");
+    logs.push("reaction.r6.order-variation = PASS");
+    logs.push("reaction.r6.out-of-scope.cpu = PASS rejected count 17 > 16");
+    logs.push("reaction.r6.out-of-scope.gpu = PASS rejected count 5 > 4");
     logs.push("reaction.handles.current = CPU " + cpuRefs.current.value + " != GPU " + gpuRefs.current.value);
     logs.push("reaction.handles.successor = CPU " + cpuRefs.successor.value + " != GPU " + gpuRefs.successor.value);
     logs.push("reaction.snapshot.isolation = PASS");
@@ -1271,6 +1401,18 @@ export async function runReactionBrowser(wasm, device) {
       r5EndContinuation: true,
       r5BoundedReturn: cpuR5.boundedReturn && gpuR5.boundedReturn,
       r5NormalizedTrajectoryDifferential: true,
+      r6OneToNCpuState: cpuR6OneToN.state,
+      r6OneToNGpuState: gpuR6OneToN.state,
+      r6OneToNMatchedCpu: cpuR6OneToN.matched,
+      r6OneToNMatchedGpu: gpuR6OneToN.matched,
+      r6NToMCpuState: cpuR6NToM.state,
+      r6NToMGpuState: gpuR6NToM.state,
+      r6OrderVariationCpuState: cpuR6Reordered.state,
+      r6OrderVariationGpuState: gpuR6Reordered.state,
+      r6OrderVariation: true,
+      r6CpuOutOfScopeRejected: cpuR6OutOfScope.rejected,
+      r6GpuOutOfScopeRejected: gpuR6OutOfScope.rejected,
+      r6NormalizedDifferential: true,
       negativeControls: true,
       logs,
     };
