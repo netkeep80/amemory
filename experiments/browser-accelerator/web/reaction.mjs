@@ -282,8 +282,8 @@ const R1_WGSL = [
   "  let current_count = scope[bank];",
   "  let snapshot_count = snapshot[0];",
   "  if (current_count > CAP || snapshot_count > CAP) { status[3] = 102u; return; }",
-  "  let target = 1u - bank;",
-  "  let current_base = base(bank); let target_base = base(target);",
+  "  let target_bank = 1u - bank;",
+  "  let current_base = base(bank); let target_base = base(target_bank);",
   "  var i = 0u;",
   "  loop { if (i >= CAP) { break; } scope[target_base + i] = NONE; i = i + 1u; }",
   "  var out_count = 0u; var matched = 0u; var mi = 0u;",
@@ -314,9 +314,9 @@ const R1_WGSL = [
   "  }",
   "  status[1] = matched;",
   "  if (matched == 0u) { status[0] = 1u; status[3] = 200u + bank; return; }",
-  "  scope[target] = out_count;",
-  "  atomicStore(&published[0], target);",
-  "  status[0] = 1u; status[2] = 1u; status[3] = 210u + target;",
+  "  scope[target_bank] = out_count;",
+  "  atomicStore(&published[0], target_bank);",
+  "  status[0] = 1u; status[2] = 1u; status[3] = 210u + target_bank;",
   "}",
 ].join("\n");
 
