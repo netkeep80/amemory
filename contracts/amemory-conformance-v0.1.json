@@ -510,6 +510,68 @@
           "negativeControls": "PASS (state loss/range/extra pair detected)"
         }
       }
+    },
+    {
+      "id": "AM-C032-anum-grammar-and-canonical-roundtrip",
+      "requirements": [
+        "AM-027",
+        "AM-029"
+      ],
+      "status": "ci-and-browser-witness-required"
+    },
+    {
+      "id": "AM-C033-two-memory-structural-equivalence",
+      "requirements": [
+        "AM-028",
+        "AM-031"
+      ],
+      "status": "browser-witness-required"
+    },
+    {
+      "id": "AM-C034-local-handle-inequality-non-authority",
+      "requirements": [
+        "AM-027",
+        "AM-028",
+        "AM-031"
+      ],
+      "status": "ci-and-browser-witness-required"
+    },
+    {
+      "id": "AM-C035-canonical-local-reuse",
+      "requirements": [
+        "AM-032"
+      ],
+      "status": "ci-and-browser-witness-required"
+    },
+    {
+      "id": "AM-C036-malformed-truncated-trailing-fail-closed",
+      "requirements": [
+        "AM-030"
+      ],
+      "status": "ci-and-browser-witness-required"
+    },
+    {
+      "id": "AM-C037-foreign-local-handle-rejected",
+      "requirements": [
+        "AM-027",
+        "AM-031"
+      ],
+      "status": "ci-and-browser-witness-required"
+    },
+    {
+      "id": "AM-C038-capacity-exhaustion-atomic-fail-closed",
+      "requirements": [
+        "AM-030"
+      ],
+      "status": "ci-and-browser-witness-required"
+    },
+    {
+      "id": "AM-C039-allocation-order-preserves-portable-anum",
+      "requirements": [
+        "AM-028",
+        "AM-031"
+      ],
+      "status": "ci-and-browser-witness-required"
     }
   ],
   "backendMatrix": [],
