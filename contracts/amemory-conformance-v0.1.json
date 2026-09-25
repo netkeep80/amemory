@@ -1,0 +1,124 @@
+{
+  "schema": "amemory-conformance/v0.1",
+  "status": "candidate",
+  "accepted": false,
+  "issue": 2,
+  "contract": "amemory-contract/v0.1",
+  "normativeMts": {
+    "version": "mts-contract/v0.13",
+    "contractBlobSha": "f3ea773ad639448fe3d196d229bd6d9e29a38528",
+    "conformanceBlobSha": "de83242ae4c248727fefa791589c72c1ce31c8e0"
+  },
+  "coverageState": "planned",
+  "mandatoryVectors": [
+    {
+      "id": "AM-C001-exact-version-pin",
+      "requirements": [
+        "AM-001"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "AM-C002-two-memory-handle-independence",
+      "requirements": [
+        "AM-002",
+        "AM-003"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "AM-C003-root-start-end-pair-canonicality",
+      "requirements": [
+        "AM-004"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "AM-C004-description-does-not-authorize-target",
+      "requirements": [
+        "AM-005"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "AM-C005-grounded-1-to-0",
+      "requirements": [
+        "AM-006"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "AM-C006-grounded-1-to-1",
+      "requirements": [
+        "AM-006"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "AM-C007-grounded-1-to-N",
+      "requirements": [
+        "AM-006"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "AM-C008-grounded-N-to-M",
+      "requirements": [
+        "AM-006"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "AM-C009-duplicate-convergence",
+      "requirements": [
+        "AM-007"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "AM-C010-theory-isolation",
+      "requirements": [
+        "AM-008"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "AM-C011-schedule-variation",
+      "requirements": [
+        "AM-009"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "AM-C012-cross-backend-portable-equivalence",
+      "requirements": [
+        "AM-010"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "AM-C013-partial-backend-fails-closed-outside-scope",
+      "requirements": [
+        "AM-001",
+        "AM-009"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "AM-C014-performance-does-not-waive-semantic-mismatch",
+      "requirements": [
+        "AM-011"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "AM-C015-backend-cannot-redefine-MTS",
+      "requirements": [
+        "AM-012"
+      ],
+      "status": "planned"
+    }
+  ],
+  "backendMatrix": [],
+  "acceptanceState": "NOT_READY"
+}
