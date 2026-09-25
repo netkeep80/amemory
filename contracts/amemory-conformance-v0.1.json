@@ -844,6 +844,82 @@
         ],
         "normalizedReactionDifferential": true,
         "negativeMismatchControl": true
+      },
+      "progress": {
+        "currentSlice": "AM-C046-r1-one-reaction-cpu-webgpu",
+        "R1": "implementation-candidate-browser-witness-required",
+        "fullProfileConformance": false
+      }
+    },
+    {
+      "id": "AM-C046-r1-one-reaction-cpu-webgpu",
+      "requirements": [
+        "AM-006",
+        "AM-006A",
+        "AM-006B",
+        "AM-009",
+        "AM-010",
+        "AM-013",
+        "AM-014",
+        "AM-015",
+        "AM-041",
+        "AM-042"
+      ],
+      "status": "planned",
+      "evidenceRequired": {
+        "issue": 26,
+        "profile": "minimal-portable-amemory-execution@0.1.0",
+        "fixture": {
+          "K": "98",
+          "A": "68",
+          "B": "16898",
+          "current": "19868",
+          "relation": "16816898",
+          "successor": "19816898"
+        },
+        "machine": [
+          "reaction JS normalization positive/negative witnesses",
+          "native Rust bounded reaction witness",
+          "wasm32 compile",
+          "all prior browser-prototype regressions"
+        ],
+        "realBrowser": [
+          "Rust/WASM loaded",
+          "WebGPU available",
+          "CPU current PASS [19868]",
+          "GPU current PASS [19868]",
+          "CPU successor PASS [19816898]",
+          "GPU successor PASS [19816898]",
+          "matchedRelations CPU=GPU=1",
+          "handoffCount CPU=GPU=1",
+          "normalized CPU/GPU reaction differential PASS",
+          "CPU/GPU local handles differ",
+          "TheorySnapshot post-capture mutation isolation PASS",
+          "old Scope retained physically PASS",
+          "mismatch/no-match/foreign negative controls PASS"
+        ],
+        "coveredPortableLaws": [
+          "P01",
+          "P02",
+          "P03",
+          "P04",
+          "P05",
+          "P06",
+          "P08",
+          "P11",
+          "P12",
+          "P15"
+        ],
+        "doesNotClosePortableLaws": [
+          "P07",
+          "P09",
+          "P10",
+          "P13",
+          "P14",
+          "P16",
+          "P17"
+        ],
+        "fullReactionProfileConformance": false
       }
     }
   ],
@@ -865,10 +941,13 @@
         "incidence observation",
         "canonical pair convergence",
         "stateful pre-authorized storage",
-        "portable Anum import/export"
+        "portable Anum import/export",
+        "bounded R1 ONE reaction over local Link handles",
+        "explicit two-bank published Scope substrate",
+        "explicit reaction-start TheorySnapshot"
       ],
-      "currentScopeMechanism": "NOT_IMPLEMENTED_FOR_EXECUTION; browser state-store has persistent physical Link state but no semantic published Scope root yet",
-      "oldPhysicalLinkRetentionPolicy": "Physical Links are retained across bounded storage rounds; historical semantic Scope retention is not implemented because reaction Scope execution is not implemented yet.",
+      "currentScopeMechanism": "R1 IMPLEMENTED: bounded two-bank Scope arrays with one published bank selector; complete successor bank is prepared before selector handoff. Scope bank/selector are substrate-only.",
+      "oldPhysicalLinkRetentionPolicy": "R1 preserves the old physical Scope bank and previously materialized Links after publication; current semantic membership is determined only by the published bank.",
       "backendSubstrateBoundary": [
         "Rust local Link pool and local handles",
         "native/WASM memory layout",
@@ -883,7 +962,9 @@
       ],
       "normalizedSemanticEquivalence": [
         "canonical exported Anum",
-        "normalized canonical pair sets"
+        "normalized canonical pair sets",
+        "canonical Anum set for published reaction Scope members",
+        "matchedRelations and handoffCount for bounded R1"
       ],
       "differentialEvidence": [
         "AM-C016",
@@ -899,21 +980,21 @@
         "AM-C039"
       ],
       "profileLawCoverage": {
-        "P01": "not-yet-executed",
-        "P02": "not-yet-executed",
-        "P03": "not-yet-executed",
-        "P04": "not-yet-executed",
-        "P05": "not-yet-executed",
-        "P06": "not-yet-executed",
+        "P01": "r1-executable-browser-witness-required",
+        "P02": "r1-executable-browser-witness-required",
+        "P03": "r1-executable-browser-witness-required",
+        "P04": "r1-executable-browser-witness-required",
+        "P05": "r1-executable-browser-witness-required",
+        "P06": "r1-executable-browser-witness-required",
         "P07": "not-yet-executed",
-        "P08": "not-yet-executed",
+        "P08": "r1-executable-browser-witness-required",
         "P09": "not-yet-executed",
         "P10": "supporting-evidence-only-not-reaction-conformance",
-        "P11": "not-yet-executed",
-        "P12": "not-yet-executed",
+        "P11": "r1-executable-browser-witness-required",
+        "P12": "r1-executable-browser-witness-required",
         "P13": "not-yet-executed",
         "P14": "not-yet-executed",
-        "P15": "supporting-evidence-only-not-reaction-conformance",
+        "P15": "r1-executable-browser-witness-required",
         "P16": "not-yet-executed",
         "P17": "not-yet-executed"
       },
@@ -934,10 +1015,13 @@
         "GPU incidence kernel",
         "GPU canonicalization witness",
         "GPU stateful pre-authorized storage",
-        "GPU portable Anum local Link pool"
+        "GPU portable Anum local Link pool",
+        "bounded R1 ONE reaction over GPU-local Link handles",
+        "explicit two-bank Scope storage plus atomic published selector",
+        "explicit reaction-start TheorySnapshot buffer"
       ],
-      "currentScopeMechanism": "NOT_IMPLEMENTED_FOR_EXECUTION; GPU buffers preserve bounded physical storage state but do not yet publish semantic reaction Scope roots",
-      "oldPhysicalLinkRetentionPolicy": "Physical GPU Link/state data are retained across declared prototype rounds; historical semantic Scope retention is not yet applicable.",
+      "currentScopeMechanism": "R1 IMPLEMENTED: bounded two-bank GPU Scope buffer plus atomic<u32> published selector; complete successor bank is written before the single selector store. Buffer/index layout is substrate-only.",
+      "oldPhysicalLinkRetentionPolicy": "R1 retains the old GPU Scope bank and Link-pool topology after publication; only the atomic published selector defines current semantic membership.",
       "backendSubstrateBoundary": [
         "WebGPU buffers and WGSL kernels",
         "GPU local Link handles/indices",
@@ -957,7 +1041,9 @@
         "CPU/GPU normalized incidence vectors",
         "CPU/GPU canonical pair sets",
         "CPU/GPU state snapshots",
-        "canonical exported Anum"
+        "canonical exported Anum",
+        "canonical exported Anum set for published reaction Scope members",
+        "matchedRelations and handoffCount for bounded R1"
       ],
       "differentialEvidence": [
         "AM-C016",
@@ -978,21 +1064,21 @@
         "AM-C039"
       ],
       "profileLawCoverage": {
-        "P01": "not-yet-executed",
-        "P02": "not-yet-executed",
-        "P03": "not-yet-executed",
-        "P04": "not-yet-executed",
-        "P05": "not-yet-executed",
-        "P06": "not-yet-executed",
+        "P01": "r1-executable-browser-witness-required",
+        "P02": "r1-executable-browser-witness-required",
+        "P03": "r1-executable-browser-witness-required",
+        "P04": "r1-executable-browser-witness-required",
+        "P05": "r1-executable-browser-witness-required",
+        "P06": "r1-executable-browser-witness-required",
         "P07": "not-yet-executed",
-        "P08": "not-yet-executed",
+        "P08": "r1-executable-browser-witness-required",
         "P09": "not-yet-executed",
         "P10": "supporting-evidence-only-not-reaction-conformance",
-        "P11": "not-yet-executed",
-        "P12": "not-yet-executed",
+        "P11": "r1-executable-browser-witness-required",
+        "P12": "r1-executable-browser-witness-required",
         "P13": "not-yet-executed",
         "P14": "not-yet-executed",
-        "P15": "supporting-evidence-only-not-reaction-conformance",
+        "P15": "r1-executable-browser-witness-required",
         "P16": "not-yet-executed",
         "P17": "not-yet-executed"
       },

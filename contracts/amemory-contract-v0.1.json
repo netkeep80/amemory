@@ -242,6 +242,14 @@
     {
       "id": "AM-040",
       "statement": "The accepted MTS v0.13 foundation pin and the post-v0.13 A-memory execution-profile pin MUST remain independently immutable and independently upgradable under explicit governance."
+    },
+    {
+      "id": "AM-041",
+      "statement": "Any backend claiming an executable reaction slice MUST implement an explicit published-current-Scope substrate and an explicit reaction-start TheorySnapshot boundary for that slice; host cursors, bank numbers, local handles and storage layout remain substrate details and MUST NOT become semantic authority."
+    },
+    {
+      "id": "AM-042",
+      "statement": "Cross-backend reaction evidence MUST compare normalized portable structural observations of current/successor Scope membership, matched relations and publication handoff, and MUST include negative mismatch/no-match controls; backend-local handles MUST NOT be compared as semantic output."
     }
   ],
   "acceptance": {
@@ -268,7 +276,7 @@
     "portableLawCount": 17,
     "semanticExtensionRequired": false,
     "acceptedMtsFoundationMutated": false,
-    "currentImplementationClaim": "partial-pre-reaction",
+    "currentImplementationClaim": "partial-r1-one-reaction-candidate",
     "fullReactionProfileConformanceClaimed": false
   }
 }
