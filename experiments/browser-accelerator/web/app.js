@@ -92,6 +92,20 @@ const ui = {
   reactionR4Visibility: document.querySelector("#reaction-r4-visibility"),
   reactionR4Stale: document.querySelector("#reaction-r4-stale"),
   reactionR4Diff: document.querySelector("#reaction-r4-diff"),
+  reactionR5S0: document.querySelector("#reaction-r5-s0"),
+  reactionR5S1: document.querySelector("#reaction-r5-s1"),
+  reactionR5S2: document.querySelector("#reaction-r5-s2"),
+  reactionR5S3: document.querySelector("#reaction-r5-s3"),
+  reactionR5S4: document.querySelector("#reaction-r5-s4"),
+  reactionR5Snapshot: document.querySelector("#reaction-r5-snapshot"),
+  reactionR5Matched: document.querySelector("#reaction-r5-matched"),
+  reactionR5Handoff: document.querySelector("#reaction-r5-handoff"),
+  reactionR5Quiescence: document.querySelector("#reaction-r5-quiescence"),
+  reactionR5Recurrence: document.querySelector("#reaction-r5-recurrence"),
+  reactionR5EndStructure: document.querySelector("#reaction-r5-end-structure"),
+  reactionR5EndContinuation: document.querySelector("#reaction-r5-end-continuation"),
+  reactionR5Bounded: document.querySelector("#reaction-r5-bounded"),
+  reactionR5Diff: document.querySelector("#reaction-r5-diff"),
   details: document.querySelector("#details"),
 };
 
@@ -883,6 +897,10 @@ async function main() {
       ui.reactionR4TMatched, ui.reactionR4THandoff, ui.reactionR4T1Snapshot, ui.reactionR4T1Before,
       ui.reactionR4T1After, ui.reactionR4T1Matched, ui.reactionR4T1Handoff, ui.reactionR4Isolation,
       ui.reactionR4Visibility, ui.reactionR4Stale, ui.reactionR4Diff,
+      ui.reactionR5S0, ui.reactionR5S1, ui.reactionR5S2, ui.reactionR5S3, ui.reactionR5S4,
+      ui.reactionR5Snapshot, ui.reactionR5Matched, ui.reactionR5Handoff, ui.reactionR5Quiescence,
+      ui.reactionR5Recurrence, ui.reactionR5EndStructure, ui.reactionR5EndContinuation,
+      ui.reactionR5Bounded, ui.reactionR5Diff,
     ]) report(element, wasm ? "WAITING_FOR_GPU" : "NOT_RUN", false);
     return;
   }
@@ -1127,6 +1145,46 @@ async function main() {
       report(ui.reactionR4Visibility, "PASS", reaction.r4NextReactionVisibility);
       report(ui.reactionR4Stale, "PASS (new admission invisible without new snapshot)", reaction.r4StaleSnapshotControl);
       report(ui.reactionR4Diff, "PASS", reaction.r4NormalizedTrajectoryDifferential);
+      const r5StateLabel = (index) =>
+        "PASS (CPU [" + reaction.r5StatesCpu[index].join(", ") + "] / GPU [" +
+        reaction.r5StatesGpu[index].join(", ") + "])";
+      report(ui.reactionR5S0, r5StateLabel(0), true);
+      report(ui.reactionR5S1, r5StateLabel(1), true);
+      report(ui.reactionR5S2, r5StateLabel(2), true);
+      report(ui.reactionR5S3, r5StateLabel(3), true);
+      report(ui.reactionR5S4, r5StateLabel(4), true);
+      report(
+        ui.reactionR5Snapshot,
+        "PASS (CPU " + reaction.r5SnapshotCountCpu + " / GPU " + reaction.r5SnapshotCountGpu + ")",
+        reaction.r5SnapshotCountCpu === 2 && reaction.r5SnapshotCountGpu === 2,
+      );
+      report(
+        ui.reactionR5Matched,
+        "PASS (CPU [" + reaction.r5MatchedCpu.join(", ") + "] / GPU [" + reaction.r5MatchedGpu.join(", ") + "])",
+        reaction.r5MatchedCpu.every((value) => value === 1) &&
+          reaction.r5MatchedGpu.every((value) => value === 1),
+      );
+      report(
+        ui.reactionR5Handoff,
+        "PASS (CPU [" + reaction.r5HandoffCpu.join(", ") + "] / GPU [" + reaction.r5HandoffGpu.join(", ") + "])",
+        reaction.r5HandoffCpu.every((value) => value === 1) &&
+          reaction.r5HandoffGpu.every((value) => value === 1),
+      );
+      report(
+        ui.reactionR5Quiescence,
+        "PASS (CPU [" + reaction.r5QuiescentCpu.join(", ") + "] / GPU [" + reaction.r5QuiescentGpu.join(", ") + "])",
+        reaction.r5QuiescentCpu.every((value) => value === false) &&
+          reaction.r5QuiescentGpu.every((value) => value === false),
+      );
+      report(ui.reactionR5Recurrence, "PASS (S0=S2=S4, S1=S3)", reaction.r5Recurrence);
+      report(ui.reactionR5EndStructure, "PASS (C=68 is structural END)", reaction.r5EndStructure);
+      report(
+        ui.reactionR5EndContinuation,
+        "PASS (K⟼C -> K⟼A remains active)",
+        reaction.r5EndContinuation,
+      );
+      report(ui.reactionR5Bounded, "PASS (4 active steps, witness returned)", reaction.r5BoundedReturn);
+      report(ui.reactionR5Diff, "PASS", reaction.r5NormalizedTrajectoryDifferential);
       for (const line of reaction.logs) log(line);
     } catch (error) {
       for (const element of [
@@ -1143,10 +1201,14 @@ async function main() {
         ui.reactionR4TMatched, ui.reactionR4THandoff, ui.reactionR4T1Snapshot, ui.reactionR4T1Before,
         ui.reactionR4T1After, ui.reactionR4T1Matched, ui.reactionR4T1Handoff, ui.reactionR4Isolation,
         ui.reactionR4Visibility, ui.reactionR4Stale, ui.reactionR4Diff,
+        ui.reactionR5S0, ui.reactionR5S1, ui.reactionR5S2, ui.reactionR5S3, ui.reactionR5S4,
+        ui.reactionR5Snapshot, ui.reactionR5Matched, ui.reactionR5Handoff, ui.reactionR5Quiescence,
+        ui.reactionR5Recurrence, ui.reactionR5EndStructure, ui.reactionR5EndContinuation,
+        ui.reactionR5Bounded, ui.reactionR5Diff,
       ]) {
         if (element.textContent === "WAITING") report(element, "FAIL", false);
       }
-      log("Reaction R1/R2/R3/R4 error: " + (error?.stack || error));
+      log("Reaction R1/R2/R3/R4/R5 error: " + (error?.stack || error));
     }
   }
 

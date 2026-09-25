@@ -262,6 +262,10 @@
     {
       "id": "AM-045",
       "statement": "A backend claiming P14 support MUST keep live Theory admissions distinct from the reaction-start TheorySnapshot: an admission added after snapshot_t MUST NOT execute in reaction t, and MUST become executable only after an explicit new snapshot at reaction t+1; physical pre-materialization or live storage visibility alone MUST NOT grant same-reaction authority."
+    },
+    {
+      "id": "AM-046",
+      "statement": "A backend claiming P16/P17 support MUST allow bounded observation of active semantic recurrence under an unchanged TheorySnapshot without conflating recurrence with quiescence, and MUST NOT treat structural END as a global halt condition when an admitted continuation relation remains applicable; proof of nontermination MUST use a returning bounded witness rather than an intentionally non-returning runtime."
     }
   ],
   "acceptance": {
@@ -288,7 +292,7 @@
     "portableLawCount": 17,
     "semanticExtensionRequired": false,
     "acceptedMtsFoundationMutated": false,
-    "currentImplementationClaim": "partial-r1-r2-r3-green-r4-theory-tplus1-candidate",
+    "currentImplementationClaim": "partial-r1-r2-r3-r4-green-r5-recurrence-end-candidate",
     "fullReactionProfileConformanceClaimed": false
   }
 }

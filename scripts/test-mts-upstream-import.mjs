@@ -461,8 +461,8 @@ console.log("MTS_AND_AMEMORY_PROFILE_IMPORT_NEGATIVE_WITNESSES=GREEN");
     for (const id of ["P16","P17"]) {
       assert.equal(
         backend.profileLawCoverage[id],
-        "not-yet-executed",
-        `${backendId} must not overclaim ${id}`,
+        "r5-executable-browser-witness-required",
+        `${backendId} R5 coverage mismatch for ${id}`,
       );
     }
   }
@@ -480,6 +480,8 @@ console.log("MTS_AND_AMEMORY_PROFILE_IMPORT_NEGATIVE_WITNESSES=GREEN");
   assert.equal(c045?.progress?.R2, "green-real-browser-differential");
   assert.equal(c045?.progress?.R3, "green-real-browser-differential");
   assert.equal(c045?.progress?.R4, "green-real-browser-differential");
+  assert.equal(c045?.progress?.R5, "implementation-candidate-browser-witness-required");
+  assert.equal(c045?.progress?.currentSlice, "AM-C050-r5-recurrence-and-end-not-halt");
   assert.equal(c045?.progress?.fullProfileConformance, false);
   assert(c045?.progress?.completedSlices?.includes("AM-C046-r1-one-reaction-cpu-webgpu"));
   assert(c045?.progress?.completedSlices?.includes("AM-C047-r2-no-admitted-relation-quiescence"));
@@ -535,6 +537,14 @@ console.log("MTS_AND_AMEMORY_PROFILE_IMPORT_NEGATIVE_WITNESSES=GREEN");
   assert.deepEqual(c049?.evidence?.coveredPortableLaws, ["P14"]);
   assert.deepEqual(c049?.evidence?.doesNotClosePortableLaws, ["P16", "P17"]);
   assert.equal(c049?.evidence?.fullReactionProfileConformance, false);
+
+  const c050 = conformance.mandatoryVectors.find(
+    (vector) => vector.id === "AM-C050-r5-recurrence-and-end-not-halt",
+  );
+  assert.equal(c050?.status, "planned");
+  assert.deepEqual(c050?.evidenceRequired?.coveredPortableLaws, ["P16", "P17"]);
+  assert.deepEqual(c050?.evidenceRequired?.doesNotClosePortableLaws, []);
+  assert.equal(c050?.evidenceRequired?.fullReactionProfileConformance, false);
 
   assert.match(readme, /minimal-portable-amemory-execution/);
   assert.match(readme, /FULL_REACTION_PROFILE_CONFORMANCE = FALSE/);
