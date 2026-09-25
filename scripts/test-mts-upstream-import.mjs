@@ -442,8 +442,8 @@ console.log("MTS_AND_AMEMORY_PROFILE_IMPORT_NEGATIVE_WITNESSES=GREEN");
     for (const id of ["P07","P13"]) {
       assert.equal(
         backend.profileLawCoverage[id],
-        "r2-executable-browser-witness-required",
-        `${backendId} R2 coverage mismatch for ${id}`,
+        "r2-green-real-browser-differential",
+        `${backendId} R2 GREEN coverage mismatch for ${id}`,
       );
     }
     assert.equal(
@@ -469,10 +469,11 @@ console.log("MTS_AND_AMEMORY_PROFILE_IMPORT_NEGATIVE_WITNESSES=GREEN");
   );
   assert.equal(c045?.status, "planned");
   assert.equal(c045?.progress?.R1, "green-real-browser-differential");
-  assert.equal(c045?.progress?.R2, "implementation-candidate-browser-witness-required");
-  assert.equal(c045?.progress?.currentSlice, "AM-C047-r2-no-admitted-relation-quiescence");
+  assert.equal(c045?.progress?.R2, "green-real-browser-differential");
   assert.equal(c045?.progress?.fullProfileConformance, false);
   assert(c045?.progress?.completedSlices?.includes("AM-C046-r1-one-reaction-cpu-webgpu"));
+  assert(c045?.progress?.completedSlices?.includes("AM-C047-r2-no-admitted-relation-quiescence"));
+  assert.deepEqual(c045?.progress?.remainingPortableLaws, ["P09","P10","P14","P16","P17"]);
 
   const c046 = conformance.mandatoryVectors.find(
     (vector) => vector.id === "AM-C046-r1-one-reaction-cpu-webgpu",
@@ -487,9 +488,13 @@ console.log("MTS_AND_AMEMORY_PROFILE_IMPORT_NEGATIVE_WITNESSES=GREEN");
   const c047 = conformance.mandatoryVectors.find(
     (vector) => vector.id === "AM-C047-r2-no-admitted-relation-quiescence",
   );
-  assert.equal(c047?.status, "planned");
-  assert.deepEqual(c047?.evidenceRequired?.coveredPortableLaws, ["P07", "P13"]);
-  assert.equal(c047?.evidenceRequired?.fullReactionProfileConformance, false);
+  assert.equal(c047?.status, "green");
+  assert.equal(c047?.evidence?.mergedMainSha, "e02b3be9e28dfaba445d121e920aea2636bd1996");
+  assert.equal(c047?.evidence?.observed?.normalizedDifferential, "PASS");
+  assert.deepEqual(c047?.evidence?.observed?.quiescent, { cpu: true, gpu: true });
+  assert.deepEqual(c047?.evidence?.observed?.invalidFailureQuiescent, { cpu: false, gpu: false });
+  assert.deepEqual(c047?.evidence?.coveredPortableLaws, ["P07", "P13"]);
+  assert.equal(c047?.evidence?.fullReactionProfileConformance, false);
 
   assert.match(readme, /minimal-portable-amemory-execution/);
   assert.match(readme, /FULL_REACTION_PROFILE_CONFORMANCE = FALSE/);
