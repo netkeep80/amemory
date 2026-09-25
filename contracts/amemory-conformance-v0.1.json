@@ -827,7 +827,7 @@
           "AM-C046"
         ],
         "fullReactionProfileConformanceClaimed": false,
-        "profileLawCoverageRule": "R1 is GREEN for P01,P02,P03,P04,P05,P06,P08,P11,P12,P15; R2 is GREEN for P07/P13; R3 is GREEN for P09/P10; R4 is GREEN for P14; R5 has executable candidate evidence for P16/P17 but requires a real browser witness."
+        "profileLawCoverageRule": "R1 is GREEN for P01,P02,P03,P04,P05,P06,P08,P11,P12,P15; R2 is GREEN for P07/P13; R3 is GREEN for P09/P10; R4 is GREEN for P14; R5 is GREEN for P16/P17. Together these slices cover P01-P17 on both rust-reference-cpu-wasm and browser-webgpu."
       }
     },
     {
@@ -836,17 +836,7 @@
         "AM-037",
         "AM-038"
       ],
-      "status": "planned",
-      "evidenceRequired": {
-        "profile": "minimal-portable-amemory-execution@0.1.0",
-        "laws": "P01-P17",
-        "backends": [
-          "rust-reference-cpu-wasm",
-          "browser-webgpu"
-        ],
-        "normalizedReactionDifferential": true,
-        "negativeMismatchControl": true
-      },
+      "status": "green",
       "progress": {
         "completedSlices": [
           "AM-C046-r1-one-reaction-cpu-webgpu",
@@ -865,6 +855,50 @@
         "fullProfileConformance": false,
         "currentSlice": "AM-C050-r5-recurrence-and-end-not-halt",
         "R5": "implementation-candidate-browser-witness-required"
+      },
+      "evidence": {
+        "profile": "minimal-portable-amemory-execution@0.1.0",
+        "profileVersion": "0.1.0",
+        "profilePinCommit": "af4e3dadbb9857fba7239a58f79ed2da59bc5c42",
+        "foundationVersion": "mts-contract/v0.13",
+        "foundationPinCommit": "440caf09558d4ff5cfda11805cb3ef97b48d1ad5",
+        "backends": [
+          "rust-reference-cpu-wasm",
+          "browser-webgpu"
+        ],
+        "completedSlices": [
+          "AM-C046-r1-one-reaction-cpu-webgpu",
+          "AM-C047-r2-no-admitted-relation-quiescence",
+          "AM-C048-r3-zero-and-duplicate-convergence",
+          "AM-C049-r4-theory-admission-tplus1",
+          "AM-C050-r5-recurrence-and-end-not-halt"
+        ],
+        "portableLawCoverage": {
+          "P01": "AM-C046",
+          "P02": "AM-C046",
+          "P03": "AM-C046",
+          "P04": "AM-C046",
+          "P05": "AM-C046",
+          "P06": "AM-C046",
+          "P07": "AM-C047",
+          "P08": "AM-C046",
+          "P09": "AM-C048",
+          "P10": "AM-C048",
+          "P11": "AM-C046",
+          "P12": "AM-C046",
+          "P13": "AM-C047",
+          "P14": "AM-C049",
+          "P15": "AM-C046",
+          "P16": "AM-C050",
+          "P17": "AM-C050"
+        },
+        "realBrowserDifferential": true,
+        "normalizedReactionDifferential": "PASS",
+        "negativeMismatchControls": "PASS across R1-R5",
+        "localHandlesNonSemantic": true,
+        "allPortableLawsCovered": true,
+        "fullReactionProfileConformance": true,
+        "note": "This GREEN applies to the pinned minimal portable A-memory execution profile P01-P17 on the two declared prototype backends. Repository-wide acceptanceState remains independent."
       }
     },
     {
@@ -1224,9 +1258,13 @@
         "AM-043",
         "AM-046"
       ],
-      "status": "planned",
-      "evidenceRequired": {
+      "status": "green",
+      "evidence": {
         "issue": 41,
+        "implementationPr": 42,
+        "mergedMainSha": "df1c119709121e27fcb672fb5aeccc17f5b4391c",
+        "browserWitnessComment": "https://github.com/netkeep80/amemory/issues/41#issuecomment-5839573222",
+        "pages": "https://netkeep80.github.io/amemory/",
         "profile": "minimal-portable-amemory-execution@0.1.0",
         "fixtures": {
           "context": "998",
@@ -1238,32 +1276,95 @@
           "relationEndStart": "16898",
           "observationSteps": 4
         },
-        "machine": [
-          "reaction JS R5 recurrence-through-END fixture witness",
-          "native Rust four-step active recurrence witness",
-          "structural END topology assertion",
-          "bounded-return witness",
-          "wasm32 compile",
-          "all prior browser-prototype regressions"
-        ],
-        "realBrowser": [
-          "Rust/WASM loaded",
-          "WebGPU available",
-          "S0 CPU=GPU=[199898]",
-          "S1 CPU=GPU=[199868]",
-          "S2 CPU=GPU=[199898]",
-          "S3 CPU=GPU=[199868]",
-          "S4 CPU=GPU=[199898]",
-          "fixed TheorySnapshot count CPU=GPU=2",
-          "all four steps matchedRelations CPU=GPU=1",
-          "all four steps handoffCount CPU=GPU=1",
-          "all four steps quiescent CPU=GPU=false",
-          "semantic recurrence S0=S2=S4 and S1=S3 PASS",
-          "C=68 structural END PASS",
-          "END continuation K->C -> K->A remains active PASS",
-          "bounded witness returns PASS",
-          "normalized CPU/GPU R5 trajectory differential PASS"
-        ],
+        "observed": {
+          "rustWasm": "LOADED",
+          "webgpu": "WEBGPU_AVAILABLE",
+          "statesCpu": [
+            [
+              "199898"
+            ],
+            [
+              "199868"
+            ],
+            [
+              "199898"
+            ],
+            [
+              "199868"
+            ],
+            [
+              "199898"
+            ]
+          ],
+          "statesGpu": [
+            [
+              "199898"
+            ],
+            [
+              "199868"
+            ],
+            [
+              "199898"
+            ],
+            [
+              "199868"
+            ],
+            [
+              "199898"
+            ]
+          ],
+          "snapshotCount": {
+            "cpu": 2,
+            "gpu": 2
+          },
+          "matchedRelations": {
+            "cpu": [
+              1,
+              1,
+              1,
+              1
+            ],
+            "gpu": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "handoffCount": {
+            "cpu": [
+              1,
+              1,
+              1,
+              1
+            ],
+            "gpu": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "quiescent": {
+            "cpu": [
+              false,
+              false,
+              false,
+              false
+            ],
+            "gpu": [
+              false,
+              false,
+              false,
+              false
+            ]
+          },
+          "recurrence": "PASS S0=S2=S4 and S1=S3",
+          "endStructure": "PASS C=68 is END",
+          "endContinuation": "PASS K->C -> K->A remains active",
+          "boundedReturn": "PASS",
+          "normalizedTrajectoryDifferential": "PASS"
+        },
         "coveredPortableLaws": [
           "P16",
           "P17"
@@ -1339,7 +1440,8 @@
         "AM-C046",
         "AM-C047",
         "AM-C048",
-        "AM-C049"
+        "AM-C049",
+        "AM-C050"
       ],
       "profileLawCoverage": {
         "P01": "r1-green-real-browser-differential",
@@ -1357,10 +1459,10 @@
         "P13": "r2-green-real-browser-differential",
         "P14": "r4-green-real-browser-differential",
         "P15": "r1-green-real-browser-differential",
-        "P16": "r5-executable-browser-witness-required",
-        "P17": "r5-executable-browser-witness-required"
+        "P16": "r5-green-real-browser-differential",
+        "P17": "r5-green-real-browser-differential"
       },
-      "fullProfileConformance": false
+      "fullProfileConformance": true
     },
     {
       "backendId": "browser-webgpu",
@@ -1435,7 +1537,8 @@
         "AM-C046",
         "AM-C047",
         "AM-C048",
-        "AM-C049"
+        "AM-C049",
+        "AM-C050"
       ],
       "profileLawCoverage": {
         "P01": "r1-green-real-browser-differential",
@@ -1453,10 +1556,10 @@
         "P13": "r2-green-real-browser-differential",
         "P14": "r4-green-real-browser-differential",
         "P15": "r1-green-real-browser-differential",
-        "P16": "r5-executable-browser-witness-required",
-        "P17": "r5-executable-browser-witness-required"
+        "P16": "r5-green-real-browser-differential",
+        "P17": "r5-green-real-browser-differential"
       },
-      "fullProfileConformance": false
+      "fullProfileConformance": true
     },
     {
       "backendId": "future-accelerator-family",
