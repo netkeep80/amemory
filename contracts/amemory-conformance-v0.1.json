@@ -17,7 +17,16 @@
       "requirements": [
         "AM-001"
       ],
-      "status": "planned"
+      "status": "green",
+      "reconciliation": {
+        "issue": 45,
+        "classification": "PROVEN_BY_EXISTING_GREEN_EVIDENCE",
+        "supportingVectors": [
+          "AM-C040-independent-foundation-and-profile-pins",
+          "AM-C041-d7-backend-declarations-complete"
+        ],
+        "note": "Exact accepted MTS foundation and execution-profile revisions are pinned independently and verifier-guarded."
+      }
     },
     {
       "id": "AM-C002-two-memory-handle-independence",
@@ -25,77 +34,174 @@
         "AM-002",
         "AM-003"
       ],
-      "status": "planned"
+      "status": "green",
+      "reconciliation": {
+        "issue": 45,
+        "classification": "PROVEN_BY_EXISTING_GREEN_EVIDENCE",
+        "supportingVectors": [
+          "AM-C033-two-memory-structural-equivalence",
+          "AM-C034-local-handle-inequality-non-authority",
+          "AM-C039-allocation-order-preserves-portable-anum"
+        ],
+        "note": "Independent local handles differ while canonical exported Anum remains equal."
+      }
     },
     {
       "id": "AM-C003-root-start-end-pair-canonicality",
       "requirements": [
         "AM-004"
       ],
-      "status": "planned"
+      "status": "green",
+      "reconciliation": {
+        "issue": 45,
+        "classification": "PROVEN_BY_EXISTING_GREEN_EVIDENCE",
+        "supportingVectors": [
+          "AM-C032-anum-grammar-and-canonical-roundtrip",
+          "AM-C033-two-memory-structural-equivalence",
+          "AM-C035-canonical-local-reuse"
+        ],
+        "note": "The canonical 19868 witness explicitly contains 8=ROOT, 98=START(ROOT), 68=END(ROOT), and 19868=PAIR(98,68)."
+      }
     },
     {
       "id": "AM-C004-description-does-not-authorize-target",
       "requirements": [
         "AM-005"
       ],
-      "status": "planned"
+      "status": "green",
+      "reconciliation": {
+        "issue": 45,
+        "classification": "PROVEN_BY_EXISTING_GREEN_EVIDENCE",
+        "supportingVectors": [
+          "AM-C022-existing-pair-never-new-commit",
+          "AM-C029-preauthorized-only-and-range-fail-closed"
+        ],
+        "note": "Candidate/description presence is separated from semantic storage authority; only pre-authorized commits cross the storage boundary."
+      }
     },
     {
       "id": "AM-C005-grounded-1-to-0",
       "requirements": [
         "AM-006"
       ],
-      "status": "planned"
+      "status": "green",
+      "reconciliation": {
+        "issue": 45,
+        "classification": "PROVEN_BY_EXISTING_GREEN_EVIDENCE",
+        "supportingVectors": [
+          "AM-C048-r3-zero-and-duplicate-convergence"
+        ],
+        "note": "R3 ZERO witnesses one admitted relation with an empty semantic successor contribution."
+      }
     },
     {
       "id": "AM-C006-grounded-1-to-1",
       "requirements": [
         "AM-006"
       ],
-      "status": "planned"
+      "status": "green",
+      "reconciliation": {
+        "issue": 45,
+        "classification": "PROVEN_BY_EXISTING_GREEN_EVIDENCE",
+        "supportingVectors": [
+          "AM-C046-r1-one-reaction-cpu-webgpu"
+        ],
+        "note": "R1 witnesses K->A with A->B producing exactly K->B."
+      }
     },
     {
       "id": "AM-C007-grounded-1-to-N",
       "requirements": [
         "AM-006"
       ],
-      "status": "planned"
+      "status": "planned",
+      "reconciliation": {
+        "issue": 45,
+        "classification": "NEEDS_NEW_EXECUTABLE_WITNESS",
+        "supportingVectors": [],
+        "note": "Requires a direct distinct MANY witness: one current truth with at least two admitted non-zero outputs."
+      }
     },
     {
       "id": "AM-C008-grounded-N-to-M",
       "requirements": [
         "AM-006"
       ],
-      "status": "planned"
+      "status": "planned",
+      "reconciliation": {
+        "issue": 45,
+        "classification": "NEEDS_NEW_EXECUTABLE_WITNESS",
+        "supportingVectors": [],
+        "note": "Requires a direct multi-current witness whose normalized successor has multiple distinct members."
+      }
     },
     {
       "id": "AM-C009-duplicate-convergence",
       "requirements": [
         "AM-007"
       ],
-      "status": "planned"
+      "status": "green",
+      "reconciliation": {
+        "issue": 45,
+        "classification": "PROVEN_BY_EXISTING_GREEN_EVIDENCE",
+        "supportingVectors": [
+          "AM-C020-candidate-canonicalization-flags",
+          "AM-C021-normalized-new-pair-set",
+          "AM-C048-r3-zero-and-duplicate-convergence"
+        ],
+        "note": "Duplicate physical/logical productions converge to one canonical semantic successor."
+      }
     },
     {
       "id": "AM-C010-theory-isolation",
       "requirements": [
         "AM-008"
       ],
-      "status": "planned"
+      "status": "green",
+      "reconciliation": {
+        "issue": 45,
+        "classification": "PROVEN_BY_EXISTING_GREEN_EVIDENCE",
+        "supportingVectors": [
+          "AM-C046-r1-one-reaction-cpu-webgpu",
+          "AM-C049-r4-theory-admission-tplus1"
+        ],
+        "note": "Reaction-start TheorySnapshot isolation and next-reaction visibility are directly witnessed."
+      }
     },
     {
       "id": "AM-C011-schedule-variation",
       "requirements": [
         "AM-009"
       ],
-      "status": "planned"
+      "status": "planned",
+      "reconciliation": {
+        "issue": 45,
+        "classification": "NEEDS_NEW_EXECUTABLE_WITNESS",
+        "supportingVectors": [],
+        "note": "Candidate reorder evidence is insufficient; requires reaction current/relation processing-order permutation with identical normalized result."
+      }
     },
     {
       "id": "AM-C012-cross-backend-portable-equivalence",
       "requirements": [
         "AM-010"
       ],
-      "status": "planned"
+      "status": "green",
+      "reconciliation": {
+        "issue": 45,
+        "classification": "PROVEN_BY_EXISTING_GREEN_EVIDENCE",
+        "supportingVectors": [
+          "AM-C016-cpu-gpu-incidence-equivalence",
+          "AM-C030-cpu-gpu-state-step-equivalence",
+          "AM-C033-two-memory-structural-equivalence",
+          "AM-C046-r1-one-reaction-cpu-webgpu",
+          "AM-C047-r2-no-admitted-relation-quiescence",
+          "AM-C048-r3-zero-and-duplicate-convergence",
+          "AM-C049-r4-theory-admission-tplus1",
+          "AM-C050-r5-recurrence-and-end-not-halt"
+        ],
+        "note": "Normalized portable observations agree across the declared CPU/WASM and WebGPU prototype surfaces for all directly witnessed slices."
+      }
     },
     {
       "id": "AM-C013-partial-backend-fails-closed-outside-scope",
@@ -103,21 +209,45 @@
         "AM-001",
         "AM-009"
       ],
-      "status": "planned"
+      "status": "planned",
+      "reconciliation": {
+        "issue": 45,
+        "classification": "NEEDS_NEW_EXECUTABLE_WITNESS",
+        "supportingVectors": [],
+        "note": "Malformed/foreign/capacity controls exist, but a direct semantically valid operation beyond each backend's declared bounded execution scope is still required."
+      }
     },
     {
       "id": "AM-C014-performance-does-not-waive-semantic-mismatch",
       "requirements": [
         "AM-011"
       ],
-      "status": "planned"
+      "status": "green",
+      "reconciliation": {
+        "issue": 45,
+        "classification": "PROVEN_BY_EXISTING_GREEN_EVIDENCE",
+        "supportingVectors": [
+          "AM-C017-differential-mismatch-fails-closed",
+          "AM-C018-negative-control-detects-perturbation"
+        ],
+        "note": "Semantic mismatch fails closed independently of performance; performance is not acceptance evidence."
+      }
     },
     {
       "id": "AM-C015-backend-cannot-redefine-MTS",
       "requirements": [
         "AM-012"
       ],
-      "status": "planned"
+      "status": "green",
+      "reconciliation": {
+        "issue": 45,
+        "classification": "PROVEN_BY_EXISTING_GREEN_EVIDENCE",
+        "supportingVectors": [
+          "AM-C040-independent-foundation-and-profile-pins",
+          "AM-C041-d7-backend-declarations-complete"
+        ],
+        "note": "Normative authority remains exact-pinned anum_docs; backend declarations and implementation consensus are non-normative."
+      }
     },
     {
       "id": "AM-C016-cpu-gpu-incidence-equivalence",
@@ -799,7 +929,7 @@
       "evidence": {
         "issue": 26,
         "result": "R1 now has explicit published current-Scope mechanisms in Rust/WASM and WebGPU; old physical Scope/Links remain separately retained and are not inferred as current semantic membership.",
-        "fullReactionProfileConformanceClaimed": false
+        "historicalScopeAtIssue26": "R1 established the current-Scope/physical-history separation; later R2-R5 reuse the same publication boundary."
       }
     },
     {
@@ -823,11 +953,11 @@
       "evidence": {
         "issue": 26,
         "supportingEvidence": [
-          "AM-C016..AM-C040",
-          "AM-C046"
+          "AM-C016..AM-C043",
+          "AM-C046..AM-C050"
         ],
-        "fullReactionProfileConformanceClaimed": false,
-        "profileLawCoverageRule": "R1 is GREEN for P01,P02,P03,P04,P05,P06,P08,P11,P12,P15; R2 is GREEN for P07/P13; R3 is GREEN for P09/P10; R4 is GREEN for P14; R5 is GREEN for P16/P17. Together these slices cover P01-P17 on both rust-reference-cpu-wasm and browser-webgpu."
+        "profileLawCoverageRule": "R1-R5 directly witness P01-P05,P07,P09-P14,P16-P17. Global audit #45 found that P06/P08 need a distinct MANY/exhaustiveness witness and P15 needs reaction-order variation; full-profile conformance remains pending until those direct witnesses exist.",
+        "currentAuditIssue": 45
       }
     },
     {
@@ -836,7 +966,7 @@
         "AM-037",
         "AM-038"
       ],
-      "status": "green",
+      "status": "planned",
       "evidence": {
         "profile": "minimal-portable-amemory-execution@0.1.0",
         "profileVersion": "0.1.0",
@@ -860,26 +990,32 @@
           "P03": "AM-C046",
           "P04": "AM-C046",
           "P05": "AM-C046",
-          "P06": "AM-C046",
+          "P06": "PENDING_DIRECT_MANY_EXHAUSTIVENESS_WITNESS",
           "P07": "AM-C047",
-          "P08": "AM-C046",
+          "P08": "PENDING_DIRECT_MANY_ALL_OUTPUTS_WITNESS",
           "P09": "AM-C048",
           "P10": "AM-C048",
           "P11": "AM-C046",
           "P12": "AM-C046",
           "P13": "AM-C047",
           "P14": "AM-C049",
-          "P15": "AM-C046",
+          "P15": "PENDING_REACTION_ORDER_VARIATION_WITNESS",
           "P16": "AM-C050",
           "P17": "AM-C050"
         },
         "realBrowserDifferential": true,
-        "normalizedReactionDifferential": "PASS",
-        "negativeMismatchControls": "PASS across R1-R5",
+        "normalizedReactionDifferential": "PASS for directly witnessed R1-R5 slices",
+        "negativeMismatchControls": "PASS across directly witnessed R1-R5 slices",
         "localHandlesNonSemantic": true,
-        "allPortableLawsCovered": true,
-        "fullReactionProfileConformance": true,
-        "note": "This GREEN applies to the pinned minimal portable A-memory execution profile P01-P17 on the two declared prototype backends. Repository-wide acceptanceState remains independent."
+        "allPortableLawsCovered": false,
+        "fullReactionProfileConformance": false,
+        "note": "Global evidence audit #45 retired the previous full-profile GREEN claim: R1 proves ONE but not distinct MANY/exhaustiveness, and existing candidate reorder evidence is not a reaction-order witness.",
+        "auditIssue": 45,
+        "auditGaps": [
+          "P06_EXHAUST_ALL_ADMITTED_RELATIONS",
+          "P08_ADMITTED_RELATIONS_REPLACE_BY_ALL_OUTPUTS",
+          "P15_PHYSICAL_SCHEDULE_AND_LOCAL_ADDRESSES_ARE_NONSEMANTIC"
+        ]
       }
     },
     {
@@ -966,18 +1102,18 @@
           "P03",
           "P04",
           "P05",
-          "P06",
-          "P08",
           "P11",
-          "P12",
-          "P15"
+          "P12"
         ],
         "doesNotClosePortableLaws": [
+          "P06",
           "P07",
+          "P08",
           "P09",
           "P10",
           "P13",
           "P14",
+          "P15",
           "P16",
           "P17"
         ],
@@ -1353,6 +1489,24 @@
         "doesNotClosePortableLaws": [],
         "fullReactionProfileConformance": false
       }
+    },
+    {
+      "id": "AM-C051-storage-plus-execution-integrity",
+      "requirements": [
+        "AM-000"
+      ],
+      "status": "green",
+      "evidence": {
+        "issue": 45,
+        "supportingVectors": [
+          "AM-C025-state-persists-across-rounds",
+          "AM-C046-r1-one-reaction-cpu-webgpu",
+          "AM-C049-r4-theory-admission-tplus1",
+          "AM-C050-r5-recurrence-and-end-not-halt"
+        ],
+        "result": "The same bounded A-network substrate has executable persistence/state evidence and Link-carried reaction evidence; storage-only or detached execution is not accepted as a complete backend claim.",
+        "acceptanceGuard": "Every contract requirement must have at least one GREEN mandatory vector before repository acceptance can become READY."
+      }
     }
   ],
   "backendMatrix": [
@@ -1382,7 +1536,7 @@
         "bounded R4 reaction-start TheorySnapshot t+1 visibility",
         "bounded R5 active recurrence through structural END"
       ],
-      "currentScopeMechanism": "R1 IMPLEMENTED: bounded two-bank Scope arrays with one published bank selector; complete successor bank is prepared before selector handoff. Scope bank/selector are substrate-only.",
+      "currentScopeMechanism": "R1-R5 IMPLEMENTED: bounded two-bank Scope arrays with one published bank selector; complete successor bank is prepared before selector handoff. Scope bank/selector are substrate-only.",
       "oldPhysicalLinkRetentionPolicy": "R1 preserves the old physical Scope bank and previously materialized Links after publication; current semantic membership is determined only by the published bank.",
       "backendSubstrateBoundary": [
         "Rust local Link pool and local handles",
@@ -1430,20 +1584,20 @@
         "P03": "r1-green-real-browser-differential",
         "P04": "r1-green-real-browser-differential",
         "P05": "r1-green-real-browser-differential",
-        "P06": "r1-green-real-browser-differential",
+        "P06": "pending-r6-direct-witness",
         "P07": "r2-green-real-browser-differential",
-        "P08": "r1-green-real-browser-differential",
+        "P08": "pending-r6-direct-witness",
         "P09": "r3-green-real-browser-differential",
         "P10": "r3-green-real-browser-differential",
         "P11": "r1-green-real-browser-differential",
         "P12": "r1-green-real-browser-differential",
         "P13": "r2-green-real-browser-differential",
         "P14": "r4-green-real-browser-differential",
-        "P15": "r1-green-real-browser-differential",
+        "P15": "pending-r6-direct-witness",
         "P16": "r5-green-real-browser-differential",
         "P17": "r5-green-real-browser-differential"
       },
-      "fullProfileConformance": true
+      "fullProfileConformance": false
     },
     {
       "backendId": "browser-webgpu",
@@ -1469,7 +1623,7 @@
         "bounded R4 reaction-start TheorySnapshot t+1 visibility",
         "bounded R5 active recurrence through structural END"
       ],
-      "currentScopeMechanism": "R1 IMPLEMENTED: bounded two-bank GPU Scope buffer plus atomic<u32> published selector; complete successor bank is written before the single selector store. Buffer/index layout is substrate-only.",
+      "currentScopeMechanism": "R1-R5 IMPLEMENTED: bounded two-bank GPU Scope buffer plus atomic<u32> published selector; complete successor bank is written before the single selector store. Buffer/index layout is substrate-only.",
       "oldPhysicalLinkRetentionPolicy": "R1 retains the old GPU Scope bank and Link-pool topology after publication; only the atomic published selector defines current semantic membership.",
       "backendSubstrateBoundary": [
         "WebGPU buffers and WGSL kernels",
@@ -1527,20 +1681,20 @@
         "P03": "r1-green-real-browser-differential",
         "P04": "r1-green-real-browser-differential",
         "P05": "r1-green-real-browser-differential",
-        "P06": "r1-green-real-browser-differential",
+        "P06": "pending-r6-direct-witness",
         "P07": "r2-green-real-browser-differential",
-        "P08": "r1-green-real-browser-differential",
+        "P08": "pending-r6-direct-witness",
         "P09": "r3-green-real-browser-differential",
         "P10": "r3-green-real-browser-differential",
         "P11": "r1-green-real-browser-differential",
         "P12": "r1-green-real-browser-differential",
         "P13": "r2-green-real-browser-differential",
         "P14": "r4-green-real-browser-differential",
-        "P15": "r1-green-real-browser-differential",
+        "P15": "pending-r6-direct-witness",
         "P16": "r5-green-real-browser-differential",
         "P17": "r5-green-real-browser-differential"
       },
-      "fullProfileConformance": true
+      "fullProfileConformance": false
     },
     {
       "backendId": "future-accelerator-family",
