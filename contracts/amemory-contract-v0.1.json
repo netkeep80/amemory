@@ -3,7 +3,7 @@
   "status": "candidate",
   "accepted": false,
   "issue": 2,
-  "purpose": "Backend-neutral observable contract for A-memory implementations and simulators.",
+  "purpose": "Backend-neutral observable contract for A-memory implementations and simulators that both store and execute an A-network of Links.",
   "normativeAuthority": {
     "repository": "netkeep80/anum_docs",
     "mtsVersion": "mts-contract/v0.13",
@@ -39,6 +39,10 @@
   },
   "requirements": [
     {
+      "id": "AM-000",
+      "statement": "An A-memory implementation MUST both store an A-network of Links and execute that network according to the declared MTS semantics; storage-only or execution-only components are substrates/components, not complete A-memory implementations."
+    },
+    {
       "id": "AM-001",
       "statement": "Every backend MUST declare the exact supported MTS version and exact normative contract/conformance revision."
     },
@@ -61,6 +65,14 @@
     {
       "id": "AM-006",
       "statement": "Within the declared execution scope, A-memory MUST reproduce accepted grounded reaction behavior including ZERO/ONE/MANY continuations."
+    },
+    {
+      "id": "AM-006A",
+      "statement": "A conformant full A-memory backend MUST expose a persistent/logically persistent A-network state across execution steps; execution MUST operate on that network rather than on a detached host-only semantic model."
+    },
+    {
+      "id": "AM-006B",
+      "statement": "Execution semantics MUST be driven by the A-network/Theory structures admitted by the declared MTS scope; backend-specific opcodes or hard-coded program meaning MUST NOT replace Link-carried semantic authority."
     },
     {
       "id": "AM-007",
@@ -90,5 +102,18 @@
   "acceptance": {
     "state": "candidate",
     "required": "Executable positive and negative witnesses for mandatory requirements plus differential validation of at least two materially different implementations."
+  },
+  "coreDefinition": {
+    "statement": "A-memory is a system that stores an A-network of Links and executes its dynamics according to the declared MTS version.",
+    "requiredCapabilities": [
+      "store and preserve the Link network",
+      "address/read Link structure and incidence",
+      "materialize canonical semantic Links within authorized scope",
+      "execute the A-network according to Link-carried MTS semantics",
+      "publish observable successor state/results",
+      "detect or report quiescence where the execution profile requires it"
+    ],
+    "passiveStorageAloneIsAmemory": false,
+    "executionWithoutPersistentNetworkModelIsAmemory": false
   }
 }
