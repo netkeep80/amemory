@@ -446,11 +446,14 @@ console.log("MTS_AND_AMEMORY_PROFILE_IMPORT_NEGATIVE_WITNESSES=GREEN");
         `${backendId} R2 GREEN coverage mismatch for ${id}`,
       );
     }
-    assert.equal(
-      backend.profileLawCoverage.P10,
-      "supporting-evidence-only-not-reaction-conformance",
-    );
-    for (const id of ["P09","P14","P16","P17"]) {
+    for (const id of ["P09","P10"]) {
+      assert.equal(
+        backend.profileLawCoverage[id],
+        "r3-executable-browser-witness-required",
+        `${backendId} R3 coverage mismatch for ${id}`,
+      );
+    }
+    for (const id of ["P14","P16","P17"]) {
       assert.equal(
         backend.profileLawCoverage[id],
         "not-yet-executed",
@@ -470,6 +473,8 @@ console.log("MTS_AND_AMEMORY_PROFILE_IMPORT_NEGATIVE_WITNESSES=GREEN");
   assert.equal(c045?.status, "planned");
   assert.equal(c045?.progress?.R1, "green-real-browser-differential");
   assert.equal(c045?.progress?.R2, "green-real-browser-differential");
+  assert.equal(c045?.progress?.R3, "implementation-candidate-browser-witness-required");
+  assert.equal(c045?.progress?.currentSlice, "AM-C048-r3-zero-and-duplicate-convergence");
   assert.equal(c045?.progress?.fullProfileConformance, false);
   assert(c045?.progress?.completedSlices?.includes("AM-C046-r1-one-reaction-cpu-webgpu"));
   assert(c045?.progress?.completedSlices?.includes("AM-C047-r2-no-admitted-relation-quiescence"));
@@ -495,6 +500,13 @@ console.log("MTS_AND_AMEMORY_PROFILE_IMPORT_NEGATIVE_WITNESSES=GREEN");
   assert.deepEqual(c047?.evidence?.observed?.invalidFailureQuiescent, { cpu: false, gpu: false });
   assert.deepEqual(c047?.evidence?.coveredPortableLaws, ["P07", "P13"]);
   assert.equal(c047?.evidence?.fullReactionProfileConformance, false);
+
+  const c048 = conformance.mandatoryVectors.find(
+    (vector) => vector.id === "AM-C048-r3-zero-and-duplicate-convergence",
+  );
+  assert.equal(c048?.status, "planned");
+  assert.deepEqual(c048?.evidenceRequired?.coveredPortableLaws, ["P09", "P10"]);
+  assert.equal(c048?.evidenceRequired?.fullReactionProfileConformance, false);
 
   assert.match(readme, /minimal-portable-amemory-execution/);
   assert.match(readme, /FULL_REACTION_PROFILE_CONFORMANCE = FALSE/);

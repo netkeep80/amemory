@@ -64,6 +64,19 @@ const ui = {
   reactionR2Bank: document.querySelector("#reaction-r2-bank"),
   reactionR2Diff: document.querySelector("#reaction-r2-diff"),
   reactionR2Failure: document.querySelector("#reaction-r2-failure"),
+  reactionR3ZeroCpu: document.querySelector("#reaction-r3-zero-cpu"),
+  reactionR3ZeroGpu: document.querySelector("#reaction-r3-zero-gpu"),
+  reactionR3ZeroMatched: document.querySelector("#reaction-r3-zero-matched"),
+  reactionR3ZeroHandoff: document.querySelector("#reaction-r3-zero-handoff"),
+  reactionR3ZeroQuiescence: document.querySelector("#reaction-r3-zero-quiescence"),
+  reactionR3ZeroOldScope: document.querySelector("#reaction-r3-zero-old-scope"),
+  reactionR3MixedCpu: document.querySelector("#reaction-r3-mixed-cpu"),
+  reactionR3MixedGpu: document.querySelector("#reaction-r3-mixed-gpu"),
+  reactionR3MixedMatched: document.querySelector("#reaction-r3-mixed-matched"),
+  reactionR3MixedHandoff: document.querySelector("#reaction-r3-mixed-handoff"),
+  reactionR3MixedQuiescence: document.querySelector("#reaction-r3-mixed-quiescence"),
+  reactionR3Duplicates: document.querySelector("#reaction-r3-duplicates"),
+  reactionR3Diff: document.querySelector("#reaction-r3-diff"),
   details: document.querySelector("#details"),
 };
 
@@ -845,6 +858,10 @@ async function main() {
       ui.reactionScope, ui.reactionNegative,
       ui.reactionR2Cpu, ui.reactionR2Gpu, ui.reactionR2Matched, ui.reactionR2Handoff,
       ui.reactionR2Quiescence, ui.reactionR2Bank, ui.reactionR2Diff, ui.reactionR2Failure,
+      ui.reactionR3ZeroCpu, ui.reactionR3ZeroGpu, ui.reactionR3ZeroMatched, ui.reactionR3ZeroHandoff,
+      ui.reactionR3ZeroQuiescence, ui.reactionR3ZeroOldScope, ui.reactionR3MixedCpu, ui.reactionR3MixedGpu,
+      ui.reactionR3MixedMatched, ui.reactionR3MixedHandoff, ui.reactionR3MixedQuiescence,
+      ui.reactionR3Duplicates, ui.reactionR3Diff,
     ]) report(element, wasm ? "WAITING_FOR_GPU" : "NOT_RUN", false);
     return;
   }
@@ -985,6 +1002,51 @@ async function main() {
         "PASS (runtime failure != quiescence)",
         reaction.r2FailureNotQuiescent,
       );
+      report(ui.reactionR3ZeroCpu, "PASS [" + reaction.r3ZeroCpuState.join(", ") + "]", true);
+      report(ui.reactionR3ZeroGpu, "PASS [" + reaction.r3ZeroGpuState.join(", ") + "]", true);
+      report(
+        ui.reactionR3ZeroMatched,
+        "PASS (CPU " + reaction.r3ZeroCpuMatched + " / GPU " + reaction.r3ZeroGpuMatched + ")",
+        reaction.r3ZeroCpuMatched === 1 && reaction.r3ZeroGpuMatched === 1,
+      );
+      report(
+        ui.reactionR3ZeroHandoff,
+        "PASS (CPU " + reaction.r3ZeroCpuHandoff + " / GPU " + reaction.r3ZeroGpuHandoff + ")",
+        reaction.r3ZeroCpuHandoff === 1 && reaction.r3ZeroGpuHandoff === 1,
+      );
+      report(
+        ui.reactionR3ZeroQuiescence,
+        "PASS (CPU " + reaction.r3ZeroCpuQuiescent + " / GPU " + reaction.r3ZeroGpuQuiescent + ")",
+        !reaction.r3ZeroCpuQuiescent && !reaction.r3ZeroGpuQuiescent,
+      );
+      report(
+        ui.reactionR3ZeroOldScope,
+        "PASS (old Scope retained physically)",
+        reaction.r3ZeroOldScopeRetained,
+      );
+      report(ui.reactionR3MixedCpu, "PASS [" + reaction.r3MixedCpuState.join(", ") + "]", true);
+      report(ui.reactionR3MixedGpu, "PASS [" + reaction.r3MixedGpuState.join(", ") + "]", true);
+      report(
+        ui.reactionR3MixedMatched,
+        "PASS (CPU " + reaction.r3MixedCpuMatched + " / GPU " + reaction.r3MixedGpuMatched + ")",
+        reaction.r3MixedCpuMatched === 3 && reaction.r3MixedGpuMatched === 3,
+      );
+      report(
+        ui.reactionR3MixedHandoff,
+        "PASS (CPU " + reaction.r3MixedCpuHandoff + " / GPU " + reaction.r3MixedGpuHandoff + ")",
+        reaction.r3MixedCpuHandoff === 1 && reaction.r3MixedGpuHandoff === 1,
+      );
+      report(
+        ui.reactionR3MixedQuiescence,
+        "PASS (CPU " + reaction.r3MixedCpuQuiescent + " / GPU " + reaction.r3MixedGpuQuiescent + ")",
+        !reaction.r3MixedCpuQuiescent && !reaction.r3MixedGpuQuiescent,
+      );
+      report(
+        ui.reactionR3Duplicates,
+        "PASS (single canonical successor)",
+        reaction.r3DuplicateConvergence,
+      );
+      report(ui.reactionR3Diff, "PASS", reaction.r3NormalizedDifferential);
       for (const line of reaction.logs) log(line);
     } catch (error) {
       for (const element of [
@@ -993,10 +1055,14 @@ async function main() {
         ui.reactionScope, ui.reactionNegative,
         ui.reactionR2Cpu, ui.reactionR2Gpu, ui.reactionR2Matched, ui.reactionR2Handoff,
         ui.reactionR2Quiescence, ui.reactionR2Bank, ui.reactionR2Diff, ui.reactionR2Failure,
+        ui.reactionR3ZeroCpu, ui.reactionR3ZeroGpu, ui.reactionR3ZeroMatched, ui.reactionR3ZeroHandoff,
+        ui.reactionR3ZeroQuiescence, ui.reactionR3ZeroOldScope, ui.reactionR3MixedCpu, ui.reactionR3MixedGpu,
+        ui.reactionR3MixedMatched, ui.reactionR3MixedHandoff, ui.reactionR3MixedQuiescence,
+        ui.reactionR3Duplicates, ui.reactionR3Diff,
       ]) {
         if (element.textContent === "WAITING") report(element, "FAIL", false);
       }
-      log("Reaction R1/R2 error: " + (error?.stack || error));
+      log("Reaction R1/R2/R3 error: " + (error?.stack || error));
     }
   }
 
