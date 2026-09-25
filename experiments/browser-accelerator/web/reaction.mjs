@@ -45,8 +45,9 @@ export const R5_FIXTURE = Object.freeze({
   stateEnd: "199868",
   relationStartEnd: "19868",
   relationEndStart: "16898",
-  observationSteps: 4,
 });
+
+export const R5_OBSERVATION_STEPS = 4;
 
 const NONE = 0xffffffff;
 const CAP = 4;
@@ -428,7 +429,7 @@ function runCpuRecurrenceEnd(wasm, refs) {
   const quiescent = [];
   const banks = [wasmU32(wasm.reactionCurrentBank())];
 
-  for (let step = 0; step < R5_FIXTURE.observationSteps; step += 1) {
+  for (let step = 0; step < R5_OBSERVATION_STEPS; step += 1) {
     must(wasm.reactionRun() === 1, "CPU R5 reaction failed at step " + step);
     states.push(cpuCurrent(wasm));
     matched.push(wasmU32(wasm.reactionMatchedRelations()));
@@ -932,7 +933,7 @@ async function runGpuRecurrenceEnd(device, pool, refs) {
     const quiescent = [];
     const banks = [initial.bank];
 
-    for (let step = 0; step < R5_FIXTURE.observationSteps; step += 1) {
+    for (let step = 0; step < R5_OBSERVATION_STEPS; step += 1) {
       await gpuRun(device, pool, state);
       const observed = await gpuObserve(device, pool, state);
       must(observed.status === 1, "GPU R5 reaction failed at step " + step + ": diagnostic=" + observed.diagnostic);
