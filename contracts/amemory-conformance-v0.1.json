@@ -1129,12 +1129,12 @@
           "K": "98",
           "A": "68",
           "B": "16898",
-          "C": "9",
+          "C": "998",
           "current0": "19868",
           "relationAB": "16816898",
           "current1": "19816898",
-          "relationBC": "1168989",
-          "current2": "1989"
+          "relationBC": "116898998",
+          "current2": "198998"
         },
         "machine": [
           "reaction JS R4 two-reaction trajectory witness",
@@ -1154,7 +1154,7 @@
           "reaction t handoffCount CPU=GPU=1",
           "snapshot_t+1 count CPU=GPU=2",
           "reaction t+1 before CPU=GPU=[19816898]",
-          "reaction t+1 after CPU=GPU=[1989]",
+          "reaction t+1 after CPU=GPU=[198998]",
           "reaction t+1 matchedRelations CPU=GPU=1",
           "reaction t+1 handoffCount CPU=GPU=1",
           "same-reaction isolation PASS",
