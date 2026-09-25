@@ -355,7 +355,7 @@ console.log("MTS_AND_AMEMORY_PROFILE_IMPORT_NEGATIVE_WITNESSES=GREEN");
   );
   assert.equal(
     contract.executionProfileBoundary.fullReactionProfileConformanceClaimed,
-    false,
+    true,
   );
 
   const requiredD7Fields = [
