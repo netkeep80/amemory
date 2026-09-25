@@ -106,6 +106,11 @@ const ui = {
   reactionR5EndContinuation: document.querySelector("#reaction-r5-end-continuation"),
   reactionR5Bounded: document.querySelector("#reaction-r5-bounded"),
   reactionR5Diff: document.querySelector("#reaction-r5-diff"),
+  reactionR6OneMany: document.querySelector("#reaction-r6-one-many"),
+  reactionR6NM: document.querySelector("#reaction-r6-n-m"),
+  reactionR6Order: document.querySelector("#reaction-r6-order"),
+  reactionR6Scope: document.querySelector("#reaction-r6-scope"),
+  reactionR6Diff: document.querySelector("#reaction-r6-diff"),
   details: document.querySelector("#details"),
 };
 
@@ -1185,6 +1190,23 @@ async function main() {
       );
       report(ui.reactionR5Bounded, "PASS (4 active steps, witness returned)", reaction.r5BoundedReturn);
       report(ui.reactionR5Diff, "PASS", reaction.r5NormalizedTrajectoryDifferential);
+      report(
+        ui.reactionR6OneMany,
+        "PASS (CPU [" + reaction.r6OneToNCpuState.join(", ") + "] / GPU [" + reaction.r6OneToNGpuState.join(", ") + "])",
+        reaction.r6OneToNMatchedCpu === 2 && reaction.r6OneToNMatchedGpu === 2,
+      );
+      report(
+        ui.reactionR6NM,
+        "PASS (CPU [" + reaction.r6NToMCpuState.join(", ") + "] / GPU [" + reaction.r6NToMGpuState.join(", ") + "])",
+        reaction.r6NToMCpuState.length === 2 && reaction.r6NToMGpuState.length === 2,
+      );
+      report(ui.reactionR6Order, "PASS (reversed current + Theory order)", reaction.r6OrderVariation);
+      report(
+        ui.reactionR6Scope,
+        "PASS (CPU 17>16 rejected / GPU 5>4 rejected)",
+        reaction.r6CpuOutOfScopeRejected && reaction.r6GpuOutOfScopeRejected,
+      );
+      report(ui.reactionR6Diff, "PASS", reaction.r6NormalizedDifferential);
       for (const line of reaction.logs) log(line);
     } catch (error) {
       for (const element of [
@@ -1205,10 +1227,11 @@ async function main() {
         ui.reactionR5Snapshot, ui.reactionR5Matched, ui.reactionR5Handoff, ui.reactionR5Quiescence,
         ui.reactionR5Recurrence, ui.reactionR5EndStructure, ui.reactionR5EndContinuation,
         ui.reactionR5Bounded, ui.reactionR5Diff,
+        ui.reactionR6OneMany, ui.reactionR6NM, ui.reactionR6Order, ui.reactionR6Scope, ui.reactionR6Diff,
       ]) {
         if (element.textContent === "WAITING") report(element, "FAIL", false);
       }
-      log("Reaction R1/R2/R3/R4/R5 error: " + (error?.stack || error));
+      log("Reaction R1/R2/R3/R4/R5/R6 error: " + (error?.stack || error));
     }
   }
 
