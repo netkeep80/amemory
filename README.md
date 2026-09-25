@@ -196,29 +196,35 @@ Observed R4:
   stale-snapshot control = PASS
   normalized CPU/GPU trajectory = PASS
 
-P16 P17
-  -> not-yet-executed
+R5 executable subset:
+  P16 P17
+    -> GREEN on real browser CPU/WASM ↔ WebGPU trajectory differential
+
+Observed R5:
+  S0 = [199898]
+  S1 = [199868]  // K⟼END
+  S2 = [199898]
+  S3 = [199868]
+  S4 = [199898]
+  matchedRelations = 1 on every step
+  handoffCount = 1 on every step
+  quiescent = false on every step
+  recurrence = PASS
+  structural END continuation = PASS
+  bounded witness returned = PASS
 
 AM-C046 R1 = GREEN
 AM-C047 R2 = GREEN
 AM-C048 R3 = GREEN
 AM-C049 R4 = GREEN
-AM-C045 FULL PROFILE = PLANNED
-FULL_REACTION_PROFILE_CONFORMANCE = FALSE
+AM-C050 R5 = GREEN
+AM-C045 FULL PROFILE = GREEN
+FULL_REACTION_PROFILE_CONFORMANCE = TRUE
 ```
 
-R1 использует explicit published Scope и reaction-start `TheorySnapshot`, а CPU/WASM и WebGPU сравниваются по canonical Anum, не по локальным handles.
+Для двух объявленных prototype-backends — Rust/CPU/WASM и browser WebGPU — весь pinned profile `minimal-portable-amemory-execution@0.1.0` покрыт реальными browser differential witnesses R1–R5 по законам `P01-P17`.
 
-Storage/incidence/Anum tests и даже R1 нельзя использовать для объявления, что profile `P01-P17` уже реализован целиком.
-
-## Следующие reaction slices
-
-После закрытых GREEN R1, R2, R3 и R4 следующий этап — закрыть оставшиеся:
-
-```text
-P16  recurrence / nontermination
-P17  structural END != halt
-```
+Это не означает, что весь репозиторий принят целиком: repository-wide `acceptanceState` остаётся независимым и может сохранять `NOT_READY` из-за других planned conformance vectors.
 
 Реализация продолжает потреблять machine profile, а не копировать смысл из control flow `anum_docs/ts/src/v013-grounded-execution.ts`.
 
