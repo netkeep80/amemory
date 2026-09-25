@@ -220,6 +220,49 @@
           "negativeControl": "PASS (mismatch detected)"
         }
       }
+    },
+    {
+      "id": "AM-C020-candidate-canonicalization-flags",
+      "requirements": [
+        "AM-007",
+        "AM-017",
+        "AM-020"
+      ],
+      "status": "browser-witness-required"
+    },
+    {
+      "id": "AM-C021-normalized-new-pair-set",
+      "requirements": [
+        "AM-017",
+        "AM-018",
+        "AM-020"
+      ],
+      "status": "browser-witness-required"
+    },
+    {
+      "id": "AM-C022-existing-pair-never-new-commit",
+      "requirements": [
+        "AM-017",
+        "AM-019"
+      ],
+      "status": "ci-and-browser-witness-required"
+    },
+    {
+      "id": "AM-C023-reorder-preserves-semantic-new-pair-set",
+      "requirements": [
+        "AM-018",
+        "AM-020"
+      ],
+      "status": "ci-required"
+    },
+    {
+      "id": "AM-C024-canonicalization-negative-controls",
+      "requirements": [
+        "AM-014",
+        "AM-015",
+        "AM-017"
+      ],
+      "status": "ci-and-browser-witness-required"
     }
   ],
   "backendMatrix": [],
