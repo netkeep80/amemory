@@ -1003,7 +1003,6 @@
           "P16": "AM-C050",
           "P17": "AM-C050"
         },
-        "realBrowserDifferential": true,
         "normalizedReactionDifferential": "PASS for directly witnessed R1-R5 slices",
         "negativeMismatchControls": "PASS across directly witnessed R1-R5 slices",
         "localHandlesNonSemantic": true,
@@ -1015,7 +1014,15 @@
           "P06_EXHAUST_ALL_ADMITTED_RELATIONS",
           "P08_ADMITTED_RELATIONS_REPLACE_BY_ALL_OUTPUTS",
           "P15_PHYSICAL_SCHEDULE_AND_LOCAL_ADDRESSES_ARE_NONSEMANTIC"
-        ]
+        ],
+        "realBrowserDifferentialCompletedSlices": [
+          "R1",
+          "R2",
+          "R3",
+          "R4",
+          "R5"
+        ],
+        "r6RealBrowserDifferential": false
       }
     },
     {
@@ -1519,7 +1526,6 @@
       "status": "planned",
       "evidence": {
         "issue": 45,
-        "implementationBranch": "convergence/45-legacy-audit-witnesses",
         "purpose": "Direct evidence candidate for legacy AM-C007/AM-C008/AM-C011/AM-C013 and portable laws P06/P08/P15.",
         "expectedWitnesses": [
           "1->N with two distinct admitted non-zero outputs",
@@ -1527,9 +1533,10 @@
           "reversed current and Theory processing order preserves normalized result",
           "semantically valid cardinality outside bounded backend scope fails closed"
         ],
-        "nativeRustWitness": "implemented; CI must pass before merge",
+        "nativeRustWitness": "implemented in repository and guarded by browser-reaction-check workflow",
         "realBrowserCpuWebGpuWitness": "REQUIRED_BEFORE_GREEN",
-        "fullReactionProfileConformance": false
+        "fullReactionProfileConformance": false,
+        "implementationPr": 46
       }
     }
   ],
