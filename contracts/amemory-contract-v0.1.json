@@ -11,7 +11,11 @@
     "contractBlobSha": "f3ea773ad639448fe3d196d229bd6d9e29a38528",
     "conformancePath": "contracts/mts-conformance-v0.13.json",
     "conformanceBlobSha": "de83242ae4c248727fefa791589c72c1ce31c8e0",
-    "floatingMainIsAuthority": false
+    "floatingMainIsAuthority": false,
+    "upstreamLock": "contracts/upstream/mts-v0.13.lock.json",
+    "requirementsProjection": "contracts/upstream/mts-v0.13-requirements.json",
+    "importPolicy": "exact-commit-and-git-blob-pinned-generated-projection",
+    "manualMtsLawCopyIsAuthority": false
   },
   "implementationFreedom": {
     "physicalDoubletRequired": false,
