@@ -1,0 +1,28 @@
+{
+  "schema": "amemory-upstream-mts-lock/v0.1",
+  "normative": true,
+  "repository": "netkeep80/anum_docs",
+  "acceptedMtsVersion": "mts-contract/v0.13",
+  "acceptedCommit": "440caf09558d4ff5cfda11805cb3ef97b48d1ad5",
+  "floatingRefsAllowed": false,
+  "artifacts": {
+    "contract": {
+      "path": "contracts/mts-contract-v0.13.json",
+      "blobSha": "f3ea773ad639448fe3d196d229bd6d9e29a38528"
+    },
+    "conformance": {
+      "path": "contracts/mts-conformance-v0.13.json",
+      "blobSha": "de83242ae4c248727fefa791589c72c1ce31c8e0"
+    },
+    "traceability": {
+      "path": "traceability/mts-v0.13.json",
+      "blobSha": "377e836378386f66753cad8e60cba765fdad9818"
+    },
+    "acceptance": {
+      "path": "cutover/typescript-c1-acceptance-v0.6.json",
+      "blobSha": "fe9ab38b3f55552d382536e636e33b7c72242e5a"
+    }
+  },
+  "generatedProjection": "contracts/upstream/mts-v0.13-requirements.json",
+  "upgradePolicy": "explicit-governance-only"
+}

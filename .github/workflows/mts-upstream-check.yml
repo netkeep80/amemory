@@ -1,0 +1,42 @@
+name: MTS upstream contract check
+
+on:
+  pull_request:
+    paths:
+      - "contracts/upstream/**"
+      - "contracts/amemory-contract-v0.1.json"
+      - "contracts/amemory-conformance-v0.1.json"
+      - "scripts/sync-mts-requirements.mjs"
+      - "scripts/test-mts-upstream-import.mjs"
+      - ".github/workflows/mts-upstream-check.yml"
+      - "repo-policy.json"
+  push:
+    branches: [main]
+    paths:
+      - "contracts/upstream/**"
+      - "contracts/amemory-contract-v0.1.json"
+      - "contracts/amemory-conformance-v0.1.json"
+      - "scripts/sync-mts-requirements.mjs"
+      - "scripts/test-mts-upstream-import.mjs"
+      - ".github/workflows/mts-upstream-check.yml"
+      - "repo-policy.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Negative and positive importer tests
+        run: node scripts/test-mts-upstream-import.mjs
+
+      - name: Verify exact pinned MTS projection
+        run: node scripts/sync-mts-requirements.mjs --check

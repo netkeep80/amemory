@@ -1,0 +1,417 @@
+{
+  "schema": "amemory-mts-requirements-projection/v0.1",
+  "generated": true,
+  "generatedFrom": {
+    "repository": "netkeep80/anum_docs",
+    "commit": "440caf09558d4ff5cfda11805cb3ef97b48d1ad5",
+    "mtsVersion": "mts-contract/v0.13",
+    "artifacts": {
+      "contract": {
+        "path": "contracts/mts-contract-v0.13.json",
+        "blobSha": "f3ea773ad639448fe3d196d229bd6d9e29a38528"
+      },
+      "conformance": {
+        "path": "contracts/mts-conformance-v0.13.json",
+        "blobSha": "de83242ae4c248727fefa791589c72c1ce31c8e0"
+      },
+      "traceability": {
+        "path": "traceability/mts-v0.13.json",
+        "blobSha": "377e836378386f66753cad8e60cba765fdad9818"
+      },
+      "acceptance": {
+        "path": "cutover/typescript-c1-acceptance-v0.6.json",
+        "blobSha": "fe9ab38b3f55552d382536e636e33b7c72242e5a"
+      }
+    }
+  },
+  "acceptance": {
+    "decision": "ACCEPT_MTS_V0_13",
+    "acceptedVersion": "mts-contract/v0.13",
+    "current": {
+      "contract": "contracts/mts-contract-v0.13.json",
+      "conformance": "contracts/mts-conformance-v0.13.json",
+      "publicFacade": "ts/src/public.ts",
+      "packageManifest": "ts/package.json"
+    },
+    "contractAccepted": true,
+    "conformanceAccepted": true,
+    "conformanceCoverageState": "complete",
+    "downstreamRepinAllowed": true,
+    "fullSelfHostedSystemClaimed": false
+  },
+  "foundation": {
+    "bootstrapBasis": {
+      "root": "R",
+      "localBasisLinks": [
+        "R",
+        "O",
+        "C",
+        "L",
+        "U"
+      ],
+      "ordinaryTransportRequiredForBasisLinks": false,
+      "definitions": {
+        "R": "R = R ⟼ R",
+        "O": "O = O ⟼ R",
+        "C": "C = R ⟼ C",
+        "L": "L = O ⟼ C",
+        "U": "U = C ⟼ O"
+      }
+    },
+    "contextAuthority": {
+      "startOperation": "read start(S) and open START position",
+      "endOperation": "read end(S) and open END position",
+      "sameSideInPosition": "open deeper Link-context",
+      "oppositeSideInPosition": "return one enclosing Link-context",
+      "hostParserStackIsSemanticAuthority": false,
+      "ambientMutableCurrentIsSemanticAuthority": false,
+      "explicitStructuralContextRequired": true
+    },
+    "canonicalTopologyClass": {
+      "ROOT": "8",
+      "START": "9",
+      "END": "6",
+      "PAIR": "1",
+      "pairRequiresTargetDistinctFromBothOperands": true,
+      "aliasesRejectedAsCanonicalPair": {
+        "188": "8",
+        "1868": "68",
+        "1988": "98"
+      },
+      "ordinaryEqualPolePairAllowedWhenTargetDistinct": true
+    },
+    "representationBoundary": {
+      "descriptionEqualsTarget": false,
+      "layers": [
+        "semantic Link",
+        "structural anum / description",
+        "Link-native representation carrier",
+        "physical wire"
+      ],
+      "representationMayUseQuotedLinkNamespace": true,
+      "representationPresenceImpliesSemanticTargetExists": false,
+      "representationPresenceGrantsMaterializationAuthority": false
+    },
+    "transportIdentity": {
+      "senderLocalLinkHandleIsTransportIdentity": false,
+      "canonicalStructuralDescriptionIsTransportIdentityEvidence": true,
+      "independentMemoriesUseDifferentLocalHandles": true,
+      "bootstrapBasisExemptFromOrdinaryTransport": [
+        "R",
+        "O",
+        "C",
+        "L",
+        "U"
+      ]
+    },
+    "materializationAuthority": {
+      "semanticWriteRequires": [
+        "exact source",
+        "selected Dictionary Use",
+        "Grammar",
+        "fixed Theory",
+        "admitted StructuralRule",
+        "validated construction request"
+      ],
+      "representationParserMayCreateSemanticTarget": false,
+      "readReplayEqualsMaterialization": false,
+      "failedAuthorizationWritesSemanticTargets": 0
+    },
+    "admissibleSemanticLinks": {
+      "finiteRootGroundingRequired": true,
+      "wellFoundedModulo": [
+        "ROOT self-incidence",
+        "direct START self-incidence",
+        "direct END self-incidence"
+      ],
+      "distinctNodeDependencyCyclesAdmissible": false,
+      "distinctNodeCycleFailure": "cyclic-grounding",
+      "arbitraryFiniteCyclicGraphMayExistAsDescriptionData": true
+    },
+    "rootOrigin": {
+      "everyLocalSequenceOrAnumContextStartsAt": "R",
+      "appliesTo": [
+        "ExactSequence",
+        "hierarchical Anum",
+        "every nested local Anum context",
+        "STRING prefixes"
+      ],
+      "unrootedLookalikesAccepted": false
+    },
+    "formalGrounding": {
+      "physicalGlyphMeaningComesFromHostSwitch": false,
+      "physicalGlyphMeaningComesFromGlyphIdentity": false,
+      "authorityPath": [
+        "exact physical source",
+        "exact STRING source",
+        "Dictionary Use",
+        "Grammar",
+        "fixed Theory",
+        "admitted FORMAL StructuralRule",
+        "ROOT/START/END/PAIR structural class"
+      ],
+      "samePrintedGlyphAcrossRolesImpliesSemanticIdentity": false
+    },
+    "physicalBoundary": {
+      "requiredDistinguishableStates": [
+        "1",
+        "6",
+        "8",
+        "9"
+      ],
+      "otherPhysicalDigitAccepted": false,
+      "optionalNoSignalState": "Z",
+      "optionalNoSignalStateIsFifthSemanticAbit": false,
+      "optionalNoSignalStateRequiredForAcceptance": false
+    }
+  },
+  "laws": {
+    "L1": "Rooted Link foundation is retained with one ontology entity Link and one root R.",
+    "L2": "Relative form Link identity is distinct from execution result Link identity.",
+    "L3": "Relative pole navigation is authorized by explicit Link-context, never a host parser stack or ambient current.",
+    "L4": "The canonical structural transport alphabet is 8=ROOT, 9=START, 6=END, 1=PAIR with self-delimiting prefix arity.",
+    "L5": "A canonical quaternary digit must match the actual semantic topology class; PAIR aliases that collapse to ROOT/START/END are noncanonical.",
+    "L6": "DESCRIPTION != TARGET across semantic, structural, Link-carrier and physical layers.",
+    "L7": "Two-memory identity is structural; sender-local technical handles never cross as transport identity.",
+    "L8": "Semantic START/END/PAIR writes require explicit source/Dictionary/Grammar/fixed-Theory/StructuralRule authority.",
+    "L9": "Pure recursive dependency without finite ROOT-grounded distinguishing evidence does not establish semantic Link identity; the current canonical 1/6/8/9 tree carrier is complete only for well-founded ROOT-decomposable Links, while rooted cyclic graphs are not rejected ontologically.",
+    "L10": "Every local exact sequence/anum context originates structurally at R.",
+    "L11": "STRING anums preserve exact byte identity and admit allocation-independent v0.13 structural description.",
+    "L12": "Quaternary structural meaning is grounded by FORMAL authority rather than host opcode or glyph identity.",
+    "L13": "The mandatory digital physical boundary distinguishes exactly 1/6/8/9; optional Z is not a semantic abit."
+  },
+  "conformance": {
+    "requiredPositiveVectors": [
+      "v013-root-basis-R-O-C-L-U",
+      "v013-relative-form-quartet-generic-S",
+      "v013-relative-form-result-separation",
+      "v013-relative-start-end-context-navigation",
+      "v013-quaternary-R-8",
+      "v013-quaternary-O-98",
+      "v013-quaternary-C-68",
+      "v013-quaternary-L-19868",
+      "v013-quaternary-U-16898",
+      "v013-nesting-968-vs-698",
+      "v013-complex-pair-1968698",
+      "v013-shared-dag",
+      "v013-ordinary-equal-pole-pair",
+      "v013-unknown-whole-two-memory",
+      "v013-real-file-1968698-two-memory",
+      "v013-string-exact-byte-roundtrip",
+      "v013-root-origin-every-local-anum-context",
+      "v013-formal-grounding-8-9-6-1",
+      "v013-abit-self-incidence-four-class-partition",
+      "v013-abit-link-signs-R-O-C-L",
+      "v013-U-pair-not-fifth-abit",
+      "v013-abit-sign-description-separation",
+      "v013-abit-two-memory-local-handle-independence",
+      "v013-rooted-cycle-remains-ontologically-open",
+      "v013-formal-root-R-from-8",
+      "v013-formal-root-O-from-98",
+      "v013-formal-root-C-from-68",
+      "v013-formal-root-L-from-19868",
+      "v013-formal-derived-U-from-16898",
+      "v013-formal-generic-unknown-finite-term"
+    ],
+    "requiredNegativeVectors": [
+      "v013-flat-relative-glyph-collision-not-canonical",
+      "v013-noncanonical-pair-188-rejected",
+      "v013-noncanonical-pair-1988-rejected",
+      "v013-noncanonical-pair-1868-rejected",
+      "v013-description-does-not-materialize-target",
+      "v013-wrong-structural-rule-writes-zero-target-links",
+      "v013-invalid-physical-opcode-fails-before-representation-writes",
+      "v013-empty-wire-is-not-root",
+      "v013-unrooted-sequence-lookalike-rejected",
+      "v013-unrooted-anum-hierarchy-rejected",
+      "v013-nonroot-both-selfclosed-rejected-by-root-uniqueness",
+      "v013-foreign-abit-handle-rejected",
+      "v013-current-recursive-proof-rejects-cycle-without-graph-cycle-evidence",
+      "v013-formal-root-wrong-rule-rejected",
+      "v013-formal-root-wrong-theory-rejected",
+      "v013-formal-root-malformed-prefix-rejected",
+      "v013-formal-root-noncanonical-pair-alias-rejected",
+      "v013-formal-root-no-host-term-special-case"
+    ]
+  },
+  "traceability": {
+    "L1": {
+      "contractPointer": "/requiredSemanticLaws/L1",
+      "positiveVectors": [
+        "v013-root-basis-R-O-C-L-U"
+      ],
+      "negativeVectors": [
+        "v013-empty-wire-is-not-root"
+      ]
+    },
+    "L2": {
+      "contractPointer": "/requiredSemanticLaws/L2",
+      "positiveVectors": [
+        "v013-relative-form-quartet-generic-S",
+        "v013-relative-form-result-separation"
+      ],
+      "negativeVectors": [
+        "v013-flat-relative-glyph-collision-not-canonical"
+      ]
+    },
+    "L3": {
+      "contractPointer": "/requiredSemanticLaws/L3",
+      "positiveVectors": [
+        "v013-relative-start-end-context-navigation"
+      ],
+      "negativeVectors": []
+    },
+    "L4": {
+      "contractPointer": "/requiredSemanticLaws/L4",
+      "positiveVectors": [
+        "v013-quaternary-R-8",
+        "v013-quaternary-O-98",
+        "v013-quaternary-C-68",
+        "v013-quaternary-L-19868",
+        "v013-quaternary-U-16898",
+        "v013-nesting-968-vs-698",
+        "v013-complex-pair-1968698"
+      ],
+      "negativeVectors": [
+        "v013-invalid-physical-opcode-fails-before-representation-writes"
+      ]
+    },
+    "L5": {
+      "contractPointer": "/requiredSemanticLaws/L5",
+      "positiveVectors": [
+        "v013-ordinary-equal-pole-pair"
+      ],
+      "negativeVectors": [
+        "v013-noncanonical-pair-188-rejected",
+        "v013-noncanonical-pair-1988-rejected",
+        "v013-noncanonical-pair-1868-rejected"
+      ]
+    },
+    "L6": {
+      "contractPointer": "/requiredSemanticLaws/L6",
+      "positiveVectors": [
+        "v013-unknown-whole-two-memory"
+      ],
+      "negativeVectors": [
+        "v013-description-does-not-materialize-target"
+      ]
+    },
+    "L7": {
+      "contractPointer": "/requiredSemanticLaws/L7",
+      "positiveVectors": [
+        "v013-shared-dag",
+        "v013-unknown-whole-two-memory",
+        "v013-real-file-1968698-two-memory"
+      ],
+      "negativeVectors": []
+    },
+    "L8": {
+      "contractPointer": "/requiredSemanticLaws/L8",
+      "positiveVectors": [
+        "v013-unknown-whole-two-memory"
+      ],
+      "negativeVectors": [
+        "v013-wrong-structural-rule-writes-zero-target-links"
+      ]
+    },
+    "L9": {
+      "contractPointer": "/requiredSemanticLaws/L9",
+      "positiveVectors": [
+        "v013-root-basis-R-O-C-L-U",
+        "v013-rooted-cycle-remains-ontologically-open"
+      ],
+      "negativeVectors": [
+        "v013-current-recursive-proof-rejects-cycle-without-graph-cycle-evidence"
+      ]
+    },
+    "L10": {
+      "contractPointer": "/requiredSemanticLaws/L10",
+      "positiveVectors": [
+        "v013-root-origin-every-local-anum-context"
+      ],
+      "negativeVectors": [
+        "v013-unrooted-sequence-lookalike-rejected",
+        "v013-unrooted-anum-hierarchy-rejected"
+      ]
+    },
+    "L11": {
+      "contractPointer": "/requiredSemanticLaws/L11",
+      "positiveVectors": [
+        "v013-string-exact-byte-roundtrip"
+      ],
+      "negativeVectors": []
+    },
+    "L12": {
+      "contractPointer": "/requiredSemanticLaws/L12",
+      "positiveVectors": [
+        "v013-formal-grounding-8-9-6-1",
+        "v013-formal-root-R-from-8",
+        "v013-formal-root-O-from-98",
+        "v013-formal-root-C-from-68",
+        "v013-formal-root-L-from-19868",
+        "v013-formal-derived-U-from-16898",
+        "v013-formal-generic-unknown-finite-term"
+      ],
+      "negativeVectors": [
+        "v013-wrong-structural-rule-writes-zero-target-links",
+        "v013-formal-root-wrong-rule-rejected",
+        "v013-formal-root-wrong-theory-rejected",
+        "v013-formal-root-malformed-prefix-rejected",
+        "v013-formal-root-noncanonical-pair-alias-rejected",
+        "v013-formal-root-no-host-term-special-case"
+      ]
+    },
+    "L13": {
+      "contractPointer": "/requiredSemanticLaws/L13",
+      "positiveVectors": [
+        "v013-real-file-1968698-two-memory"
+      ],
+      "negativeVectors": [
+        "v013-invalid-physical-opcode-fails-before-representation-writes"
+      ]
+    }
+  },
+  "veto": {
+    "runtimeOrStorageIdAsSemanticIdentity": false,
+    "sourcePositionOccurrenceOrPathAsSemanticIdentity": false,
+    "readOrReplayMayMaterialize": false,
+    "secondLiveRuntime": false,
+    "pythonCompatibilityRuntime": false,
+    "hiddenClassicalEqualityAsFoundation": false,
+    "hostParserOrCallbackAsSemanticAuthority": false,
+    "lowLevelTransitionPrimitiveAsSemanticTargetAuthority": false
+  },
+  "explicitlyDeferred": {
+    "productionNonWellFoundedMutualCycles": true,
+    "productionAtomicCyclicWriter": true,
+    "fifthSemanticSymbolZ": true,
+    "senderGlobalRefOrId": true,
+    "mandatorySurfaceSpellingForRelativeForms": true,
+    "retroactiveMutationOfAcceptedV012": true,
+    "automaticAcceptance": true,
+    "philosophicalInterpretationOfFourStructuralClasses": true,
+    "compactDerivedTransportAlphabet": true,
+    "graphReferenceCompression": true
+  },
+  "nonBlockingPostAcceptanceResearch": [
+    "package-wide/global semantic trust-boundary closure",
+    "A-memory/carrier irreducibility and global minimal-basis proof",
+    "generic Rule/template meta-grounding self-hosting",
+    "semantic source reconstruction/full source-removal",
+    "A72u/A72v hierarchical Result / dual-tree Context / persistent Result versions"
+  ],
+  "researchPointers": [
+    {
+      "repository": "netkeep80/anum_docs",
+      "issue": 1558,
+      "normative": false,
+      "topic": "full executable A-network dynamics for A-memory"
+    },
+    {
+      "repository": "netkeep80/anum_docs",
+      "issue": 1332,
+      "normative": false,
+      "topic": "MTS Aset <-> Doublets Aset representation boundary"
+    }
+  ]
+}

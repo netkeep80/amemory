@@ -120,5 +120,12 @@
     }
   ],
   "backendMatrix": [],
-  "acceptanceState": "NOT_READY"
+  "acceptanceState": "NOT_READY",
+  "upstreamRequirements": {
+    "lock": "contracts/upstream/mts-v0.13.lock.json",
+    "projection": "contracts/upstream/mts-v0.13-requirements.json",
+    "verificationWorkflow": ".github/workflows/mts-upstream-check.yml",
+    "floatingUpstreamAllowed": false,
+    "manualProjectionEditsAllowed": false
+  }
 }
