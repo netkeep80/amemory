@@ -449,8 +449,8 @@ console.log("MTS_AND_AMEMORY_PROFILE_IMPORT_NEGATIVE_WITNESSES=GREEN");
     for (const id of ["P09","P10"]) {
       assert.equal(
         backend.profileLawCoverage[id],
-        "r3-executable-browser-witness-required",
-        `${backendId} R3 coverage mismatch for ${id}`,
+        "r3-green-real-browser-differential",
+        `${backendId} R3 GREEN coverage mismatch for ${id}`,
       );
     }
     for (const id of ["P14","P16","P17"]) {
@@ -473,12 +473,12 @@ console.log("MTS_AND_AMEMORY_PROFILE_IMPORT_NEGATIVE_WITNESSES=GREEN");
   assert.equal(c045?.status, "planned");
   assert.equal(c045?.progress?.R1, "green-real-browser-differential");
   assert.equal(c045?.progress?.R2, "green-real-browser-differential");
-  assert.equal(c045?.progress?.R3, "implementation-candidate-browser-witness-required");
-  assert.equal(c045?.progress?.currentSlice, "AM-C048-r3-zero-and-duplicate-convergence");
+  assert.equal(c045?.progress?.R3, "green-real-browser-differential");
   assert.equal(c045?.progress?.fullProfileConformance, false);
   assert(c045?.progress?.completedSlices?.includes("AM-C046-r1-one-reaction-cpu-webgpu"));
   assert(c045?.progress?.completedSlices?.includes("AM-C047-r2-no-admitted-relation-quiescence"));
-  assert.deepEqual(c045?.progress?.remainingPortableLaws, ["P09","P10","P14","P16","P17"]);
+  assert(c045?.progress?.completedSlices?.includes("AM-C048-r3-zero-and-duplicate-convergence"));
+  assert.deepEqual(c045?.progress?.remainingPortableLaws, ["P14","P16","P17"]);
 
   const c046 = conformance.mandatoryVectors.find(
     (vector) => vector.id === "AM-C046-r1-one-reaction-cpu-webgpu",
@@ -504,9 +504,17 @@ console.log("MTS_AND_AMEMORY_PROFILE_IMPORT_NEGATIVE_WITNESSES=GREEN");
   const c048 = conformance.mandatoryVectors.find(
     (vector) => vector.id === "AM-C048-r3-zero-and-duplicate-convergence",
   );
-  assert.equal(c048?.status, "planned");
-  assert.deepEqual(c048?.evidenceRequired?.coveredPortableLaws, ["P09", "P10"]);
-  assert.equal(c048?.evidenceRequired?.fullReactionProfileConformance, false);
+  assert.equal(c048?.status, "green");
+  assert.equal(c048?.evidence?.mergedMainSha, "9bba6f1478c5fa49963f173c6a634c52d8e2db5b");
+  assert.equal(c048?.evidence?.observed?.normalizedDifferential, "PASS");
+  assert.deepEqual(c048?.evidence?.observed?.zero?.scopeCpu, []);
+  assert.deepEqual(c048?.evidence?.observed?.zero?.scopeGpu, []);
+  assert.deepEqual(c048?.evidence?.observed?.zero?.quiescent, { cpu: false, gpu: false });
+  assert.deepEqual(c048?.evidence?.observed?.mixed?.scopeCpu, ["19816898"]);
+  assert.deepEqual(c048?.evidence?.observed?.mixed?.scopeGpu, ["19816898"]);
+  assert.equal(c048?.evidence?.observed?.mixed?.duplicateConvergence, "PASS single canonical 19816898");
+  assert.deepEqual(c048?.evidence?.coveredPortableLaws, ["P09", "P10"]);
+  assert.equal(c048?.evidence?.fullReactionProfileConformance, false);
 
   assert.match(readme, /minimal-portable-amemory-execution/);
   assert.match(readme, /FULL_REACTION_PROFILE_CONFORMANCE = FALSE/);
