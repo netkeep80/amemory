@@ -338,9 +338,9 @@ export async function gpuImport(device, gpuPool, source) {
             if (used(h)) {
               let s = pool[h];
               let e = pool[64u + h];
-              if ((kind == 1u && s == h && e == a) ||
-                  (kind == 2u && s == a && e == h) ||
-                  (kind == 3u && s == a && e == b)) {
+              if ((kind == 1u && s == h && e == a && e != h) ||
+                  (kind == 2u && s == a && e == h && s != h) ||
+                  (kind == 3u && s == a && e == b && s != h && e != h)) {
                 found = h;
                 break;
               }
