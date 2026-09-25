@@ -6,6 +6,7 @@ import {
   destroyGpuAnumPool,
   gpuExport,
   gpuImport,
+  readGpuTopology,
   localRef,
   normalizeAnum,
   parseAnum,
@@ -107,6 +108,28 @@ async function importGpuFixture(device, pool) {
   return refs;
 }
 
+async function validateGpuFixtureTopology(device, pool, refs) {
+  const topology = await readGpuTopology(device, pool);
+  const handles = Object.fromEntries(
+    Object.entries(refs).map(([name, ref]) => [name, requireLocalRef(ref, pool.memory)]),
+  );
+  for (const [name, handle] of Object.entries(handles)) {
+    must(topology.used[handle] !== 0, "GPU topology preflight: unused handle for " + name + "=" + handle);
+  }
+  const checks = [
+    ["current.start", topology.starts[handles.current], handles.K],
+    ["current.end", topology.ends[handles.current], handles.A],
+    ["relation.start", topology.starts[handles.relation], handles.A],
+    ["relation.end", topology.ends[handles.relation], handles.B],
+    ["successor.start", topology.starts[handles.successor], handles.K],
+    ["successor.end", topology.ends[handles.successor], handles.B],
+  ];
+  for (const [label, actual, expected] of checks) {
+    must(actual === expected, "GPU topology preflight " + label + ": expected " + expected + ", got " + actual);
+  }
+  return handles;
+}
+
 function cpuConfigure(wasm, currentRef, relationRef) {
   wasm.reactionReset();
   must(wasm.reactionSetCurrentMember(0, requireLocalRef(currentRef, "cpu-A")) === 1, "CPU current rejected");
@@ -200,7 +223,7 @@ function createGpuReactionState(device, currentHandle, relationHandle) {
   snapshotWords[1] = relationHandle;
   const snapshot = makeBuffer(device, snapshotWords.length, snapshotWords);
 
-  const status = makeBuffer(device, 4);
+  const status = makeBuffer(device, 4, new Uint32Array([0, 0, 0, 900]));
   return { selector, scope, theory, snapshot, status };
 }
 
@@ -253,12 +276,12 @@ const R1_WGSL = [
   "@compute @workgroup_size(1)",
   "fn main(@builtin(global_invocation_id) id: vec3<u32>) {",
   "  if (id.x != 0u) { return; }",
-  "  status[0] = 0u; status[1] = 0u; status[2] = 0u; status[3] = NONE;",
+  "  status[0] = 0u; status[1] = 0u; status[2] = 0u; status[3] = 100u;",
   "  let bank = atomicLoad(&published[0]);",
-  "  if (bank > 1u) { return; }",
+  "  if (bank > 1u) { status[3] = 101u; return; }",
   "  let current_count = scope[bank];",
   "  let snapshot_count = snapshot[0];",
-  "  if (current_count > CAP || snapshot_count > CAP) { return; }",
+  "  if (current_count > CAP || snapshot_count > CAP) { status[3] = 102u; return; }",
   "  let target = 1u - bank;",
   "  let current_base = base(bank); let target_base = base(target);",
   "  var i = 0u;",
@@ -267,59 +290,73 @@ const R1_WGSL = [
   "  loop {",
   "    if (mi >= current_count) { break; }",
   "    let member = scope[current_base + mi];",
-  "    if (!pair_record(member)) { return; }",
+  "    if (!pair_record(member)) { status[3] = 103u; return; }",
   "    let context = pool[member]; let antecedent = pool[END_BASE + member];",
   "    var member_matches = 0u; var ri = 0u;",
   "    loop {",
   "      if (ri >= snapshot_count) { break; }",
   "      let relation = snapshot[1u + ri];",
-  "      if (!pair_record(relation)) { return; }",
+  "      if (!pair_record(relation)) { status[3] = 104u; return; }",
   "      if (pool[relation] == antecedent) {",
   "        let candidate = find_pair(context, pool[END_BASE + relation]);",
-  "        if (candidate == NONE || out_count >= CAP) { return; }",
+  "        if (candidate == NONE) { status[3] = 105u; return; }",
+  "        if (out_count >= CAP) { status[3] = 106u; return; }",
   "        scope[target_base + out_count] = candidate;",
   "        out_count = out_count + 1u; matched = matched + 1u; member_matches = member_matches + 1u;",
   "      }",
   "      ri = ri + 1u;",
   "    }",
   "    if (member_matches == 0u) {",
-  "      if (out_count >= CAP) { return; }",
+  "      if (out_count >= CAP) { status[3] = 107u; return; }",
   "      scope[target_base + out_count] = member; out_count = out_count + 1u;",
   "    }",
   "    mi = mi + 1u;",
   "  }",
   "  status[1] = matched;",
-  "  if (matched == 0u) { status[0] = 1u; status[3] = bank; return; }",
+  "  if (matched == 0u) { status[0] = 1u; status[3] = 200u + bank; return; }",
   "  scope[target] = out_count;",
   "  atomicStore(&published[0], target);",
-  "  status[0] = 1u; status[2] = 1u; status[3] = target;",
+  "  status[0] = 1u; status[2] = 1u; status[3] = 210u + target;",
   "}",
 ].join("\n");
 
 async function gpuRun(device, pool, state) {
-  const shader = device.createShaderModule({ code: R1_WGSL });
-  const pipeline = device.createComputePipeline({
-    layout: "auto",
-    compute: { module: shader, entryPoint: "main" },
-  });
-  const bindGroup = device.createBindGroup({
-    layout: pipeline.getBindGroupLayout(0),
-    entries: [
-      { binding: 0, resource: { buffer: pool.buffer } },
-      { binding: 1, resource: { buffer: state.scope } },
-      { binding: 2, resource: { buffer: state.snapshot } },
-      { binding: 3, resource: { buffer: state.selector } },
-      { binding: 4, resource: { buffer: state.status } },
-    ],
-  });
-  const encoder = device.createCommandEncoder();
-  const pass = encoder.beginComputePass();
-  pass.setPipeline(pipeline);
-  pass.setBindGroup(0, bindGroup);
-  pass.dispatchWorkgroups(1);
-  pass.end();
-  device.queue.submit([encoder.finish()]);
-  await device.queue.onSubmittedWorkDone();
+  device.pushErrorScope("validation");
+  try {
+    const shader = device.createShaderModule({ code: R1_WGSL });
+    if (typeof shader.getCompilationInfo === "function") {
+      const info = await shader.getCompilationInfo();
+      const errors = info.messages.filter((message) => message.type === "error");
+      if (errors.length > 0) {
+        throw new Error("WGSL compilation failed: " + errors.map((message) => message.lineNum + ":" + message.linePos + " " + message.message).join(" | "));
+      }
+    }
+    const descriptor = { layout: "auto", compute: { module: shader, entryPoint: "main" } };
+    const pipeline = typeof device.createComputePipelineAsync === "function"
+      ? await device.createComputePipelineAsync(descriptor)
+      : device.createComputePipeline(descriptor);
+    const bindGroup = device.createBindGroup({
+      layout: pipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: pool.buffer } },
+        { binding: 1, resource: { buffer: state.scope } },
+        { binding: 2, resource: { buffer: state.snapshot } },
+        { binding: 3, resource: { buffer: state.selector } },
+        { binding: 4, resource: { buffer: state.status } },
+      ],
+    });
+    const encoder = device.createCommandEncoder();
+    const pass = encoder.beginComputePass();
+    pass.setPipeline(pipeline);
+    pass.setBindGroup(0, bindGroup);
+    pass.dispatchWorkgroups(1);
+    pass.end();
+    device.queue.submit([encoder.finish()]);
+    await device.queue.onSubmittedWorkDone();
+  } finally {
+    const validationError = await device.popErrorScope();
+    if (validationError) throw new Error("WebGPU validation failed: " + validationError.message);
+  }
 }
 
 async function gpuObserve(device, pool, state) {
@@ -343,6 +380,7 @@ async function gpuObserve(device, pool, state) {
     status: status[0],
     matched: status[1],
     handoff: status[2],
+    diagnostic: status[3],
   };
 }
 
@@ -375,7 +413,7 @@ async function runGpuPositive(device, pool, refs) {
 
     await gpuRun(device, pool, state);
     const after = await gpuObserve(device, pool, state);
-    must(after.status === 1, "GPU reaction failed");
+    must(after.status === 1, "GPU reaction failed: diagnostic=" + after.diagnostic + ", matched=" + after.matched + ", handoff=" + after.handoff + ", bank=" + after.bank);
     return {
       before: before.anums,
       after: after.anums,
@@ -399,7 +437,7 @@ async function runGpuNoMatch(device, pool, refs) {
     const before = await gpuObserve(device, pool, state);
     await gpuRun(device, pool, state);
     const after = await gpuObserve(device, pool, state);
-    must(after.status === 1, "GPU no-match failed");
+    must(after.status === 1, "GPU no-match failed: diagnostic=" + after.diagnostic + ", matched=" + after.matched + ", handoff=" + after.handoff + ", bank=" + after.bank);
     return {
       state: after.anums,
       beforeBank: before.bank,
@@ -420,6 +458,7 @@ export async function runReactionBrowser(wasm, device) {
 
   try {
     const gpuRefs = await importGpuFixture(device, gpuPool);
+    const gpuTopologyHandles = await validateGpuFixtureTopology(device, gpuPool, gpuRefs);
     const cpu = runCpuPositive(wasm, cpuRefs);
     const gpu = await runGpuPositive(device, gpuPool, gpuRefs);
 
@@ -468,6 +507,7 @@ export async function runReactionBrowser(wasm, device) {
     must(handlesDiffer, "CPU/GPU local reaction handles did not differ");
 
     logs.push("reaction.profile = minimal-portable-amemory-execution@0.1.0");
+    logs.push("reaction.gpu.topology = K " + gpuTopologyHandles.K + ", A " + gpuTopologyHandles.A + ", B " + gpuTopologyHandles.B + ", current " + gpuTopologyHandles.current + ", relation " + gpuTopologyHandles.relation + ", successor " + gpuTopologyHandles.successor);
     logs.push("reaction.before.cpu = [" + cpu.before.join(", ") + "]");
     logs.push("reaction.before.gpu = [" + gpu.before.join(", ") + "]");
     logs.push("reaction.after.cpu = [" + cpu.after.join(", ") + "]");
