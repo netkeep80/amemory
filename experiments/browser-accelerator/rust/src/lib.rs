@@ -1102,9 +1102,9 @@ mod anum_boundary_tests {
         // R4 P14: a new live Theory admission added after snapshot_t is
         // invisible to reaction t and becomes executable only after the next
         // explicit reaction-start snapshot.
-        let c = import("9");
-        let relation_bc = import("1168989");
-        let successor_c = import("1989");
+        let c = import("998");
+        let relation_bc = import("116898998");
+        let successor_c = import("198998");
         for handle in [c, relation_bc, successor_c] {
             assert_ne!(handle, ANUM_CPU_NONE);
         }
@@ -1138,7 +1138,7 @@ mod anum_boundary_tests {
         assert_eq!(amemory_reaction_matched_relations(), 1);
         assert_eq!(amemory_reaction_handoff_count(), 1);
         assert_eq!(amemory_reaction_quiescent(), 0);
-        assert_eq!(export(amemory_reaction_current_member(0)), "1989");
+        assert_eq!(export(amemory_reaction_current_member(0)), "198998");
 
         // Negative control on an independent substrate state: adding B->C to
         // live Theory without taking a new snapshot leaves K->B unchanged.
