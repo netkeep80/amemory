@@ -32,9 +32,9 @@ export const R3_FIXTURE = Object.freeze({
 });
 
 export const R4_FIXTURE = Object.freeze({
-  C: "9",
-  relationBC: "1168989",
-  successorC: "1989",
+  C: "998",
+  relationBC: "116898998",
+  successorC: "198998",
 });
 
 const NONE = 0xffffffff;
