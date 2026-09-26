@@ -946,6 +946,108 @@ fn vectors(width: usize) -> Vec<(u32, u32)> {
     out
 }
 
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct WebLogicOutcome {
+    pub(crate) value: u32,
+    pub(crate) writeback: u8,
+    pub(crate) defined_mask: u32,
+    pub(crate) value_mask: u32,
+    pub(crate) undefined_mask: u32,
+    pub(crate) preserve_mask: u32,
+    pub(crate) reactions: u32,
+    pub(crate) links_after_build: u32,
+    pub(crate) links_after_first: u32,
+    pub(crate) steady_link_delta: u32,
+    pub(crate) quiescent: u8,
+}
+
+const WEB_CF: u32 = 1 << 0;
+const WEB_PF: u32 = 1 << 2;
+const WEB_AF: u32 = 1 << 4;
+const WEB_ZF: u32 = 1 << 6;
+const WEB_SF: u32 = 1 << 7;
+const WEB_OF: u32 = 1 << 11;
+const WEB_STATUS_FLAGS: u32 = WEB_CF | WEB_PF | WEB_AF | WEB_ZF | WEB_SF | WEB_OF;
+
+fn web_logic_masks(out: EffectOutcome) -> (u32, u32, u32, u32) {
+    let mut defined = 0u32;
+    let mut values = 0u32;
+    for (mask, value) in [
+        (WEB_CF, out.cf),
+        (WEB_PF, out.pf),
+        (WEB_ZF, out.zf),
+        (WEB_SF, out.sf),
+        (WEB_OF, out.of),
+    ] {
+        if let Some(bit) = value {
+            defined |= mask;
+            if bit != 0 {
+                values |= mask;
+            }
+        }
+    }
+    let undefined = if out.af_undefined { WEB_AF } else { 0 };
+    let preserve = WEB_STATUS_FLAGS & !(defined | undefined);
+    (defined, values, undefined, preserve)
+}
+
+pub(crate) fn web_run_logic(op: u32, a: u32, b: u32) -> Option<WebLogicOutcome> {
+    let mut f = FullFixture::new();
+    let program = LogicEffectProgram::install(&mut f, 32);
+    let links_after_build = f.store.link_count() as u32;
+
+    let (first, reactions) = match op {
+        1 => (
+            run_binary_effect(&mut f, &program, program.logic.gates.and2, a, b, 1),
+            program.binary_steps,
+        ),
+        2 => (
+            run_binary_effect(&mut f, &program, program.logic.gates.or2, a, b, 1),
+            program.binary_steps,
+        ),
+        3 => (
+            run_binary_effect(&mut f, &program, program.logic.gates.xor2, a, b, 1),
+            program.binary_steps,
+        ),
+        4 => (run_not_effect(&mut f, &program, a), program.not_steps),
+        5 => (
+            run_binary_effect(&mut f, &program, program.logic.gates.and2, a, b, 0),
+            program.binary_steps,
+        ),
+        _ => return None,
+    };
+    let links_after_first = f.store.link_count() as u32;
+
+    let second = match op {
+        1 => run_binary_effect(&mut f, &program, program.logic.gates.and2, a, b, 1),
+        2 => run_binary_effect(&mut f, &program, program.logic.gates.or2, a, b, 1),
+        3 => run_binary_effect(&mut f, &program, program.logic.gates.xor2, a, b, 1),
+        4 => run_not_effect(&mut f, &program, a),
+        5 => run_binary_effect(&mut f, &program, program.logic.gates.and2, a, b, 0),
+        _ => unreachable!(),
+    };
+    assert_eq!(second, first, "web logic repeat changed result");
+    let links_after_second = f.store.link_count() as u32;
+    let (defined_mask, value_mask, undefined_mask, preserve_mask) =
+        web_logic_masks(first);
+
+    Some(WebLogicOutcome {
+        value: first.value,
+        writeback: first.writeback,
+        defined_mask,
+        value_mask,
+        undefined_mask,
+        preserve_mask,
+        reactions: reactions as u32,
+        links_after_build,
+        links_after_first,
+        steady_link_delta: links_after_second - links_after_first,
+        quiescent: 1,
+    })
+}
+
+
 #[test]
 #[ignore = "heavy M4 logical-effect suite; mandatory release workflow"]
 fn m4_logic_effects_8_16_32_match_partial_flag_oracle() {
