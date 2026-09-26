@@ -1,25 +1,21 @@
 name: A-Circuit web 80386 interactive lab
 
+# The user-visible constructor is a first-class executable test surface.
+
 on:
   pull_request:
     paths:
       - "experiments/a-circuit/**"
-      - "experiments/browser-accelerator/web/i386-lab.js"
-      - "experiments/browser-accelerator/web/build-info.js"
+      - "experiments/browser-accelerator/web/**"
       - "VERSION"
-      - "experiments/browser-accelerator/web/i386-blocks.json"
-      - "experiments/browser-accelerator/web/index.html"
       - ".github/workflows/a-circuit-web-lab.yml"
       - ".github/workflows/browser-accelerator-pages.yml"
   push:
     branches: [main]
     paths:
       - "experiments/a-circuit/**"
-      - "experiments/browser-accelerator/web/i386-lab.js"
-      - "experiments/browser-accelerator/web/build-info.js"
+      - "experiments/browser-accelerator/web/**"
       - "VERSION"
-      - "experiments/browser-accelerator/web/i386-blocks.json"
-      - "experiments/browser-accelerator/web/index.html"
       - ".github/workflows/a-circuit-web-lab.yml"
       - ".github/workflows/browser-accelerator-pages.yml"
   workflow_dispatch:
@@ -38,6 +34,84 @@ jobs:
         run: |
           rustup toolchain install 1.98.1 --profile minimal
           rustup target add --toolchain 1.98.1 wasm32-unknown-unknown
+
+      - name: Browser lab syntax and rendering witness
+        run: |
+          set -euo pipefail
+          cp experiments/browser-accelerator/web/i386-lab.js /tmp/i386-lab.mjs
+          node --check /tmp/i386-lab.mjs
+          node --check experiments/browser-accelerator/web/i386-lab-view.mjs
+
+          node --input-type=module <<'NODE'
+          import {
+            blockDefinitionHtml,
+            catalogCardHtml,
+            evidenceHtml,
+          } from "./experiments/browser-accelerator/web/i386-lab-view.mjs";
+
+          const outcome = {
+            value: 0x0a0a0a0a,
+            valueHi: 0,
+            writeback: 1,
+            defined: 0,
+            flagValues: 0,
+            undefined: 0,
+            preserve: 0x000008d5,
+            reactions: 42,
+            linksBuild: 100,
+            linksFirst: 120,
+            steadyDelta: 0,
+            quiescent: 1,
+          };
+
+          const and32 = {
+            id: "and32",
+            opcode: 1,
+            category: "Logic",
+            name: "AND32",
+            formula: "A & B",
+            inputs: [
+              { key: "A", slot: "a", type: "word32" },
+              { key: "B", slot: "b", type: "word32" },
+            ],
+            outputs: [{ key: "Result", type: "word32" }],
+            modes: ["single", "vectors"],
+          };
+
+          const one = evidenceHtml(and32, { A: 0xaaaaaaaa, B: 0x0f0f0f0f }, outcome);
+          if (!one.includes("Result") || !one.includes("0x0a0a0a0a") || !one.includes("Identical rerun Link growth")) {
+            throw new Error("one-output browser renderer witness failed");
+          }
+
+          const mul = {
+            id: "mul32-raw",
+            opcode: 23,
+            category: "Multiply",
+            name: "MUL32 raw Wide64",
+            formula: "Wide64 = A × B",
+            inputs: [
+              { key: "A", slot: "a", type: "word32" },
+              { key: "B", slot: "b", type: "word32" },
+            ],
+            outputs: [
+              { key: "LoWord32", slot: "value", type: "word32" },
+              { key: "HiWord32", slot: "valueHi", type: "word32" },
+            ],
+            modes: ["single", "vectors"],
+          };
+          const wide = evidenceHtml(mul, { A: 0xffffffff, B: 2 }, { ...outcome, value: 0xfffffffe, valueHi: 1 });
+          if (!wide.includes("LoWord32") || !wide.includes("HiWord32") || !wide.includes("Combined Hi:Lo") || !wide.includes("0x00000001:0xfffffffe")) {
+            throw new Error("Wide64 browser renderer witness failed");
+          }
+
+          const definition = blockDefinitionHtml(mul);
+          const card = catalogCardHtml(mul);
+          if (!definition.includes("INPUT ABI") || !definition.includes("OUTPUT ABI") || !card.includes("MUL32 raw Wide64")) {
+            throw new Error("constructor definition/catalog renderer witness failed");
+          }
+
+          console.log("browser syntax + one-output + Wide64 constructor rendering PASS");
+          NODE
 
       - name: Native web-lab structural tests
         run: |
