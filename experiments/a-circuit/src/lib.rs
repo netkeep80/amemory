@@ -1,6 +1,8 @@
 #[cfg(test)]
 mod flags_n;
 #[cfg(test)]
+mod logic_n;
+#[cfg(test)]
 mod full_adder;
 #[cfg(test)]
 mod ripple4;
