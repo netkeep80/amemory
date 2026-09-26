@@ -1,0 +1,38 @@
+name: A-Circuit M3 ripple scale 4-32
+
+on:
+  pull_request:
+    paths:
+      - "experiments/a-circuit/**"
+      - ".github/workflows/a-circuit-m3-scale.yml"
+  push:
+    branches: [main]
+    paths:
+      - "experiments/a-circuit/**"
+      - ".github/workflows/a-circuit-m3-scale.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal
+
+      - name: Mandatory release-mode ripple scale suite
+        run: |
+          cargo +1.98.1 test \
+            --release \
+            --manifest-path experiments/a-circuit/Cargo.toml \
+            m3_scale_ \
+            -- --ignored --nocapture --test-threads=1
+
+      - name: Scale policy
+        run: |
+          echo "4/8/16/32 use one generated ripple architecture."
+          echo "Heavy tests are mandatory here, but excluded from the fast semantic workflow."
