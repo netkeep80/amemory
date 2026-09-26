@@ -243,6 +243,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "heavy web-lab structural integration; mandatory dedicated release workflow"]
     fn web_lab_executes_real_logic_arithmetic_and_mux_blocks() {
         let and = execute(1, 0xf0f0_1234, 0x0ff0_ffff, 0).unwrap();
         assert_eq!(and.value, 0x00f0_1234);
