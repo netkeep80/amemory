@@ -285,8 +285,12 @@ fn structural_discriminator_matches(
             return Ok(false);
         }
 
-        pending.push((template_end, claimed_end));
+        // Prefilter ordering is deliberately non-semantic. Explore END first:
+        // in nested Link carriers this often reaches grounded discriminators
+        // before large role-heavy prefixes. Any uncertainty still falls
+        // through to the authoritative full unifier.
         pending.push((template_start, claimed_start));
+        pending.push((template_end, claimed_end));
     }
 
     Ok(true)
