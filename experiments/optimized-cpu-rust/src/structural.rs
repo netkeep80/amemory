@@ -753,6 +753,36 @@ mod tests {
 
         let active = store.ensure_pair(caller, input).unwrap();
 
+        // Audit every accepted-v0.13 discovery boundary independently before
+        // the reaction engine is involved.
+        assert_eq!(
+            read_structural_role_dictionary(&store, role_dictionary).unwrap(),
+            vec![role],
+            "role dictionary"
+        );
+        assert_eq!(
+            unify_structural_rule_template(&store, before, active, &[role]).unwrap(),
+            vec![StructuralRoleBinding { role, value: caller }],
+            "structural unification"
+        );
+
+        let (_, endpoint) = store.poles(active).unwrap();
+        let (derived_trigger_key, _) = store.poles(endpoint).unwrap();
+        assert_eq!(derived_trigger_key, trigger_key, "trigger projection");
+
+        let trigger_members = store
+            .start_incidence(trigger_key)
+            .unwrap()
+            .collect::<Vec<_>>();
+        assert!(
+            trigger_members.contains(&store.ensure_pair(trigger_key, admission).unwrap()),
+            "trigger index contains admission projection"
+        );
+
+        let images =
+            discover_triggered_rule_images(&store, theory, active).unwrap();
+        assert_eq!(images.len(), 1, "one discoverable structural image");
+
         let mut engine = OptimizedStructuralEngine::new(8);
         engine.set_interpreter(&store, interpreter).unwrap();
         engine.set_current(&store, &[active]).unwrap();
