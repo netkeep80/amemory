@@ -765,11 +765,10 @@ fn discover_triggered_rule_images_internal(
             || store.poles(metadata.body).ok()
                 != Some((metadata.before, metadata.output_bundle_template))
         {
-            metadata_cache.remove(&rule);
-            if let Some(profile) = profile.as_deref_mut() {
-                profile.candidates_rejected_before_unification += 1;
-            }
-            continue;
+            // Cache metadata is never semantic authority. If its local-store
+            // invariants are broken, fail closed instead of silently turning a
+            // potentially valid Rule into quiescence.
+            return Err(StructuralError::InvalidRule(rule));
         }
 
         if !compiled_grounded_paths_match(
@@ -1233,6 +1232,117 @@ mod tests {
             Err(StructuralError::TemplateMismatch),
             "full matcher remains final authority after discriminator uncertainty"
         );
+    }
+
+    #[test]
+    fn compiled_grounded_paths_are_sound_prefilter_for_role_templates() {
+        let mut store = OptimizedLinkStore::new();
+        let anchors = fresh(&mut store, 48);
+        let role = anchors[40];
+        let grounded_left = anchors[6];
+        let grounded_right = anchors[7];
+        let bound_value = anchors[8];
+        let other = anchors[9];
+
+        let grounded_suffix =
+            store.ensure_pair(grounded_left, grounded_right).unwrap();
+        let template = store.ensure_pair(role, grounded_suffix).unwrap();
+        let matching = store.ensure_pair(bound_value, grounded_suffix).unwrap();
+        let wrong_suffix = store.ensure_pair(grounded_left, other).unwrap();
+        let rejected = store.ensure_pair(bound_value, wrong_suffix).unwrap();
+
+        let checks =
+            compile_grounded_path_checks(&store, template, &[role]).unwrap();
+        assert!(!checks.is_empty());
+
+        let mut matching_profile = None;
+        assert!(
+            compiled_grounded_paths_match(
+                &store,
+                matching,
+                &checks,
+                &mut matching_profile,
+            )
+            .unwrap(),
+            "true structural match must survive compiled prefilter"
+        );
+        assert!(
+            unify_structural_rule_template(&store, template, matching, &[role])
+                .is_ok(),
+        );
+
+        let mut rejected_profile = None;
+        assert!(
+            !compiled_grounded_paths_match(
+                &store,
+                rejected,
+                &checks,
+                &mut rejected_profile,
+            )
+            .unwrap(),
+            "grounded mismatch should be rejected before full unification"
+        );
+        assert_eq!(
+            unify_structural_rule_template(&store, template, rejected, &[role]),
+            Err(StructuralError::TemplateMismatch),
+        );
+    }
+
+    #[test]
+    fn executor_metadata_cache_is_scoped_to_one_runtime_store() {
+        let mut original = OptimizedLinkStore::new();
+        let original_id = original.instance_id();
+
+        let source = original.export_anum(ROOT_HANDLE).unwrap();
+        original.import_anum(&source).unwrap();
+        assert_eq!(
+            original.instance_id(),
+            original_id,
+            "transactional import must preserve runtime store identity"
+        );
+
+        let cloned = original.clone();
+        assert_ne!(
+            cloned.instance_id(),
+            original.instance_id(),
+            "independent store clones must never share executor-cache identity"
+        );
+
+        let mut engine = OptimizedStructuralEngine::new(4);
+        engine.metadata_store_instance = Some(original.instance_id());
+        engine.rule_metadata_cache.insert(
+            ROOT_HANDLE,
+            CompiledRuleMetadata {
+                role_dictionary: ROOT_HANDLE,
+                body: ROOT_HANDLE,
+                before: ROOT_HANDLE,
+                output_bundle_template: ROOT_HANDLE,
+                roles: Vec::new(),
+                grounded_checks: Vec::new(),
+            },
+        );
+
+        let interpreter = {
+            let dictionary =
+                define_structural_role_dictionary(&mut original, &[]).unwrap();
+            let grammar = original.ensure_start_self_closed(ROOT_HANDLE).unwrap();
+            let theory = original.ensure_end_self_closed(ROOT_HANDLE).unwrap();
+            define_structural_interpreter(
+                &mut original,
+                dictionary,
+                grammar,
+                theory,
+            )
+            .unwrap()
+        };
+        engine.set_interpreter(&original, interpreter).unwrap();
+        engine.set_current(&original, &[ROOT_HANDLE]).unwrap();
+        let _ = engine.run(&mut original).unwrap();
+
+        // Merely seeing another store instance is sufficient to invalidate all
+        // local-handle metadata before any semantic discovery can use it.
+        let clone_id = cloned.instance_id();
+        assert_ne!(clone_id, engine.metadata_store_instance.unwrap());
     }
 
     #[test]
