@@ -193,16 +193,16 @@ fn unary_call(
 }
 
 #[derive(Clone, Debug)]
-struct FlaggedArithmeticProgram {
-    width: usize,
-    flagged: Handle,
-    result_tag: Handle,
-    active_steps: usize,
-    links_after_build: usize,
+pub(crate) struct FlaggedArithmeticProgram {
+    pub(crate) width: usize,
+    pub(crate) flagged: Handle,
+    pub(crate) result_tag: Handle,
+    pub(crate) active_steps: usize,
+    pub(crate) links_after_build: usize,
 }
 
 impl FlaggedArithmeticProgram {
-    fn install(f: &mut FullFixture, width: usize) -> Self {
+    pub(crate) fn install(f: &mut FullFixture, width: usize) -> Self {
         assert!((8..=32).contains(&width));
 
         let arithmetic = ArithmeticProgram::install(f, width);

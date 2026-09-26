@@ -18,6 +18,8 @@ mod subtractor;
 mod subtractor_n;
 #[cfg(test)]
 mod arithmetic_n;
+#[cfg(test)]
+mod arithmetic_effect_n;
 
 use amemory_optimized_cpu_probe::{OptimizedLinkStore, OptimizedReactionEngine};
 use std::collections::BTreeSet;

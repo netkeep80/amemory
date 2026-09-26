@@ -1,0 +1,39 @@
+name: A-Circuit M4 arithmetic effects and CMP
+
+on:
+  pull_request:
+    paths:
+      - "experiments/a-circuit/**"
+      - ".github/workflows/a-circuit-m4-arith-effect.yml"
+  push:
+    branches: [main]
+    paths:
+      - "experiments/a-circuit/**"
+      - ".github/workflows/a-circuit-m4-arith-effect.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  arithmetic-effect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal
+
+      - name: Structural arithmetic effect and CMP suite
+        run: |
+          cargo +1.98.1 test \
+            --release \
+            --manifest-path experiments/a-circuit/Cargo.toml \
+            m4_arith_effect_ \
+            -- --ignored --nocapture --test-threads=1
+
+      - name: M4 arithmetic effect policy
+        run: |
+          echo "Arithmetic flags are converted to the shared FlagPatch ABI."
+          echo "CMP is SUB with X=0 Mode=1 WriteBack=0."
+          echo "No arithmetic or flag recomputation occurs in the effect adapter."
