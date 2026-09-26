@@ -35,7 +35,7 @@ fn fresh(
     result
 }
 
-fn call(
+pub(crate) fn call(
     store: &mut OptimizedLinkStore,
     apply: Handle,
     function: Handle,
@@ -82,7 +82,7 @@ fn half_finish_frame(
     store.ensure_start_self_closed(descriptor).unwrap()
 }
 
-fn tagged_frame(
+pub(crate) fn tagged_frame(
     store: &mut OptimizedLinkStore,
     tag: Handle,
     caller: Handle,
@@ -93,7 +93,7 @@ fn tagged_frame(
     store.ensure_start_self_closed(descriptor).unwrap()
 }
 
-fn define_bundle_rule(
+pub(crate) fn define_bundle_rule(
     store: &mut OptimizedLinkStore,
     theory: Handle,
     roles: &[Handle],
@@ -121,7 +121,7 @@ fn admit_bundle_rule(
     rule
 }
 
-fn index_rule_for(
+pub(crate) fn index_rule_for(
     store: &mut OptimizedLinkStore,
     trigger_keys: &[Handle],
     admission: Handle,
@@ -131,19 +131,23 @@ fn index_rule_for(
     }
 }
 
-struct Fixture {
-    store: OptimizedLinkStore,
-    engine: OptimizedStructuralEngine,
-    full: Handle,
-    k: Handle,
-    zero: Handle,
-    one: Handle,
-    apply: Handle,
+pub(crate) struct Fixture {
+    pub(crate) store: OptimizedLinkStore,
+    pub(crate) engine: OptimizedStructuralEngine,
+    pub(crate) full: Handle,
+    pub(crate) k: Handle,
+    pub(crate) zero: Handle,
+    pub(crate) one: Handle,
+    pub(crate) apply: Handle,
+    pub(crate) theory: Handle,
+    pub(crate) interpreter: Handle,
+    pub(crate) o: Handle,
+    pub(crate) c: Handle,
     args3: [[[Handle; 2]; 2]; 2],
 }
 
 impl Fixture {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let mut store = OptimizedLinkStore::new();
         let (o, c, l, u) = basis(&mut store);
         let anchors = fresh(&mut store, o, c, u, l, 320);
@@ -527,6 +531,10 @@ impl Fixture {
             zero,
             one,
             apply,
+            theory,
+            interpreter,
+            o,
+            c,
             args3,
         }
     }
