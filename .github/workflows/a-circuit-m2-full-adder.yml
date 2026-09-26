@@ -1,0 +1,102 @@
+name: A-Circuit M2 Full Adder differential
+
+on:
+  pull_request:
+    paths:
+      - "experiments/a-circuit/**"
+      - "experiments/optimized-cpu-rust/**"
+      - ".github/workflows/a-circuit-m2-full-adder.yml"
+  push:
+    branches: [main]
+    paths:
+      - "experiments/a-circuit/**"
+      - "experiments/optimized-cpu-rust/**"
+      - ".github/workflows/a-circuit-m2-full-adder.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  MTS_ACCEPTED_V013_SHA: 3819b5fb2bae65506c2888e7c4fa0de387551846
+
+jobs:
+  differential:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout A-memory
+        uses: actions/checkout@v6
+
+      - name: Checkout exact accepted MTS v0.13
+        uses: actions/checkout@v6
+        with:
+          repository: netkeep80/anum_docs
+          ref: ${{ env.MTS_ACCEPTED_V013_SHA }}
+          path: _upstream/anum_docs
+
+      - name: Verify exact upstream pin
+        shell: bash
+        run: |
+          test "$(git -C _upstream/anum_docs rev-parse HEAD)" = "$MTS_ACCEPTED_V013_SHA"
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Build accepted MTS TypeScript kernel
+        working-directory: _upstream/anum_docs/ts
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal
+
+      - name: Run accepted MTS Full Adder oracle
+        shell: bash
+        run: |
+          node experiments/a-circuit/upstream/m2-full-adder.mjs 2>&1 | tee /tmp/full-adder-upstream.log
+          grep -q "A_CIRCUIT_M2_FULL_ADDER=GREEN" /tmp/full-adder-upstream.log
+
+      - name: Run optimized A-memory Full Adder
+        shell: bash
+        run: |
+          cargo +1.98.1 test \
+            --manifest-path experiments/a-circuit/Cargo.toml \
+            m2_gate_composed_full_adder_all_eight_rows \
+            -- --nocapture --test-threads=1 2>&1 | tee /tmp/full-adder-rust.log
+
+      - name: Compare normalized portable truth-table observations
+        shell: bash
+        run: |
+          sed -n 's/.*FULL_ADDER_TRACE input=\([01][01][01]\) sum=\([01]\) cout=\([01]\).*/\1:\2\3/p' \
+            /tmp/full-adder-upstream.log | sort -u > /tmp/upstream.rows
+
+          sed -n 's/.*FULL_ADDER_TRACE input=\([01][01][01]\) sum=\([01]\) cout=\([01]\).*/\1:\2\3/p' \
+            /tmp/full-adder-rust.log | sort -u > /tmp/rust.rows
+
+          test "$(wc -l < /tmp/upstream.rows)" -eq 8
+          test "$(wc -l < /tmp/rust.rows)" -eq 8
+
+          echo "Accepted MTS rows:"
+          cat /tmp/upstream.rows
+          echo "Optimized A-memory rows:"
+          cat /tmp/rust.rows
+
+          diff -u /tmp/upstream.rows /tmp/rust.rows
+
+          cat > /tmp/expected.rows <<'EOF'
+          000:00
+          001:10
+          010:10
+          011:01
+          100:10
+          101:01
+          110:01
+          111:11
+          EOF
+          sed -i 's/^          //' /tmp/expected.rows
+          diff -u /tmp/expected.rows /tmp/rust.rows
+
+          echo "FULL_ADDER_DIFFERENTIAL=PASS"
