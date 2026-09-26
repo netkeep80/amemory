@@ -244,7 +244,7 @@ Forbidden:
 - special HalfAdder opcode;
 - replacing the actual gate network with one direct truth-table lookup and calling it a circuit.
 
-C2b is the first real gate-composition test. Full Adder remains blocked until C2b is GREEN.
+C2b is the first real gate-composition test. This gate is now GREEN; the later M2/M3 checkpoint below records the accepted continuation.
 
 
 ## M2/M3 — machine-directed arithmetic checkpoint

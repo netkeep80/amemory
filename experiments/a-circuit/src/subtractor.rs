@@ -78,6 +78,9 @@ impl Sub1Program {
         let cout_not_tag = anchors.next(&mut f.store);
 
         let bits = [f.zero, f.one];
+        // Trigger discovery uses the START pole of the active member's endpoint.
+        // For scalar bit results: START(U)=C and START(L)=O.
+        let bit_triggers = [f.c, f.o];
 
         // Reusable structural NOT function:
         //
@@ -160,7 +163,7 @@ impl Sub1Program {
                 before,
                 &[after],
             );
-            index_rule_for(&mut f.store, &bits, admission);
+            index_rule_for(&mut f.store, &bit_triggers, admission);
         }
 
         // Borrow-in inversion return:
@@ -194,7 +197,7 @@ impl Sub1Program {
                 before,
                 &[after],
             );
-            index_rule_for(&mut f.store, &bits, admission);
+            index_rule_for(&mut f.store, &bit_triggers, admission);
         }
 
         // Full Adder returns [diff,carry_out]. For subtraction, x86-style
@@ -258,7 +261,7 @@ impl Sub1Program {
                 before,
                 &[after],
             );
-            index_rule_for(&mut f.store, &bits, admission);
+            index_rule_for(&mut f.store, &bit_triggers, admission);
         }
 
         Self {
