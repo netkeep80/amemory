@@ -294,13 +294,14 @@ jobs:
               throw new Error("MUX1 structural proof JSON missing");
             }
             const proofLen = w.amemory_i386_lab_proof_json_len() >>> 0;
-            const proofBytes = Buffer.alloc(proofLen);
-            for (let i = 0; i < proofLen; i += 1) {
-              const byte = w.amemory_i386_lab_proof_json_byte(i) >>> 0;
-              if (byte > 255) throw new Error("invalid proof byte " + i);
-              proofBytes[i] = byte;
+            const proofPtr = w.amemory_i386_lab_proof_json_ptr() >>> 0;
+            if (!proofLen || proofPtr + proofLen > w.memory.buffer.byteLength) {
+              throw new Error("MUX1 proof JSON pointer/length invalid");
             }
-            const proof = JSON.parse(proofBytes.toString("utf8"));
+            const proofText = Buffer
+              .from(w.memory.buffer, proofPtr, proofLen)
+              .toString("utf8");
+            const proof = JSON.parse(proofText);
             const memoryId = proof.load.memoryInstanceId;
             if (!memoryId || proof.execute.memoryInstanceId !== memoryId || proof.result.memoryInstanceId !== memoryId) {
               throw new Error("proof changed runtime A-memory identity");
