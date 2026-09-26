@@ -173,10 +173,18 @@ function styleLab() {
     .proof-result-anums { display:grid; gap:8px; margin:10px 0; }
     .proof-result-anums > div { display:grid; gap:5px; padding:9px 10px; border:1px solid var(--line); border-radius:9px; background:var(--surface); }
     .proof-result-anums code { overflow-wrap:anywhere; }
-    .proof-visual-toolbar { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; margin:14px 0 8px; }
+    .proof-visual-toolbar { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; margin:14px 0 8px; align-items:center; }
+    .proof-visual-toolbar > div:first-child { display:grid; gap:3px; }
     .proof-visual-toolbar span { color:var(--muted); }
+    .proof-visual-tabs { display:flex; flex-wrap:wrap; gap:6px; }
+    .proof-visual-tabs button { min-height:36px; border:1px solid var(--line); border-radius:9px; padding:6px 9px; background:var(--surface-2); color:var(--text); cursor:pointer; }
+    .proof-visual-tabs button[aria-pressed="true"] { outline:2px solid var(--accent); font-weight:800; }
+    .proof-visual-note { margin:6px 0 8px; color:var(--muted); font-size:.8rem; }
+    .proof-visual-note code { color:var(--text); }
     .proof-visual { min-height:280px; overflow:auto; border:1px solid var(--line); border-radius:12px; background:var(--surface); padding:8px; }
     .proof-visual svg { width:100%; min-width:720px; min-height:520px; }
+    .proof-visual-three { height:620px; min-height:620px; overflow:hidden; padding:0; position:relative; }
+    .proof-visual-three canvas { display:block; width:100% !important; height:100% !important; }
     .lab-hidden { display:none !important; }
     @media(max-width:1050px){ .lab-layout{grid-template-columns:1fr;} .lab-catalog-shell{position:static;max-height:none;} .lab-catalog{grid-template-columns:repeat(3,minmax(0,1fr));} }
     @media(max-width:820px){ .lab-catalog{grid-template-columns:repeat(2,minmax(0,1fr));} .lab-constructor{grid-template-columns:1fr;} .lab-chip::before,.lab-chip::after,.lab-input-port::after,.lab-output-port::before{display:none;} .lab-evidence-io,.lab-spec-grid,.lab-metrics{grid-template-columns:1fr 1fr;} .proof-title{flex-direction:column;} .proof-memory{min-width:0;width:100%;box-sizing:border-box;} .proof-root{grid-template-columns:1fr;} .proof-root code{grid-column:1;} }
