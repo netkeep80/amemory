@@ -299,7 +299,8 @@ SUB1                                  GREEN (#80/#81)
 -> M4 logical flag/writeback effects       GREEN (#91/#92)
 -> M4 arithmetic effect + CMP               GREEN (#93/#94)
 -> M4 one-bit SHL/SHR/SAR wiring             GREEN (#95/#96)
--> M4 variable SHL/SHR/SAR count&31 effects   CURRENT (#97)
+-> M4 variable SHL/SHR/SAR count&31 effects   GREEN (#97/#98)
+-> M4 ROL/ROR count&31 effects                  CURRENT (#99)
 ```
 
 
@@ -588,3 +589,33 @@ count5>1:
 
 This issue intentionally targets r/m32. Byte/word count>=operand-width semantics
 remain outside this witness.
+
+
+## M4 — structural ROL/ROR
+
+Issue: #99
+
+ROL/ROR use the same structural Count8 masking convention as SHIFT32: c0..c4
+select the generated rule and c5..c7 remain ignored roles.
+
+For a nonzero masked count, rotation itself is a direct role permutation of the
+32-bit Word. Only CF and OF belong to the FlagPatch:
+
+```text
+count5=0:
+  FlagPatch = []
+
+count5=1:
+  ROL: SET(CF,Result[0]),  SET(OF,Result[31] XOR CF)
+  ROR: SET(CF,Result[31]), SET(OF,Result[31] XOR Result[30])
+
+count5>1:
+  SET(CF,...)
+  UNDEFINED(OF)
+```
+
+SF/ZF/AF/PF are absent from the patch and therefore preserved.
+
+Because count>1 requires no derived flag beyond wiring, those complete rotations
+are expected to execute in one Structural Rule reaction. Only count=1 needs an
+extra XOR gate and response, for three reactions total.

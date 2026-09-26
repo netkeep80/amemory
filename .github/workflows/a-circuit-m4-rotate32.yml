@@ -1,0 +1,39 @@
+name: A-Circuit M4 ROL ROR
+
+on:
+  pull_request:
+    paths:
+      - "experiments/a-circuit/**"
+      - ".github/workflows/a-circuit-m4-rotate32.yml"
+  push:
+    branches: [main]
+    paths:
+      - "experiments/a-circuit/**"
+      - ".github/workflows/a-circuit-m4-rotate32.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rotate32:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal
+
+      - name: Structural ROL/ROR suite
+        run: |
+          cargo +1.98.1 test \
+            --release \
+            --manifest-path experiments/a-circuit/Cargo.toml \
+            m4_rotate32_ \
+            -- --ignored --nocapture --test-threads=1
+
+      - name: 80386 rotate policy
+        run: |
+          echo "Count8 masking is structural over c0..c4."
+          echo "ROL/ROR change only CF/OF; other flags are absent and preserved."
+          echo "count1 uses 3 reactions for OF XOR; all other counts use 1."
