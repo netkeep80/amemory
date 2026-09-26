@@ -1,0 +1,39 @@
+name: A-Circuit M4 one-bit shifts
+
+on:
+  pull_request:
+    paths:
+      - "experiments/a-circuit/**"
+      - ".github/workflows/a-circuit-m4-shift1.yml"
+  push:
+    branches: [main]
+    paths:
+      - "experiments/a-circuit/**"
+      - ".github/workflows/a-circuit-m4-shift1.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  shift1:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal
+
+      - name: Structural one-bit shift suite
+        run: |
+          cargo +1.98.1 test \
+            --release \
+            --manifest-path experiments/a-circuit/Cargo.toml \
+            m4_shift1_ \
+            -- --ignored --nocapture --test-threads=1
+
+      - name: M4 shift architecture policy
+        run: |
+          echo "SHL1 SHR1 SAR1 are direct structural Word role rearrangements."
+          echo "Each runtime shift completes in one Structural Rule reaction."
+          echo "SAL1 is exactly the SHL1 function Link."
