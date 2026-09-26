@@ -507,6 +507,7 @@ fn m3_scale_word_order_is_semantic_at_32_bits() {
 
     assert_eq!(decode_word(&f, 32, word), 0x0000_0003);
     assert_eq!(decode_word(&f, 32, reversed_word), 0xc000_0000);
+}
 
 #[test]
 #[ignore = "informational performance baseline; no acceptance threshold"]
@@ -592,4 +593,3 @@ fn m3_perf_ripple_width_baseline() {
     println!("RIPPLE_PERF_NOTE=informational-only-no-performance-threshold");
 }
 
-}
