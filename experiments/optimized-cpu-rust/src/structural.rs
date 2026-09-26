@@ -720,10 +720,15 @@ mod tests {
         let anchors = fresh(&mut store, 20);
         let theory = anchors[0];
         let grammar = anchors[1];
-        let role = anchors[2];
         let caller = anchors[3];
         let input = anchors[4];
         let output = anchors[5];
+
+        // fresh[] is a recursively nested chain. Use a later Link as the
+        // placeholder role so the grounded input does not structurally contain
+        // that same role occurrence. Otherwise the matcher correctly treats
+        // the nested occurrence as a second placeholder occurrence.
+        let role = anchors[10];
 
         let authority_dictionary =
             define_structural_role_dictionary(&mut store, &[]).unwrap();
