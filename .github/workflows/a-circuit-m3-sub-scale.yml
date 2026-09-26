@@ -1,0 +1,38 @@
+name: A-Circuit M3 ripple subtraction scale 4-32
+
+on:
+  pull_request:
+    paths:
+      - "experiments/a-circuit/**"
+      - ".github/workflows/a-circuit-m3-sub-scale.yml"
+  push:
+    branches: [main]
+    paths:
+      - "experiments/a-circuit/**"
+      - ".github/workflows/a-circuit-m3-sub-scale.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal
+
+      - name: Mandatory release-mode subtraction scale suite
+        run: |
+          cargo +1.98.1 test \
+            --release \
+            --manifest-path experiments/a-circuit/Cargo.toml \
+            m3_sub_scale_ \
+            -- --ignored --nocapture --test-threads=1
+
+      - name: Scale policy
+        run: |
+          echo "4/8/16/32 use one generated ripple-subtraction architecture."
+          echo "Every bit reuses the same structural SUB1; no host borrow propagation."
