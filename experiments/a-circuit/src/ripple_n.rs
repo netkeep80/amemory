@@ -432,6 +432,7 @@ fn deterministic_vectors(width: usize) -> Vec<(u32, u32, u8)> {
 }
 
 #[test]
+#[ignore = "heavy scale suite; mandatory release workflow"]
 fn m3_scale_generic_n4_repeats_exhaustive_512_proof() {
     let mut f = FullFixture::new();
     let program = RippleProgram::install(&mut f, 4);
@@ -457,6 +458,7 @@ fn m3_scale_generic_n4_repeats_exhaustive_512_proof() {
 }
 
 #[test]
+#[ignore = "heavy scale suite; mandatory release workflow"]
 fn m3_scale_8_16_32_same_architecture() {
     for width in [8usize, 16, 32] {
         let mut f = FullFixture::new();
