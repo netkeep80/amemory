@@ -13,6 +13,7 @@ import {
   assertR5Fixture,
   assertR6Fixture,
   assertReactionStateExact,
+  makePortableReactionResult,
   normalizeReactionState,
   pairAnum,
   perturbReactionState,
@@ -63,6 +64,28 @@ assert.equal(
   assertReactionStateExact([R1_FIXTURE.successor], [R1_FIXTURE.successor], "positive"),
   true,
 );
+
+assert.deepEqual(
+  makePortableReactionResult([R1_FIXTURE.successor], 1, 1, false),
+  {
+    scope: [R1_FIXTURE.successor],
+    matchedRelations: 1,
+    handoff: 1,
+    quiescent: false,
+  },
+);
+assert.deepEqual(
+  makePortableReactionResult([], 1, 1, false),
+  {
+    scope: [],
+    matchedRelations: 1,
+    handoff: 1,
+    quiescent: false,
+  },
+);
+assert.throws(() => makePortableReactionResult([], -1, 1, false), /matchedRelations/);
+assert.throws(() => makePortableReactionResult([], 0, 2, false), /handoff/);
+assert.throws(() => makePortableReactionResult([], 0, 0, 0), /quiescent/);
 
 assert.throws(
   () => splitPairAnum("98"),
