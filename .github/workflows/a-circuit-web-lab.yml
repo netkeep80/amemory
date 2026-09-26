@@ -1,5 +1,7 @@
 name: A-Circuit web 80386 interactive lab
 
+# The user-visible constructor is a first-class executable test surface.
+
 on:
   pull_request:
     paths:
