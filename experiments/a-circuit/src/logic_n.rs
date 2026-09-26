@@ -185,6 +185,20 @@ fn install_gates(
     }
 }
 
+pub(crate) fn install_gate_basis(
+    f: &mut FullFixture,
+) -> GateSet {
+    let seed0 = f.store.ensure_pair(f.k, f.full).unwrap();
+    let mut anchors = AnchorGen::new(
+        &mut f.store,
+        seed0,
+        f.o,
+        f.c,
+        33,
+    );
+    install_gates(f, &mut anchors)
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct LogicProgram {
     pub(crate) width: usize,

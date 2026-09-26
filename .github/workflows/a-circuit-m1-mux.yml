@@ -1,0 +1,47 @@
+name: A-Circuit M1 structural MUX
+
+on:
+  pull_request:
+    paths:
+      - "experiments/a-circuit/**"
+      - ".github/workflows/a-circuit-m1-mux.yml"
+  push:
+    branches: [main]
+    paths:
+      - "experiments/a-circuit/**"
+      - ".github/workflows/a-circuit-m1-mux.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal
+
+      - name: Exhaustive MUX1 direct/composed witness
+        run: |
+          cargo +1.98.1 test \
+            --release \
+            --manifest-path experiments/a-circuit/Cargo.toml \
+            m1_mux1_ \
+            -- --nocapture --test-threads=1
+
+      - name: Composed structural MUX32 suite
+        run: |
+          cargo +1.98.1 test \
+            --release \
+            --manifest-path experiments/a-circuit/Cargo.toml \
+            m1_mux32_ \
+            -- --ignored --nocapture --test-threads=1
+
+      - name: M1 MUX architecture policy
+        run: |
+          echo "DIRECT_MUX1 is differential-only."
+          echo "Architectural MUX1 is XOR/AND/XOR composition."
+          echo "MUX32 scales the composed MUX1; host never selects runtime data."
