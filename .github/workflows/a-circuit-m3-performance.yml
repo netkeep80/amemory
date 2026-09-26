@@ -30,7 +30,13 @@ jobs:
             --release \
             --manifest-path experiments/a-circuit/Cargo.toml \
             m3_perf_ripple_width_baseline \
-            -- --ignored --nocapture --test-threads=1
+            -- --ignored --nocapture --test-threads=1 2>&1 | tee /tmp/ripple-perf.log
+
+          grep -q "RIPPLE_PERF width=4 " /tmp/ripple-perf.log
+          grep -q "RIPPLE_PERF width=8 " /tmp/ripple-perf.log
+          grep -q "RIPPLE_PERF width=16 " /tmp/ripple-perf.log
+          grep -q "RIPPLE_PERF width=32 " /tmp/ripple-perf.log
+          grep -q "RIPPLE_PERF_NOTE=informational-only-no-performance-threshold" /tmp/ripple-perf.log
 
       - name: Performance policy
         run: |
