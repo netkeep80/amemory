@@ -15,9 +15,9 @@ function parseWord(text) {
   let n;
   if (/^0x[0-9a-f]+$/i.test(value)) n = Number.parseInt(value.slice(2), 16);
   else if (/^[0-9]+$/.test(value)) n = Number.parseInt(value, 10);
-  else throw new Error(\`invalid 32-bit value: \${text}\`);
+  else throw new Error(`invalid 32-bit value: ${text}`);
   if (!Number.isFinite(n) || n < 0 || n > 0xffff_ffff) {
-    throw new Error(\`outside uint32: \${text}\`);
+    throw new Error(`outside uint32: ${text}`);
   }
   return n >>> 0;
 }
@@ -26,22 +26,22 @@ function parseTyped(type, value) {
   if (type === "word32") return parseWord(value);
   if (type === "bit") {
     const n = Number(value);
-    if (n !== 0 && n !== 1) throw new Error(\`bit must be 0 or 1: \${value}\`);
+    if (n !== 0 && n !== 1) throw new Error(`bit must be 0 or 1: ${value}`);
     return n;
   }
   if (type === "count8") {
     const n = Number(value);
     if (!Number.isInteger(n) || n < 0 || n > 255) {
-      throw new Error(\`count8 must be 0..255: \${value}\`);
+      throw new Error(`count8 must be 0..255: ${value}`);
     }
     return n;
   }
-  throw new Error(\`unsupported input type: \${type}\`);
+  throw new Error(`unsupported input type: ${type}`);
 }
 
 async function loadRegistry() {
   const response = await fetch("./i386-blocks.json", { cache: "no-store" });
-  if (!response.ok) throw new Error(\`block registry HTTP \${response.status}\`);
+  if (!response.ok) throw new Error(`block registry HTTP ${response.status}`);
   const registry = await response.json();
   if (registry.schemaVersion !== 1 || !Array.isArray(registry.blocks)) {
     throw new Error("unsupported block registry");
@@ -51,7 +51,7 @@ async function loadRegistry() {
 
 async function loadLabWasm() {
   const response = await fetch("./amemory_a_circuit.wasm", { cache: "no-store" });
-  if (!response.ok) throw new Error(\`A-Circuit WASM HTTP \${response.status}\`);
+  if (!response.ok) throw new Error(`A-Circuit WASM HTTP ${response.status}`);
   const bytes = await response.arrayBuffer();
   const { instance } = await WebAssembly.instantiate(bytes, {});
   const wasm = instance.exports;
@@ -63,7 +63,7 @@ async function loadLabWasm() {
 
 function styleLab() {
   const style = document.createElement("style");
-  style.textContent = \`
+  style.textContent = `
     .i386-lab { margin: 34px 0 44px; }
     .i386-lab > h2 { margin-bottom: 6px; }
     .i386-lab > p { max-width: 920px; margin-top: 0; }
@@ -148,22 +148,22 @@ function styleLab() {
     @media(max-width:1050px){ .lab-layout{grid-template-columns:1fr;} .lab-catalog-shell{position:static;max-height:none;} .lab-catalog{grid-template-columns:repeat(3,minmax(0,1fr));} }
     @media(max-width:820px){ .lab-catalog{grid-template-columns:repeat(2,minmax(0,1fr));} .lab-constructor{grid-template-columns:1fr;} .lab-chip::before,.lab-chip::after,.lab-input-port::after,.lab-output-port::before{display:none;} .lab-evidence-io,.lab-spec-grid,.lab-metrics{grid-template-columns:1fr 1fr;} }
     @media(max-width:560px){ .lab-catalog{grid-template-columns:1fr;} .lab-evidence-io,.lab-spec-grid,.lab-metrics{grid-template-columns:1fr;} .lab-modebar{align-items:flex-start;flex-direction:column;} }
-  \`;
+  `;
   document.head.append(style);
 }
 
 function inputControl(def, value, rowMode = false) {
-  const label = rowMode ? \` aria-label="\${escapeHtml(def.key)}"\` : "";
+  const label = rowMode ? ` aria-label="${escapeHtml(def.key)}"` : "";
   if (def.type === "bit") {
-    return \`<select data-input="\${escapeHtml(def.key)}" data-type="bit"\${label}>
-      <option value="0"\${Number(value) === 0 ? " selected" : ""}>0</option>
-      <option value="1"\${Number(value) === 1 ? " selected" : ""}>1</option>
-    </select>\`;
+    return `<select data-input="${escapeHtml(def.key)}" data-type="bit"${label}>
+      <option value="0"${Number(value) === 0 ? " selected" : ""}>0</option>
+      <option value="1"${Number(value) === 1 ? " selected" : ""}>1</option>
+    </select>`;
   }
   if (def.type === "count8") {
-    return \`<input type="number" min="0" max="255" step="1" data-input="\${escapeHtml(def.key)}" data-type="count8" value="\${escapeHtml(value)}"\${label}>\`;
+    return `<input type="number" min="0" max="255" step="1" data-input="${escapeHtml(def.key)}" data-type="count8" value="${escapeHtml(value)}"${label}>`;
   }
-  return \`<input data-input="\${escapeHtml(def.key)}" data-type="\${escapeHtml(def.type)}" value="\${escapeHtml(value)}"\${label}>\`;
+  return `<input data-input="${escapeHtml(def.key)}" data-type="${escapeHtml(def.type)}" value="${escapeHtml(value)}"${label}>`;
 }
 
 function inputPortCard(def, value) {
@@ -173,26 +173,26 @@ function inputPortCard(def, value) {
   } catch {
     preview = '<div class="lab-input-preview lab-error">invalid input</div>';
   }
-  return \`
-    <div class="lab-port-card lab-input-port" data-port="\${escapeHtml(def.key)}">
+  return `
+    <div class="lab-port-card lab-input-port" data-port="${escapeHtml(def.key)}">
       <div class="lab-port-head">
-        <strong>\${escapeHtml(def.key)}</strong>
-        <small>\${escapeHtml(def.type)} · ABI \${escapeHtml(def.slot)}</small>
+        <strong>${escapeHtml(def.key)}</strong>
+        <small>${escapeHtml(def.type)} · ABI ${escapeHtml(def.slot)}</small>
       </div>
-      \${inputControl(def, value)}
-      <div data-input-preview>\${preview}</div>
-    </div>\`;
+      ${inputControl(def, value)}
+      <div data-input-preview>${preview}</div>
+    </div>`;
 }
 
 function outputPlaceholder(block) {
-  return (block.outputs || [{ key: "Result", type: "word32" }]).map((def) => \`
+  return (block.outputs || [{ key: "Result", type: "word32" }]).map((def) => `
     <div class="lab-port-card lab-output-port">
       <div class="lab-port-head">
-        <strong>\${escapeHtml(def.key)}</strong>
-        <small>\${escapeHtml(def.type)} · ABI \${escapeHtml(def.slot || "value")}</small>
+        <strong>${escapeHtml(def.key)}</strong>
+        <small>${escapeHtml(def.type)} · ABI ${escapeHtml(def.slot || "value")}</small>
       </div>
       <span class="lab-placeholder">Run the real A-Circuit block to observe this port.</span>
-    </div>\`).join("");
+    </div>`).join("");
 }
 
 function buildLab(registry) {
@@ -203,12 +203,12 @@ function buildLab(registry) {
   const section = document.createElement("section");
   section.className = "i386-lab";
   section.id = "i386-lab";
-  section.innerHTML = \`
+  section.innerHTML = `
     <h2>80386 A-memory logic-block constructor</h2>
     <p>Select a real block, edit its input ports and execute the structural A-Circuit implementation compiled to WASM. The constructor shows the block ABI, outputs, x86 flag patch and structural execution evidence; JavaScript only drives UI and formatting.</p>
     <div class="lab-layout">
       <aside class="lab-catalog-shell">
-        <div class="lab-catalog-head"><h3>Block catalog</h3><small id="lab-count">\${registry.blocks.length} blocks</small></div>
+        <div class="lab-catalog-head"><h3>Block catalog</h3><small id="lab-count">${registry.blocks.length} blocks</small></div>
         <input class="lab-search" id="lab-search" placeholder="Search AND, ADD, MUL…" aria-label="Search logical blocks">
         <div class="lab-categorybar" id="lab-categories"></div>
         <div class="lab-catalog" id="lab-catalog"></div>
@@ -222,7 +222,7 @@ function buildLab(registry) {
         <div id="lab-status" class="notice">Loading A-Circuit WASM…</div>
         <div id="lab-workspace"></div>
       </div>
-    </div>\`;
+    </div>`;
 
   const overviewNotice = main.querySelector(".notice");
   if (overviewNotice) overviewNotice.after(section);
@@ -242,11 +242,11 @@ function setupCatalog(section, registry, selectBlock) {
     const query = search.value.trim().toLowerCase();
     const visible = registry.blocks.filter((block) => {
       const categoryOk = activeCategory === "All" || block.category === activeCategory;
-      const haystack = \`\${block.name} \${block.category} \${block.formula} \${block.opcode}\`.toLowerCase();
+      const haystack = `${block.name} ${block.category} ${block.formula} ${block.opcode}`.toLowerCase();
       return categoryOk && (!query || haystack.includes(query));
     });
     catalog.innerHTML = visible.map(catalogCardHtml).join("");
-    count.textContent = \`\${visible.length}/\${registry.blocks.length} blocks\`;
+    count.textContent = `${visible.length}/${registry.blocks.length} blocks`;
     catalog.querySelectorAll("[data-block-id]").forEach((button) => {
       button.addEventListener("click", () => selectBlock(button.dataset.blockId));
     });
@@ -254,7 +254,7 @@ function setupCatalog(section, registry, selectBlock) {
   };
 
   categories.innerHTML = allCategories.map((category, index) =>
-    \`<button type="button" class="lab-category" data-category="\${escapeHtml(category)}" aria-pressed="\${index === 0}">\${escapeHtml(category)}</button>\`
+    `<button type="button" class="lab-category" data-category="${escapeHtml(category)}" aria-pressed="${index === 0}">${escapeHtml(category)}</button>`
   ).join("");
   categories.querySelectorAll("[data-category]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -279,8 +279,8 @@ function markSelected(section, id) {
 function readInputs(container, block) {
   const values = {};
   for (const def of block.inputs) {
-    const control = container.querySelector(\`[data-input="\${def.key}"]\`);
-    if (!control) throw new Error(\`missing input \${def.key}\`);
+    const control = container.querySelector(`[data-input="${def.key}"]`);
+    if (!control) throw new Error(`missing input ${def.key}`);
     values[def.key] = parseTyped(def.type, control.value);
   }
   return values;
@@ -293,7 +293,7 @@ function abiArgs(block, values) {
     if (def.slot === "a") a = value;
     else if (def.slot === "b") b = value;
     else if (def.slot === "flag") flag = value;
-    else throw new Error(\`unsupported ABI slot \${def.slot}\`);
+    else throw new Error(`unsupported ABI slot ${def.slot}`);
   }
   return [block.opcode, a >>> 0, b >>> 0, flag >>> 0];
 }
@@ -317,10 +317,10 @@ function collectOutcome(wasm) {
 
 function runBlock(wasm, block, values) {
   if (wasm.amemory_i386_lab_supports?.(block.opcode) !== 1) {
-    throw new Error(\`registry block \${block.name} is not supported by A-Circuit WASM\`);
+    throw new Error(`registry block ${block.name} is not supported by A-Circuit WASM`);
   }
   const ok = wasm.amemory_i386_lab_run(...abiArgs(block, values));
-  if (ok !== 1) throw new Error(\`\${block.name}: A-Circuit rejected input\`);
+  if (ok !== 1) throw new Error(`${block.name}: A-Circuit rejected input`);
   return collectOutcome(wasm);
 }
 
@@ -328,7 +328,7 @@ function compactOutput(block, out) {
   const outputs = block.outputs?.length ? block.outputs : [{ key: "Result", type: "word32", slot: "value" }];
   return outputs.map((def) => {
     const value = outputValue(out, def);
-    return \`\${escapeHtml(def.key)}=\${def.type === "bit" ? value : hex32(value)}\`;
+    return `${escapeHtml(def.key)}=${def.type === "bit" ? value : hex32(value)}`;
   }).join("<br>");
 }
 
@@ -338,27 +338,27 @@ function setDefinition(section, block) {
 
 function renderSingle(section, block, wasm) {
   const workspace = section.querySelector("#lab-workspace");
-  workspace.innerHTML = \`
+  workspace.innerHTML = `
     <div class="lab-constructor">
       <div>
         <div class="lab-stage-label">Editable INPUT ports</div>
         <div class="lab-port-stack" id="lab-single-inputs">
-          \${block.inputs.map((def) => inputPortCard(def, def.default)).join("")}
+          ${block.inputs.map((def) => inputPortCard(def, def.default)).join("")}
         </div>
       </div>
       <div class="lab-chip">
-        <small>\${escapeHtml(block.category)} · opcode \${block.opcode}</small>
-        <h3>\${escapeHtml(block.name)}</h3>
-        <code>\${escapeHtml(block.formula)}</code>
+        <small>${escapeHtml(block.category)} · opcode ${block.opcode}</small>
+        <h3>${escapeHtml(block.name)}</h3>
+        <code>${escapeHtml(block.formula)}</code>
         <small>real structural A-Circuit WASM</small>
         <button class="lab-run" id="lab-run-single" type="button">Run in A-memory</button>
       </div>
       <div>
         <div class="lab-stage-label">OUTPUT ports</div>
-        <div class="lab-port-stack" id="lab-output-live">\${outputPlaceholder(block)}</div>
+        <div class="lab-port-stack" id="lab-output-live">${outputPlaceholder(block)}</div>
       </div>
     </div>
-    <div class="lab-evidence" id="lab-single-result"></div>\`;
+    <div class="lab-evidence" id="lab-single-result"></div>`;
 
   const controls = workspace.querySelector("#lab-single-inputs");
   controls.querySelectorAll("[data-input]").forEach((control) => {
@@ -368,7 +368,7 @@ function renderSingle(section, block, wasm) {
       try {
         preview.innerHTML = inputPreviewHtml(def, parseTyped(def.type, control.value));
       } catch (error) {
-        preview.innerHTML = \`<span class="lab-error">\${escapeHtml(error.message)}</span>\`;
+        preview.innerHTML = `<span class="lab-error">${escapeHtml(error.message)}</span>`;
       }
     };
     control.addEventListener("input", updatePreview);
@@ -379,12 +379,12 @@ function renderSingle(section, block, wasm) {
     const status = section.querySelector("#lab-status");
     try {
       const values = readInputs(controls, block);
-      status.textContent = \`Executing \${block.name} structurally…\`;
+      status.textContent = `Executing ${block.name} structurally…`;
       status.className = "notice";
       const out = runBlock(wasm, block, values);
       workspace.querySelector("#lab-output-live").innerHTML = outputHtml(block, out);
       workspace.querySelector("#lab-single-result").innerHTML = evidenceHtml(block, values, out);
-      status.textContent = \`\${block.name}: real structural result returned by A-Circuit WASM.\`;
+      status.textContent = `${block.name}: real structural result returned by A-Circuit WASM.`;
       status.className = "notice lab-ok";
     } catch (error) {
       status.textContent = error.message;
@@ -410,35 +410,35 @@ function vectorExpectation(out, vector) {
 function vectorRowHtml(block, vector, index, custom = false) {
   const cells = block.inputs.map((def) => {
     const value = vector.inputs?.[def.key] ?? def.default;
-    return \`<td>\${inputControl(def, value, true)}</td>\`;
+    return `<td>${inputControl(def, value, true)}</td>`;
   }).join("");
-  return \`<tr data-vector-row="\${index}" data-custom="\${custom}">
-    <td><input data-vector-name value="\${escapeHtml(vector.name || "custom")}"></td>
-    \${cells}
+  return `<tr data-vector-row="${index}" data-custom="${custom}">
+    <td><input data-vector-name value="${escapeHtml(vector.name || "custom")}"></td>
+    ${cells}
     <td data-vector-result>—</td>
     <td>
       <button class="lab-small" data-run-row type="button">Run</button>
-      \${custom ? '<button class="lab-small" data-remove-row type="button">Remove</button>' : ""}
+      ${custom ? '<button class="lab-small" data-remove-row type="button">Remove</button>' : ""}
     </td>
-  </tr>\`;
+  </tr>`;
 }
 
 function renderVectors(section, block, wasm) {
   const workspace = section.querySelector("#lab-workspace");
   const vectors = (block.vectors || []).map((v) => JSON.parse(JSON.stringify(v)));
-  const headers = block.inputs.map((x) => \`<th>\${escapeHtml(x.key)}</th>\`).join("");
+  const headers = block.inputs.map((x) => `<th>${escapeHtml(x.key)}</th>`).join("");
 
-  workspace.innerHTML = \`
+  workspace.innerHTML = `
     <div class="lab-vector-actions">
       <button class="lab-run" id="lab-run-all" type="button">Run all canonical vectors</button>
       <button class="lab-small" id="lab-add-row" type="button">Add custom row</button>
     </div>
     <div class="lab-table-wrap">
       <table class="lab-table">
-        <thead><tr><th>Case</th>\${headers}<th>Observed</th><th>Action</th></tr></thead>
-        <tbody id="lab-vector-body">\${vectors.map((v,i)=>vectorRowHtml(block,v,i)).join("")}</tbody>
+        <thead><tr><th>Case</th>${headers}<th>Observed</th><th>Action</th></tr></thead>
+        <tbody id="lab-vector-body">${vectors.map((v,i)=>vectorRowHtml(block,v,i)).join("")}</tbody>
       </table>
-    </div>\`;
+    </div>`;
 
   const body = workspace.querySelector("#lab-vector-body");
 
@@ -452,11 +452,11 @@ function renderVectors(section, block, wasm) {
       const out = runBlock(wasm, block, values);
       const verdict = vectorExpectation(out, vector);
       row.querySelector("[data-vector-result]").innerHTML =
-        \`<strong class="\${verdict.ok === false ? "lab-error" : "lab-ok"}">\${verdict.label}</strong><br><code>\${compactOutput(block, out)}</code><br><small>\${out.reactions} reactions · Q=\${out.quiescent} · ΔLinks=\${out.steadyDelta}</small>\`;
-      status.textContent = \`\${block.name}: vector executed in A-memory.\`;
+        `<strong class="${verdict.ok === false ? "lab-error" : "lab-ok"}">${verdict.label}</strong><br><code>${compactOutput(block, out)}</code><br><small>${out.reactions} reactions · Q=${out.quiescent} · ΔLinks=${out.steadyDelta}</small>`;
+      status.textContent = `${block.name}: vector executed in A-memory.`;
       status.className = "notice";
     } catch (error) {
-      row.querySelector("[data-vector-result]").innerHTML = \`<span class="lab-error">\${escapeHtml(error.message)}</span>\`;
+      row.querySelector("[data-vector-result]").innerHTML = `<span class="lab-error">${escapeHtml(error.message)}</span>`;
       status.textContent = error.message;
       status.className = "notice lab-error";
     }
@@ -503,26 +503,26 @@ function renderSweep(section, block, wasm) {
   }
   const keys = block.inputs.map((x) => x.key);
   const cases = cartesianEntries(block.sweep.values, keys);
-  const headers = keys.map((x) => \`<th>\${escapeHtml(x)}</th>\`).join("");
-  workspace.innerHTML = \`
-    <div class="lab-vector-actions"><button class="lab-run" id="lab-run-sweep" type="button">Run exhaustive sweep (\${cases.length})</button></div>
+  const headers = keys.map((x) => `<th>${escapeHtml(x)}</th>`).join("");
+  workspace.innerHTML = `
+    <div class="lab-vector-actions"><button class="lab-run" id="lab-run-sweep" type="button">Run exhaustive sweep (${cases.length})</button></div>
     <div class="lab-table-wrap"><table class="lab-table">
-      <thead><tr>\${headers}<th>Output</th><th>Evidence</th></tr></thead>
+      <thead><tr>${headers}<th>Output</th><th>Evidence</th></tr></thead>
       <tbody>
-        \${cases.map((values,i)=>\`<tr data-sweep="\${i}">\${keys.map(k=>\`<td><code>\${values[k]}</code></td>\`).join("")}<td>—</td><td>—</td></tr>\`).join("")}
+        ${cases.map((values,i)=>`<tr data-sweep="${i}">${keys.map(k=>`<td><code>${values[k]}</code></td>`).join("")}<td>—</td><td>—</td></tr>`).join("")}
       </tbody>
-    </table></div>\`;
+    </table></div>`;
 
   workspace.querySelector("#lab-run-sweep").addEventListener("click", () => {
     const rows = [...workspace.querySelectorAll("[data-sweep]")];
     for (const row of rows) {
       const values = cases[Number(row.dataset.sweep)];
       const out = runBlock(wasm, block, values);
-      row.children[keys.length].innerHTML = \`<strong>\${compactOutput(block, out)}</strong>\`;
-      row.children[keys.length + 1].innerHTML = \`<small>\${out.reactions} reactions · Q=\${out.quiescent} · ΔLinks=\${out.steadyDelta}</small>\`;
+      row.children[keys.length].innerHTML = `<strong>${compactOutput(block, out)}</strong>`;
+      row.children[keys.length + 1].innerHTML = `<small>${out.reactions} reactions · Q=${out.quiescent} · ΔLinks=${out.steadyDelta}</small>`;
     }
     const status = section.querySelector("#lab-status");
-    status.textContent = \`\${block.name}: exhaustive \${cases.length}-case sweep completed in A-memory.\`;
+    status.textContent = `${block.name}: exhaustive ${cases.length}-case sweep completed in A-memory.`;
     status.className = "notice lab-ok";
   });
 }
@@ -538,7 +538,7 @@ function configureBlock(section, block, wasm) {
   setDefinition(section, block);
 
   if (wasm.amemory_i386_lab_supports?.(block.opcode) !== 1) {
-    section.querySelector("#lab-status").textContent = \`\${block.name}: registry/WASM mismatch — unsupported opcode.\`;
+    section.querySelector("#lab-status").textContent = `${block.name}: registry/WASM mismatch — unsupported opcode.`;
     section.querySelector("#lab-status").className = "notice lab-error";
     section.querySelector("#lab-workspace").innerHTML = "";
     return;
@@ -565,7 +565,7 @@ function configureBlock(section, block, wasm) {
     tabs.append(button);
   }
 
-  section.querySelector("#lab-status").textContent = \`\${block.name} ready. Edit ports and run the real A-memory block.\`;
+  section.querySelector("#lab-status").textContent = `${block.name} ready. Edit ports and run the real A-memory block.`;
   section.querySelector("#lab-status").className = "notice";
   selectMode(modes[0]);
 }
@@ -574,7 +574,7 @@ async function bootLab() {
   const [registry, wasm] = await Promise.all([loadRegistry(), loadLabWasm()]);
   for (const block of registry.blocks) {
     if (wasm.amemory_i386_lab_supports?.(block.opcode) !== 1) {
-      throw new Error(\`registry entry \${block.id} has no WASM implementation\`);
+      throw new Error(`registry entry ${block.id} has no WASM implementation`);
     }
   }
 
@@ -595,7 +595,7 @@ if (typeof document !== "undefined") {
     const main = document.querySelector("main");
     const node = document.createElement("div");
     node.className = "notice lab-error";
-    node.textContent = \`80386 lab failed closed: \${error.message}\`;
+    node.textContent = `80386 lab failed closed: ${error.message}`;
     main?.prepend(node);
   });
 }
