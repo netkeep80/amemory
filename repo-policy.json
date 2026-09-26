@@ -2,7 +2,7 @@
   "policy_format_version": "0.3.0",
   "repository_kind": "tooling",
   "enforcement": {
-    "mode": "advisory"
+    "mode": "blocking"
   },
   "paths": {
     "forbidden": [
@@ -76,5 +76,36 @@
         "contracts/upstream/mts-v0.13-requirements.json"
       ]
     }
-  ]
+  ],
+  "document_relations": {
+    "documents": {
+      "base-amemory-version": {
+        "path": "VERSION",
+        "format": "plain_text",
+        "snapshot": "base"
+      },
+      "head-amemory-version": {
+        "path": "VERSION",
+        "format": "plain_text",
+        "snapshot": "head"
+      }
+    },
+    "rules": [
+      {
+        "id": "amemory-version-monotonic",
+        "kind": "scalar_strictly_greater",
+        "comparator": "semver",
+        "left": {
+          "document": "head-amemory-version",
+          "pointer": "",
+          "type": "string"
+        },
+        "right": {
+          "document": "base-amemory-version",
+          "pointer": "",
+          "type": "string"
+        }
+      }
+    ]
+  }
 }
