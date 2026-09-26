@@ -21,6 +21,216 @@ fn run_once(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use amemory_browser_probe::{
+        amemory_anum_cpu_export,
+        amemory_anum_cpu_import,
+        amemory_anum_cpu_output_get,
+        amemory_anum_cpu_reset_pool,
+        amemory_anum_cpu_set_token,
+        amemory_reaction_current_count,
+        amemory_reaction_current_member,
+        amemory_reaction_handoff_count,
+        amemory_reaction_matched_relations,
+        amemory_reaction_quiescent,
+        amemory_reaction_reset,
+        amemory_reaction_run,
+        amemory_reaction_set_current_count,
+        amemory_reaction_set_current_member,
+        amemory_reaction_set_theory_count,
+        amemory_reaction_set_theory_relation,
+        amemory_reaction_snapshot_theory,
+    };
+    use amemory_optimized_cpu_probe::PortableReactionResult;
+    use std::sync::Mutex;
+
+    static REFERENCE_LOCK: Mutex<()> = Mutex::new(());
+
+    // Benchmark-local role assignment over already accepted ROOT-basis Links.
+    // No claim is made that O "means AND" or C "means APPLY" in MTS itself.
+    // They are simply distinct portable structural symbols used by this fixture.
+    const K: &str = "8";       // R
+    const FN_AND: &str = "98"; // O, benchmark-local role: AND function
+    const APPLY: &str = "68";  // C, benchmark-local role: application constructor
+    const BIT0: &str = "16898"; // U / Q-denotation 0
+    const BIT1: &str = "19868"; // L / Q-denotation 1
+
+    fn pair(start: &str, end: &str) -> String {
+        format!("1{start}{end}")
+    }
+
+    fn start(value: &str) -> String {
+        format!("9{value}")
+    }
+
+    /// Accepted MTS ExactSequence topology:
+    ///
+    ///   current := R
+    ///   payload := current ⟼ value
+    ///   current := START(payload)
+    ///
+    /// The sequence therefore always originates at A-root R.
+    fn exact_sequence(values: &[&str]) -> String {
+        let mut current = K.to_owned();
+        for value in values {
+            current = start(&pair(&current, value));
+        }
+        current
+    }
+
+    /// Structural application term. APPLY is only a benchmark-local role;
+    /// application identity itself is fully structural and portable.
+    fn call(function: &str, argument: &str) -> String {
+        pair(APPLY, &pair(function, argument))
+    }
+
+    /// Sequential partial function after one argument.
+    ///
+    /// F_a is a real Link, not host closure state.
+    fn partial(function: &str, argument: &str) -> String {
+        pair(function, argument)
+    }
+
+    fn reference_import(source: &str) -> u32 {
+        for (index, byte) in source.bytes().enumerate() {
+            let token = if byte.is_ascii_digit() {
+                (byte - b'0') as u32
+            } else {
+                255
+            };
+            assert_eq!(amemory_anum_cpu_set_token(index as u32, token), 1);
+        }
+        amemory_anum_cpu_import(source.len() as u32)
+    }
+
+    fn reference_export(handle: u32) -> String {
+        let len = amemory_anum_cpu_export(handle);
+        assert_ne!(len, u32::MAX);
+        let mut out = String::new();
+        for index in 0..len {
+            out.push(char::from_digit(amemory_anum_cpu_output_get(index), 10).unwrap());
+        }
+        out
+    }
+
+    fn reference_observe() -> PortableReactionResult {
+        let count = amemory_reaction_current_count();
+        let mut scope = Vec::new();
+        for index in 0..count {
+            scope.push(reference_export(amemory_reaction_current_member(index)));
+        }
+        scope.sort();
+        scope.dedup();
+        PortableReactionResult {
+            scope,
+            matched_relations: amemory_reaction_matched_relations(),
+            handoff: amemory_reaction_handoff_count(),
+            quiescent: amemory_reaction_quiescent() == 1,
+        }
+    }
+
+    fn reference_prepare(
+        theory_sources: &[String],
+        other_sources: &[String],
+    ) -> (Vec<u32>, Vec<u32>) {
+        amemory_anum_cpu_reset_pool();
+        let theory = theory_sources
+            .iter()
+            .map(|source| {
+                let handle = reference_import(source);
+                assert_ne!(handle, u32::MAX, "reference rejected Theory {source}");
+                handle
+            })
+            .collect::<Vec<_>>();
+        let other = other_sources
+            .iter()
+            .map(|source| {
+                let handle = reference_import(source);
+                assert_ne!(handle, u32::MAX, "reference rejected fixture {source}");
+                handle
+            })
+            .collect::<Vec<_>>();
+
+        amemory_reaction_reset();
+        for (index, relation) in theory.iter().enumerate() {
+            assert_eq!(
+                amemory_reaction_set_theory_relation(index as u32, *relation),
+                1
+            );
+        }
+        assert_eq!(amemory_reaction_set_theory_count(theory.len() as u32), 1);
+        assert_eq!(amemory_reaction_snapshot_theory(), 1);
+        (theory, other)
+    }
+
+    fn reference_set_single_current(handle: u32) {
+        assert_eq!(amemory_reaction_set_current_member(0, handle), 1);
+        assert_eq!(amemory_reaction_set_current_count(1), 1);
+    }
+
+    fn reference_run() -> PortableReactionResult {
+        assert_eq!(amemory_reaction_run(), 1);
+        reference_observe()
+    }
+
+    fn optimized_prepare(
+        theory_sources: &[String],
+        other_sources: &[String],
+    ) -> (OptimizedLinkStore, OptimizedReactionEngine, Vec<u32>, Vec<u32>) {
+        let mut store = OptimizedLinkStore::new();
+        let theory = theory_sources
+            .iter()
+            .map(|source| store.import_anum(source).unwrap())
+            .collect::<Vec<_>>();
+        let other = other_sources
+            .iter()
+            .map(|source| store.import_anum(source).unwrap())
+            .collect::<Vec<_>>();
+
+        let mut engine = OptimizedReactionEngine::new(32);
+        engine.set_theory(&store, &theory).unwrap();
+        engine.snapshot_theory(&store).unwrap();
+        (store, engine, theory, other)
+    }
+
+    fn optimized_run_single(
+        engine: &mut OptimizedReactionEngine,
+        store: &OptimizedLinkStore,
+        current: u32,
+    ) -> PortableReactionResult {
+        engine.set_current(store, &[current]).unwrap();
+        engine.run(store).unwrap();
+        engine.portable_result(store).unwrap()
+    }
+
+    fn and_expected(a: &str, b: &str) -> &'static str {
+        if a == BIT1 && b == BIT1 { BIT1 } else { BIT0 }
+    }
+
+    fn sequential_theory() -> Vec<String> {
+        let and0 = partial(FN_AND, BIT0);
+        let and1 = partial(FN_AND, BIT1);
+
+        vec![
+            pair(&call(FN_AND, BIT0), &and0),
+            pair(&call(FN_AND, BIT1), &and1),
+            pair(&call(&and0, BIT0), BIT0),
+            pair(&call(&and0, BIT1), BIT0),
+            pair(&call(&and1, BIT0), BIT0),
+            pair(&call(&and1, BIT1), BIT1),
+        ]
+    }
+
+    fn parallel_theory() -> Vec<String> {
+        [BIT0, BIT1]
+            .into_iter()
+            .flat_map(|a| {
+                [BIT0, BIT1].into_iter().map(move |b| {
+                    let args = exact_sequence(&[a, b]);
+                    pair(&call(FN_AND, &args), and_expected(a, b))
+                })
+            })
+            .collect()
+    }
 
     #[test]
     fn c0_unary_not_executes_inside_amemory() {
@@ -164,4 +374,142 @@ mod tests {
             "a true two-premise AND unexpectedly appeared without a joined antecedent"
         );
     }
+
+    #[test]
+    fn p1_exact_sequence_is_root_originating_and_not_an_ordinary_pair() {
+        assert_eq!(exact_sequence(&[]), "8");
+
+        let seq01 = exact_sequence(&[BIT0, BIT1]);
+        let seq10 = exact_sequence(&[BIT1, BIT0]);
+        let raw_pair01 = pair(BIT0, BIT1);
+
+        assert_ne!(seq01, raw_pair01, "ExactSequence([0,1]) != PAIR(0,1)");
+        assert_ne!(seq01, seq10, "ExactSequence order is semantic");
+
+        // Reconstruct the accepted two-step topology literally.
+        let s1 = start(&pair(K, BIT0));
+        let s2 = start(&pair(&s1, BIT1));
+        assert_eq!(seq01, s2);
+    }
+
+    #[test]
+    fn s1_sequential_and_returns_portable_partial_function_then_value() {
+        let _guard = REFERENCE_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let theory = sequential_theory();
+
+        for a in [BIT0, BIT1] {
+            for b in [BIT0, BIT1] {
+                let expected_partial = partial(FN_AND, a);
+                let first_call = call(FN_AND, a);
+                let first_current = pair(K, &first_call);
+                let first_successor = pair(K, &expected_partial);
+
+                // The second invocation uses the function structurally returned
+                // by stage 1. Host supplies only the next argument b.
+                let second_call = call(&expected_partial, b);
+                let second_current = pair(K, &second_call);
+                let expected_value = and_expected(a, b);
+                let second_successor = pair(K, expected_value);
+
+                let fixture = vec![
+                    first_current.clone(),
+                    first_successor.clone(),
+                    second_current.clone(),
+                    second_successor.clone(),
+                ];
+
+                // Reference CPU: one fixed TheorySnapshot for both applications.
+                let (_, reference_fixture) = reference_prepare(&theory, &fixture);
+                reference_set_single_current(reference_fixture[0]);
+                let reference_first = reference_run();
+                assert_eq!(reference_first.scope, vec![first_successor.clone()]);
+                assert_eq!(reference_first.matched_relations, 1);
+                assert_eq!(reference_first.handoff, 1);
+                assert!(!reference_first.quiescent);
+
+                // The actual first result is the portable partial function under K.
+                assert_eq!(reference_first.scope[0], pair(K, &expected_partial));
+
+                reference_set_single_current(reference_fixture[2]);
+                let reference_second = reference_run();
+                assert_eq!(reference_second.scope, vec![second_successor.clone()]);
+                assert_eq!(reference_second.matched_relations, 1);
+                assert_eq!(reference_second.handoff, 1);
+                assert!(!reference_second.quiescent);
+
+                // Optimized CPU runs the exact same structural fixture/Theory.
+                let (store, mut engine, _, optimized_fixture) =
+                    optimized_prepare(&theory, &fixture);
+                let optimized_first =
+                    optimized_run_single(&mut engine, &store, optimized_fixture[0]);
+                assert_eq!(optimized_first, reference_first);
+
+                let optimized_second =
+                    optimized_run_single(&mut engine, &store, optimized_fixture[2]);
+                assert_eq!(optimized_second, reference_second);
+
+                // Portable function/result identity, not local handle equality.
+                assert_eq!(
+                    store.export_anum(optimized_fixture[1]).unwrap(),
+                    first_successor
+                );
+                assert_eq!(
+                    store.export_anum(optimized_fixture[3]).unwrap(),
+                    second_successor
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn p1_parallel_and_maps_one_root_originating_sequence_directly_to_value() {
+        let _guard = REFERENCE_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let theory = parallel_theory();
+
+        for a in [BIT0, BIT1] {
+            for b in [BIT0, BIT1] {
+                let args = exact_sequence(&[a, b]);
+                let application = call(FN_AND, &args);
+                let current = pair(K, &application);
+                let expected_value = and_expected(a, b);
+                let successor = pair(K, expected_value);
+                let fixture = vec![current.clone(), successor.clone()];
+
+                let (_, reference_fixture) = reference_prepare(&theory, &fixture);
+                reference_set_single_current(reference_fixture[0]);
+                let reference = reference_run();
+                assert_eq!(reference.scope, vec![successor.clone()]);
+                assert_eq!(reference.matched_relations, 1);
+                assert_eq!(reference.handoff, 1);
+                assert!(!reference.quiescent);
+
+                let (store, mut engine, _, optimized_fixture) =
+                    optimized_prepare(&theory, &fixture);
+                let optimized =
+                    optimized_run_single(&mut engine, &store, optimized_fixture[0]);
+
+                assert_eq!(optimized, reference);
+                assert_eq!(optimized.scope, vec![successor]);
+            }
+        }
+    }
+
+    #[test]
+    fn sequential_and_partial_functions_are_structural_and_distinct() {
+        let mut store = OptimizedLinkStore::new();
+
+        let and0 = partial(FN_AND, BIT0);
+        let and1 = partial(FN_AND, BIT1);
+        let f0 = store.import_anum(&and0).unwrap();
+        let f1 = store.import_anum(&and1).unwrap();
+
+        assert_ne!(f0, f1);
+        assert_eq!(store.export_anum(f0).unwrap(), and0);
+        assert_eq!(store.export_anum(f1).unwrap(), and1);
+
+        // Canonical reconstruction reuses the same local identity within memory.
+        assert_eq!(store.import_anum(&and0).unwrap(), f0);
+        assert_eq!(store.import_anum(&and1).unwrap(), f1);
+    }
+
 }
