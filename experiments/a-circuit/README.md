@@ -292,8 +292,54 @@ Required order:
 ```text
 SUB1                                  GREEN (#80/#81)
 -> SUB_N 4/8/16/32                   GREEN (#83/#84)
--> shared ADD/ADC/SUB/SBB datapath       CURRENT (#85)
--> CF/ZF/SF/OF/PF/AF
+-> shared ADD/ADC/SUB/SBB datapath       GREEN (#85/#86)
+-> CF/PF/AF/ZF/SF/OF                      CURRENT (#87)
 -> M3 complete
 -> M4 32-bit ALU
 ```
+
+
+### Composable arithmetic result ABI
+
+The shared arithmetic payload remains:
+
+```text
+ExactSequence_R([Word, Status, C4_raw, Csign_in_raw, Cfinal_raw, Mode])
+```
+
+but composable components wrap that payload in a stable structural result tag:
+
+```text
+ARITH_RESULT(payload)
+```
+
+This is required by the current generic Structural Rule trigger projection:
+a direct `ExactSequence` is self-starting, so its concrete full value would become
+the trigger key. The stable envelope lets EFLAGS and later ALU stages consume one
+generic arithmetic result without enumerating every possible Word value.
+
+The envelope is a component ABI convention only; it does not add an MTS law or an
+executor opcode.
+
+### M3 arithmetic flags
+
+Issue: #87
+
+The next stage consumes the raw arithmetic result once and derives:
+
+```text
+CF = Status
+AF = C4_raw XOR Mode
+OF = Csign_in_raw XOR Cfinal_raw
+SF = Result[MSB]
+ZF = NOT(OR-reduction(Result))
+PF = NOT(XOR-reduction(Result[0..7]))
+```
+
+The final flagged payload is ordered as:
+
+```text
+[Word, CF, PF, AF, ZF, SF, OF]
+```
+
+and is itself placed under a stable result envelope so M4 can compose it directly.
