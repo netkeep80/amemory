@@ -1,5 +1,9 @@
 # amemory
 
+> **Live 80386 A-memory lab:** https://netkeep80.github.io/amemory/  
+> Интерактивные реальные A-Circuit/WASM тесты: настраиваемые входы → структурное исполнение в апамяти → результат, флаги и evidence.  
+> Версия стенда: `experiments/browser-accelerator/VERSION` (SemVer).
+
 Библиотека реализаций и симуляций **A-memory**.
 
 ## Назначение
