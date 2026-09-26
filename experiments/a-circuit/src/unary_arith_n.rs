@@ -354,6 +354,71 @@ fn vectors(width:usize)->Vec<u32>{
     v.sort_unstable();v.dedup();v
 }
 
+
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub(crate) struct WebUnaryOutcome{
+    pub(crate) value:u32,
+    pub(crate) writeback:u8,
+    pub(crate) defined_mask:u32,
+    pub(crate) value_mask:u32,
+    pub(crate) undefined_mask:u32,
+    pub(crate) preserve_mask:u32,
+    pub(crate) reactions:u32,
+    pub(crate) links_after_build:u32,
+    pub(crate) links_after_first:u32,
+    pub(crate) steady_link_delta:u32,
+    pub(crate) quiescent:u8,
+}
+
+const WEB_CF:u32=1<<0;
+const WEB_PF:u32=1<<2;
+const WEB_AF:u32=1<<4;
+const WEB_ZF:u32=1<<6;
+const WEB_SF:u32=1<<7;
+const WEB_OF:u32=1<<11;
+
+pub(crate) fn web_run_unary32(op:u32,value:u32)->Option<WebUnaryOutcome>{
+    let mut f=FullFixture::new();
+    let p=Program::install(&mut f,32);
+    let function=match op{20=>p.inc,21=>p.dec,22=>p.neg,_=>return None};
+    let links_after_build=f.store.link_count() as u32;
+
+    let first=run(&mut f,&p,function,value);
+    let links_after_first=f.store.link_count() as u32;
+    let second=run(&mut f,&p,function,value);
+    assert_eq!(second,first,"web unary repeat changed result");
+    let links_after_second=f.store.link_count() as u32;
+
+    let mut defined_mask=WEB_PF|WEB_AF|WEB_ZF|WEB_SF|WEB_OF;
+    let mut value_mask=0u32;
+    for (mask,bit) in [(WEB_PF,first.pf),(WEB_AF,first.af),(WEB_ZF,first.zf),(WEB_SF,first.sf),(WEB_OF,first.of)]{
+        if bit!=0{value_mask|=mask;}
+    }
+    let preserve_mask;
+    if let Some(cf)=first.cf{
+        defined_mask|=WEB_CF;
+        if cf!=0{value_mask|=WEB_CF;}
+        preserve_mask=0;
+    }else{
+        preserve_mask=WEB_CF;
+    }
+
+    Some(WebUnaryOutcome{
+        value:first.value,
+        writeback:1,
+        defined_mask,
+        value_mask,
+        undefined_mask:0,
+        preserve_mask,
+        reactions:p.active_steps as u32,
+        links_after_build,
+        links_after_first,
+        steady_link_delta:links_after_second-links_after_first,
+        quiescent:1,
+    })
+}
+
+
 #[test]
 #[ignore="heavy M4 unary arithmetic suite; mandatory release workflow"]
 fn m4_unary_arith_8_16_32_reuses_flagged_add_sub(){
