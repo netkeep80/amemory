@@ -5,8 +5,10 @@ use super::{
     logic_n::{install_gate_basis, GateSet},
 };
 use amemory_optimized_cpu_probe::{
-    structural::{materialize_exact_sequence, read_exact_sequence},
-    Handle, OptimizedLinkStore, OptimizedStructuralEngine,
+    structural::{
+        materialize_exact_sequence, read_exact_sequence, OptimizedStructuralEngine,
+    },
+    Handle, OptimizedLinkStore,
 };
 use serde::Serialize;
 use std::{
