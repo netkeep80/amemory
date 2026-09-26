@@ -884,12 +884,12 @@ mod tests {
         assert_ne!(root_pair, ROOT_HANDLE);
         assert_eq!(store.export_anum(root_pair).unwrap(), "188");
 
-        let from_k = store.start_incidence(k).unwrap();
+        let from_k = store.start_incidence(k).unwrap().collect::<Vec<_>>();
         assert!(from_k.contains(&k)); // START(K child ROOT) is self-start incident.
         assert!(from_k.contains(&current));
         assert!(from_k.contains(&successor));
 
-        let to_a = store.end_incidence(a).unwrap();
+        let to_a = store.end_incidence(a).unwrap().collect::<Vec<_>>();
         assert!(to_a.contains(&a)); // END(ROOT) is self-end incident.
         assert!(to_a.contains(&current));
 
