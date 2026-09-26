@@ -51,6 +51,7 @@ mod tests {
     const K: &str = "8";       // R
     const FN_AND: &str = "98"; // O, benchmark-local role: AND function
     const APPLY: &str = "68";  // C, benchmark-local role: application constructor
+    const FN_HALF: &str = "998"; // benchmark-local role: Half Adder function
     const BIT0: &str = "16898"; // U / Q-denotation 0
     const BIT1: &str = "19868"; // L / Q-denotation 1
 
@@ -227,6 +228,45 @@ mod tests {
                 [BIT0, BIT1].into_iter().map(move |b| {
                     let args = exact_sequence(&[a, b]);
                     pair(&call(FN_AND, &args), and_expected(a, b))
+                })
+            })
+            .collect()
+    }
+
+    fn half_expected(a: &str, b: &str) -> (&'static str, &'static str) {
+        match (a == BIT1, b == BIT1) {
+            (false, false) => (BIT0, BIT0),
+            (false, true) | (true, false) => (BIT1, BIT0),
+            (true, true) => (BIT0, BIT1),
+        }
+    }
+
+    fn half_result_sequence(a: &str, b: &str) -> String {
+        let (sum, carry) = half_expected(a, b);
+        exact_sequence(&[sum, carry])
+    }
+
+    fn sequential_half_theory() -> Vec<String> {
+        let half0 = partial(FN_HALF, BIT0);
+        let half1 = partial(FN_HALF, BIT1);
+
+        vec![
+            pair(&call(FN_HALF, BIT0), &half0),
+            pair(&call(FN_HALF, BIT1), &half1),
+            pair(&call(&half0, BIT0), &half_result_sequence(BIT0, BIT0)),
+            pair(&call(&half0, BIT1), &half_result_sequence(BIT0, BIT1)),
+            pair(&call(&half1, BIT0), &half_result_sequence(BIT1, BIT0)),
+            pair(&call(&half1, BIT1), &half_result_sequence(BIT1, BIT1)),
+        ]
+    }
+
+    fn parallel_half_theory() -> Vec<String> {
+        [BIT0, BIT1]
+            .into_iter()
+            .flat_map(|a| {
+                [BIT0, BIT1].into_iter().map(move |b| {
+                    let args = exact_sequence(&[a, b]);
+                    pair(&call(FN_HALF, &args), &half_result_sequence(a, b))
                 })
             })
             .collect()
@@ -510,6 +550,128 @@ mod tests {
         // Canonical reconstruction reuses the same local identity within memory.
         assert_eq!(store.import_anum(&and0).unwrap(), f0);
         assert_eq!(store.import_anum(&and1).unwrap(), f1);
+    }
+
+
+    #[test]
+    fn c2a_half_adder_result_is_one_root_originating_two_position_sequence() {
+        for a in [BIT0, BIT1] {
+            for b in [BIT0, BIT1] {
+                let result = half_result_sequence(a, b);
+                let (sum, carry) = half_expected(a, b);
+
+                assert_eq!(result, exact_sequence(&[sum, carry]));
+                assert_ne!(result, pair(sum, carry), "Half Adder result must not collapse to PAIR");
+
+                let reversed = exact_sequence(&[carry, sum]);
+                if sum != carry {
+                    assert_ne!(result, reversed, "Sum/Carry positions are ordered");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn c2a_sequential_half_adder_returns_partial_function_then_sum_carry_sequence() {
+        let _guard = REFERENCE_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let theory = sequential_half_theory();
+
+        for a in [BIT0, BIT1] {
+            for b in [BIT0, BIT1] {
+                let expected_partial = partial(FN_HALF, a);
+                let first_call = call(FN_HALF, a);
+                let first_current = pair(K, &first_call);
+                let first_successor = pair(K, &expected_partial);
+
+                let second_call = call(&expected_partial, b);
+                let second_current = pair(K, &second_call);
+                let result_sequence = half_result_sequence(a, b);
+                let second_successor = pair(K, &result_sequence);
+
+                let fixture = vec![
+                    first_current.clone(),
+                    first_successor.clone(),
+                    second_current.clone(),
+                    second_successor.clone(),
+                ];
+
+                let (_, reference_fixture) = reference_prepare(&theory, &fixture);
+                reference_set_single_current(reference_fixture[0]);
+                let reference_first = reference_run();
+                assert_eq!(reference_first.scope, vec![first_successor.clone()]);
+                assert_eq!(reference_first.matched_relations, 1);
+                assert_eq!(reference_first.handoff, 1);
+                assert!(!reference_first.quiescent);
+
+                reference_set_single_current(reference_fixture[2]);
+                let reference_second = reference_run();
+                assert_eq!(reference_second.scope, vec![second_successor.clone()]);
+                assert_eq!(reference_second.matched_relations, 1);
+                assert_eq!(reference_second.handoff, 1);
+                assert!(!reference_second.quiescent);
+
+                let (store, mut engine, _, optimized_fixture) =
+                    optimized_prepare(&theory, &fixture);
+
+                let optimized_first =
+                    optimized_run_single(&mut engine, &store, optimized_fixture[0]);
+                assert_eq!(optimized_first, reference_first);
+
+                let optimized_second =
+                    optimized_run_single(&mut engine, &store, optimized_fixture[2]);
+                assert_eq!(optimized_second, reference_second);
+
+                assert_eq!(
+                    store.export_anum(optimized_fixture[1]).unwrap(),
+                    first_successor
+                );
+                assert_eq!(
+                    store.export_anum(optimized_fixture[3]).unwrap(),
+                    second_successor
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn c2a_parallel_half_adder_maps_argument_sequence_to_sum_carry_sequence() {
+        let _guard = REFERENCE_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let theory = parallel_half_theory();
+
+        for a in [BIT0, BIT1] {
+            for b in [BIT0, BIT1] {
+                let args = exact_sequence(&[a, b]);
+                let result_sequence = half_result_sequence(a, b);
+                let current = pair(K, &call(FN_HALF, &args));
+                let successor = pair(K, &result_sequence);
+                let fixture = vec![current.clone(), successor.clone()];
+
+                let (_, reference_fixture) = reference_prepare(&theory, &fixture);
+                reference_set_single_current(reference_fixture[0]);
+                let reference = reference_run();
+
+                assert_eq!(reference.scope, vec![successor.clone()]);
+                assert_eq!(reference.matched_relations, 1);
+                assert_eq!(reference.handoff, 1);
+                assert!(!reference.quiescent);
+
+                let (store, mut engine, _, optimized_fixture) =
+                    optimized_prepare(&theory, &fixture);
+                let optimized =
+                    optimized_run_single(&mut engine, &store, optimized_fixture[0]);
+
+                assert_eq!(optimized, reference);
+                assert_eq!(optimized.scope, vec![successor]);
+            }
+        }
+    }
+
+    #[test]
+    fn c2a_half_adder_truth_table_is_exact() {
+        assert_eq!(half_expected(BIT0, BIT0), (BIT0, BIT0));
+        assert_eq!(half_expected(BIT0, BIT1), (BIT1, BIT0));
+        assert_eq!(half_expected(BIT1, BIT0), (BIT1, BIT0));
+        assert_eq!(half_expected(BIT1, BIT1), (BIT0, BIT1));
     }
 
 }
