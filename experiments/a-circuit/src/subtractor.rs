@@ -77,10 +77,14 @@ impl Sub1Program {
         let full_tag = anchors.next(&mut f.store);
         let cout_not_tag = anchors.next(&mut f.store);
 
-        // Trigger discovery uses START(END(active)).
-        // Scalar continuations below therefore use C for U/0 and O for L/1,
-        // and use literal 0/1 templates so an untyped role cannot bind to a
-        // non-bit composite that happens to share the same trigger aspect.
+        // A unary function result is carried as a one-position
+        // ROOT-originating ExactSequence. Returning a naked U/L bit is unsafe
+        // in the mixed Theory because its topology can also satisfy unrelated
+        // generic templates (for example C->role).
+        let not_outputs = [
+            materialize_exact_sequence(&mut f.store, &[f.zero]).unwrap(),
+            materialize_exact_sequence(&mut f.store, &[f.one]).unwrap(),
+        ];
 
         // Reusable structural NOT function:
         //
@@ -93,7 +97,11 @@ impl Sub1Program {
             let caller = anchors.next(&mut f.store);
             let before_call = call(&mut f.store, f.apply, not, input);
             let before = f.store.ensure_pair(caller, before_call).unwrap();
-            let after = f.store.ensure_pair(caller, output).unwrap();
+            let output_index = if output == f.zero { 0 } else { 1 };
+            let after = f
+                .store
+                .ensure_pair(caller, not_outputs[output_index])
+                .unwrap();
 
             let (_, admission) = define_bundle_rule(
                 &mut f.store,
@@ -138,20 +146,20 @@ impl Sub1Program {
 
         // B inversion return:
         //
-        // BNotFrame([K,a,bin]) -> not_b
+        // BNotFrame([K,a,bin]) -> ExactSequence_R([not_b])
         // =>
         // BinNotFrame([K,a,not_b]) -> Call(NOT,bin)
-        //
-        // One literal continuation per canonical bit keeps this fail-closed:
-        // a role in endpoint position could otherwise bind to a non-bit Link.
-        for not_b in [f.zero, f.one] {
+        {
             let k = anchors.next(&mut f.store);
             let a = anchors.next(&mut f.store);
             let bin = anchors.next(&mut f.store);
+            let not_b = anchors.next(&mut f.store);
 
             let caller =
                 stage_frame(&mut f.store, b_not_tag, &[k, a, bin]);
-            let before = f.store.ensure_pair(caller, not_b).unwrap();
+            let not_result =
+                materialize_exact_sequence(&mut f.store, &[not_b]).unwrap();
+            let before = f.store.ensure_pair(caller, not_result).unwrap();
 
             let next_caller =
                 stage_frame(&mut f.store, bin_not_tag, &[k, a, not_b]);
@@ -161,27 +169,29 @@ impl Sub1Program {
             let (_, admission) = define_bundle_rule(
                 &mut f.store,
                 f.theory,
-                &[k, a, bin],
+                &[k, a, bin, not_b],
                 before,
                 &[after],
             );
-            let trigger = if not_b == f.zero { f.c } else { f.o };
-            index_rule_for(&mut f.store, &[trigger], admission);
+            index_rule_for(&mut f.store, &not_outputs, admission);
         }
 
         // Borrow-in inversion return:
         //
-        // BinNotFrame([K,a,not_b]) -> not_bin
+        // BinNotFrame([K,a,not_b]) -> ExactSequence_R([not_bin])
         // =>
         // FullFrame([K]) -> Call(FULL,[a,not_b,not_bin])
-        for not_bin in [f.zero, f.one] {
+        {
             let k = anchors.next(&mut f.store);
             let a = anchors.next(&mut f.store);
             let not_b = anchors.next(&mut f.store);
+            let not_bin = anchors.next(&mut f.store);
 
             let caller =
                 stage_frame(&mut f.store, bin_not_tag, &[k, a, not_b]);
-            let before = f.store.ensure_pair(caller, not_bin).unwrap();
+            let not_result =
+                materialize_exact_sequence(&mut f.store, &[not_bin]).unwrap();
+            let before = f.store.ensure_pair(caller, not_result).unwrap();
 
             let next_caller = stage_frame(&mut f.store, full_tag, &[k]);
             let full_args = materialize_exact_sequence(
@@ -195,14 +205,14 @@ impl Sub1Program {
             let (_, admission) = define_bundle_rule(
                 &mut f.store,
                 f.theory,
-                &[k, a, not_b],
+                &[k, a, not_b, not_bin],
                 before,
                 &[after],
             );
-            let trigger = if not_bin == f.zero { f.c } else { f.o };
-            index_rule_for(&mut f.store, &[trigger], admission);
+            index_rule_for(&mut f.store, &not_outputs, admission);
         }
 
+        // Full Adder returns [diff,carry_out]. For subtraction, x86-style
         // Full Adder returns [diff,carry_out]. For subtraction, x86-style
         // Full Adder returns [diff,carry_out]. For subtraction, x86-style
         // unsigned borrow is NOT(carry_out).
@@ -241,16 +251,19 @@ impl Sub1Program {
 
         // Final borrow return:
         //
-        // CoutNotFrame([K,diff]) -> borrow
+        // CoutNotFrame([K,diff]) -> ExactSequence_R([borrow])
         // =>
         // K -> ExactSequence_R([diff,borrow])
-        for borrow in [f.zero, f.one] {
+        {
             let k = anchors.next(&mut f.store);
             let diff = anchors.next(&mut f.store);
+            let borrow = anchors.next(&mut f.store);
 
             let caller =
                 stage_frame(&mut f.store, cout_not_tag, &[k, diff]);
-            let before = f.store.ensure_pair(caller, borrow).unwrap();
+            let not_result =
+                materialize_exact_sequence(&mut f.store, &[borrow]).unwrap();
+            let before = f.store.ensure_pair(caller, not_result).unwrap();
 
             let result =
                 materialize_exact_sequence(&mut f.store, &[diff, borrow])
@@ -260,14 +273,14 @@ impl Sub1Program {
             let (_, admission) = define_bundle_rule(
                 &mut f.store,
                 f.theory,
-                &[k, diff],
+                &[k, diff, borrow],
                 before,
                 &[after],
             );
-            let trigger = if borrow == f.zero { f.c } else { f.o };
-            index_rule_for(&mut f.store, &[trigger], admission);
+            index_rule_for(&mut f.store, &not_outputs, admission);
         }
 
+        Self {
         Self {
             sub,
             // OPEN
