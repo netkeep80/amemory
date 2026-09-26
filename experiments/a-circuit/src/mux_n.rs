@@ -719,6 +719,7 @@ pub(crate) struct WebProofPrepareStage {
     pub(crate) runtime_memory_exists: bool,
     pub(crate) aset_anums: Vec<String>,
     pub(crate) semantic_roots: Vec<WebProofPreparedRoot>,
+    pub(crate) theory_admissions: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -934,6 +935,8 @@ pub(crate) fn web_prove_mux1(
 
     let prepared_roots = vec![
         semantic_source(&compiler.store, "function.mux1", program.mux1),
+        semantic_source(&compiler.store, "function.dependency.xor2", program.gates.xor2),
+        semantic_source(&compiler.store, "function.dependency.and2", program.gates.and2),
         semantic_source(&compiler.store, "data.select", bits[select as usize]),
         semantic_source(&compiler.store, "data.a", bits[a as usize]),
         semantic_source(&compiler.store, "data.b", bits[b as usize]),
@@ -948,6 +951,21 @@ pub(crate) fn web_prove_mux1(
         semantic_source(&compiler.store, "context.caller", compiler.k),
         semantic_source(&compiler.store, "result.tag", program.bit_result_tag),
     ];
+    let theory_admissions = compiler
+        .store
+        .start_incidence(compiler.theory)
+        .ok()?
+        .filter_map(|handle| {
+            let (start, _end) = compiler.store.poles(handle).ok()?;
+            (start == compiler.theory)
+                .then(|| compiler.store.export_anum(handle).ok())
+                .flatten()
+        })
+        .collect::<Vec<_>>();
+    if theory_admissions.is_empty() {
+        return None;
+    }
+
     let prepared_anums = export_portable_aset(&compiler.store);
 
     let prepare = WebProofPrepareStage {
@@ -955,6 +973,7 @@ pub(crate) fn web_prove_mux1(
         runtime_memory_exists: false,
         aset_anums: prepared_anums.clone(),
         semantic_roots: prepared_roots.clone(),
+        theory_admissions,
     };
 
     // Stage 2: exactly one runtime A-memory is created. Every following stage
@@ -1132,6 +1151,7 @@ fn web_mux1_proof_uses_one_runtime_memory_for_all_eight_cases() {
                 let proof = web_prove_mux1(select, a, b).expect("MUX1 proof");
                 assert!(!proof.prepare.runtime_memory_exists);
                 assert!(proof.load.portable_round_trip);
+                assert!(!proof.prepare.theory_admissions.is_empty());
                 assert_eq!(proof.load.links_before_load, 1);
                 assert!(proof.load.links_after_load > proof.load.links_before_load);
                 assert_eq!(proof.execute.active_reaction_count, 7);
