@@ -725,6 +725,15 @@ fn proof_binary_call(
     call(store, apply, function, args)
 }
 
+fn proof_fresh_pair(
+    store: &mut OptimizedLinkStore,
+    anchors: &mut AnchorGen,
+) -> Handle {
+    let left = anchors.next(store);
+    let right = anchors.next(store);
+    store.ensure_pair(left, right).unwrap()
+}
+
 fn install_proof_gate(
     store: &mut OptimizedLinkStore,
     anchors: &mut AnchorGen,
@@ -766,14 +775,10 @@ fn build_proof_mux_fixture() -> ProofMuxFixture {
     let seed = store.ensure_pair(u, l).unwrap();
     let mut anchors = AnchorGen::new(&mut store, seed, o, c);
 
-    let theory = store
-        .ensure_pair(anchors.next(&mut store), anchors.next(&mut store))
-        .unwrap();
+    let theory = proof_fresh_pair(&mut store, &mut anchors);
     let authority_dictionary =
         define_structural_role_dictionary(&mut store, &[]).unwrap();
-    let grammar = store
-        .ensure_pair(anchors.next(&mut store), anchors.next(&mut store))
-        .unwrap();
+    let grammar = proof_fresh_pair(&mut store, &mut anchors);
     let interpreter = define_structural_interpreter(
         &mut store,
         authority_dictionary,
@@ -782,24 +787,14 @@ fn build_proof_mux_fixture() -> ProofMuxFixture {
     )
     .unwrap();
 
-    let xor2 = store
-        .ensure_pair(anchors.next(&mut store), anchors.next(&mut store))
-        .unwrap();
-    let and2 = store
-        .ensure_pair(anchors.next(&mut store), anchors.next(&mut store))
-        .unwrap();
-    let mux1 = store
-        .ensure_pair(anchors.next(&mut store), anchors.next(&mut store))
-        .unwrap();
-    let k = store
-        .ensure_pair(anchors.next(&mut store), anchors.next(&mut store))
-        .unwrap();
+    let xor2 = proof_fresh_pair(&mut store, &mut anchors);
+    let and2 = proof_fresh_pair(&mut store, &mut anchors);
+    let mux1 = proof_fresh_pair(&mut store, &mut anchors);
+    let k = proof_fresh_pair(&mut store, &mut anchors);
     let xor_ab_tag = anchors.next(&mut store);
     let and_s_tag = anchors.next(&mut store);
     let xor_out_tag = anchors.next(&mut store);
-    let bit_result_tag = store
-        .ensure_pair(anchors.next(&mut store), anchors.next(&mut store))
-        .unwrap();
+    let bit_result_tag = proof_fresh_pair(&mut store, &mut anchors);
 
     let apply = o;
     let zero = u;
