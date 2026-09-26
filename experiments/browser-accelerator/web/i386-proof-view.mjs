@@ -154,8 +154,19 @@ export function proofPipelineHtml(proof) {
               <div><strong>Result sequence Anum</strong>${code(proof.result.resultSequenceAnum)}</div>
             </div>
             <div class="proof-visual-toolbar">
-              <strong>Same-memory Link topology</strong>
-              <span>${proof.result.visualLinks.length} runtime Links · projected directly from ${escapeHtml(id)}</span>
+              <div>
+                <strong>Same-memory Link topology</strong>
+                <span>${proof.result.visualLinks.length} runtime Links · projected directly from ${escapeHtml(id)}</span>
+              </div>
+              <div class="proof-visual-tabs" data-proof-visual-tabs>
+                <button type="button" data-proof-view="blueprint" aria-pressed="true">Blueprint 2D</button>
+                <button type="button" data-proof-view="static3d" aria-pressed="false">Static 3D</button>
+                <button type="button" data-proof-view="live3d" aria-pressed="false">Live physics 3D</button>
+              </div>
+            </div>
+            <div class="proof-visual-note">
+              Exact renderer authority: <code>@mts/visual 0.3.0</code> ·
+              <code>mts_visual@4b7c8e97fab8</code>. Presentation only; semantic truth remains the runtime A-memory.
             </div>
             <div class="proof-visual" data-proof-visual>
               <div class="notice">Loading exact-pinned mts_visual Blueprint renderer…</div>
@@ -170,18 +181,90 @@ export function proofPipelineHtml(proof) {
     </section>`;
 }
 
+const proofVisualCleanup = new WeakMap();
+
+async function destroyProofVisual(target) {
+  const cleanup = proofVisualCleanup.get(target);
+  if (cleanup) {
+    await cleanup();
+    proofVisualCleanup.delete(target);
+  }
+}
+
+async function renderBlueprint(target, network) {
+  const mts = await import("./vendor/mts-visual/index.js");
+  const scene = mts.buildBlueprintSvgScene(network);
+  target.classList.remove("proof-visual-three");
+  target.innerHTML = mts.serializeBlueprintSvg(scene);
+  target.dataset.renderer = "@mts/visual Blueprint 2D";
+}
+
+async function renderStatic3D(target, network) {
+  const [mts, threeVisual] = await Promise.all([
+    import("./vendor/mts-visual/index.js"),
+    import("./vendor/mts-visual/three/index.js"),
+  ]);
+  const initial = mts.createInitialPhysics3DState(network);
+  const data = threeVisual.buildVisualThreeSceneData(network, initial);
+  target.innerHTML = "";
+  target.classList.add("proof-visual-three");
+  threeVisual.createVisualThreeRenderer(target, data);
+  target.dataset.renderer = "@mts/visual Static 3D";
+  proofVisualCleanup.set(target, () => {
+    threeVisual.destroyVisualThreeRenderer(target);
+  });
+}
+
+async function renderLive3D(target, network) {
+  const [mts, threeVisual] = await Promise.all([
+    import("./vendor/mts-visual/index.js"),
+    import("./vendor/mts-visual/three/index.js"),
+  ]);
+  const initial = mts.createInitialPhysics3DState(network);
+  const controller = mts.createLivePhysics3D(network, initial);
+  target.innerHTML = "";
+  target.classList.add("proof-visual-three");
+  threeVisual.createVisualThreeLiveRenderer(target, network, controller);
+  target.dataset.renderer = "@mts/visual Live physics 3D";
+  proofVisualCleanup.set(target, () => {
+    threeVisual.destroyVisualThreeRenderer(target);
+  });
+}
+
+async function renderProofVisual(target, network, mode) {
+  await destroyProofVisual(target);
+  target.innerHTML = `<div class="notice">Rendering ${escapeHtml(mode)} from the same runtime Link snapshot…</div>`;
+  try {
+    if (mode === "blueprint") await renderBlueprint(target, network);
+    else if (mode === "static3d") await renderStatic3D(target, network);
+    else if (mode === "live3d") await renderLive3D(target, network);
+    else throw new Error(`unknown proof visual mode: ${mode}`);
+  } catch (error) {
+    target.classList.remove("proof-visual-three");
+    target.innerHTML = `<div class="notice lab-error">mts_visual rendering failed closed: ${escapeHtml(error.message)}</div>`;
+  }
+}
+
 export async function renderProofPipeline(target, proof) {
+  const previousVisual = target.querySelector?.("[data-proof-visual]");
+  if (previousVisual) await destroyProofVisual(previousVisual);
+
   target.innerHTML = proofPipelineHtml(proof);
   const visual = target.querySelector("[data-proof-visual]");
-  if (!visual) return;
+  const tabs = target.querySelector("[data-proof-visual-tabs]");
+  if (!visual || !tabs) return;
 
-  try {
-    const mts = await import("./vendor/mts-visual/index.js");
-    const network = visualNetworkFromProof(proof);
-    const scene = mts.buildBlueprintSvgScene(network);
-    visual.innerHTML = mts.serializeBlueprintSvg(scene);
-    visual.dataset.renderer = "@mts/visual Blueprint 2D";
-  } catch (error) {
-    visual.innerHTML = `<div class="notice lab-error">mts_visual rendering failed closed: ${escapeHtml(error.message)}</div>`;
-  }
+  const network = visualNetworkFromProof(proof);
+  const activate = async (mode) => {
+    tabs.querySelectorAll("[data-proof-view]").forEach((button) => {
+      button.setAttribute("aria-pressed", String(button.dataset.proofView === mode));
+    });
+    await renderProofVisual(visual, network, mode);
+  };
+
+  tabs.querySelectorAll("[data-proof-view]").forEach((button) => {
+    button.addEventListener("click", () => void activate(button.dataset.proofView));
+  });
+
+  await activate("blueprint");
 }
