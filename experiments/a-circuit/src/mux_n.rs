@@ -630,6 +630,64 @@ pub(crate) fn web_run_mux32(
 }
 
 
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct WebMux1Outcome {
+    pub(crate) value: u8,
+    pub(crate) reactions: u32,
+    pub(crate) links_after_build: u32,
+    pub(crate) links_after_first: u32,
+    pub(crate) steady_link_delta: u32,
+    pub(crate) quiescent: u8,
+}
+
+pub(crate) fn web_run_mux1(
+    select: u32,
+    a: u32,
+    b: u32,
+) -> Option<WebMux1Outcome> {
+    if select > 1 || a > 1 || b > 1 {
+        return None;
+    }
+
+    let mut f = FullFixture::new();
+    let program = MuxProgram::install(&mut f);
+    let links_after_build = f.store.link_count() as u32;
+
+    let first = run_mux1(
+        &mut f,
+        &program,
+        program.mux1,
+        program.mux1_steps,
+        select as u8,
+        a as u8,
+        b as u8,
+    );
+    let links_after_first = f.store.link_count() as u32;
+
+    let second = run_mux1(
+        &mut f,
+        &program,
+        program.mux1,
+        program.mux1_steps,
+        select as u8,
+        a as u8,
+        b as u8,
+    );
+    assert_eq!(second, first, "web MUX1 repeat changed result");
+    let links_after_second = f.store.link_count() as u32;
+
+    Some(WebMux1Outcome {
+        value: first,
+        reactions: program.mux1_steps as u32,
+        links_after_build,
+        links_after_first,
+        steady_link_delta: links_after_second - links_after_first,
+        quiescent: 1,
+    })
+}
+
+
 #[test]
 fn m1_mux1_direct_and_composed_all_rows() {
     let mut f = FullFixture::new();
