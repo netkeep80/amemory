@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod full_adder;
+
 use amemory_optimized_cpu_probe::{OptimizedLinkStore, OptimizedReactionEngine};
 use std::collections::BTreeSet;
 
