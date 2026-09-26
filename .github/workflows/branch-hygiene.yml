@@ -1,5 +1,6 @@
 name: branch policy and hygiene
 
+# Side branches are expected to become PR-backed work surfaces immediately.
 on:
   push:
     branches-ignore:
