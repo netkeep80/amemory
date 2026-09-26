@@ -61,6 +61,10 @@ pub struct StructuralRunProfile {
     pub instantiation_canonical_hits: u64,
     pub instantiation_new_links: u64,
     pub publication_outputs: u64,
+    pub rule_metadata_cache_hits: u64,
+    pub rule_metadata_cache_misses: u64,
+    pub grounded_path_checks: u64,
+    pub grounded_path_rejects: u64,
     pub discovery_ns: u128,
     pub role_decode_ns: u128,
     pub unification_ns: u128,
@@ -84,6 +88,10 @@ impl StructuralRunProfile {
         self.instantiation_canonical_hits += other.instantiation_canonical_hits;
         self.instantiation_new_links += other.instantiation_new_links;
         self.publication_outputs += other.publication_outputs;
+        self.rule_metadata_cache_hits += other.rule_metadata_cache_hits;
+        self.rule_metadata_cache_misses += other.rule_metadata_cache_misses;
+        self.grounded_path_checks += other.grounded_path_checks;
+        self.grounded_path_rejects += other.grounded_path_rejects;
         self.discovery_ns += other.discovery_ns;
         self.role_decode_ns += other.role_decode_ns;
         self.unification_ns += other.unification_ns;
@@ -91,6 +99,23 @@ impl StructuralRunProfile {
         self.publication_ns += other.publication_ns;
         self.total_ns += other.total_ns;
     }
+}
+
+#[derive(Clone, Debug)]
+struct GroundedPathCheck {
+    // false = START, true = END
+    path: Vec<bool>,
+    expected: Handle,
+}
+
+#[derive(Clone, Debug)]
+struct CompiledRuleMetadata {
+    role_dictionary: Handle,
+    body: Handle,
+    before: Handle,
+    output_bundle_template: Handle,
+    roles: Vec<Handle>,
+    grounded_checks: Vec<GroundedPathCheck>,
 }
 
 #[derive(Clone, Debug)]
@@ -235,6 +260,121 @@ pub fn read_structural_interpreter(
         grammar,
         theory,
     })
+}
+
+const MAX_COMPILED_GROUNDED_CHECKS: usize = 32;
+
+fn compile_grounded_path_checks(
+    store: &OptimizedLinkStore,
+    template: Handle,
+    roles: &[Handle],
+) -> Result<Vec<GroundedPathCheck>, StructuralError> {
+    let role_set = roles.iter().copied().collect::<HashSet<_>>();
+
+    // Compute "subtree contains any role" bottom-up. OptimizedLinkStore Links
+    // only point to existing handles, except their own START/END self-incidence,
+    // so ignoring direct self-edges gives an acyclic dependency walk.
+    let mut contains_role = HashMap::<Handle, bool>::new();
+    let mut pending = vec![(template, false)];
+
+    while let Some((node, expanded)) = pending.pop() {
+        if contains_role.contains_key(&node) {
+            continue;
+        }
+        if role_set.contains(&node) {
+            contains_role.insert(node, true);
+            continue;
+        }
+
+        let (start, end) = store.poles(node)?;
+        if expanded {
+            let start_has = if start == node {
+                false
+            } else {
+                *contains_role.get(&start).unwrap_or(&false)
+            };
+            let end_has = if end == node {
+                false
+            } else {
+                *contains_role.get(&end).unwrap_or(&false)
+            };
+            contains_role.insert(node, start_has || end_has);
+            continue;
+        }
+
+        pending.push((node, true));
+        if start != node && !contains_role.contains_key(&start) {
+            pending.push((start, false));
+        }
+        if end != node && !contains_role.contains_key(&end) {
+            pending.push((end, false));
+        }
+    }
+
+    // Record maximal grounded subtrees: once a subtree contains no role, exact
+    // canonical handle equality is a necessary condition for a true match.
+    // END-first mirrors the proven useful traversal order from P1.
+    let mut checks = Vec::new();
+    let mut walk = vec![(template, Vec::<bool>::new())];
+
+    while let Some((node, path)) = walk.pop() {
+        if role_set.contains(&node) {
+            continue;
+        }
+        if !contains_role.get(&node).copied().unwrap_or(false) {
+            checks.push(GroundedPathCheck {
+                path,
+                expected: node,
+            });
+            if checks.len() >= MAX_COMPILED_GROUNDED_CHECKS {
+                break;
+            }
+            continue;
+        }
+
+        let (start, end) = store.poles(node)?;
+        if start != node {
+            let mut start_path = path.clone();
+            start_path.push(false);
+            walk.push((start, start_path));
+        }
+        if end != node {
+            let mut end_path = path;
+            end_path.push(true);
+            walk.push((end, end_path));
+        }
+    }
+
+    checks.sort_by_key(|check| check.path.len());
+    Ok(checks)
+}
+
+fn compiled_grounded_paths_match(
+    store: &OptimizedLinkStore,
+    claimed: Handle,
+    checks: &[GroundedPathCheck],
+    profile: &mut Option<&mut StructuralRunProfile>,
+) -> Result<bool, StructuralError> {
+    for check in checks {
+        if let Some(profile) = profile.as_deref_mut() {
+            profile.grounded_path_checks += 1;
+        }
+
+        let mut current = claimed;
+        for go_end in &check.path {
+            let (start, end) = store.poles(current)?;
+            current = if *go_end { end } else { start };
+        }
+
+        if current != check.expected {
+            if let Some(profile) = profile.as_deref_mut() {
+                profile.grounded_path_rejects += 1;
+            }
+            return Ok(false);
+        }
+    }
+
+    Ok(true)
 }
 
 const STRUCTURAL_DISCRIMINATION_BUDGET: usize = 128;
@@ -507,6 +647,7 @@ fn discover_triggered_rule_images_internal(
     store: &OptimizedLinkStore,
     theory: Handle,
     active: Handle,
+    metadata_cache: &mut HashMap<Handle, CompiledRuleMetadata>,
     profile: &mut Option<&mut StructuralRunProfile>,
 ) -> Result<Vec<StructuralImage>, StructuralError> {
     let discovery_started = profile.as_ref().map(|_| Instant::now());
@@ -557,39 +698,97 @@ fn discover_triggered_rule_images_internal(
             continue;
         }
 
-        let Ok((role_dictionary, body)) = store.poles(rule) else {
+        let metadata_missing = !metadata_cache.contains_key(&rule);
+        if metadata_missing {
             if let Some(profile) = profile.as_deref_mut() {
-                profile.candidates_rejected_before_unification += 1;
+                profile.rule_metadata_cache_misses += 1;
             }
-            continue;
-        };
 
-        let role_started = profile.as_ref().map(|_| Instant::now());
-        let roles_result = read_structural_role_dictionary(store, role_dictionary);
-        if let Some(profile) = profile.as_deref_mut() {
-            profile.role_dictionary_decodes += 1;
-            if let Some(started) = role_started {
-                profile.role_decode_ns += started.elapsed().as_nanos();
+            let Ok((role_dictionary, body)) = store.poles(rule) else {
+                if let Some(profile) = profile.as_deref_mut() {
+                    profile.candidates_rejected_before_unification += 1;
+                }
+                continue;
+            };
+
+            let role_started = profile.as_ref().map(|_| Instant::now());
+            let roles_result = read_structural_role_dictionary(store, role_dictionary);
+            if let Some(profile) = profile.as_deref_mut() {
+                profile.role_dictionary_decodes += 1;
+                if let Some(started) = role_started {
+                    profile.role_decode_ns += started.elapsed().as_nanos();
+                }
             }
+            let Ok(roles) = roles_result else {
+                if let Some(profile) = profile.as_deref_mut() {
+                    profile.candidates_rejected_before_unification += 1;
+                }
+                continue;
+            };
+            if let Some(profile) = profile.as_deref_mut() {
+                profile.decoded_roles += roles.len() as u64;
+            }
+
+            let Ok((before, output_bundle_template)) = store.poles(body) else {
+                if let Some(profile) = profile.as_deref_mut() {
+                    profile.candidates_rejected_before_unification += 1;
+                }
+                continue;
+            };
+
+            let grounded_checks =
+                compile_grounded_path_checks(store, before, &roles)?;
+
+            metadata_cache.insert(
+                rule,
+                CompiledRuleMetadata {
+                    role_dictionary,
+                    body,
+                    before,
+                    output_bundle_template,
+                    roles,
+                    grounded_checks,
+                },
+            );
+        } else if let Some(profile) = profile.as_deref_mut() {
+            profile.rule_metadata_cache_hits += 1;
         }
-        let Ok(roles) = roles_result else {
-            if let Some(profile) = profile.as_deref_mut() {
-                profile.candidates_rejected_before_unification += 1;
-            }
+
+        let Some(metadata) = metadata_cache.get(&rule) else {
             continue;
         };
-        if let Some(profile) = profile.as_deref_mut() {
-            profile.decoded_roles += roles.len() as u64;
+
+        // Defensive local-store validation. Cache identity is already scoped to
+        // one OptimizedLinkStore instance; these cheap checks additionally make
+        // malformed or stale metadata fail open to rejection/recompile logic.
+        if store.poles(rule).ok() != Some((metadata.role_dictionary, metadata.body))
+            || store.poles(metadata.body).ok()
+                != Some((metadata.before, metadata.output_bundle_template))
+        {
+            // Cache metadata is never semantic authority. If its local-store
+            // invariants are broken, fail closed instead of silently turning a
+            // potentially valid Rule into quiescence.
+            return Err(StructuralError::InvalidRule(rule));
         }
 
-        let Ok((before, output_bundle_template)) = store.poles(body) else {
+        if !compiled_grounded_paths_match(
+            store,
+            active,
+            &metadata.grounded_checks,
+            profile,
+        )? {
             if let Some(profile) = profile.as_deref_mut() {
                 profile.candidates_rejected_before_unification += 1;
             }
             continue;
-        };
+        }
 
-        if !structural_discriminator_matches(store, before, active, &roles)? {
+        if !structural_discriminator_matches(
+            store,
+            metadata.before,
+            active,
+            &metadata.roles,
+        )? {
             if let Some(profile) = profile.as_deref_mut() {
                 profile.candidates_rejected_before_unification += 1;
             }
@@ -600,8 +799,13 @@ fn discover_triggered_rule_images_internal(
             profile.unification_attempts += 1;
         }
         let unify_started = profile.as_ref().map(|_| Instant::now());
-        let bindings_result =
-            unify_structural_rule_template_internal(store, before, active, &roles, profile);
+        let bindings_result = unify_structural_rule_template_internal(
+            store,
+            metadata.before,
+            active,
+            &metadata.roles,
+            profile,
+        );
         if let Some(profile) = profile.as_deref_mut() {
             if let Some(started) = unify_started {
                 profile.unification_ns += started.elapsed().as_nanos();
@@ -615,7 +819,7 @@ fn discover_triggered_rule_images_internal(
         }
 
         images.push(StructuralImage {
-            output_bundle_template,
+            output_bundle_template: metadata.output_bundle_template,
             bindings,
         });
     }
@@ -634,7 +838,14 @@ fn discover_triggered_rule_images(
     active: Handle,
 ) -> Result<Vec<StructuralImage>, StructuralError> {
     let mut profile = None;
-    discover_triggered_rule_images_internal(store, theory, active, &mut profile)
+    let mut metadata_cache = HashMap::new();
+    discover_triggered_rule_images_internal(
+        store,
+        theory,
+        active,
+        &mut metadata_cache,
+        &mut profile,
+    )
 }
 
 #[derive(Clone, Debug)]
@@ -647,6 +858,8 @@ pub struct OptimizedStructuralEngine {
     transitioned_members: u32,
     handoff_count: u32,
     quiescent: bool,
+    metadata_store_instance: Option<u32>,
+    rule_metadata_cache: HashMap<Handle, CompiledRuleMetadata>,
 }
 
 impl OptimizedStructuralEngine {
@@ -661,6 +874,8 @@ impl OptimizedStructuralEngine {
             transitioned_members: 0,
             handoff_count: 0,
             quiescent: false,
+            metadata_store_instance: None,
+            rule_metadata_cache: HashMap::new(),
         }
     }
 
@@ -729,6 +944,12 @@ impl OptimizedStructuralEngine {
     ) -> Result<StructuralReactionResult, StructuralError> {
         self.quiescent = false;
 
+        let store_instance = store.instance_id();
+        if self.metadata_store_instance != Some(store_instance) {
+            self.rule_metadata_cache.clear();
+            self.metadata_store_instance = Some(store_instance);
+        }
+
         let interpreter = self.interpreter.ok_or(StructuralError::MissingInterpreter)?;
         let authority = read_structural_interpreter(store, interpreter)?;
         let old_members = self.scope_banks[self.current_bank].clone();
@@ -763,6 +984,7 @@ impl OptimizedStructuralEngine {
                 store,
                 authority.theory,
                 active,
+                &mut self.rule_metadata_cache,
                 profile,
             )?;
 
@@ -1010,6 +1232,117 @@ mod tests {
             Err(StructuralError::TemplateMismatch),
             "full matcher remains final authority after discriminator uncertainty"
         );
+    }
+
+    #[test]
+    fn compiled_grounded_paths_are_sound_prefilter_for_role_templates() {
+        let mut store = OptimizedLinkStore::new();
+        let anchors = fresh(&mut store, 48);
+        let role = anchors[40];
+        let grounded_left = anchors[6];
+        let grounded_right = anchors[7];
+        let bound_value = anchors[8];
+        let other = anchors[9];
+
+        let grounded_suffix =
+            store.ensure_pair(grounded_left, grounded_right).unwrap();
+        let template = store.ensure_pair(role, grounded_suffix).unwrap();
+        let matching = store.ensure_pair(bound_value, grounded_suffix).unwrap();
+        let wrong_suffix = store.ensure_pair(grounded_left, other).unwrap();
+        let rejected = store.ensure_pair(bound_value, wrong_suffix).unwrap();
+
+        let checks =
+            compile_grounded_path_checks(&store, template, &[role]).unwrap();
+        assert!(!checks.is_empty());
+
+        let mut matching_profile = None;
+        assert!(
+            compiled_grounded_paths_match(
+                &store,
+                matching,
+                &checks,
+                &mut matching_profile,
+            )
+            .unwrap(),
+            "true structural match must survive compiled prefilter"
+        );
+        assert!(
+            unify_structural_rule_template(&store, template, matching, &[role])
+                .is_ok(),
+        );
+
+        let mut rejected_profile = None;
+        assert!(
+            !compiled_grounded_paths_match(
+                &store,
+                rejected,
+                &checks,
+                &mut rejected_profile,
+            )
+            .unwrap(),
+            "grounded mismatch should be rejected before full unification"
+        );
+        assert_eq!(
+            unify_structural_rule_template(&store, template, rejected, &[role]),
+            Err(StructuralError::TemplateMismatch),
+        );
+    }
+
+    #[test]
+    fn executor_metadata_cache_is_scoped_to_one_runtime_store() {
+        let mut original = OptimizedLinkStore::new();
+        let original_id = original.instance_id();
+
+        let source = original.export_anum(ROOT_HANDLE).unwrap();
+        original.import_anum(&source).unwrap();
+        assert_eq!(
+            original.instance_id(),
+            original_id,
+            "transactional import must preserve runtime store identity"
+        );
+
+        let cloned = original.clone();
+        assert_ne!(
+            cloned.instance_id(),
+            original.instance_id(),
+            "independent store clones must never share executor-cache identity"
+        );
+
+        let mut engine = OptimizedStructuralEngine::new(4);
+        engine.metadata_store_instance = Some(original.instance_id());
+        engine.rule_metadata_cache.insert(
+            ROOT_HANDLE,
+            CompiledRuleMetadata {
+                role_dictionary: ROOT_HANDLE,
+                body: ROOT_HANDLE,
+                before: ROOT_HANDLE,
+                output_bundle_template: ROOT_HANDLE,
+                roles: Vec::new(),
+                grounded_checks: Vec::new(),
+            },
+        );
+
+        let interpreter = {
+            let dictionary =
+                define_structural_role_dictionary(&mut original, &[]).unwrap();
+            let grammar = original.ensure_start_self_closed(ROOT_HANDLE).unwrap();
+            let theory = original.ensure_end_self_closed(ROOT_HANDLE).unwrap();
+            define_structural_interpreter(
+                &mut original,
+                dictionary,
+                grammar,
+                theory,
+            )
+            .unwrap()
+        };
+        engine.set_interpreter(&original, interpreter).unwrap();
+        engine.set_current(&original, &[ROOT_HANDLE]).unwrap();
+        let _ = engine.run(&mut original).unwrap();
+
+        // Merely seeing another store instance is sufficient to invalidate all
+        // local-handle metadata before any semantic discovery can use it.
+        let clone_id = cloned.instance_id();
+        assert_ne!(clone_id, engine.metadata_store_instance.unwrap());
     }
 
     #[test]
