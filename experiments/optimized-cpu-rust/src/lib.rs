@@ -150,11 +150,24 @@ impl OptimizedLinkStore {
         Ok((self.starts[index], self.ends[index]))
     }
 
-    pub fn import_anum(&mut self, source: &str) -> Result<Handle, StoreError> {
+    fn import_anum_in_place(
+        &mut self,
+        source: &str,
+    ) -> Result<Handle, StoreError> {
         if source.is_empty() {
             return Err(StoreError::EmptyAnum);
         }
 
+        let bytes = source.as_bytes();
+        let mut cursor = 0usize;
+        let handle = self.parse_node(bytes, &mut cursor)?;
+        if cursor != bytes.len() {
+            return Err(StoreError::TrailingInput(cursor));
+        }
+        Ok(handle)
+    }
+
+    pub fn import_anum(&mut self, source: &str) -> Result<Handle, StoreError> {
         // Whole-Anum import is transactional. Parsing/canonicalization happens
         // against a staging clone; only complete success replaces live state.
         let runtime_instance_id = self.instance_id;
@@ -163,14 +176,36 @@ impl OptimizedLinkStore {
         // normal external clone receives a fresh cache identity, but a
         // successful import must preserve this store's identity.
         staging.instance_id = runtime_instance_id;
-        let bytes = source.as_bytes();
-        let mut cursor = 0usize;
-        let handle = staging.parse_node(bytes, &mut cursor)?;
-        if cursor != bytes.len() {
-            return Err(StoreError::TrailingInput(cursor));
-        }
+        let handle = staging.import_anum_in_place(source)?;
         *self = staging;
         Ok(handle)
+    }
+
+    /// Transactionally imports a portable Aset in source order.
+    ///
+    /// The whole batch uses one staging clone and is published atomically.
+    /// This is semantically equivalent to repeated `import_anum` calls on a
+    /// successful batch, while avoiding an O(batch) sequence of growing-store
+    /// clones. Any malformed/capacity failure leaves the live store unchanged.
+    pub fn import_anums(
+        &mut self,
+        sources: &[String],
+    ) -> Result<Vec<Handle>, StoreError> {
+        if sources.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let runtime_instance_id = self.instance_id;
+        let mut staging = self.clone();
+        staging.instance_id = runtime_instance_id;
+
+        let mut handles = Vec::with_capacity(sources.len());
+        for source in sources {
+            handles.push(staging.import_anum_in_place(source)?);
+        }
+
+        *self = staging;
+        Ok(handles)
     }
 
     pub fn export_anum(&self, handle: Handle) -> Result<String, StoreError> {
@@ -863,6 +898,43 @@ mod tests {
         let first = optimized.import_anum("19868").unwrap();
         let second = optimized.import_anum("19868").unwrap();
         assert_eq!(first, second);
+    }
+
+    #[test]
+    fn batch_import_matches_sequential_import_and_is_atomic() {
+        let sources = vec![
+            "98".to_owned(),
+            "68".to_owned(),
+            "16898".to_owned(),
+            "19868".to_owned(),
+            "16816898".to_owned(),
+        ];
+
+        let mut sequential = OptimizedLinkStore::new();
+        let sequential_handles = sources
+            .iter()
+            .map(|source| sequential.import_anum(source).unwrap())
+            .collect::<Vec<_>>();
+
+        let mut batched = OptimizedLinkStore::new();
+        let instance_id = batched.instance_id;
+        let batch_handles = batched.import_anums(&sources).unwrap();
+
+        assert_eq!(batch_handles, sequential_handles);
+        assert_eq!(batched.instance_id, instance_id);
+        assert_eq!(batched.link_count(), sequential.link_count());
+        for (source, handle) in sources.iter().zip(batch_handles.iter()) {
+            assert_eq!(batched.export_anum(*handle).unwrap(), *source);
+        }
+
+        let stable = batched.import_anum("198698").unwrap();
+        let before_count = batched.link_count();
+        let before_stable = batched.export_anum(stable).unwrap();
+        let failed = vec!["116898998".to_owned(), "19868x".to_owned()];
+        assert!(batched.import_anums(&failed).is_err());
+        assert_eq!(batched.instance_id, instance_id);
+        assert_eq!(batched.link_count(), before_count);
+        assert_eq!(batched.export_anum(stable).unwrap(), before_stable);
     }
 
     #[test]
