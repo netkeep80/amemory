@@ -3,119 +3,276 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>A-memory browser accelerator prototype</title>
+  <meta name="color-scheme" content="light dark">
+  <title>A-memory diagnostic dashboard</title>
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; line-height: 1.45; }
+    :root {
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color-scheme: light dark;
+      --bg: #f5f7fb;
+      --surface: #ffffff;
+      --surface-2: #f0f3f8;
+      --text: #172033;
+      --muted: #68738a;
+      --line: #dfe5ef;
+      --accent: #315efb;
+      --good: #18794e;
+      --bad: #c9372c;
+      --shadow: 0 12px 34px rgba(25, 38, 64, .08);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0e1118;
+        --surface: #151a24;
+        --surface-2: #1c2330;
+        --text: #eef2f8;
+        --muted: #9ca7ba;
+        --line: #293243;
+        --accent: #7d9cff;
+        --good: #69d39a;
+        --bad: #ff847c;
+        --shadow: 0 12px 34px rgba(0, 0, 0, .28);
+      }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); line-height: 1.45; }
+    main { max-width: 1180px; margin: 0 auto; padding: 32px 20px 56px; }
+    h1 { margin: 0; font-size: clamp(2rem, 5vw, 3.2rem); letter-spacing: -.045em; }
+    h2 { margin: 36px 0 14px; font-size: 1.25rem; }
+    p { color: var(--muted); }
     code, pre { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
-    .row { padding: .6rem 0; border-bottom: 1px solid #ddd; }
-    .ok { font-weight: 700; }
-    .fail { font-weight: 700; }
-    pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+    .hero { display: flex; justify-content: space-between; gap: 24px; align-items: end; margin-bottom: 24px; }
+    .hero p { max-width: 720px; margin: 8px 0 0; }
+    .badge { padding: 7px 11px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--muted); font-size: .82rem; white-space: nowrap; }
+    .status-grid { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 12px; margin: 22px 0; }
+    .status-card, .flow-card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); }
+    .status-card { padding: 16px; min-height: 104px; }
+    .status-card .kicker, .flow-card .kicker { display: block; color: var(--muted); font-size: .76rem; text-transform: uppercase; letter-spacing: .08em; }
+    .status-card .value { display: block; margin-top: 10px; font-size: 1.05rem; font-weight: 760; overflow-wrap: anywhere; }
+    .flow { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 28px; margin: 18px 0 8px; }
+    .flow-card { padding: 18px; position: relative; min-height: 150px; }
+    .flow-card:not(:last-child)::after { content: "→"; position: absolute; right: -22px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 1.4rem; font-weight: 800; }
+    .flow-card h3 { margin: 8px 0 10px; font-size: 1.08rem; }
+    .flow-card .primary { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-weight: 700; overflow-wrap: anywhere; }
+    .flow-card .secondary { margin-top: 8px; color: var(--muted); font-size: .88rem; }
+    .notice { margin-top: 14px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); color: var(--muted); font-size: .88rem; }
+    .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; margin: 10px 0; overflow: hidden; }
+    .panel > summary { cursor: pointer; display: flex; justify-content: space-between; gap: 18px; align-items: baseline; padding: 15px 17px; font-weight: 760; }
+    .panel > summary small { color: var(--muted); font-weight: 500; }
+    .rows { border-top: 1px solid var(--line); padding: 0 17px; }
+    .row { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(220px, 1.25fr); gap: 20px; padding: 10px 0; border-bottom: 1px solid var(--line); align-items: start; }
+    .row:last-child { border-bottom: 0; }
+    .label { color: var(--muted); }
+    .ok { color: var(--good); font-weight: 760; }
+    .fail { color: var(--bad); font-weight: 760; }
+    .lifecycle-row { display: grid; grid-template-columns: 1fr auto; gap: 20px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+    .lifecycle-row:last-child { border-bottom: 0; }
+    .raw { margin-top: 12px; }
+    pre { margin: 0; padding: 16px; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--surface-2); border-radius: 0 0 14px 14px; max-height: 540px; overflow: auto; font-size: .82rem; }
+    @media (max-width: 820px) {
+      .status-grid, .flow { grid-template-columns: 1fr 1fr; }
+      .flow { gap: 12px; }
+      .flow-card::after { display: none; }
+      .row { grid-template-columns: 1fr; gap: 3px; }
+      .hero { align-items: start; flex-direction: column; }
+    }
+    @media (max-width: 520px) {
+      main { padding: 22px 13px 40px; }
+      .status-grid, .flow { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
-  <h1>A-memory browser accelerator prototype</h1>
-  <p>Browser CPU/WASM ↔ WebGPU A-memory differential witnesses.</p>
+<main>
+  <header class="hero">
+    <div>
+      <h1>A-memory</h1>
+      <p>Browser CPU/WASM ↔ WebGPU diagnostic dashboard. Portable structure is shown first; backend-local handles and raw evidence remain available below.</p>
+    </div>
+    <span class="badge">minimal-portable-amemory-execution @ 0.1.0</span>
+  </header>
 
-  <div class="row">Rust/WASM: <span id="wasm">STARTING</span></div>
-  <div class="row">CPU control: <span id="cpu">WAITING</span></div>
-  <div class="row">WebGPU: <span id="webgpu">WAITING</span></div>
-  <div class="row">GPU smoke compute: <span id="compute">WAITING</span></div>
-  <div class="row">A-memory incidence CPU: <span id="incidence-cpu">WAITING</span></div>
-  <div class="row">A-memory incidence GPU: <span id="incidence-gpu">WAITING</span></div>
-  <div class="row">CPU/GPU differential: <span id="differential">WAITING</span></div>
-  <div class="row">Negative control: <span id="negative">WAITING</span></div>
-  <div class="row">Canonicalization CPU: <span id="canonical-cpu">WAITING</span></div>
-  <div class="row">Canonicalization GPU: <span id="canonical-gpu">WAITING</span></div>
-  <div class="row">Canonical new pairs CPU: <span id="canonical-pairs-cpu">WAITING</span></div>
-  <div class="row">Canonical new pairs GPU: <span id="canonical-pairs-gpu">WAITING</span></div>
-  <div class="row">CPU/GPU canonicalization differential: <span id="canonical-diff">WAITING</span></div>
-  <div class="row">Canonicalization negative control: <span id="canonical-negative">WAITING</span></div>
-  <div class="row">State round 0 CPU: <span id="state-r0-cpu">WAITING</span></div>
-  <div class="row">State round 0 GPU: <span id="state-r0-gpu">WAITING</span></div>
-  <div class="row">State round 1 CPU: <span id="state-r1-cpu">WAITING</span></div>
-  <div class="row">State round 1 GPU: <span id="state-r1-gpu">WAITING</span></div>
-  <div class="row">State round 2 CPU: <span id="state-r2-cpu">WAITING</span></div>
-  <div class="row">State round 2 GPU: <span id="state-r2-gpu">WAITING</span></div>
-  <div class="row">State persistence differential: <span id="state-diff">WAITING</span></div>
-  <div class="row">State negative controls: <span id="state-negative">WAITING</span></div>
-  <div class="row">Anum import CPU: <span id="anum-import-cpu">WAITING</span></div>
-  <div class="row">Anum import GPU: <span id="anum-import-gpu">WAITING</span></div>
-  <div class="row">Anum export CPU: <span id="anum-export-cpu">WAITING</span></div>
-  <div class="row">Anum export GPU: <span id="anum-export-gpu">WAITING</span></div>
-  <div class="row">Two-memory Anum differential: <span id="anum-diff">WAITING</span></div>
-  <div class="row">Local handles differ: <span id="anum-handles">WAITING</span></div>
-  <div class="row">Canonical local reuse: <span id="anum-reuse">WAITING</span></div>
-  <div class="row">Malformed/foreign/capacity controls: <span id="anum-negative">WAITING</span></div>
-  <div class="row">Reaction R1 current CPU: <span id="reaction-before-cpu">WAITING</span></div>
-  <div class="row">Reaction R1 current GPU: <span id="reaction-before-gpu">WAITING</span></div>
-  <div class="row">Reaction R1 successor CPU: <span id="reaction-after-cpu">WAITING</span></div>
-  <div class="row">Reaction R1 successor GPU: <span id="reaction-after-gpu">WAITING</span></div>
-  <div class="row">Reaction R1 matched relations: <span id="reaction-matched">WAITING</span></div>
-  <div class="row">Reaction R1 Scope handoff: <span id="reaction-handoff">WAITING</span></div>
-  <div class="row">Reaction R1 normalized CPU/GPU differential: <span id="reaction-diff">WAITING</span></div>
-  <div class="row">Reaction R1 local handles: <span id="reaction-handles">WAITING</span></div>
-  <div class="row">Reaction R1 TheorySnapshot / old Scope: <span id="reaction-scope">WAITING</span></div>
-  <div class="row">Reaction R1 negative controls: <span id="reaction-negative">WAITING</span></div>
-  <div class="row">Reaction R2 Scope CPU: <span id="reaction-r2-cpu">WAITING</span></div>
-  <div class="row">Reaction R2 Scope GPU: <span id="reaction-r2-gpu">WAITING</span></div>
-  <div class="row">Reaction R2 matched relations: <span id="reaction-r2-matched">WAITING</span></div>
-  <div class="row">Reaction R2 Scope handoff: <span id="reaction-r2-handoff">WAITING</span></div>
-  <div class="row">Reaction R2 quiescence: <span id="reaction-r2-quiescence">WAITING</span></div>
-  <div class="row">Reaction R2 published Scope: <span id="reaction-r2-bank">WAITING</span></div>
-  <div class="row">Reaction R2 normalized CPU/GPU differential: <span id="reaction-r2-diff">WAITING</span></div>
-  <div class="row">Reaction R2 failure control: <span id="reaction-r2-failure">WAITING</span></div>
-  <div class="row">Reaction R3 ZERO Scope CPU: <span id="reaction-r3-zero-cpu">WAITING</span></div>
-  <div class="row">Reaction R3 ZERO Scope GPU: <span id="reaction-r3-zero-gpu">WAITING</span></div>
-  <div class="row">Reaction R3 ZERO matched relations: <span id="reaction-r3-zero-matched">WAITING</span></div>
-  <div class="row">Reaction R3 ZERO Scope handoff: <span id="reaction-r3-zero-handoff">WAITING</span></div>
-  <div class="row">Reaction R3 ZERO quiescence: <span id="reaction-r3-zero-quiescence">WAITING</span></div>
-  <div class="row">Reaction R3 ZERO old Scope: <span id="reaction-r3-zero-old-scope">WAITING</span></div>
-  <div class="row">Reaction R3 mixed Scope CPU: <span id="reaction-r3-mixed-cpu">WAITING</span></div>
-  <div class="row">Reaction R3 mixed Scope GPU: <span id="reaction-r3-mixed-gpu">WAITING</span></div>
-  <div class="row">Reaction R3 mixed matched relations: <span id="reaction-r3-mixed-matched">WAITING</span></div>
-  <div class="row">Reaction R3 mixed Scope handoff: <span id="reaction-r3-mixed-handoff">WAITING</span></div>
-  <div class="row">Reaction R3 mixed quiescence: <span id="reaction-r3-mixed-quiescence">WAITING</span></div>
-  <div class="row">Reaction R3 duplicate convergence: <span id="reaction-r3-duplicates">WAITING</span></div>
-  <div class="row">Reaction R3 normalized CPU/GPU differential: <span id="reaction-r3-diff">WAITING</span></div>
-  <div class="row">Reaction R4 t before CPU/GPU: <span id="reaction-r4-t-before">WAITING</span></div>
-  <div class="row">Reaction R4 t snapshot count: <span id="reaction-r4-t-snapshot">WAITING</span></div>
-  <div class="row">Reaction R4 live Theory after admission: <span id="reaction-r4-live-theory">WAITING</span></div>
-  <div class="row">Reaction R4 t after CPU/GPU: <span id="reaction-r4-t-after">WAITING</span></div>
-  <div class="row">Reaction R4 t matched relations: <span id="reaction-r4-t-matched">WAITING</span></div>
-  <div class="row">Reaction R4 t Scope handoff: <span id="reaction-r4-t-handoff">WAITING</span></div>
-  <div class="row">Reaction R4 t+1 snapshot count: <span id="reaction-r4-t1-snapshot">WAITING</span></div>
-  <div class="row">Reaction R4 t+1 before CPU/GPU: <span id="reaction-r4-t1-before">WAITING</span></div>
-  <div class="row">Reaction R4 t+1 after CPU/GPU: <span id="reaction-r4-t1-after">WAITING</span></div>
-  <div class="row">Reaction R4 t+1 matched relations: <span id="reaction-r4-t1-matched">WAITING</span></div>
-  <div class="row">Reaction R4 t+1 Scope handoff: <span id="reaction-r4-t1-handoff">WAITING</span></div>
-  <div class="row">Reaction R4 same-reaction isolation: <span id="reaction-r4-isolation">WAITING</span></div>
-  <div class="row">Reaction R4 next-reaction visibility: <span id="reaction-r4-visibility">WAITING</span></div>
-  <div class="row">Reaction R4 stale snapshot control: <span id="reaction-r4-stale">WAITING</span></div>
-  <div class="row">Reaction R4 normalized CPU/GPU trajectory differential: <span id="reaction-r4-diff">WAITING</span></div>
-  <div class="row">Reaction R5 S0 CPU/GPU: <span id="reaction-r5-s0">WAITING</span></div>
-  <div class="row">Reaction R5 S1 CPU/GPU: <span id="reaction-r5-s1">WAITING</span></div>
-  <div class="row">Reaction R5 S2 CPU/GPU: <span id="reaction-r5-s2">WAITING</span></div>
-  <div class="row">Reaction R5 S3 CPU/GPU: <span id="reaction-r5-s3">WAITING</span></div>
-  <div class="row">Reaction R5 S4 CPU/GPU: <span id="reaction-r5-s4">WAITING</span></div>
-  <div class="row">Reaction R5 fixed TheorySnapshot count: <span id="reaction-r5-snapshot">WAITING</span></div>
-  <div class="row">Reaction R5 matched relations: <span id="reaction-r5-matched">WAITING</span></div>
-  <div class="row">Reaction R5 Scope handoffs: <span id="reaction-r5-handoff">WAITING</span></div>
-  <div class="row">Reaction R5 quiescence: <span id="reaction-r5-quiescence">WAITING</span></div>
-  <div class="row">Reaction R5 recurrence: <span id="reaction-r5-recurrence">WAITING</span></div>
-  <div class="row">Reaction R5 END structure: <span id="reaction-r5-end-structure">WAITING</span></div>
-  <div class="row">Reaction R5 END continuation: <span id="reaction-r5-end-continuation">WAITING</span></div>
-  <div class="row">Reaction R5 bounded witness: <span id="reaction-r5-bounded">WAITING</span></div>
-  <div class="row">Reaction R5 normalized CPU/GPU trajectory differential: <span id="reaction-r5-diff">WAITING</span></div>
-  <div class="row">Reaction R6 1→N CPU/GPU: <span id="reaction-r6-one-many">WAITING</span></div>
-  <div class="row">Reaction R6 N→M CPU/GPU: <span id="reaction-r6-n-m">WAITING</span></div>
-  <div class="row">Reaction R6 reaction-order variation: <span id="reaction-r6-order">WAITING</span></div>
-  <div class="row">Reaction R6 bounded-scope fail-closed: <span id="reaction-r6-scope">WAITING</span></div>
-  <div class="row">Reaction R6 normalized CPU/GPU differential: <span id="reaction-r6-diff">WAITING</span></div>
+  <section class="status-grid" aria-label="System overview">
+    <div class="status-card"><span class="kicker">Rust / WASM</span><span class="value" id="overview-wasm">STARTING</span></div>
+    <div class="status-card"><span class="kicker">WebGPU path</span><span class="value" id="overview-webgpu">WAITING</span></div>
+    <div class="status-card"><span class="kicker">CPU ↔ GPU</span><span class="value" id="overview-differential">WAITING</span></div>
+    <div class="status-card"><span class="kicker">A-memory lifecycle</span><span class="value" id="overview-lifecycle">EMPTY</span></div>
+  </section>
 
-  <h2>Details</h2>
-  <pre id="details"></pre>
+  <h2>Execution flow</h2>
+  <section class="flow" aria-label="A-memory execution flow">
+    <article class="flow-card">
+      <span class="kicker">Input</span>
+      <h3>Portable Aset</h3>
+      <div class="primary" id="flow-input">WAITING</div>
+      <div class="secondary">Multi-Anum atomic load. Failed member ⇒ no partial publication.</div>
+    </article>
+    <article class="flow-card">
+      <span class="kicker">Memory</span>
+      <h3>Canonical Link network</h3>
+      <div class="primary" id="flow-memory">WAITING</div>
+      <div class="secondary">Local handles are substrate-only; portable identity is structural.</div>
+    </article>
+    <article class="flow-card">
+      <span class="kicker">Execution</span>
+      <h3>Scope + TheorySnapshot</h3>
+      <div class="primary" id="flow-execution">WAITING</div>
+      <div class="secondary">Successor is completed before one atomic Scope handoff.</div>
+    </article>
+    <article class="flow-card">
+      <span class="kicker">Result</span>
+      <h3>Portable observation</h3>
+      <div class="primary" id="flow-result">WAITING</div>
+      <div class="secondary">Scope Anums + matched relations + handoff + quiescence.</div>
+    </article>
+  </section>
+
+  <div class="notice">The dashboard visualizes the current bounded prototype. It does not make the physical pair/doublet layout normative for A-memory.</div>
+
+  <h2>Lifecycle evidence</h2>
+  <section class="panel">
+    <div class="rows">
+      <div class="lifecycle-row"><span class="label">Atomic multi-Anum Aset load</span><span id="aset-atomic">WAITING</span></div>
+      <div class="lifecycle-row"><span class="label">Portable reaction result</span><span id="reaction-portable-result">WAITING</span></div>
+    </div>
+  </section>
+
+  <h2>Conformance evidence</h2>
+  <details class="panel" open>
+  <summary><span>Platform</span><small>WASM, WebGPU and actual accelerator path</small></summary>
+  <div class="rows"><div class="row"><span class="label">Rust/WASM:</span><span id="wasm">STARTING</span></div>
+<div class="row"><span class="label">CPU control:</span><span id="cpu">WAITING</span></div>
+<div class="row"><span class="label">WebGPU:</span><span id="webgpu">WAITING</span></div>
+<div class="row"><span class="label">GPU smoke compute:</span><span id="compute">WAITING</span></div></div>
+</details>
+  <details class="panel">
+  <summary><span>Incidence differential</span><small>Independent CPU/GPU incidence + negative control</small></summary>
+  <div class="rows"><div class="row"><span class="label">A-memory incidence CPU:</span><span id="incidence-cpu">WAITING</span></div>
+<div class="row"><span class="label">A-memory incidence GPU:</span><span id="incidence-gpu">WAITING</span></div>
+<div class="row"><span class="label">CPU/GPU differential:</span><span id="differential">WAITING</span></div>
+<div class="row"><span class="label">Negative control:</span><span id="negative">WAITING</span></div></div>
+</details>
+  <details class="panel">
+  <summary><span>Canonicalization</span><small>Duplicate convergence and canonical candidate set</small></summary>
+  <div class="rows"><div class="row"><span class="label">Canonicalization CPU:</span><span id="canonical-cpu">WAITING</span></div>
+<div class="row"><span class="label">Canonicalization GPU:</span><span id="canonical-gpu">WAITING</span></div>
+<div class="row"><span class="label">Canonical new pairs CPU:</span><span id="canonical-pairs-cpu">WAITING</span></div>
+<div class="row"><span class="label">Canonical new pairs GPU:</span><span id="canonical-pairs-gpu">WAITING</span></div>
+<div class="row"><span class="label">CPU/GPU canonicalization differential:</span><span id="canonical-diff">WAITING</span></div>
+<div class="row"><span class="label">Canonicalization negative control:</span><span id="canonical-negative">WAITING</span></div></div>
+</details>
+  <details class="panel">
+  <summary><span>Persistent substrate state</span><small>Bounded state-store persistence witnesses</small></summary>
+  <div class="rows"><div class="row"><span class="label">State round 0 CPU:</span><span id="state-r0-cpu">WAITING</span></div>
+<div class="row"><span class="label">State round 0 GPU:</span><span id="state-r0-gpu">WAITING</span></div>
+<div class="row"><span class="label">State round 1 CPU:</span><span id="state-r1-cpu">WAITING</span></div>
+<div class="row"><span class="label">State round 1 GPU:</span><span id="state-r1-gpu">WAITING</span></div>
+<div class="row"><span class="label">State round 2 CPU:</span><span id="state-r2-cpu">WAITING</span></div>
+<div class="row"><span class="label">State round 2 GPU:</span><span id="state-r2-gpu">WAITING</span></div>
+<div class="row"><span class="label">State persistence differential:</span><span id="state-diff">WAITING</span></div>
+<div class="row"><span class="label">State negative controls:</span><span id="state-negative">WAITING</span></div></div>
+</details>
+  <details class="panel" open>
+  <summary><span>Anum boundary</span><small>Portable import/export, two-memory identity and controls</small></summary>
+  <div class="rows"><div class="row"><span class="label">Anum import CPU:</span><span id="anum-import-cpu">WAITING</span></div>
+<div class="row"><span class="label">Anum import GPU:</span><span id="anum-import-gpu">WAITING</span></div>
+<div class="row"><span class="label">Anum export CPU:</span><span id="anum-export-cpu">WAITING</span></div>
+<div class="row"><span class="label">Anum export GPU:</span><span id="anum-export-gpu">WAITING</span></div>
+<div class="row"><span class="label">Two-memory Anum differential:</span><span id="anum-diff">WAITING</span></div>
+<div class="row"><span class="label">Local handles differ:</span><span id="anum-handles">WAITING</span></div>
+<div class="row"><span class="label">Canonical local reuse:</span><span id="anum-reuse">WAITING</span></div>
+<div class="row"><span class="label">Malformed/foreign/capacity controls:</span><span id="anum-negative">WAITING</span></div></div>
+</details>
+  <details class="panel" open>
+  <summary><span>Reaction R1</span><small>ONE continuation, snapshot isolation, atomic handoff</small></summary>
+  <div class="rows"><div class="row"><span class="label">Reaction R1 current CPU:</span><span id="reaction-before-cpu">WAITING</span></div>
+<div class="row"><span class="label">Reaction R1 current GPU:</span><span id="reaction-before-gpu">WAITING</span></div>
+<div class="row"><span class="label">Reaction R1 successor CPU:</span><span id="reaction-after-cpu">WAITING</span></div>
+<div class="row"><span class="label">Reaction R1 successor GPU:</span><span id="reaction-after-gpu">WAITING</span></div>
+<div class="row"><span class="label">Reaction R1 matched relations:</span><span id="reaction-matched">WAITING</span></div>
+<div class="row"><span class="label">Reaction R1 Scope handoff:</span><span id="reaction-handoff">WAITING</span></div>
+<div class="row"><span class="label">Reaction R1 normalized CPU/GPU differential:</span><span id="reaction-diff">WAITING</span></div>
+<div class="row"><span class="label">Reaction R1 local handles:</span><span id="reaction-handles">WAITING</span></div>
+<div class="row"><span class="label">Reaction R1 TheorySnapshot / old Scope:</span><span id="reaction-scope">WAITING</span></div>
+<div class="row"><span class="label">Reaction R1 negative controls:</span><span id="reaction-negative">WAITING</span></div></div>
+</details>
+  <details class="panel">
+  <summary><span>Reaction R2</span><small>No admitted relation / semantic quiescence</small></summary>
+  <div class="rows"><div class="row"><span class="label">Reaction R2 Scope CPU:</span><span id="reaction-r2-cpu">WAITING</span></div>
+<div class="row"><span class="label">Reaction R2 Scope GPU:</span><span id="reaction-r2-gpu">WAITING</span></div>
+<div class="row"><span class="label">Reaction R2 matched relations:</span><span id="reaction-r2-matched">WAITING</span></div>
+<div class="row"><span class="label">Reaction R2 Scope handoff:</span><span id="reaction-r2-handoff">WAITING</span></div>
+<div class="row"><span class="label">Reaction R2 quiescence:</span><span id="reaction-r2-quiescence">WAITING</span></div>
+<div class="row"><span class="label">Reaction R2 published Scope:</span><span id="reaction-r2-bank">WAITING</span></div>
+<div class="row"><span class="label">Reaction R2 normalized CPU/GPU differential:</span><span id="reaction-r2-diff">WAITING</span></div>
+<div class="row"><span class="label">Reaction R2 failure control:</span><span id="reaction-r2-failure">WAITING</span></div></div>
+</details>
+  <details class="panel">
+  <summary><span>Reaction R3</span><small>Empty contribution and duplicate convergence</small></summary>
+  <div class="rows"><div class="row"><span class="label">Reaction R3 ZERO Scope CPU:</span><span id="reaction-r3-zero-cpu">WAITING</span></div>
+<div class="row"><span class="label">Reaction R3 ZERO Scope GPU:</span><span id="reaction-r3-zero-gpu">WAITING</span></div>
+<div class="row"><span class="label">Reaction R3 ZERO matched relations:</span><span id="reaction-r3-zero-matched">WAITING</span></div>
+<div class="row"><span class="label">Reaction R3 ZERO Scope handoff:</span><span id="reaction-r3-zero-handoff">WAITING</span></div>
+<div class="row"><span class="label">Reaction R3 ZERO quiescence:</span><span id="reaction-r3-zero-quiescence">WAITING</span></div>
+<div class="row"><span class="label">Reaction R3 ZERO old Scope:</span><span id="reaction-r3-zero-old-scope">WAITING</span></div>
+<div class="row"><span class="label">Reaction R3 mixed Scope CPU:</span><span id="reaction-r3-mixed-cpu">WAITING</span></div>
+<div class="row"><span class="label">Reaction R3 mixed Scope GPU:</span><span id="reaction-r3-mixed-gpu">WAITING</span></div>
+<div class="row"><span class="label">Reaction R3 mixed matched relations:</span><span id="reaction-r3-mixed-matched">WAITING</span></div>
+<div class="row"><span class="label">Reaction R3 mixed Scope handoff:</span><span id="reaction-r3-mixed-handoff">WAITING</span></div>
+<div class="row"><span class="label">Reaction R3 mixed quiescence:</span><span id="reaction-r3-mixed-quiescence">WAITING</span></div>
+<div class="row"><span class="label">Reaction R3 duplicate convergence:</span><span id="reaction-r3-duplicates">WAITING</span></div>
+<div class="row"><span class="label">Reaction R3 normalized CPU/GPU differential:</span><span id="reaction-r3-diff">WAITING</span></div></div>
+</details>
+  <details class="panel">
+  <summary><span>Reaction R4</span><small>Theory admission visible only next reaction</small></summary>
+  <div class="rows"><div class="row"><span class="label">Reaction R4 t before CPU/GPU:</span><span id="reaction-r4-t-before">WAITING</span></div>
+<div class="row"><span class="label">Reaction R4 t snapshot count:</span><span id="reaction-r4-t-snapshot">WAITING</span></div>
+<div class="row"><span class="label">Reaction R4 live Theory after admission:</span><span id="reaction-r4-live-theory">WAITING</span></div>
+<div class="row"><span class="label">Reaction R4 t after CPU/GPU:</span><span id="reaction-r4-t-after">WAITING</span></div>
+<div class="row"><span class="label">Reaction R4 t matched relations:</span><span id="reaction-r4-t-matched">WAITING</span></div>
+<div class="row"><span class="label">Reaction R4 t Scope handoff:</span><span id="reaction-r4-t-handoff">WAITING</span></div>
+<div class="row"><span class="label">Reaction R4 t+1 snapshot count:</span><span id="reaction-r4-t1-snapshot">WAITING</span></div>
+<div class="row"><span class="label">Reaction R4 t+1 before CPU/GPU:</span><span id="reaction-r4-t1-before">WAITING</span></div>
+<div class="row"><span class="label">Reaction R4 t+1 after CPU/GPU:</span><span id="reaction-r4-t1-after">WAITING</span></div>
+<div class="row"><span class="label">Reaction R4 t+1 matched relations:</span><span id="reaction-r4-t1-matched">WAITING</span></div>
+<div class="row"><span class="label">Reaction R4 t+1 Scope handoff:</span><span id="reaction-r4-t1-handoff">WAITING</span></div>
+<div class="row"><span class="label">Reaction R4 same-reaction isolation:</span><span id="reaction-r4-isolation">WAITING</span></div>
+<div class="row"><span class="label">Reaction R4 next-reaction visibility:</span><span id="reaction-r4-visibility">WAITING</span></div>
+<div class="row"><span class="label">Reaction R4 stale snapshot control:</span><span id="reaction-r4-stale">WAITING</span></div>
+<div class="row"><span class="label">Reaction R4 normalized CPU/GPU trajectory differential:</span><span id="reaction-r4-diff">WAITING</span></div></div>
+</details>
+  <details class="panel">
+  <summary><span>Reaction R5</span><small>Recurrence and END ≠ global halt</small></summary>
+  <div class="rows"><div class="row"><span class="label">Reaction R5 S0 CPU/GPU:</span><span id="reaction-r5-s0">WAITING</span></div>
+<div class="row"><span class="label">Reaction R5 S1 CPU/GPU:</span><span id="reaction-r5-s1">WAITING</span></div>
+<div class="row"><span class="label">Reaction R5 S2 CPU/GPU:</span><span id="reaction-r5-s2">WAITING</span></div>
+<div class="row"><span class="label">Reaction R5 S3 CPU/GPU:</span><span id="reaction-r5-s3">WAITING</span></div>
+<div class="row"><span class="label">Reaction R5 S4 CPU/GPU:</span><span id="reaction-r5-s4">WAITING</span></div>
+<div class="row"><span class="label">Reaction R5 fixed TheorySnapshot count:</span><span id="reaction-r5-snapshot">WAITING</span></div>
+<div class="row"><span class="label">Reaction R5 matched relations:</span><span id="reaction-r5-matched">WAITING</span></div>
+<div class="row"><span class="label">Reaction R5 Scope handoffs:</span><span id="reaction-r5-handoff">WAITING</span></div>
+<div class="row"><span class="label">Reaction R5 quiescence:</span><span id="reaction-r5-quiescence">WAITING</span></div>
+<div class="row"><span class="label">Reaction R5 recurrence:</span><span id="reaction-r5-recurrence">WAITING</span></div>
+<div class="row"><span class="label">Reaction R5 END structure:</span><span id="reaction-r5-end-structure">WAITING</span></div>
+<div class="row"><span class="label">Reaction R5 END continuation:</span><span id="reaction-r5-end-continuation">WAITING</span></div>
+<div class="row"><span class="label">Reaction R5 bounded witness:</span><span id="reaction-r5-bounded">WAITING</span></div>
+<div class="row"><span class="label">Reaction R5 normalized CPU/GPU trajectory differential:</span><span id="reaction-r5-diff">WAITING</span></div></div>
+</details>
+  <details class="panel">
+  <summary><span>Reaction R6</span><small>1→N, N→M, order invariance and bounded fail-closed</small></summary>
+  <div class="rows"><div class="row"><span class="label">Reaction R6 1→N CPU/GPU:</span><span id="reaction-r6-one-many">WAITING</span></div>
+<div class="row"><span class="label">Reaction R6 N→M CPU/GPU:</span><span id="reaction-r6-n-m">WAITING</span></div>
+<div class="row"><span class="label">Reaction R6 reaction-order variation:</span><span id="reaction-r6-order">WAITING</span></div>
+<div class="row"><span class="label">Reaction R6 bounded-scope fail-closed:</span><span id="reaction-r6-scope">WAITING</span></div>
+<div class="row"><span class="label">Reaction R6 normalized CPU/GPU differential:</span><span id="reaction-r6-diff">WAITING</span></div></div>
+</details>
+
+  <details class="panel raw">
+    <summary><span>Raw details</span><small>Exact diagnostic log</small></summary>
+    <pre id="details"></pre>
+  </details>
 
   <script type="module" src="./app.js"></script>
+</main>
 </body>
 </html>
