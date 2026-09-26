@@ -1,3 +1,5 @@
+pub mod structural;
+
 use std::collections::{HashMap, HashSet};
 
 pub type Handle = u32;
@@ -149,6 +151,25 @@ impl OptimizedLinkStore {
         }
 
         self.allocate_record(start, end)
+    }
+
+    /// Canonical START-self-closed Link constructor.
+    ///
+    /// This is a semantic structural constructor, not an optimized-backend
+    /// identity primitive: portable identity remains the resulting topology.
+    pub fn ensure_start_self_closed(
+        &mut self,
+        child: Handle,
+    ) -> Result<Handle, StoreError> {
+        self.ensure_start_form(child)
+    }
+
+    /// Canonical END-self-closed Link constructor.
+    pub fn ensure_end_self_closed(
+        &mut self,
+        child: Handle,
+    ) -> Result<Handle, StoreError> {
+        self.ensure_end_form(child)
     }
 
     pub fn start_incidence(&self, start: Handle) -> Result<IncidenceIter<'_>, StoreError> {
