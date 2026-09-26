@@ -872,6 +872,271 @@ mod tests {
     }
 
     #[test]
+    fn optimized_reaction_r1_r2_r3_matches_reference() {
+        let _guard = REFERENCE_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let reference = load_reference_fixture();
+        let (store, optimized) = load_optimized_fixture();
+        let mut engine = OptimizedReactionEngine::new(16);
+
+        // R1 ONE.
+        reference_configure(&reference, &["19868"], &["16816898"]);
+        optimized_configure(&mut engine, &store, &optimized, &["19868"], &["16816898"]);
+        let old_bank = engine.current_bank();
+        let reference_r1 = reference_run_result();
+        engine.run(&store).unwrap();
+        let optimized_r1 = engine.portable_result(&store).unwrap();
+        assert_eq!(optimized_r1, reference_r1);
+        assert_eq!(
+            optimized_r1,
+            PortableReactionResult {
+                scope: vec!["19816898".to_owned()],
+                matched_relations: 1,
+                handoff: 1,
+                quiescent: false,
+            }
+        );
+        assert_ne!(engine.current_bank(), old_bank);
+        assert_eq!(
+            store.export_anum(engine.bank(old_bank).unwrap()[0]).unwrap(),
+            "19868"
+        );
+
+        // R2 no admitted relation / semantic quiescence.
+        reference_configure(&reference, &["19868"], &["19816898"]);
+        optimized_configure(&mut engine, &store, &optimized, &["19868"], &["19816898"]);
+        let reference_bank = amemory_reaction_current_bank();
+        let optimized_bank = engine.current_bank();
+        let reference_r2 = reference_run_result();
+        engine.run(&store).unwrap();
+        let optimized_r2 = engine.portable_result(&store).unwrap();
+        assert_eq!(optimized_r2, reference_r2);
+        assert_eq!(optimized_r2.scope, vec!["19868"]);
+        assert_eq!(optimized_r2.matched_relations, 0);
+        assert_eq!(optimized_r2.handoff, 0);
+        assert!(optimized_r2.quiescent);
+        assert_eq!(amemory_reaction_current_bank(), reference_bank);
+        assert_eq!(engine.current_bank(), optimized_bank);
+
+        // R3 ZERO: admitted match, empty published successor, one handoff.
+        reference_configure(&reference, &["19868"], &["1688"]);
+        optimized_configure(&mut engine, &store, &optimized, &["19868"], &["1688"]);
+        let reference_r3_zero = reference_run_result();
+        engine.run(&store).unwrap();
+        let optimized_r3_zero = engine.portable_result(&store).unwrap();
+        assert_eq!(optimized_r3_zero, reference_r3_zero);
+        assert!(optimized_r3_zero.scope.is_empty());
+        assert_eq!(optimized_r3_zero.matched_relations, 1);
+        assert_eq!(optimized_r3_zero.handoff, 1);
+        assert!(!optimized_r3_zero.quiescent);
+
+        // R3 mixed ZERO + two duplicate non-zero productions -> one successor.
+        let mixed_current = ["19868", "1988"];
+        let mixed_theory = ["1688", "16816898", "1816898"];
+        reference_configure(&reference, &mixed_current, &mixed_theory);
+        optimized_configure(&mut engine, &store, &optimized, &mixed_current, &mixed_theory);
+        let reference_r3_mixed = reference_run_result();
+        engine.run(&store).unwrap();
+        let optimized_r3_mixed = engine.portable_result(&store).unwrap();
+        assert_eq!(optimized_r3_mixed, reference_r3_mixed);
+        assert_eq!(optimized_r3_mixed.scope, vec!["19816898"]);
+        assert_eq!(optimized_r3_mixed.matched_relations, 3);
+        assert_eq!(optimized_r3_mixed.handoff, 1);
+        assert!(!optimized_r3_mixed.quiescent);
+    }
+
+    #[test]
+    fn optimized_reaction_r4_theory_snapshot_matches_reference() {
+        let _guard = REFERENCE_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let reference = load_reference_fixture();
+        let (store, optimized) = load_optimized_fixture();
+        let mut engine = OptimizedReactionEngine::new(16);
+
+        reference_configure(&reference, &["19868"], &["16816898"]);
+        optimized_configure(&mut engine, &store, &optimized, &["19868"], &["16816898"]);
+
+        // Admit B->C only after snapshot_t.
+        reference_set_live_theory(&reference, &["16816898", "116898998"]);
+        engine
+            .set_theory(
+                &store,
+                &optimized_handles(&optimized, &["16816898", "116898998"]),
+            )
+            .unwrap();
+
+        assert_eq!(amemory_reaction_snapshot_count(), 1);
+        assert_eq!(engine.snapshot_count(), 1);
+        assert_eq!(amemory_reaction_theory_count(), 2);
+        assert_eq!(engine.live_theory_count(), 2);
+
+        let reference_t = reference_run_result();
+        engine.run(&store).unwrap();
+        let optimized_t = engine.portable_result(&store).unwrap();
+        assert_eq!(optimized_t, reference_t);
+        assert_eq!(optimized_t.scope, vec!["19816898"]);
+
+        // New admission becomes visible only after snapshot_t+1.
+        assert_eq!(amemory_reaction_snapshot_theory(), 1);
+        engine.snapshot_theory(&store).unwrap();
+        assert_eq!(amemory_reaction_snapshot_count(), 2);
+        assert_eq!(engine.snapshot_count(), 2);
+
+        let reference_t1 = reference_run_result();
+        engine.run(&store).unwrap();
+        let optimized_t1 = engine.portable_result(&store).unwrap();
+        assert_eq!(optimized_t1, reference_t1);
+        assert_eq!(optimized_t1.scope, vec!["198998"]);
+
+        // Independent stale-snapshot negative control.
+        reference_configure(&reference, &["19816898"], &["16816898"]);
+        optimized_configure(
+            &mut engine,
+            &store,
+            &optimized,
+            &["19816898"],
+            &["16816898"],
+        );
+        reference_set_live_theory(&reference, &["16816898", "116898998"]);
+        engine
+            .set_theory(
+                &store,
+                &optimized_handles(&optimized, &["16816898", "116898998"]),
+            )
+            .unwrap();
+
+        let reference_stale = reference_run_result();
+        engine.run(&store).unwrap();
+        let optimized_stale = engine.portable_result(&store).unwrap();
+        assert_eq!(optimized_stale, reference_stale);
+        assert_eq!(optimized_stale.scope, vec!["19816898"]);
+        assert_eq!(optimized_stale.matched_relations, 0);
+        assert!(optimized_stale.quiescent);
+    }
+
+    #[test]
+    fn optimized_reaction_r5_r6_matches_reference() {
+        let _guard = REFERENCE_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let reference = load_reference_fixture();
+        let (store, optimized) = load_optimized_fixture();
+        let mut engine = OptimizedReactionEngine::new(16);
+
+        // R5 bounded recurrence through structural END.
+        reference_configure(&reference, &["199898"], &["19868", "16898"]);
+        optimized_configure(
+            &mut engine,
+            &store,
+            &optimized,
+            &["199898"],
+            &["19868", "16898"],
+        );
+        let expected = ["199868", "199898", "199868", "199898"];
+        for expected_scope in expected {
+            let reference_step = reference_run_result();
+            engine.run(&store).unwrap();
+            let optimized_step = engine.portable_result(&store).unwrap();
+            assert_eq!(optimized_step, reference_step);
+            assert_eq!(optimized_step.scope, vec![expected_scope]);
+            assert_eq!(optimized_step.matched_relations, 1);
+            assert_eq!(optimized_step.handoff, 1);
+            assert!(!optimized_step.quiescent);
+        }
+
+        // R6 1->N.
+        let one_many_theory = ["16816898", "168998"];
+        reference_configure(&reference, &["19868"], &one_many_theory);
+        optimized_configure(&mut engine, &store, &optimized, &["19868"], &one_many_theory);
+        let reference_one_many = reference_run_result();
+        engine.run(&store).unwrap();
+        let optimized_one_many = engine.portable_result(&store).unwrap();
+        assert_eq!(optimized_one_many, reference_one_many);
+        assert_eq!(
+            optimized_one_many.scope,
+            vec!["19816898".to_owned(), "198998".to_owned()]
+        );
+        assert_eq!(optimized_one_many.matched_relations, 2);
+
+        // R6 N->M.
+        let many_current = ["19868", "1988"];
+        let many_theory = ["16816898", "18998"];
+        reference_configure(&reference, &many_current, &many_theory);
+        optimized_configure(&mut engine, &store, &optimized, &many_current, &many_theory);
+        let reference_many = reference_run_result();
+        engine.run(&store).unwrap();
+        let optimized_many = engine.portable_result(&store).unwrap();
+        assert_eq!(optimized_many, reference_many);
+
+        // P15: reverse both physical iteration orders; normalized result unchanged.
+        let reversed_current = ["1988", "19868"];
+        let reversed_theory = ["18998", "16816898"];
+        reference_configure(&reference, &reversed_current, &reversed_theory);
+        optimized_configure(
+            &mut engine,
+            &store,
+            &optimized,
+            &reversed_current,
+            &reversed_theory,
+        );
+        let reference_reordered = reference_run_result();
+        engine.run(&store).unwrap();
+        let optimized_reordered = engine.portable_result(&store).unwrap();
+        assert_eq!(optimized_reordered, reference_reordered);
+        assert_eq!(optimized_reordered, optimized_many);
+
+        // Same bounded scope guard as reference prototype.
+        amemory_reaction_reset();
+        assert_eq!(amemory_reaction_set_current_count(17), 0);
+        let too_many = vec![optimized["19868"]; 17];
+        assert!(matches!(
+            engine.set_current(&store, &too_many),
+            Err(ReactionError::ScopeCapacity {
+                requested: 17,
+                cap: 16
+            })
+        ));
+    }
+
+    #[test]
+    fn optimized_reaction_missing_successor_fails_closed_like_reference() {
+        let _guard = REFERENCE_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+
+        let sources = ["98", "68", "16898", "19868", "16816898"];
+
+        amemory_anum_cpu_reset_pool();
+        let mut reference = StdHashMap::new();
+        for source in sources {
+            reference.insert(source, reference_import(source));
+        }
+
+        let mut store = OptimizedLinkStore::new();
+        let mut optimized = StdHashMap::new();
+        for source in sources {
+            optimized.insert(source, store.import_anum(source).unwrap());
+        }
+
+        reference_configure(&reference, &["19868"], &["16816898"]);
+        let reference_bank = amemory_reaction_current_bank();
+
+        let mut engine = OptimizedReactionEngine::new(16);
+        optimized_configure(&mut engine, &store, &optimized, &["19868"], &["16816898"]);
+        let optimized_bank = engine.current_bank();
+
+        assert_eq!(amemory_reaction_run(), 0);
+        let optimized_error = engine.run(&store).unwrap_err();
+        assert!(matches!(
+            optimized_error,
+            ReactionError::MissingPreexistingSuccessor { .. }
+        ));
+
+        let reference_after = reference_observe();
+        let optimized_after = engine.portable_result(&store).unwrap();
+        assert_eq!(reference_after, optimized_after);
+        assert_eq!(reference_after.scope, vec!["19868"]);
+        assert_eq!(reference_after.handoff, 0);
+        assert!(!reference_after.quiescent);
+        assert_eq!(amemory_reaction_current_bank(), reference_bank);
+        assert_eq!(engine.current_bank(), optimized_bank);
+    }
+
+    #[test]
     #[ignore = "informational optimized-index baseline; no performance threshold"]
     fn optimized_hash_index_benchmark_baseline() {
         use std::hint::black_box;
