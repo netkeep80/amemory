@@ -1,0 +1,53 @@
+name: A-Circuit C2b accepted MTS structural Half Adder
+
+on:
+  pull_request:
+    paths:
+      - "experiments/a-circuit/upstream/**"
+      - ".github/workflows/a-circuit-c2b-mts.yml"
+  push:
+    branches: [main]
+    paths:
+      - "experiments/a-circuit/upstream/**"
+      - ".github/workflows/a-circuit-c2b-mts.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  MTS_ACCEPTED_V013_SHA: 3819b5fb2bae65506c2888e7c4fa0de387551846
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout A-memory
+        uses: actions/checkout@v6
+
+      - name: Checkout exact accepted MTS v0.13
+        uses: actions/checkout@v6
+        with:
+          repository: netkeep80/anum_docs
+          ref: ${{ env.MTS_ACCEPTED_V013_SHA }}
+          path: _upstream/anum_docs
+
+      - name: Verify exact upstream pin
+        shell: bash
+        run: |
+          test "$(git -C _upstream/anum_docs rev-parse HEAD)" = "$MTS_ACCEPTED_V013_SHA"
+          echo "MTS accepted v0.13 pin: $MTS_ACCEPTED_V013_SHA"
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Build accepted MTS TypeScript kernel
+        working-directory: _upstream/anum_docs/ts
+        run: |
+          npm ci
+          npm run build
+
+      - name: Run gate-composed Half Adder witness
+        run: node experiments/a-circuit/upstream/c2b-half-adder.mjs
