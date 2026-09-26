@@ -1,0 +1,52 @@
+name: Optimized CPU backend check
+
+on:
+  pull_request:
+    paths:
+      - "experiments/optimized-cpu-rust/**"
+      - "experiments/browser-accelerator/rust/**"
+      - ".github/workflows/optimized-cpu-check.yml"
+  push:
+    branches: [main]
+    paths:
+      - "experiments/optimized-cpu-rust/**"
+      - "experiments/browser-accelerator/rust/**"
+      - ".github/workflows/optimized-cpu-check.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal
+
+      - name: Optimized LinkStore differential witnesses
+        run: |
+          cargo +1.98.1 test \
+            --manifest-path experiments/optimized-cpu-rust/Cargo.toml \
+            -- --test-threads=1
+
+      - name: Optimized index informational baseline
+        run: |
+          cargo +1.98.1 test \
+            --release \
+            --manifest-path experiments/optimized-cpu-rust/Cargo.toml \
+            optimized_hash_index_benchmark_baseline \
+            -- --ignored --nocapture --test-threads=1
+
+      - name: Benchmark policy
+        run: |
+          echo "Informational only; no performance threshold."
+          echo "Semantic differential remains authoritative."
+
+      - name: Release compile
+        run: |
+          cargo +1.98.1 build \
+            --release \
+            --manifest-path experiments/optimized-cpu-rust/Cargo.toml

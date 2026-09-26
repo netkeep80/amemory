@@ -1,0 +1,16 @@
+[package]
+name = "amemory-optimized-cpu-probe"
+version = "0.0.1"
+edition = "2021"
+publish = false
+
+[dependencies]
+amemory-browser-probe = { path = "../browser-accelerator/rust" }
+
+[lib]
+crate-type = ["rlib"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
