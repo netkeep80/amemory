@@ -683,6 +683,825 @@
           ]
         }
       }
+    },
+    {
+      "id": "shl32",
+      "opcode": 13,
+      "category": "Shift",
+      "name": "SHL32",
+      "formula": "A << (Count & 31)",
+      "inputs": [
+        {
+          "key": "A",
+          "slot": "a",
+          "type": "word32",
+          "default": "0x80000001"
+        },
+        {
+          "key": "Count",
+          "slot": "b",
+          "type": "count8",
+          "default": 1
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Result",
+          "type": "word32"
+        }
+      ],
+      "modes": [
+        "single",
+        "vectors"
+      ],
+      "vectors": [
+        {
+          "name": "count 0",
+          "inputs": {
+            "A": "0x80000001",
+            "Count": 0
+          },
+          "expect": {
+            "value": "0x80000001"
+          }
+        },
+        {
+          "name": "count 1",
+          "inputs": {
+            "A": "0x80000001",
+            "Count": 1
+          },
+          "expect": {
+            "value": "0x00000002"
+          }
+        },
+        {
+          "name": "count 31",
+          "inputs": {
+            "A": "0x80000001",
+            "Count": 31
+          },
+          "expect": {
+            "value": "0x80000000"
+          }
+        },
+        {
+          "name": "count 32",
+          "inputs": {
+            "A": "0x80000001",
+            "Count": 32
+          },
+          "expect": {
+            "value": "0x80000001"
+          }
+        },
+        {
+          "name": "count 33",
+          "inputs": {
+            "A": "0x80000001",
+            "Count": 33
+          },
+          "expect": {
+            "value": "0x00000002"
+          }
+        },
+        {
+          "name": "count 255",
+          "inputs": {
+            "A": "0x80000001",
+            "Count": 255
+          },
+          "expect": {
+            "value": "0x80000000"
+          }
+        }
+      ]
+    },
+    {
+      "id": "shr32",
+      "opcode": 14,
+      "category": "Shift",
+      "name": "SHR32",
+      "formula": "A >> (Count & 31) logical",
+      "inputs": [
+        {
+          "key": "A",
+          "slot": "a",
+          "type": "word32",
+          "default": "0x80000001"
+        },
+        {
+          "key": "Count",
+          "slot": "b",
+          "type": "count8",
+          "default": 1
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Result",
+          "type": "word32"
+        }
+      ],
+      "modes": [
+        "single",
+        "vectors"
+      ],
+      "vectors": [
+        {
+          "name": "count 0",
+          "inputs": {
+            "A": "0x80000001",
+            "Count": 0
+          },
+          "expect": {
+            "value": "0x80000001"
+          }
+        },
+        {
+          "name": "count 1",
+          "inputs": {
+            "A": "0x80000001",
+            "Count": 1
+          },
+          "expect": {
+            "value": "0x40000000"
+          }
+        },
+        {
+          "name": "count 31",
+          "inputs": {
+            "A": "0x80000001",
+            "Count": 31
+          },
+          "expect": {
+            "value": "0x00000001"
+          }
+        },
+        {
+          "name": "count 32",
+          "inputs": {
+            "A": "0x80000001",
+            "Count": 32
+          },
+          "expect": {
+            "value": "0x80000001"
+          }
+        },
+        {
+          "name": "count 33",
+          "inputs": {
+            "A": "0x80000001",
+            "Count": 33
+          },
+          "expect": {
+            "value": "0x40000000"
+          }
+        },
+        {
+          "name": "count 255",
+          "inputs": {
+            "A": "0x80000001",
+            "Count": 255
+          },
+          "expect": {
+            "value": "0x00000001"
+          }
+        }
+      ]
+    },
+    {
+      "id": "sar32",
+      "opcode": 15,
+      "category": "Shift",
+      "name": "SAR32",
+      "formula": "signed A >> (Count & 31)",
+      "inputs": [
+        {
+          "key": "A",
+          "slot": "a",
+          "type": "word32",
+          "default": "0x80000001"
+        },
+        {
+          "key": "Count",
+          "slot": "b",
+          "type": "count8",
+          "default": 1
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Result",
+          "type": "word32"
+        }
+      ],
+      "modes": [
+        "single",
+        "vectors"
+      ],
+      "vectors": [
+        {
+          "name": "count 0",
+          "inputs": {
+            "A": "0x80000001",
+            "Count": 0
+          },
+          "expect": {
+            "value": "0x80000001"
+          }
+        },
+        {
+          "name": "count 1",
+          "inputs": {
+            "A": "0x80000001",
+            "Count": 1
+          },
+          "expect": {
+            "value": "0xc0000000"
+          }
+        },
+        {
+          "name": "count 31",
+          "inputs": {
+            "A": "0x80000001",
+            "Count": 31
+          },
+          "expect": {
+            "value": "0xffffffff"
+          }
+        },
+        {
+          "name": "count 32",
+          "inputs": {
+            "A": "0x80000001",
+            "Count": 32
+          },
+          "expect": {
+            "value": "0x80000001"
+          }
+        },
+        {
+          "name": "count 33",
+          "inputs": {
+            "A": "0x80000001",
+            "Count": 33
+          },
+          "expect": {
+            "value": "0xc0000000"
+          }
+        },
+        {
+          "name": "count 255",
+          "inputs": {
+            "A": "0x80000001",
+            "Count": 255
+          },
+          "expect": {
+            "value": "0xffffffff"
+          }
+        }
+      ]
+    },
+    {
+      "id": "rol32",
+      "opcode": 16,
+      "category": "Rotate",
+      "name": "ROL32",
+      "formula": "ROL(A, Count & 31)",
+      "inputs": [
+        {
+          "key": "A",
+          "slot": "a",
+          "type": "word32",
+          "default": "0x80000001"
+        },
+        {
+          "key": "Count",
+          "slot": "b",
+          "type": "count8",
+          "default": 1
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Result",
+          "type": "word32"
+        }
+      ],
+      "modes": [
+        "single",
+        "vectors"
+      ],
+      "vectors": [
+        {
+          "name": "count 0",
+          "inputs": {
+            "A": "0x80000001",
+            "Count": 0
+          },
+          "expect": {
+            "value": "0x80000001"
+          }
+        },
+        {
+          "name": "count 1",
+          "inputs": {
+            "A": "0x80000001",
+            "Count": 1
+          },
+          "expect": {
+            "value": "0x00000003"
+          }
+        },
+        {
+          "name": "count 31",
+          "inputs": {
+            "A": "0x80000001",
+            "Count": 31
+          },
+          "expect": {
+            "value": "0xc0000000"
+          }
+        },
+        {
+          "name": "count 32",
+          "inputs": {
+            "A": "0x80000001",
+            "Count": 32
+          },
+          "expect": {
+            "value": "0x80000001"
+          }
+        },
+        {
+          "name": "count 33",
+          "inputs": {
+            "A": "0x80000001",
+            "Count": 33
+          },
+          "expect": {
+            "value": "0x00000003"
+          }
+        },
+        {
+          "name": "count 255",
+          "inputs": {
+            "A": "0x80000001",
+            "Count": 255
+          },
+          "expect": {
+            "value": "0xc0000000"
+          }
+        }
+      ]
+    },
+    {
+      "id": "ror32",
+      "opcode": 17,
+      "category": "Rotate",
+      "name": "ROR32",
+      "formula": "ROR(A, Count & 31)",
+      "inputs": [
+        {
+          "key": "A",
+          "slot": "a",
+          "type": "word32",
+          "default": "0x80000001"
+        },
+        {
+          "key": "Count",
+          "slot": "b",
+          "type": "count8",
+          "default": 1
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Result",
+          "type": "word32"
+        }
+      ],
+      "modes": [
+        "single",
+        "vectors"
+      ],
+      "vectors": [
+        {
+          "name": "count 0",
+          "inputs": {
+            "A": "0x80000001",
+            "Count": 0
+          },
+          "expect": {
+            "value": "0x80000001"
+          }
+        },
+        {
+          "name": "count 1",
+          "inputs": {
+            "A": "0x80000001",
+            "Count": 1
+          },
+          "expect": {
+            "value": "0xc0000000"
+          }
+        },
+        {
+          "name": "count 31",
+          "inputs": {
+            "A": "0x80000001",
+            "Count": 31
+          },
+          "expect": {
+            "value": "0x00000003"
+          }
+        },
+        {
+          "name": "count 32",
+          "inputs": {
+            "A": "0x80000001",
+            "Count": 32
+          },
+          "expect": {
+            "value": "0x80000001"
+          }
+        },
+        {
+          "name": "count 33",
+          "inputs": {
+            "A": "0x80000001",
+            "Count": 33
+          },
+          "expect": {
+            "value": "0xc0000000"
+          }
+        },
+        {
+          "name": "count 255",
+          "inputs": {
+            "A": "0x80000001",
+            "Count": 255
+          },
+          "expect": {
+            "value": "0x00000003"
+          }
+        }
+      ]
+    },
+    {
+      "id": "rcl32",
+      "opcode": 18,
+      "category": "Rotate+CF",
+      "name": "RCL32",
+      "formula": "rotate [CF:A] left by (Count & 31)",
+      "inputs": [
+        {
+          "key": "A",
+          "slot": "a",
+          "type": "word32",
+          "default": "0x00000000"
+        },
+        {
+          "key": "Count",
+          "slot": "b",
+          "type": "count8",
+          "default": 1
+        },
+        {
+          "key": "CF",
+          "slot": "flag",
+          "type": "bit",
+          "default": 1
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Result",
+          "type": "word32"
+        }
+      ],
+      "modes": [
+        "single",
+        "vectors"
+      ],
+      "vectors": [
+        {
+          "name": "count 0",
+          "inputs": {
+            "A": "0x92345679",
+            "Count": 0,
+            "CF": 1
+          },
+          "expect": {
+            "value": "0x92345679"
+          }
+        },
+        {
+          "name": "CF enters bit 0",
+          "inputs": {
+            "A": "0x00000000",
+            "Count": 1,
+            "CF": 1
+          },
+          "expect": {
+            "value": "0x00000001"
+          }
+        },
+        {
+          "name": "count 31",
+          "inputs": {
+            "A": "0x92345679",
+            "Count": 31,
+            "CF": 0
+          }
+        },
+        {
+          "name": "count 32 alias 0",
+          "inputs": {
+            "A": "0x92345679",
+            "Count": 32,
+            "CF": 1
+          },
+          "expect": {
+            "value": "0x92345679"
+          }
+        },
+        {
+          "name": "count 33 alias 1",
+          "inputs": {
+            "A": "0x92345679",
+            "Count": 33,
+            "CF": 0
+          }
+        },
+        {
+          "name": "count 255 alias 31",
+          "inputs": {
+            "A": "0x92345679",
+            "Count": 255,
+            "CF": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "rcr32",
+      "opcode": 19,
+      "category": "Rotate+CF",
+      "name": "RCR32",
+      "formula": "rotate [CF:A] right by (Count & 31)",
+      "inputs": [
+        {
+          "key": "A",
+          "slot": "a",
+          "type": "word32",
+          "default": "0x00000000"
+        },
+        {
+          "key": "Count",
+          "slot": "b",
+          "type": "count8",
+          "default": 1
+        },
+        {
+          "key": "CF",
+          "slot": "flag",
+          "type": "bit",
+          "default": 1
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Result",
+          "type": "word32"
+        }
+      ],
+      "modes": [
+        "single",
+        "vectors"
+      ],
+      "vectors": [
+        {
+          "name": "count 0",
+          "inputs": {
+            "A": "0x92345679",
+            "Count": 0,
+            "CF": 1
+          },
+          "expect": {
+            "value": "0x92345679"
+          }
+        },
+        {
+          "name": "CF enters bit 31",
+          "inputs": {
+            "A": "0x00000000",
+            "Count": 1,
+            "CF": 1
+          },
+          "expect": {
+            "value": "0x80000000"
+          }
+        },
+        {
+          "name": "count 31",
+          "inputs": {
+            "A": "0x92345679",
+            "Count": 31,
+            "CF": 0
+          }
+        },
+        {
+          "name": "count 32 alias 0",
+          "inputs": {
+            "A": "0x92345679",
+            "Count": 32,
+            "CF": 1
+          },
+          "expect": {
+            "value": "0x92345679"
+          }
+        },
+        {
+          "name": "count 33 alias 1",
+          "inputs": {
+            "A": "0x92345679",
+            "Count": 33,
+            "CF": 0
+          }
+        },
+        {
+          "name": "count 255 alias 31",
+          "inputs": {
+            "A": "0x92345679",
+            "Count": 255,
+            "CF": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "inc32",
+      "opcode": 20,
+      "category": "Unary arithmetic",
+      "name": "INC32",
+      "formula": "A + 1 (CF preserved)",
+      "inputs": [
+        {
+          "key": "A",
+          "slot": "a",
+          "type": "word32",
+          "default": "0x7fffffff"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Result",
+          "type": "word32"
+        }
+      ],
+      "modes": [
+        "single",
+        "vectors"
+      ],
+      "vectors": [
+        {
+          "name": "zero",
+          "inputs": {
+            "A": "0x00000000"
+          },
+          "expect": {
+            "value": "0x00000001"
+          }
+        },
+        {
+          "name": "signed overflow",
+          "inputs": {
+            "A": "0x7fffffff"
+          },
+          "expect": {
+            "value": "0x80000000"
+          }
+        },
+        {
+          "name": "wrap",
+          "inputs": {
+            "A": "0xffffffff"
+          },
+          "expect": {
+            "value": "0x00000000"
+          }
+        }
+      ]
+    },
+    {
+      "id": "dec32",
+      "opcode": 21,
+      "category": "Unary arithmetic",
+      "name": "DEC32",
+      "formula": "A - 1 (CF preserved)",
+      "inputs": [
+        {
+          "key": "A",
+          "slot": "a",
+          "type": "word32",
+          "default": "0x80000000"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Result",
+          "type": "word32"
+        }
+      ],
+      "modes": [
+        "single",
+        "vectors"
+      ],
+      "vectors": [
+        {
+          "name": "zero wrap",
+          "inputs": {
+            "A": "0x00000000"
+          },
+          "expect": {
+            "value": "0xffffffff"
+          }
+        },
+        {
+          "name": "signed overflow",
+          "inputs": {
+            "A": "0x80000000"
+          },
+          "expect": {
+            "value": "0x7fffffff"
+          }
+        },
+        {
+          "name": "one",
+          "inputs": {
+            "A": "0x00000001"
+          },
+          "expect": {
+            "value": "0x00000000"
+          }
+        }
+      ]
+    },
+    {
+      "id": "neg32",
+      "opcode": 22,
+      "category": "Unary arithmetic",
+      "name": "NEG32",
+      "formula": "0 - A",
+      "inputs": [
+        {
+          "key": "A",
+          "slot": "a",
+          "type": "word32",
+          "default": "0x00000001"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Result",
+          "type": "word32"
+        }
+      ],
+      "modes": [
+        "single",
+        "vectors"
+      ],
+      "vectors": [
+        {
+          "name": "zero",
+          "inputs": {
+            "A": "0x00000000"
+          },
+          "expect": {
+            "value": "0x00000000"
+          }
+        },
+        {
+          "name": "one",
+          "inputs": {
+            "A": "0x00000001"
+          },
+          "expect": {
+            "value": "0xffffffff"
+          }
+        },
+        {
+          "name": "INT_MIN",
+          "inputs": {
+            "A": "0x80000000"
+          },
+          "expect": {
+            "value": "0x80000000"
+          }
+        }
+      ]
     }
   ]
 }
