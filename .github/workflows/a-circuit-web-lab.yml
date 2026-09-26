@@ -124,6 +124,7 @@ jobs:
                 { role: "execution.interpreter", source: "68" },
                 { role: "invocation.call", source: "19868" },
               ],
+              theoryAdmissions: ["16898"],
             },
             load: {
               memoryInstanceId: "A-memory#7",
@@ -183,6 +184,7 @@ jobs:
             "Static 3D",
             "Live physics 3D",
             "@mts/visual 0.3.0",
+            "Structural rules admitted to Theory",
           ]) {
             if (!proofHtml.includes(required)) {
               throw new Error("proof browser renderer missing: " + required);
@@ -318,8 +320,11 @@ jobs:
               throw new Error("runtime A-memory existed during PREPARE stage");
             }
             const roles = new Set(proof.prepare.semanticRoots.map((root) => root.role));
-            for (const role of ["function.mux1", "data.select", "data.a", "data.b", "execution.interpreter", "execution.theory", "invocation.call", "scope.initial"]) {
+            for (const role of ["function.mux1", "function.dependency.xor2", "function.dependency.and2", "data.select", "data.a", "data.b", "execution.interpreter", "execution.theory", "invocation.call", "scope.initial"]) {
               if (!roles.has(role)) throw new Error("prepared Aset missing semantic root " + role);
+            }
+            if (!Array.isArray(proof.prepare.theoryAdmissions) || proof.prepare.theoryAdmissions.length === 0) {
+              throw new Error("prepared Aset did not expose admitted Structural Rules");
             }
             if (!proof.load.portableRoundTrip || proof.load.linksBeforeLoad !== 1 || proof.load.linksAfterLoad <= 1) {
               throw new Error("portable load witness failed");
