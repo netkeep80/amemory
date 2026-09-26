@@ -291,8 +291,8 @@ Required order:
 
 ```text
 SUB1                                  GREEN (#80/#81)
--> SUB_N 4/8/16/32                   CURRENT (#83)
--> shared ADD/SUB datapath
+-> SUB_N 4/8/16/32                   GREEN (#83/#84)
+-> shared ADD/ADC/SUB/SBB datapath       CURRENT (#85)
 -> CF/ZF/SF/OF/PF/AF
 -> M3 complete
 -> M4 32-bit ALU
