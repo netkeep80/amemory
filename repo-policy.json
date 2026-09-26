@@ -57,6 +57,14 @@
     "repo-guard-workflow": {
       "path": ".github/workflows/repo-guard.yml",
       "sha": "37a8d4dd65ac86f683c063dd1e0a6ddb685b2da6"
+    },
+    "version-governance": {
+      "authority": {
+        "path": "VERSION",
+        "pointer": "",
+        "format": "plain_text"
+      },
+      "advance": "semver"
     }
   },
   "content_rules": [],
