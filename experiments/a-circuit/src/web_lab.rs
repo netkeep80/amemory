@@ -1,7 +1,7 @@
 use crate::{
     arithmetic_effect_n::web_run_arithmetic,
     logic_effect_n::web_run_logic,
-    mux_n::web_run_mux32,
+    mux_n::{web_run_mux1, web_run_mux32},
 };
 
 const FLAG_CF: u32 = 1 << 0;
@@ -77,6 +77,23 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
         });
     }
 
+    if op == 12 {
+        let out = web_run_mux1(input_flag, a, b)?;
+        return Some(LabOutcome {
+            value: u32::from(out.value),
+            writeback: 1,
+            defined_mask: 0,
+            value_mask: 0,
+            undefined_mask: 0,
+            preserve_mask: STATUS_FLAGS,
+            reactions: out.reactions,
+            links_after_build: out.links_after_build,
+            links_after_first: out.links_after_first,
+            steady_link_delta: out.steady_link_delta,
+            quiescent: u32::from(out.quiescent),
+        });
+    }
+
     None
 }
 
@@ -95,6 +112,11 @@ static mut LAST_QUIESCENT: u32 = 0;
 #[no_mangle]
 pub extern "C" fn amemory_i386_lab_probe() -> u32 {
     0x0000_0386
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_lab_supports(op: u32) -> u32 {
+    u32::from((1..=12).contains(&op))
 }
 
 #[no_mangle]
@@ -174,11 +196,25 @@ mod tests {
         assert_eq!(mux.value, 0x5555_5555);
         assert_eq!(mux.preserve_mask, STATUS_FLAGS);
         assert_eq!(mux.steady_link_delta, 0);
+
+        for select in 0u32..=1 {
+            for a in 0u32..=1 {
+                for b in 0u32..=1 {
+                    let mux1 = execute(12, a, b, select).unwrap();
+                    assert_eq!(mux1.value, if select == 0 { a } else { b });
+                    assert_eq!(mux1.reactions, 7);
+                    assert_eq!(mux1.steady_link_delta, 0);
+                }
+            }
+        }
     }
 
     #[test]
     fn web_lab_rejects_unknown_op_and_invalid_select() {
         assert!(execute(99, 0, 0, 0).is_none());
         assert!(execute(11, 0, 0, 2).is_none());
+        assert!(execute(12, 2, 0, 0).is_none());
+        assert_eq!(amemory_i386_lab_supports(12), 1);
+        assert_eq!(amemory_i386_lab_supports(13), 0);
     }
 }
