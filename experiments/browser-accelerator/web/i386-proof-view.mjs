@@ -90,7 +90,8 @@ export function proofPipelineHtml(proof) {
             <h4>PREPARE ASET</h4>
             <p><strong>No runtime A-memory exists yet.</strong> ${escapeHtml(proof.prepare.compilerLabel)}</p>
             <div class="proof-kpis">
-              <span><small>Portable Anums</small><strong>${proof.prepare.asetAnums.length}</strong></span>
+              <span><small>Compiled Links</small><strong>${proof.prepare.compiledLinks}</strong></span>
+              <span><small>Portable transport Anums</small><strong>${proof.prepare.asetAnums.length}</strong></span>
               <span><small>Runtime memory</small><strong>${proof.prepare.runtimeMemoryExists ? "CREATED" : "NOT CREATED"}</strong></span>
             </div>
             <h5>Semantic roots inside the portable image</h5>
@@ -116,7 +117,8 @@ export function proofPipelineHtml(proof) {
             <div class="proof-kpis">
               <span><small>Links before load</small><strong>${proof.load.linksBeforeLoad}</strong></span>
               <span><small>Links after load</small><strong>${proof.load.linksAfterLoad}</strong></span>
-              <span><small>Imported Anums</small><strong>${proof.load.importedAnums}</strong></span>
+              <span><small>Complete image</small><strong>${proof.load.linksAfterLoad === proof.prepare.compiledLinks ? "PASS" : "FAIL"}</strong></span>
+              <span><small>Imported transport Anums</small><strong>${proof.load.importedAnums}</strong></span>
               <span><small>Portable round-trip</small><strong>${proof.load.portableRoundTrip ? "PASS" : "FAIL"}</strong></span>
             </div>
             <h5>Roots resolved in this same memory</h5>
