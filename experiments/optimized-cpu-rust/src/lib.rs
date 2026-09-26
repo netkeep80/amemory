@@ -42,12 +42,6 @@ struct Pair {
     end: Handle,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct Record {
-    start: Handle,
-    end: Handle,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StoreError {
     EmptyAnum,
@@ -61,7 +55,11 @@ pub enum StoreError {
 
 #[derive(Clone, Debug)]
 pub struct OptimizedLinkStore {
-    records: Vec<Option<Record>>,
+    // Dense SoA carrier. Every index >=1 and <len is a valid local Link handle;
+    // no per-record Option/discriminant is needed because this prototype does
+    // not delete physical records in place.
+    starts: Vec<Handle>,
+    ends: Vec<Handle>,
     canonical_by_pair: HashMap<Pair, Handle>,
     start_forms: HashMap<Handle, Handle>,
     end_forms: HashMap<Handle, Handle>,
@@ -94,10 +92,8 @@ impl OptimizedLinkStore {
     fn with_optional_limit(max_links: Option<usize>) -> Self {
         assert!(max_links.map_or(true, |limit| limit >= 1));
         let mut store = Self {
-            records: vec![None, Some(Record {
-                start: ROOT_HANDLE,
-                end: ROOT_HANDLE,
-            })],
+            starts: vec![NO_HANDLE, ROOT_HANDLE],
+            ends: vec![NO_HANDLE, ROOT_HANDLE],
             canonical_by_pair: HashMap::new(),
             start_forms: HashMap::new(),
             end_forms: HashMap::new(),
@@ -118,22 +114,19 @@ impl OptimizedLinkStore {
     }
 
     pub fn link_count(&self) -> usize {
-        self.records.len() - 1
+        self.starts.len() - 1
     }
 
     pub fn is_valid(&self, handle: Handle) -> bool {
-        handle > 0
-            && (handle as usize) < self.records.len()
-            && self.records[handle as usize].is_some()
+        handle > 0 && (handle as usize) < self.starts.len()
     }
 
     pub fn poles(&self, handle: Handle) -> Result<(Handle, Handle), StoreError> {
-        let record = self
-            .records
-            .get(handle as usize)
-            .and_then(|record| *record)
-            .ok_or(StoreError::UnknownHandle(handle))?;
-        Ok((record.start, record.end))
+        if !self.is_valid(handle) {
+            return Err(StoreError::UnknownHandle(handle));
+        }
+        let index = handle as usize;
+        Ok((self.starts[index], self.ends[index]))
     }
 
     pub fn import_anum(&mut self, source: &str) -> Result<Handle, StoreError> {
@@ -227,7 +220,7 @@ impl OptimizedLinkStore {
     }
 
     fn next_handle(&self) -> Result<Handle, StoreError> {
-        let next = self.records.len();
+        let next = self.starts.len();
         if self.max_links.is_some_and(|limit| self.link_count() >= limit) {
             return Err(StoreError::CapacityExceeded);
         }
@@ -240,7 +233,8 @@ impl OptimizedLinkStore {
         end: Handle,
     ) -> Result<Handle, StoreError> {
         let handle = self.next_handle()?;
-        self.records.push(Some(Record { start, end }));
+        self.starts.push(start);
+        self.ends.push(end);
         self.canonical_by_pair.insert(Pair { start, end }, handle);
         self.index_record(handle, start, end);
         Ok(handle)
@@ -252,11 +246,8 @@ impl OptimizedLinkStore {
             return Ok(*handle);
         }
         let handle = self.next_handle()?;
-        let record = Record {
-            start: handle,
-            end: child,
-        };
-        self.records.push(Some(record));
+        self.starts.push(handle);
+        self.ends.push(child);
         self.start_forms.insert(child, handle);
         self.index_record(handle, handle, child);
         Ok(handle)
@@ -268,11 +259,8 @@ impl OptimizedLinkStore {
             return Ok(*handle);
         }
         let handle = self.next_handle()?;
-        let record = Record {
-            start: child,
-            end: handle,
-        };
-        self.records.push(Some(record));
+        self.starts.push(child);
+        self.ends.push(handle);
         self.end_forms.insert(child, handle);
         self.index_record(handle, child, handle);
         Ok(handle)
@@ -932,8 +920,8 @@ mod tests {
 
         // Inject a substrate corruption that cannot be produced through the
         // public immutable/canonical construction API.
-        store.records.push(Some(Record { start: 3, end: 1 })); // handle 2
-        store.records.push(Some(Record { start: 2, end: 1 })); // handle 3
+        store.starts.push(3); store.ends.push(1); // handle 2
+        store.starts.push(2); store.ends.push(1); // handle 3
 
         assert!(matches!(
             store.export_anum(2),
