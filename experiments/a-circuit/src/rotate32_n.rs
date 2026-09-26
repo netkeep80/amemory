@@ -587,6 +587,88 @@ fn values() -> Vec<u32> {
     out
 }
 
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct WebRotateOutcome {
+    pub(crate) value: u32,
+    pub(crate) writeback: u8,
+    pub(crate) defined_mask: u32,
+    pub(crate) value_mask: u32,
+    pub(crate) undefined_mask: u32,
+    pub(crate) preserve_mask: u32,
+    pub(crate) reactions: u32,
+    pub(crate) links_after_build: u32,
+    pub(crate) links_after_first: u32,
+    pub(crate) steady_link_delta: u32,
+    pub(crate) quiescent: u8,
+}
+
+const WEB_CF: u32 = 1 << 0;
+const WEB_PF: u32 = 1 << 2;
+const WEB_AF: u32 = 1 << 4;
+const WEB_ZF: u32 = 1 << 6;
+const WEB_SF: u32 = 1 << 7;
+const WEB_OF: u32 = 1 << 11;
+const WEB_OTHER_STATUS: u32 = WEB_PF | WEB_AF | WEB_ZF | WEB_SF;
+
+fn web_rotate_state(mask: u32, state: FlagState, defined: &mut u32, values: &mut u32, undefined: &mut u32, preserve: &mut u32) {
+    match state {
+        FlagState::Set(bit) => {
+            *defined |= mask;
+            if bit != 0 { *values |= mask; }
+        }
+        FlagState::Undefined => *undefined |= mask,
+        FlagState::Preserve => *preserve |= mask,
+    }
+}
+
+pub(crate) fn web_run_rotate32(
+    op: u32,
+    value: u32,
+    count: u32,
+) -> Option<WebRotateOutcome> {
+    if count > u8::MAX as u32 {
+        return None;
+    }
+
+    let mut f = FullFixture::new();
+    let p = Rotate32Program::install(&mut f);
+    let function = match op {
+        16 => p.rol,
+        17 => p.ror,
+        _ => return None,
+    };
+    let links_after_build = f.store.link_count() as u32;
+
+    let first = run_rotate(&mut f, &p, function, value, count as u8);
+    let links_after_first = f.store.link_count() as u32;
+    let second = run_rotate(&mut f, &p, function, value, count as u8);
+    assert_eq!(second, first, "web ROTATE32 repeat changed result");
+    let links_after_second = f.store.link_count() as u32;
+
+    let mut defined_mask = 0u32;
+    let mut value_mask = 0u32;
+    let mut undefined_mask = 0u32;
+    let mut preserve_mask = WEB_OTHER_STATUS;
+    web_rotate_state(WEB_CF, first.cf, &mut defined_mask, &mut value_mask, &mut undefined_mask, &mut preserve_mask);
+    web_rotate_state(WEB_OF, first.of, &mut defined_mask, &mut value_mask, &mut undefined_mask, &mut preserve_mask);
+
+    Some(WebRotateOutcome {
+        value: first.value,
+        writeback: first.writeback,
+        defined_mask,
+        value_mask,
+        undefined_mask,
+        preserve_mask,
+        reactions: first.reactions as u32,
+        links_after_build,
+        links_after_first,
+        steady_link_delta: links_after_second - links_after_first,
+        quiescent: 1,
+    })
+}
+
+
 #[test]
 #[ignore = "heavy M4 ROTATE32 suite; mandatory release workflow"]
 fn m4_rotate32_count_masking_and_flags_match_80386() {
