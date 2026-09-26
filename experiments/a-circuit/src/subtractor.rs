@@ -77,10 +77,10 @@ impl Sub1Program {
         let full_tag = anchors.next(&mut f.store);
         let cout_not_tag = anchors.next(&mut f.store);
 
-        let bits = [f.zero, f.one];
-        // Trigger discovery uses the START pole of the active member's endpoint.
-        // For scalar bit results: START(U)=C and START(L)=O.
-        let bit_triggers = [f.c, f.o];
+        // Trigger discovery uses START(END(active)).
+        // Scalar continuations below therefore use C for U/0 and O for L/1,
+        // and use literal 0/1 templates so an untyped role cannot bind to a
+        // non-bit composite that happens to share the same trigger aspect.
 
         // Reusable structural NOT function:
         //
@@ -141,11 +141,13 @@ impl Sub1Program {
         // BNotFrame([K,a,bin]) -> not_b
         // =>
         // BinNotFrame([K,a,not_b]) -> Call(NOT,bin)
-        {
+        //
+        // One literal continuation per canonical bit keeps this fail-closed:
+        // a role in endpoint position could otherwise bind to a non-bit Link.
+        for not_b in [f.zero, f.one] {
             let k = anchors.next(&mut f.store);
             let a = anchors.next(&mut f.store);
             let bin = anchors.next(&mut f.store);
-            let not_b = anchors.next(&mut f.store);
 
             let caller =
                 stage_frame(&mut f.store, b_not_tag, &[k, a, bin]);
@@ -159,11 +161,12 @@ impl Sub1Program {
             let (_, admission) = define_bundle_rule(
                 &mut f.store,
                 f.theory,
-                &[k, a, bin, not_b],
+                &[k, a, bin],
                 before,
                 &[after],
             );
-            index_rule_for(&mut f.store, &bit_triggers, admission);
+            let trigger = if not_b == f.zero { f.c } else { f.o };
+            index_rule_for(&mut f.store, &[trigger], admission);
         }
 
         // Borrow-in inversion return:
@@ -171,11 +174,10 @@ impl Sub1Program {
         // BinNotFrame([K,a,not_b]) -> not_bin
         // =>
         // FullFrame([K]) -> Call(FULL,[a,not_b,not_bin])
-        {
+        for not_bin in [f.zero, f.one] {
             let k = anchors.next(&mut f.store);
             let a = anchors.next(&mut f.store);
             let not_b = anchors.next(&mut f.store);
-            let not_bin = anchors.next(&mut f.store);
 
             let caller =
                 stage_frame(&mut f.store, bin_not_tag, &[k, a, not_b]);
@@ -193,13 +195,15 @@ impl Sub1Program {
             let (_, admission) = define_bundle_rule(
                 &mut f.store,
                 f.theory,
-                &[k, a, not_b, not_bin],
+                &[k, a, not_b],
                 before,
                 &[after],
             );
-            index_rule_for(&mut f.store, &bit_triggers, admission);
+            let trigger = if not_bin == f.zero { f.c } else { f.o };
+            index_rule_for(&mut f.store, &[trigger], admission);
         }
 
+        // Full Adder returns [diff,carry_out]. For subtraction, x86-style
         // Full Adder returns [diff,carry_out]. For subtraction, x86-style
         // unsigned borrow is NOT(carry_out).
         let full_outputs = [
@@ -240,10 +244,9 @@ impl Sub1Program {
         // CoutNotFrame([K,diff]) -> borrow
         // =>
         // K -> ExactSequence_R([diff,borrow])
-        {
+        for borrow in [f.zero, f.one] {
             let k = anchors.next(&mut f.store);
             let diff = anchors.next(&mut f.store);
-            let borrow = anchors.next(&mut f.store);
 
             let caller =
                 stage_frame(&mut f.store, cout_not_tag, &[k, diff]);
@@ -257,13 +260,15 @@ impl Sub1Program {
             let (_, admission) = define_bundle_rule(
                 &mut f.store,
                 f.theory,
-                &[k, diff, borrow],
+                &[k, diff],
                 before,
                 &[after],
             );
-            index_rule_for(&mut f.store, &bit_triggers, admission);
+            let trigger = if borrow == f.zero { f.c } else { f.o };
+            index_rule_for(&mut f.store, &[trigger], admission);
         }
 
+        Self {
         Self {
             sub,
             // OPEN
