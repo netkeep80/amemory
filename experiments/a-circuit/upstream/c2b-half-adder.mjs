@@ -19,7 +19,10 @@ function assert(condition, message) {
 }
 
 function same(actual, expected, message) {
-  assert(Object.is(actual, expected), message + ": values differ");
+  assert(
+    Object.is(actual, expected),
+    message + ": expected " + String(expected) + ", got " + String(actual),
+  );
 }
 
 function sameMembers(actual, expected, message) {
@@ -328,6 +331,15 @@ function runCase(f, a, b, seedBase) {
     const nextSeed = fresh[seedBase + 1 + step];
     assert(nextSeed !== undefined, "reaction seed " + step);
     const reaction = reactV013StructuralScope(memory, cursor, nextSeed);
+
+    console.log(
+      "C2B_TRACE",
+      "input=" + (a === ONE ? "1" : "0") + (b === ONE ? "1" : "0"),
+      "step=" + step,
+      "matches=" + reaction.rawRuleMatches,
+      "transitioned=" + reaction.transitionedMembers,
+      "members=" + reaction.nextMembers.join(","),
+    );
 
     assert(!reaction.quiescent, "step " + step + " must be active");
     same(reaction.rawRuleMatches, 1, "step " + step + " one Rule");
