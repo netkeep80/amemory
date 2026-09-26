@@ -6,10 +6,16 @@ use super::{
 };
 use amemory_optimized_cpu_probe::{
     structural::{materialize_exact_sequence, read_exact_sequence},
-    Handle, OptimizedLinkStore,
+    Handle, OptimizedLinkStore, OptimizedStructuralEngine,
+};
+use serde::Serialize;
+use std::{
+    collections::HashMap,
+    sync::atomic::{AtomicU32, Ordering},
 };
 
 const WIDTH: usize = 32;
+static NEXT_PROOF_MEMORY_ID: AtomicU32 = AtomicU32::new(1);
 
 struct AnchorGen {
     current: Handle,
@@ -685,6 +691,427 @@ pub(crate) fn web_run_mux1(
         steady_link_delta: links_after_second - links_after_first,
         quiescent: 1,
     })
+}
+
+
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WebProofPreparedRoot {
+    pub(crate) role: String,
+    pub(crate) source: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WebProofLoadedRoot {
+    pub(crate) role: String,
+    pub(crate) source: String,
+    pub(crate) local_handle: u32,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WebProofPrepareStage {
+    pub(crate) compiler_label: String,
+    pub(crate) runtime_memory_exists: bool,
+    pub(crate) aset_anums: Vec<String>,
+    pub(crate) semantic_roots: Vec<WebProofPreparedRoot>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WebProofLoadStage {
+    pub(crate) memory_instance_id: String,
+    pub(crate) links_before_load: u32,
+    pub(crate) links_after_load: u32,
+    pub(crate) imported_anums: u32,
+    pub(crate) portable_round_trip: bool,
+    pub(crate) semantic_roots: Vec<WebProofLoadedRoot>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WebProofReactionStep {
+    pub(crate) memory_instance_id: String,
+    pub(crate) step: u32,
+    pub(crate) scope_before: Vec<String>,
+    pub(crate) raw_rule_matches: u32,
+    pub(crate) transitioned_members: u32,
+    pub(crate) handoff_count: u32,
+    pub(crate) scope_after: Vec<String>,
+    pub(crate) links_after: u32,
+    pub(crate) quiescent: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WebProofVisualLink {
+    pub(crate) key: String,
+    pub(crate) start_key: String,
+    pub(crate) end_key: String,
+    pub(crate) local_handle: u32,
+    pub(crate) anum: String,
+    pub(crate) label: Option<String>,
+    pub(crate) tags: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WebProofExecuteStage {
+    pub(crate) memory_instance_id: String,
+    pub(crate) reactions: Vec<WebProofReactionStep>,
+    pub(crate) active_reaction_count: u32,
+    pub(crate) final_quiescent: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WebProofResultStage {
+    pub(crate) memory_instance_id: String,
+    pub(crate) result_anum: String,
+    pub(crate) result_sequence_anum: String,
+    pub(crate) decoded_value: u8,
+    pub(crate) oracle_value: u8,
+    pub(crate) oracle_matches: bool,
+    pub(crate) links_final: u32,
+    pub(crate) identical_rerun_link_delta: u32,
+    pub(crate) visual_links: Vec<WebProofVisualLink>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WebMux1Proof {
+    pub(crate) schema_version: u32,
+    pub(crate) block: String,
+    pub(crate) prepare: WebProofPrepareStage,
+    pub(crate) load: WebProofLoadStage,
+    pub(crate) execute: WebProofExecuteStage,
+    pub(crate) result: WebProofResultStage,
+}
+
+#[derive(Debug)]
+struct ProofRuntimeMemory {
+    id: String,
+    store: OptimizedLinkStore,
+}
+
+fn export_all_anums(store: &OptimizedLinkStore) -> Vec<String> {
+    (1..=store.link_count() as u32)
+        .map(|handle| store.export_anum(handle).expect("proof export"))
+        .collect()
+}
+
+fn export_scope(store: &OptimizedLinkStore, scope: &[Handle]) -> Vec<String> {
+    scope
+        .iter()
+        .map(|handle| store.export_anum(*handle).expect("scope export"))
+        .collect()
+}
+
+fn semantic_source(
+    store: &OptimizedLinkStore,
+    role: &str,
+    handle: Handle,
+) -> WebProofPreparedRoot {
+    WebProofPreparedRoot {
+        role: role.to_owned(),
+        source: store.export_anum(handle).expect("semantic root export"),
+    }
+}
+
+fn visual_snapshot(
+    memory: &ProofRuntimeMemory,
+    loaded_roots: &[WebProofLoadedRoot],
+) -> Vec<WebProofVisualLink> {
+    let mut roles_by_handle: HashMap<u32, Vec<String>> = HashMap::new();
+    for root in loaded_roots {
+        roles_by_handle
+            .entry(root.local_handle)
+            .or_default()
+            .push(root.role.clone());
+    }
+
+    (1..=memory.store.link_count() as u32)
+        .map(|handle| {
+            let (start, end) = memory.store.poles(handle).expect("visual poles");
+            let roles = roles_by_handle.get(&handle).cloned().unwrap_or_default();
+            WebProofVisualLink {
+                key: format!("{}:L{}", memory.id, handle),
+                start_key: format!("{}:L{}", memory.id, start),
+                end_key: format!("{}:L{}", memory.id, end),
+                local_handle: handle,
+                anum: memory.store.export_anum(handle).expect("visual Anum"),
+                label: (!roles.is_empty()).then(|| roles.join(" + ")),
+                tags: roles,
+            }
+        })
+        .collect()
+}
+
+pub(crate) fn web_prove_mux1(
+    select: u32,
+    a: u32,
+    b: u32,
+) -> Option<WebMux1Proof> {
+    if select > 1 || a > 1 || b > 1 {
+        return None;
+    }
+
+    // Stage 1: compile a complete portable Aset before the runtime A-memory exists.
+    // This compiler store is preparation state only; it is intentionally discarded
+    // before execution. Runtime identity begins only below at ProofRuntimeMemory.
+    let mut compiler = FullFixture::new();
+    let program = MuxProgram::install(&mut compiler);
+    let bits = [compiler.zero, compiler.one];
+    let args = materialize_exact_sequence(
+        &mut compiler.store,
+        &[
+            bits[select as usize],
+            bits[a as usize],
+            bits[b as usize],
+        ],
+    )
+    .unwrap();
+    let invocation = call(
+        &mut compiler.store,
+        compiler.apply,
+        program.mux1,
+        args,
+    );
+    let initial = compiler.store.ensure_pair(compiler.k, invocation).unwrap();
+
+    let prepared_roots = vec![
+        semantic_source(&compiler.store, "function.mux1", program.mux1),
+        semantic_source(&compiler.store, "data.select", bits[select as usize]),
+        semantic_source(&compiler.store, "data.a", bits[a as usize]),
+        semantic_source(&compiler.store, "data.b", bits[b as usize]),
+        semantic_source(&compiler.store, "data.zero", compiler.zero),
+        semantic_source(&compiler.store, "data.one", compiler.one),
+        semantic_source(&compiler.store, "execution.interpreter", compiler.interpreter),
+        semantic_source(&compiler.store, "execution.theory", compiler.theory),
+        semantic_source(&compiler.store, "execution.apply", compiler.apply),
+        semantic_source(&compiler.store, "invocation.args", args),
+        semantic_source(&compiler.store, "invocation.call", invocation),
+        semantic_source(&compiler.store, "scope.initial", initial),
+        semantic_source(&compiler.store, "context.caller", compiler.k),
+        semantic_source(&compiler.store, "result.tag", program.bit_result_tag),
+    ];
+    let prepared_anums = export_all_anums(&compiler.store);
+
+    let prepare = WebProofPrepareStage {
+        compiler_label: "portable Aset compiler/preparation state (not runtime A-memory)".to_owned(),
+        runtime_memory_exists: false,
+        aset_anums: prepared_anums.clone(),
+        semantic_roots: prepared_roots.clone(),
+    };
+
+    // Stage 2: exactly one runtime A-memory is created. Every following stage
+    // keeps and mutates this one ProofRuntimeMemory.store instance.
+    let memory_number = NEXT_PROOF_MEMORY_ID.fetch_add(1, Ordering::SeqCst);
+    let mut memory = ProofRuntimeMemory {
+        id: format!("A-memory#{}", memory_number),
+        store: OptimizedLinkStore::new(),
+    };
+    let links_before_load = memory.store.link_count() as u32;
+    for source in &prepared_anums {
+        memory.store.import_anum(source).ok()?;
+    }
+    let links_after_load = memory.store.link_count() as u32;
+
+    let mut loaded_roots = Vec::with_capacity(prepared_roots.len());
+    let mut portable_round_trip = true;
+    for root in &prepared_roots {
+        let before = memory.store.link_count();
+        let handle = memory.store.import_anum(&root.source).ok()?;
+        // Semantic-root resolution must reuse already loaded topology.
+        if memory.store.link_count() != before {
+            return None;
+        }
+        if memory.store.export_anum(handle).ok().as_deref() != Some(root.source.as_str()) {
+            portable_round_trip = false;
+        }
+        loaded_roots.push(WebProofLoadedRoot {
+            role: root.role.clone(),
+            source: root.source.clone(),
+            local_handle: handle,
+        });
+    }
+
+    let find = |role: &str| -> Option<Handle> {
+        loaded_roots
+            .iter()
+            .find(|root| root.role == role)
+            .map(|root| root.local_handle)
+    };
+    let interpreter = find("execution.interpreter")?;
+    let initial = find("scope.initial")?;
+    let caller = find("context.caller")?;
+    let result_tag = find("result.tag")?;
+    let zero = find("data.zero")?;
+    let one = find("data.one")?;
+
+    let load = WebProofLoadStage {
+        memory_instance_id: memory.id.clone(),
+        links_before_load,
+        links_after_load,
+        imported_anums: prepared_anums.len() as u32,
+        portable_round_trip,
+        semantic_roots: loaded_roots.clone(),
+    };
+
+    // Stage 3: execute against the exact same runtime store.
+    let mut engine = OptimizedStructuralEngine::new(32);
+    engine.set_interpreter(&memory.store, interpreter).ok()?;
+    engine.set_current(&memory.store, &[initial]).ok()?;
+
+    let mut reactions = Vec::new();
+    for step in 0..64u32 {
+        let scope_before = export_scope(&memory.store, engine.current());
+        let reaction = engine.run(&mut memory.store).ok()?;
+        let scope_after = export_scope(&memory.store, engine.current());
+        let quiescent = reaction.quiescent;
+        reactions.push(WebProofReactionStep {
+            memory_instance_id: memory.id.clone(),
+            step,
+            scope_before,
+            raw_rule_matches: reaction.raw_rule_matches,
+            transitioned_members: reaction.transitioned_members,
+            handoff_count: reaction.handoff_count,
+            scope_after,
+            links_after: memory.store.link_count() as u32,
+            quiescent,
+        });
+        if quiescent {
+            break;
+        }
+    }
+    if !reactions.last().map(|step| step.quiescent).unwrap_or(false) {
+        return None;
+    }
+    let active_reaction_count =
+        reactions.iter().filter(|step| !step.quiescent).count() as u32;
+
+    // Stage 4: result is decoded from this same memory, then visual topology is
+    // projected directly from this same store. Host MUX arithmetic is oracle only.
+    if engine.current().len() != 1 {
+        return None;
+    }
+    let final_link = engine.current()[0];
+    let (final_caller, endpoint) = memory.store.poles(final_link).ok()?;
+    if final_caller != caller {
+        return None;
+    }
+    let (tag, payload) = memory.store.poles(endpoint).ok()?;
+    if tag != result_tag {
+        return None;
+    }
+    let values = read_exact_sequence(&memory.store, payload).ok()?;
+    if values.len() != 1 {
+        return None;
+    }
+    let decoded_value = if values[0] == one {
+        1
+    } else if values[0] == zero {
+        0
+    } else {
+        return None;
+    };
+    let oracle_value = if select == 0 { a as u8 } else { b as u8 };
+    let result_anum = memory.store.export_anum(final_link).ok()?;
+    let result_sequence_anum = memory.store.export_anum(payload).ok()?;
+
+    // Re-run the exact same invocation in the same runtime A-memory. This is
+    // not a second authority: it is an idempotence witness over the same store.
+    let links_before_rerun = memory.store.link_count();
+    engine.set_current(&memory.store, &[initial]).ok()?;
+    for _ in 0..64u32 {
+        let repeat = engine.run(&mut memory.store).ok()?;
+        if repeat.quiescent {
+            break;
+        }
+    }
+    if !engine.quiescent() {
+        return None;
+    }
+    if engine.current().len() != 1 {
+        return None;
+    }
+    let repeat_result = memory.store.export_anum(engine.current()[0]).ok()?;
+    if repeat_result != result_anum {
+        return None;
+    }
+    let identical_rerun_link_delta =
+        (memory.store.link_count() - links_before_rerun) as u32;
+    let visual_links = visual_snapshot(&memory, &loaded_roots);
+
+    let execute = WebProofExecuteStage {
+        memory_instance_id: memory.id.clone(),
+        reactions,
+        active_reaction_count,
+        final_quiescent: true,
+    };
+    let result = WebProofResultStage {
+        memory_instance_id: memory.id.clone(),
+        result_anum,
+        result_sequence_anum,
+        decoded_value,
+        oracle_value,
+        oracle_matches: decoded_value == oracle_value,
+        links_final: memory.store.link_count() as u32,
+        identical_rerun_link_delta,
+        visual_links,
+    };
+
+    Some(WebMux1Proof {
+        schema_version: 1,
+        block: "MUX1".to_owned(),
+        prepare,
+        load,
+        execute,
+        result,
+    })
+}
+
+#[test]
+fn web_mux1_proof_uses_one_runtime_memory_for_all_eight_cases() {
+    for select in 0..=1 {
+        for a in 0..=1 {
+            for b in 0..=1 {
+                let proof = web_prove_mux1(select, a, b).expect("MUX1 proof");
+                assert!(!proof.prepare.runtime_memory_exists);
+                assert!(proof.load.portable_round_trip);
+                assert_eq!(proof.load.links_before_load, 1);
+                assert!(proof.load.links_after_load > proof.load.links_before_load);
+                assert_eq!(proof.execute.active_reaction_count, 7);
+                assert!(proof.execute.final_quiescent);
+                assert!(proof.result.oracle_matches);
+                assert_eq!(proof.result.identical_rerun_link_delta, 0);
+
+                let id = &proof.load.memory_instance_id;
+                assert_eq!(&proof.execute.memory_instance_id, id);
+                assert_eq!(&proof.result.memory_instance_id, id);
+                assert!(proof.execute.reactions.iter().all(|step| &step.memory_instance_id == id));
+
+                let mut previous = proof.load.links_after_load;
+                for step in &proof.execute.reactions {
+                    assert!(step.links_after >= previous);
+                    previous = step.links_after;
+                }
+                assert_eq!(proof.result.links_final, previous);
+
+                let keys = proof.result.visual_links
+                    .iter()
+                    .map(|link| link.key.as_str())
+                    .collect::<std::collections::HashSet<_>>();
+                for link in &proof.result.visual_links {
+                    assert!(keys.contains(link.start_key.as_str()));
+                    assert!(keys.contains(link.end_key.as_str()));
+                    assert!(link.key.starts_with(id));
+                }
+            }
+        }
+    }
 }
 
 

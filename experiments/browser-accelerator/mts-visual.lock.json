@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "repository": "netkeep80/mts_visual",
+  "commit": "4b7c8e97fab8d84a31783a4d8e422dcb12a4e795",
+  "package": "@mts/visual",
+  "packageVersion": "0.3.0",
+  "purpose": "A-memory runtime Link-store proof visualization only"
+}
