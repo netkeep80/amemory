@@ -40,6 +40,14 @@ jobs:
             optimized_hash_index_benchmark_baseline \
             -- --ignored --nocapture --test-threads=1
 
+      - name: Optimized reaction informational baseline
+        run: |
+          cargo +1.98.1 test \
+            --release \
+            --manifest-path experiments/optimized-cpu-rust/Cargo.toml \
+            optimized_reaction_benchmark_baseline \
+            -- --ignored --nocapture --test-threads=1
+
       - name: Benchmark policy
         run: |
           echo "Informational only; no performance threshold."
