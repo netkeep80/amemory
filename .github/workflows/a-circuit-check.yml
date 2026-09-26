@@ -1,0 +1,39 @@
+name: A-Circuit semantic ladder C0-C1
+
+on:
+  pull_request:
+    paths:
+      - "experiments/a-circuit/**"
+      - "experiments/optimized-cpu-rust/**"
+      - ".github/workflows/a-circuit-check.yml"
+  push:
+    branches: [main]
+    paths:
+      - "experiments/a-circuit/**"
+      - "experiments/optimized-cpu-rust/**"
+      - ".github/workflows/a-circuit-check.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal
+
+      - name: C0-C1 semantic witnesses
+        run: |
+          cargo +1.98.1 test \
+            --manifest-path experiments/a-circuit/Cargo.toml \
+            -- --test-threads=1
+
+      - name: Release compile
+        run: |
+          cargo +1.98.1 build \
+            --release \
+            --manifest-path experiments/a-circuit/Cargo.toml
