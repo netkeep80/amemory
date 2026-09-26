@@ -33,7 +33,7 @@ jobs:
 
       - name: Storage scale ladder
         run: |
-          for n in 1000 10000 100000 1000000; do
+          for n in 1000 10000 100000 1000000 10000000; do
             echo "=== STORAGE $n ==="
             cargo +1.98.1 run \
               --quiet \
@@ -44,7 +44,7 @@ jobs:
 
       - name: Reaction/Theory scale ladder
         run: |
-          for n in 1000 10000 100000; do
+          for n in 1000 10000 100000 1000000; do
             echo "=== REACTION $n ==="
             cargo +1.98.1 run \
               --quiet \
@@ -56,4 +56,4 @@ jobs:
       - name: Scale policy
         run: |
           echo "Informational scale evidence only; no timing threshold."
-          echo "10^7 is intentionally not a default shared-runner gate."
+          echo "Storage is exercised through 10^7 Links; Theory/reaction through 10^6 relations."
