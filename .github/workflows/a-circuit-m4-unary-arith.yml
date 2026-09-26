@@ -1,0 +1,36 @@
+name: A-Circuit M4 unary arithmetic
+
+on:
+  pull_request:
+    paths:
+      - "experiments/a-circuit/**"
+      - ".github/workflows/a-circuit-m4-unary-arith.yml"
+  push:
+    branches: [main]
+    paths:
+      - "experiments/a-circuit/**"
+      - ".github/workflows/a-circuit-m4-unary-arith.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unary-arithmetic:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal
+      - name: Structural INC DEC NEG suite
+        run: |
+          cargo +1.98.1 test \
+            --release \
+            --manifest-path experiments/a-circuit/Cargo.toml \
+            m4_unary_arith_ \
+            -- --ignored --nocapture --test-threads=1
+      - name: Unary arithmetic architecture policy
+        run: |
+          echo "INC/DEC/NEG reuse the existing flagged ADD/SUB path."
+          echo "INC/DEC omit CF from FlagPatch; NEG publishes full arithmetic flags."
+          echo "No host runtime unary arithmetic is authoritative."
