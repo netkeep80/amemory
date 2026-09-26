@@ -301,7 +301,8 @@ SUB1                                  GREEN (#80/#81)
 -> M4 one-bit SHL/SHR/SAR wiring             GREEN (#95/#96)
 -> M4 variable SHL/SHR/SAR count&31 effects   GREEN (#97/#98)
 -> M4 ROL/ROR count&31 effects                  GREEN (#99/#100)
--> M4 RCL/RCR Word32+CF effects                  CURRENT (#101)
+-> M4 RCL/RCR Word32+CF effects                  GREEN (#101/#102)
+-> M1 reusable MUX1/MUX32 selector                 CURRENT (#104)
 ```
 
 
@@ -649,3 +650,46 @@ The first 32 result positions form Word32 and position 32 is CF_out.
 Only CF/OF appear in the FlagPatch. Count zero emits an empty patch; count one
 computes OF with the architectural single-rotate formula; multibit rotates mark
 OF undefined. SF/ZF/AF/PF are preserved by absence.
+
+
+## M1 gap closure — structural MUX
+
+Issue: #104
+
+M1 declared the boolean basis `NOT / AND / OR / XOR / MUX`.
+
+This stage keeps two MUX1 implementations deliberately:
+
+```text
+DIRECT_MUX1(S,A,B)
+  S=0 -> A
+  S=1 -> B
+```
+
+as the minimal one-reaction differential witness, and the architectural
+composed form:
+
+```text
+MUX1(S,A,B) = A XOR (S AND (A XOR B))
+```
+
+built only from the existing structural XOR/AND gate basis.
+
+MUX32 scales the composed form, not the direct shortcut. It invokes the same
+MUX1 structurally for all 32 bit positions and assembles the ordered LSB-first
+Word32 inside A-memory.
+
+Stable component results:
+
+```text
+MUX1_RESULT(ExactSequence_R([bit]))
+MUX32_RESULT(ExactSequence_R([Word32]))
+```
+
+Expected reaction counts:
+
+```text
+DIRECT_MUX1 = 1
+MUX1        = 7
+MUX32       = 257
+```
