@@ -808,4 +808,204 @@ mod tests {
         assert_eq!(engine.current_bank(), stable);
         assert_eq!(engine.current(), &[expected]);
     }
+
+    #[test]
+    fn grounded_constant_mismatch_is_quiescent_not_a_false_match() {
+        let mut store = OptimizedLinkStore::new();
+        let anchors = fresh(&mut store, 30);
+        let theory = anchors[0];
+        let grammar = anchors[1];
+        let caller = anchors[2];
+        let common = anchors[3];
+        let left = anchors[4];
+        let right = anchors[5];
+        let output = anchors[6];
+        let role = anchors[20];
+
+        let input = store.ensure_pair(common, left).unwrap();
+        let wrong_input = store.ensure_pair(common, right).unwrap();
+
+        let authority_dictionary =
+            define_structural_role_dictionary(&mut store, &[]).unwrap();
+        let interpreter =
+            define_structural_interpreter(&mut store, authority_dictionary, grammar, theory)
+                .unwrap();
+
+        let dictionary =
+            define_structural_role_dictionary(&mut store, &[role]).unwrap();
+        let before = store.ensure_pair(role, input).unwrap();
+        let after = store.ensure_pair(role, output).unwrap();
+        let bundle = materialize_exact_sequence(&mut store, &[after]).unwrap();
+        let body = store.ensure_pair(before, bundle).unwrap();
+        let rule = define_structural_rule(&mut store, dictionary, body).unwrap();
+        let admission = admit_structural_rule(&mut store, theory, rule).unwrap();
+        index_structural_rule_trigger(&mut store, common, admission).unwrap();
+
+        let active = store.ensure_pair(caller, wrong_input).unwrap();
+
+        let mut engine = OptimizedStructuralEngine::new(8);
+        engine.set_interpreter(&store, interpreter).unwrap();
+        engine.set_current(&store, &[active]).unwrap();
+        let bank = engine.current_bank();
+
+        let reaction = engine.run(&mut store).unwrap();
+        assert!(reaction.quiescent);
+        assert_eq!(reaction.raw_rule_matches, 0);
+        assert_eq!(reaction.handoff_count, 0);
+        assert_eq!(engine.current_bank(), bank);
+        assert_eq!(engine.current(), &[active]);
+    }
+
+    #[test]
+    fn declared_role_missing_from_template_is_rejected() {
+        let mut store = OptimizedLinkStore::new();
+        let anchors = fresh(&mut store, 12);
+        let declared_role = anchors[10];
+        let grounded = store.ensure_pair(anchors[2], anchors[3]).unwrap();
+
+        assert_eq!(
+            unify_structural_rule_template(
+                &store,
+                grounded,
+                grounded,
+                &[declared_role],
+            ),
+            Err(StructuralError::MissingRoleBinding(declared_role))
+        );
+    }
+
+    #[test]
+    fn foreign_theory_projection_does_not_broaden_authority() {
+        let mut store = OptimizedLinkStore::new();
+        let anchors = fresh(&mut store, 32);
+        let theory_a = anchors[0];
+        let theory_b = anchors[1];
+        let grammar = anchors[2];
+        let caller = anchors[3];
+        let input = anchors[4];
+        let output = anchors[5];
+        let role = anchors[24];
+
+        let authority_dictionary =
+            define_structural_role_dictionary(&mut store, &[]).unwrap();
+        let interpreter =
+            define_structural_interpreter(&mut store, authority_dictionary, grammar, theory_a)
+                .unwrap();
+
+        let dictionary =
+            define_structural_role_dictionary(&mut store, &[role]).unwrap();
+        let before = store.ensure_pair(role, input).unwrap();
+        let after = store.ensure_pair(role, output).unwrap();
+        let bundle = materialize_exact_sequence(&mut store, &[after]).unwrap();
+        let body = store.ensure_pair(before, bundle).unwrap();
+        let rule = define_structural_rule(&mut store, dictionary, body).unwrap();
+
+        // The projection is discoverable by trigger, but its admission belongs
+        // to theory_b while the active interpreter authorizes theory_a.
+        let foreign_admission =
+            admit_structural_rule(&mut store, theory_b, rule).unwrap();
+        let (trigger_key, _) = store.poles(input).unwrap();
+        index_structural_rule_trigger(&mut store, trigger_key, foreign_admission).unwrap();
+
+        let active = store.ensure_pair(caller, input).unwrap();
+        let mut engine = OptimizedStructuralEngine::new(8);
+        engine.set_interpreter(&store, interpreter).unwrap();
+        engine.set_current(&store, &[active]).unwrap();
+
+        let reaction = engine.run(&mut store).unwrap();
+        assert!(reaction.quiescent);
+        assert_eq!(reaction.raw_rule_matches, 0);
+        assert_eq!(reaction.handoff_count, 0);
+        assert_eq!(engine.current(), &[active]);
+    }
+
+    #[test]
+    fn malformed_output_bundle_fails_closed_before_scope_handoff() {
+        let mut store = OptimizedLinkStore::new();
+        let anchors = fresh(&mut store, 32);
+        let theory = anchors[0];
+        let grammar = anchors[1];
+        let caller = anchors[2];
+        let input = anchors[3];
+        let output = anchors[4];
+        let role = anchors[24];
+
+        let authority_dictionary =
+            define_structural_role_dictionary(&mut store, &[]).unwrap();
+        let interpreter =
+            define_structural_interpreter(&mut store, authority_dictionary, grammar, theory)
+                .unwrap();
+
+        let dictionary =
+            define_structural_role_dictionary(&mut store, &[role]).unwrap();
+        let before = store.ensure_pair(role, input).unwrap();
+
+        // Deliberately not an ExactSequence carrier.
+        let malformed_bundle = store.ensure_pair(role, output).unwrap();
+        let body = store.ensure_pair(before, malformed_bundle).unwrap();
+        let rule = define_structural_rule(&mut store, dictionary, body).unwrap();
+        let admission = admit_structural_rule(&mut store, theory, rule).unwrap();
+        let (trigger_key, _) = store.poles(input).unwrap();
+        index_structural_rule_trigger(&mut store, trigger_key, admission).unwrap();
+
+        let active = store.ensure_pair(caller, input).unwrap();
+        let mut engine = OptimizedStructuralEngine::new(8);
+        engine.set_interpreter(&store, interpreter).unwrap();
+        engine.set_current(&store, &[active]).unwrap();
+        let bank = engine.current_bank();
+
+        let error = engine.run(&mut store).unwrap_err();
+        assert!(matches!(error, StructuralError::InvalidExactSequence(_)));
+        assert_eq!(engine.current_bank(), bank);
+        assert_eq!(engine.current(), &[active]);
+        assert_eq!(engine.handoff_count(), 0);
+        assert!(!engine.quiescent());
+    }
+
+    #[test]
+    fn duplicate_rule_images_converge_to_one_canonical_successor() {
+        let mut store = OptimizedLinkStore::new();
+        let anchors = fresh(&mut store, 40);
+        let theory = anchors[0];
+        let grammar = anchors[1];
+        let caller = anchors[2];
+        let input = anchors[3];
+        let output = anchors[4];
+        let role_a = anchors[30];
+        let role_b = anchors[31];
+
+        let authority_dictionary =
+            define_structural_role_dictionary(&mut store, &[]).unwrap();
+        let interpreter =
+            define_structural_interpreter(&mut store, authority_dictionary, grammar, theory)
+                .unwrap();
+
+        let (trigger_key, _) = store.poles(input).unwrap();
+
+        for role in [role_a, role_b] {
+            let dictionary =
+                define_structural_role_dictionary(&mut store, &[role]).unwrap();
+            let before = store.ensure_pair(role, input).unwrap();
+            let after = store.ensure_pair(role, output).unwrap();
+            let bundle = materialize_exact_sequence(&mut store, &[after]).unwrap();
+            let body = store.ensure_pair(before, bundle).unwrap();
+            let rule = define_structural_rule(&mut store, dictionary, body).unwrap();
+            let admission = admit_structural_rule(&mut store, theory, rule).unwrap();
+            index_structural_rule_trigger(&mut store, trigger_key, admission).unwrap();
+        }
+
+        let active = store.ensure_pair(caller, input).unwrap();
+        let expected = store.ensure_pair(caller, output).unwrap();
+
+        let mut engine = OptimizedStructuralEngine::new(8);
+        engine.set_interpreter(&store, interpreter).unwrap();
+        engine.set_current(&store, &[active]).unwrap();
+
+        let reaction = engine.run(&mut store).unwrap();
+        assert_eq!(reaction.raw_rule_matches, 2);
+        assert_eq!(reaction.transitioned_members, 1);
+        assert_eq!(reaction.handoff_count, 1);
+        assert_eq!(engine.current(), &[expected]);
+    }
+
 }

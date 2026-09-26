@@ -383,12 +383,16 @@ function runCase(f, a, b, seedBase) {
   same(decoded.values[1], expected.carry, "Carry position");
 
   return Object.freeze({
+    input: (a === ONE ? "1" : "0") + (b === ONE ? "1" : "0"),
+    output: (decoded.values[0] === ONE ? "1" : "0")
+      + (decoded.values[1] === ONE ? "1" : "0"),
     a,
     b,
     sum: decoded.values[0],
     carry: decoded.values[1],
     matches: Object.freeze(matches),
     handoffs: Object.freeze(handoffs),
+    quiescent: quiescent.quiescent,
   });
 }
 
@@ -415,6 +419,18 @@ function main() {
     assert(row.matches.every((n) => n === 1), "row " + index + " one Rule per active step");
     assert(row.handoffs.every((n) => n === 1), "row " + index + " one handoff per active step");
   });
+
+  const normalized = Object.freeze({
+    rows: rows.map((row) => Object.freeze({
+      input: row.input,
+      output: row.output,
+      matches: [...row.matches],
+      handoffs: [...row.handoffs],
+      quiescent: row.quiescent,
+    })),
+    activeReactionsPerCase: 4,
+  });
+  console.log("C2B_RESULT_JSON=" + JSON.stringify(normalized));
 
   console.log([
     "A_CIRCUIT_C2B=GREEN",
