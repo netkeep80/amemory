@@ -1,14 +1,16 @@
-name: A-Circuit C2b accepted MTS structural Half Adder
+name: A-Circuit C2b structural differential
 
 on:
   pull_request:
     paths:
       - "experiments/a-circuit/upstream/**"
+      - "experiments/optimized-cpu-rust/**"
       - ".github/workflows/a-circuit-c2b-mts.yml"
   push:
     branches: [main]
     paths:
       - "experiments/a-circuit/upstream/**"
+      - "experiments/optimized-cpu-rust/**"
       - ".github/workflows/a-circuit-c2b-mts.yml"
   workflow_dispatch:
 
@@ -49,5 +51,29 @@ jobs:
           npm ci
           npm run build
 
-      - name: Run gate-composed Half Adder witness
-        run: node experiments/a-circuit/upstream/c2b-half-adder.mjs
+      - name: Run accepted-MTS gate-composed Half Adder
+        run: |
+          node experiments/a-circuit/upstream/c2b-half-adder.mjs | tee /tmp/c2b-mts.log
+          grep '^C2B_RESULT_JSON=' /tmp/c2b-mts.log
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal
+
+      - name: Run optimized Rust gate-composed Half Adder
+        run: |
+          cargo +1.98.1 run \
+            --quiet \
+            --release \
+            --manifest-path experiments/optimized-cpu-rust/Cargo.toml \
+            --example c2b_half_adder | tee /tmp/c2b-rust.log
+          grep '^C2B_RESULT_JSON=' /tmp/c2b-rust.log
+
+      - name: Compare normalized portable trajectories
+        shell: bash
+        run: |
+          MTS="$(grep '^C2B_RESULT_JSON=' /tmp/c2b-mts.log)"
+          RUST="$(grep '^C2B_RESULT_JSON=' /tmp/c2b-rust.log)"
+          printf 'accepted MTS: %s\n' "$MTS"
+          printf 'optimized Rust: %s\n' "$RUST"
+          test "$MTS" = "$RUST"
+          echo "C2B_STRUCTURAL_DIFFERENTIAL=PASS"
