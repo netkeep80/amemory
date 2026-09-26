@@ -66,7 +66,7 @@ fn stage_frame(
 }
 
 #[derive(Clone, Debug)]
-struct RippleSubProgram {
+pub(crate) struct RippleSubProgram {
     width: usize,
     sub_n: Handle,
     active_steps: usize,
@@ -74,7 +74,7 @@ struct RippleSubProgram {
 }
 
 impl RippleSubProgram {
-    fn install(f: &mut FullFixture, width: usize) -> Self {
+    pub(crate) fn install(f: &mut FullFixture, width: usize) -> Self {
         assert!((1..=32).contains(&width));
 
         // One reusable one-bit subtractor is installed once; every bit position
@@ -291,7 +291,7 @@ fn decode_word(
     value
 }
 
-fn run_sub(
+pub(crate) fn run_sub(
     f: &mut FullFixture,
     program: &RippleSubProgram,
     a: u32,

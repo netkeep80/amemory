@@ -62,7 +62,7 @@ fn stage_frame(
 }
 
 #[derive(Clone, Debug)]
-struct RippleProgram {
+pub(crate) struct RippleProgram {
     width: usize,
     add: Handle,
     active_steps: usize,
@@ -70,7 +70,7 @@ struct RippleProgram {
 }
 
 impl RippleProgram {
-    fn install(f: &mut FullFixture, width: usize) -> Self {
+    pub(crate) fn install(f: &mut FullFixture, width: usize) -> Self {
         assert!((1..=32).contains(&width));
 
         let seed = f.store.ensure_pair(f.full, f.k).unwrap();
@@ -300,7 +300,7 @@ fn decode_word(
     value
 }
 
-fn run_add(
+pub(crate) fn run_add(
     f: &mut FullFixture,
     program: &RippleProgram,
     a: u32,

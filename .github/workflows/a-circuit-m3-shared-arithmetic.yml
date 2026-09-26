@@ -1,0 +1,39 @@
+name: A-Circuit M3 shared arithmetic datapath
+
+on:
+  pull_request:
+    paths:
+      - "experiments/a-circuit/**"
+      - ".github/workflows/a-circuit-m3-shared-arithmetic.yml"
+  push:
+    branches: [main]
+    paths:
+      - "experiments/a-circuit/**"
+      - ".github/workflows/a-circuit-m3-shared-arithmetic.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  shared-arithmetic:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal
+
+      - name: Mandatory release-mode shared arithmetic differential
+        run: |
+          cargo +1.98.1 test \
+            --release \
+            --manifest-path experiments/a-circuit/Cargo.toml \
+            m3_arith_shared_ \
+            -- --ignored --nocapture --test-threads=1
+
+      - name: Architecture policy
+        run: |
+          echo "One datapath handles ADD/ADC/SUB/SBB through structural Mode."
+          echo "B_eff=B XOR Mode; C0=X XOR Mode; Status=Cn XOR Mode."
+          echo "Raw carry taps are structural outputs for later EFLAGS."
