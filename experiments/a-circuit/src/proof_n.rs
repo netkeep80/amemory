@@ -134,17 +134,21 @@ pub(crate) fn export_portable_aset(store: &OptimizedLinkStore) -> Vec<String> {
         if referenced.contains(&handle) {
             continue;
         }
-        let source = store.export_anum(handle).expect("proof root export");
-        let imported = reconstructed
-            .import_anum(&source)
-            .expect("proof root import");
+        sources.push(
+            store.export_anum(handle).expect("proof root export")
+        );
+    }
+
+    let imported_roots = reconstructed
+        .import_anums(&sources)
+        .expect("proof root batch import");
+    for (source, imported) in sources.iter().zip(imported_roots) {
         assert_eq!(
             reconstructed
                 .export_anum(imported)
                 .expect("proof root round-trip"),
-            source,
+            *source,
         );
-        sources.push(source);
     }
 
     if reconstructed.link_count() < count as usize {
@@ -249,12 +253,21 @@ pub(crate) fn load_runtime(
     };
 
     let links_before_load = memory.store.link_count() as u32;
-    for source in &prepare.aset_anums {
-        memory.store.import_anum(source).ok()?;
-    }
+    memory.store.import_anums(&prepare.aset_anums).ok()?;
     let links_after_load = memory.store.link_count() as u32;
 
     if links_after_load != prepare.compiled_links {
+        return None;
+    }
+
+    let root_sources = prepare
+        .semantic_roots
+        .iter()
+        .map(|root| root.source.clone())
+        .collect::<Vec<_>>();
+    let before_roots = memory.store.link_count();
+    let root_handles = memory.store.import_anums(&root_sources).ok()?;
+    if memory.store.link_count() != before_roots {
         return None;
     }
 
@@ -262,12 +275,7 @@ pub(crate) fn load_runtime(
         Vec::with_capacity(prepare.semantic_roots.len());
     let mut portable_round_trip = true;
 
-    for root in &prepare.semantic_roots {
-        let before = memory.store.link_count();
-        let handle = memory.store.import_anum(&root.source).ok()?;
-        if memory.store.link_count() != before {
-            return None;
-        }
+    for (root, handle) in prepare.semantic_roots.iter().zip(root_handles) {
         if memory.store.export_anum(handle).ok().as_deref()
             != Some(root.source.as_str())
         {
@@ -445,8 +453,8 @@ mod tests {
         );
 
         let mut reconstructed = OptimizedLinkStore::new();
-        for source in &sources {
-            let handle = reconstructed.import_anum(source).unwrap();
+        let handles = reconstructed.import_anums(&sources).unwrap();
+        for (source, handle) in sources.iter().zip(handles) {
             assert_eq!(reconstructed.export_anum(handle).unwrap(), *source);
         }
 
