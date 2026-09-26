@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 amemory-optimized-cpu-probe = { path = "../optimized-cpu-rust" }
+amemory-browser-probe = { path = "../browser-accelerator/rust" }
 
 [lib]
 crate-type = ["rlib"]
