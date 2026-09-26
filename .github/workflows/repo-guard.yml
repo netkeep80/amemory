@@ -24,7 +24,7 @@ jobs:
         uses: netkeep80/repo-guard@37a8d4dd65ac86f683c063dd1e0a6ddb685b2da6
         with:
           mode: check-pr
-          enforcement: advisory
+          enforcement: blocking
           node-version: 24
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
