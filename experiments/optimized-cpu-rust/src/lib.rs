@@ -2,6 +2,39 @@ use std::collections::{HashMap, HashSet};
 
 pub type Handle = u32;
 pub const ROOT_HANDLE: Handle = 1;
+const NO_HANDLE: Handle = 0;
+
+#[derive(Clone, Debug)]
+pub struct IncidenceIter<'a> {
+    next: &'a [Handle],
+    current: Handle,
+    remaining: usize,
+}
+
+impl Iterator for IncidenceIter<'_> {
+    type Item = Handle;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current == NO_HANDLE {
+            self.remaining = 0;
+            return None;
+        }
+        let out = self.current;
+        self.current = self.next[out as usize];
+        self.remaining = self.remaining.saturating_sub(1);
+        Some(out)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.remaining, Some(self.remaining))
+    }
+}
+
+impl ExactSizeIterator for IncidenceIter<'_> {
+    fn len(&self) -> usize {
+        self.remaining
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct Pair {
@@ -32,8 +65,14 @@ pub struct OptimizedLinkStore {
     canonical_by_pair: HashMap<Pair, Handle>,
     start_forms: HashMap<Handle, Handle>,
     end_forms: HashMap<Handle, Handle>,
-    by_start: HashMap<Handle, Vec<Handle>>,
-    by_end: HashMap<Handle, Vec<Handle>>,
+    // Dense intrusive incidence lists. Handles are dense local substrate IDs,
+    // so per-handle arrays avoid one HashMap entry + Vec allocation per pole.
+    start_head: Vec<Handle>,
+    end_head: Vec<Handle>,
+    next_by_start: Vec<Handle>,
+    next_by_end: Vec<Handle>,
+    start_count: Vec<u32>,
+    end_count: Vec<u32>,
     max_links: Option<usize>,
 }
 
@@ -62,8 +101,12 @@ impl OptimizedLinkStore {
             canonical_by_pair: HashMap::new(),
             start_forms: HashMap::new(),
             end_forms: HashMap::new(),
-            by_start: HashMap::new(),
-            by_end: HashMap::new(),
+            start_head: vec![NO_HANDLE; 2],
+            end_head: vec![NO_HANDLE; 2],
+            next_by_start: vec![NO_HANDLE; 2],
+            next_by_end: vec![NO_HANDLE; 2],
+            start_count: vec![0; 2],
+            end_count: vec![0; 2],
             max_links,
         };
         // ROOT and self-incidence forms are not ordinary PAIR representatives.
@@ -132,14 +175,22 @@ impl OptimizedLinkStore {
         self.allocate_record(start, end)
     }
 
-    pub fn start_incidence(&self, start: Handle) -> Result<&[Handle], StoreError> {
+    pub fn start_incidence(&self, start: Handle) -> Result<IncidenceIter<'_>, StoreError> {
         self.require_valid(start)?;
-        Ok(self.by_start.get(&start).map(Vec::as_slice).unwrap_or(&[]))
+        Ok(IncidenceIter {
+            next: &self.next_by_start,
+            current: self.start_head[start as usize],
+            remaining: self.start_count[start as usize] as usize,
+        })
     }
 
-    pub fn end_incidence(&self, end: Handle) -> Result<&[Handle], StoreError> {
+    pub fn end_incidence(&self, end: Handle) -> Result<IncidenceIter<'_>, StoreError> {
         self.require_valid(end)?;
-        Ok(self.by_end.get(&end).map(Vec::as_slice).unwrap_or(&[]))
+        Ok(IncidenceIter {
+            next: &self.next_by_end,
+            current: self.end_head[end as usize],
+            remaining: self.end_count[end as usize] as usize,
+        })
     }
 
     fn ordinary_pair_poles(&self, handle: Handle) -> Result<Option<(Handle, Handle)>, StoreError> {
@@ -228,8 +279,27 @@ impl OptimizedLinkStore {
     }
 
     fn index_record(&mut self, handle: Handle, start: Handle, end: Handle) {
-        self.by_start.entry(start).or_default().push(handle);
-        self.by_end.entry(end).or_default().push(handle);
+        let required = (handle.max(start).max(end) as usize) + 1;
+        if self.start_head.len() < required {
+            self.start_head.resize(required, NO_HANDLE);
+            self.end_head.resize(required, NO_HANDLE);
+            self.next_by_start.resize(required, NO_HANDLE);
+            self.next_by_end.resize(required, NO_HANDLE);
+            self.start_count.resize(required, 0);
+            self.end_count.resize(required, 0);
+        }
+
+        let hi = handle as usize;
+        let si = start as usize;
+        let ei = end as usize;
+
+        self.next_by_start[hi] = self.start_head[si];
+        self.start_head[si] = handle;
+        self.start_count[si] = self.start_count[si].saturating_add(1);
+
+        self.next_by_end[hi] = self.end_head[ei];
+        self.end_head[ei] = handle;
+        self.end_count[ei] = self.end_count[ei].saturating_add(1);
     }
 
     fn parse_node(&mut self, bytes: &[u8], cursor: &mut usize) -> Result<Handle, StoreError> {
