@@ -1,0 +1,119 @@
+name: A-Circuit web 80386 interactive lab
+
+on:
+  pull_request:
+    paths:
+      - "experiments/a-circuit/**"
+      - "experiments/browser-accelerator/web/i386-lab.js"
+      - "experiments/browser-accelerator/web/i386-blocks.json"
+      - "experiments/browser-accelerator/web/index.html"
+      - ".github/workflows/a-circuit-web-lab.yml"
+      - ".github/workflows/browser-accelerator-pages.yml"
+  push:
+    branches: [main]
+    paths:
+      - "experiments/a-circuit/**"
+      - "experiments/browser-accelerator/web/i386-lab.js"
+      - "experiments/browser-accelerator/web/i386-blocks.json"
+      - "experiments/browser-accelerator/web/index.html"
+      - ".github/workflows/a-circuit-web-lab.yml"
+      - ".github/workflows/browser-accelerator-pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  web-lab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup toolchain install 1.98.1 --profile minimal
+          rustup target add --toolchain 1.98.1 wasm32-unknown-unknown
+
+      - name: Native web-lab structural tests
+        run: |
+          cargo +1.98.1 test \
+            --release \
+            --manifest-path experiments/a-circuit/Cargo.toml \
+            web_lab_ \
+            -- --nocapture --test-threads=1
+
+      - name: Build the real A-Circuit WASM
+        run: |
+          cargo +1.98.1 build \
+            --release \
+            --manifest-path experiments/a-circuit/Cargo.toml \
+            --target wasm32-unknown-unknown
+
+      - name: Registry schema and uniqueness
+        run: |
+          node <<'NODE'
+          const fs = require("fs");
+          const registry = JSON.parse(
+            fs.readFileSync("experiments/browser-accelerator/web/i386-blocks.json", "utf8")
+          );
+          if (registry.schemaVersion !== 1) throw new Error("unexpected registry schema");
+          if (!Array.isArray(registry.blocks) || registry.blocks.length < 12) {
+            throw new Error("expected at least 12 registered blocks");
+          }
+          const ids = new Set();
+          const opcodes = new Set();
+          for (const block of registry.blocks) {
+            if (!block.id || !Number.isInteger(block.opcode)) throw new Error("bad block identity");
+            if (ids.has(block.id)) throw new Error("duplicate block id " + block.id);
+            if (opcodes.has(block.opcode)) throw new Error("duplicate opcode " + block.opcode);
+            ids.add(block.id);
+            opcodes.add(block.opcode);
+            if (!Array.isArray(block.inputs) || !Array.isArray(block.modes)) {
+              throw new Error("bad block schema " + block.id);
+            }
+          }
+          console.log("registry blocks=" + registry.blocks.length);
+          NODE
+
+      - name: Instantiate WASM and verify every registry opcode
+        run: |
+          node <<'NODE'
+          const fs = require("fs");
+          const registry = JSON.parse(
+            fs.readFileSync("experiments/browser-accelerator/web/i386-blocks.json", "utf8")
+          );
+          const bytes = fs.readFileSync(
+            "experiments/a-circuit/target/wasm32-unknown-unknown/release/amemory_a_circuit.wasm"
+          );
+          WebAssembly.instantiate(bytes, {}).then(({instance}) => {
+            const w = instance.exports;
+            if (w.amemory_i386_lab_probe() !== 0x386) throw new Error("bad lab probe");
+            for (const block of registry.blocks) {
+              if (w.amemory_i386_lab_supports(block.opcode) !== 1) {
+                throw new Error("registry/WASM mismatch: " + block.id);
+              }
+            }
+
+            // Real WASM execution smoke: composed structural MUX1.
+            if (w.amemory_i386_lab_run(12, 1, 0, 1) !== 1) {
+              throw new Error("MUX1 WASM execution rejected");
+            }
+            if (w.amemory_i386_lab_value() !== 0) {
+              throw new Error("MUX1 WASM wrong result");
+            }
+            if (w.amemory_i386_lab_reactions() !== 7) {
+              throw new Error("MUX1 WASM wrong reaction count");
+            }
+            if (w.amemory_i386_lab_quiescent() !== 1) {
+              throw new Error("MUX1 WASM did not reach quiescence");
+            }
+            if (w.amemory_i386_lab_steady_link_delta() !== 0) {
+              throw new Error("MUX1 repeated run grew Links");
+            }
+            console.log("WASM registry + structural MUX1 smoke PASS");
+          }).catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
