@@ -508,3 +508,88 @@ fn m3_scale_word_order_is_semantic_at_32_bits() {
     assert_eq!(decode_word(&f, 32, word), 0x0000_0003);
     assert_eq!(decode_word(&f, 32, reversed_word), 0xc000_0000);
 }
+
+#[test]
+#[ignore = "informational performance baseline; no acceptance threshold"]
+fn m3_perf_ripple_width_baseline() {
+    use std::hint::black_box;
+    use std::time::Instant;
+
+    let mut previous_steady_ns: Option<u128> = None;
+
+    for width in [4usize, 8, 16, 32] {
+        let build_started = Instant::now();
+        let mut f = FullFixture::new();
+        let program = RippleProgram::install(&mut f, width);
+        let build_ns = build_started.elapsed().as_nanos();
+
+        let m = mask(width);
+        let a = 0xa5a5_a5a5u32 & m;
+        let b = 0x5a5a_5a5au32 & m;
+        let cin = 1u8;
+
+        // Complementary patterns plus Cin=1 force a carry through the full word.
+        let before_first = f.store.link_count();
+        let first_started = Instant::now();
+        let first = run_add(&mut f, &program, a, b, cin);
+        let first_ns = first_started.elapsed().as_nanos();
+        let after_first = f.store.link_count();
+        let first_growth = after_first - before_first;
+
+        assert_eq!(first.0, 0, "carry-heavy Sum must wrap to zero");
+        assert_eq!(first.1, 1, "carry-heavy Cout must be one");
+
+        let iters: u128 = match width {
+            4 => 96,
+            8 => 64,
+            16 => 32,
+            32 => 12,
+            _ => unreachable!(),
+        };
+
+        let steady_started = Instant::now();
+        for _ in 0..iters {
+            let result = run_add(&mut f, &program, a, b, cin);
+            black_box(result);
+        }
+        let steady_total_ns = steady_started.elapsed().as_nanos();
+        let steady_ns = steady_total_ns / iters;
+
+        // The repeated identical computation must reuse already materialized
+        // canonical Links; steady-state execution is not allowed to leak state.
+        assert_eq!(
+            f.store.link_count(),
+            after_first,
+            "steady-state repeated addition materialized new Links"
+        );
+
+        let ns_per_bit = steady_ns / width as u128;
+        let approx_ns_per_reaction =
+            steady_ns / program.active_steps as u128;
+        let reactions_per_second =
+            (program.active_steps as u128 * 1_000_000_000u128) / steady_ns.max(1);
+        let scale_milli = previous_steady_ns
+            .map(|previous| (steady_ns * 1000) / previous.max(1))
+            .unwrap_or(0);
+
+        println!(
+            "RIPPLE_PERF width={} build_ns={} program_links={} first_ns={} first_growth={} steady_iters={} steady_ns_per_add={} ns_per_bit={} approx_ns_per_reaction={} reactions_per_sec={} scale_x1000={}",
+            width,
+            build_ns,
+            program.links_after_build,
+            first_ns,
+            first_growth,
+            iters,
+            steady_ns,
+            ns_per_bit,
+            approx_ns_per_reaction,
+            reactions_per_second,
+            scale_milli,
+        );
+
+        previous_steady_ns = Some(steady_ns);
+    }
+
+    println!("RIPPLE_PERF_NOTE=informational-only-no-performance-threshold");
+}
+

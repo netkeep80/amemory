@@ -1,0 +1,45 @@
+name: A-Circuit M3 ripple performance baseline
+
+on:
+  pull_request:
+    paths:
+      - "experiments/a-circuit/**"
+      - ".github/workflows/a-circuit-m3-performance.yml"
+  push:
+    branches: [main]
+    paths:
+      - "experiments/a-circuit/**"
+      - ".github/workflows/a-circuit-m3-performance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  baseline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal
+
+      - name: Informational 4-32 ripple performance baseline
+        run: |
+          cargo +1.98.1 test \
+            --release \
+            --manifest-path experiments/a-circuit/Cargo.toml \
+            m3_perf_ripple_width_baseline \
+            -- --ignored --nocapture --test-threads=1 2>&1 | tee /tmp/ripple-perf.log
+
+          grep -q "RIPPLE_PERF width=4 " /tmp/ripple-perf.log
+          grep -q "RIPPLE_PERF width=8 " /tmp/ripple-perf.log
+          grep -q "RIPPLE_PERF width=16 " /tmp/ripple-perf.log
+          grep -q "RIPPLE_PERF width=32 " /tmp/ripple-perf.log
+          grep -q "RIPPLE_PERF_NOTE=informational-only-no-performance-threshold" /tmp/ripple-perf.log
+
+      - name: Performance policy
+        run: |
+          echo "Informational baseline only."
+          echo "No timing threshold participates in correctness/acceptance."
+          echo "Semantic and differential failures remain authoritative."
