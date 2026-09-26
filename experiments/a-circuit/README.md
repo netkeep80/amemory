@@ -440,3 +440,9 @@ The FlagPatch schema is shared across M4 components. Reinstalling it from the
 same fixture seed reconstructs the same structural `FlagId`, `SET` and
 `UNDEFINED` Links. This is required so later arithmetic/CMP effects and logical
 effects can be applied by one EFLAGS state-transition component.
+
+
+The effect envelope tag is shared as `ALU_EFFECT_RESULT` for every producer of
+`[WriteBack, Word, FlagPatch]`. Logical effects use it now; the next arithmetic/CMP
+effect wrapper must reconstruct the same tag. A future architectural state applier
+can therefore consume one effect ABI independent of which ALU family produced it.

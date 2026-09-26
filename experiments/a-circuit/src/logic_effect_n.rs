@@ -3,7 +3,8 @@ use super::{
         call, define_bundle_rule, index_rule_for, Fixture as FullFixture,
     },
     flag_patch::{
-        set_flag_action, undefined_flag_action, FlagPatchSchema,
+        install_alu_effect_result_tag, set_flag_action,
+        undefined_flag_action, FlagPatchSchema,
     },
     logic_n::LogicProgram,
 };
@@ -132,10 +133,13 @@ impl LogicEffectProgram {
         let not_effect =
             f.store.ensure_pair(not_left, not_right).unwrap();
 
-        let result_left = anchors.next(&mut f.store);
-        let result_right = anchors.next(&mut f.store);
-        let result_tag =
-            f.store.ensure_pair(result_left, result_right).unwrap();
+        let effect_seed = f.store.ensure_pair(f.k, f.full).unwrap();
+        let result_tag = install_alu_effect_result_tag(
+            &mut f.store,
+            effect_seed,
+            f.o,
+            f.c,
+        );
 
         // Shared component ABI. Calling this with the same FullFixture seed
         // yields the same structural FlagId / SET / UNDEFINED Links for

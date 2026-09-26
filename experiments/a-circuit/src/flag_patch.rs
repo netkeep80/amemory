@@ -108,3 +108,21 @@ mod tests {
         assert_eq!(store.link_count(), links);
     }
 }
+
+
+pub(crate) fn install_alu_effect_result_tag(
+    store: &mut OptimizedLinkStore,
+    seed: Handle,
+    o: Handle,
+    c: Handle,
+) -> Handle {
+    // Shared stable envelope tag for every ALU effect producer whose payload is:
+    // ExactSequence_R([WriteBack, Word, FlagPatch]).
+    // Arithmetic/CMP and logic/TEST therefore converge before architectural
+    // register/EFLAGS application.
+    let mut current = store.ensure_pair(seed, seed).unwrap();
+    for pole in [o, o, c, o, c, c, o, c, o, c, o, o, c, c] {
+        current = store.ensure_pair(current, pole).unwrap();
+    }
+    current
+}
