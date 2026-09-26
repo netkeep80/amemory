@@ -1137,6 +1137,53 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "informational optimized-reaction baseline; no performance threshold"]
+    fn optimized_reaction_benchmark_baseline() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        const ITERS: u128 = 1_000_000;
+
+        let (store, optimized) = load_optimized_fixture();
+        let current = optimized["19868"];
+        let relation = optimized["16816898"];
+        let successor = optimized["19816898"];
+
+        // Full bounded R1 orchestration: current + live Theory + snapshot index + run.
+        let mut engine = OptimizedReactionEngine::new(16);
+        let full_started = Instant::now();
+        for _ in 0..ITERS {
+            engine.reset();
+            engine.set_current(&store, &[current]).unwrap();
+            engine.set_theory(&store, &[relation]).unwrap();
+            engine.snapshot_theory(&store).unwrap();
+            engine.run(&store).unwrap();
+            black_box(engine.current()[0]);
+        }
+        let full_ns = full_started.elapsed().as_nanos() / ITERS;
+        assert_eq!(engine.current(), &[successor]);
+
+        // Reuse one TheorySnapshot/index across reactions. Reset only current
+        // semantic Scope before each run; published bank may alternate.
+        engine.reset();
+        engine.set_theory(&store, &[relation]).unwrap();
+        engine.snapshot_theory(&store).unwrap();
+        let reused_started = Instant::now();
+        for _ in 0..ITERS {
+            engine.set_current(&store, &[current]).unwrap();
+            engine.run(&store).unwrap();
+            black_box(engine.current()[0]);
+        }
+        let reused_ns = reused_started.elapsed().as_nanos() / ITERS;
+        assert_eq!(engine.current(), &[successor]);
+
+        println!("OPT_CPU_P2_ITERS={ITERS}");
+        println!("OPT_CPU_P2_R1_FULL_SNAPSHOT_NS_PER_OP={full_ns}");
+        println!("OPT_CPU_P2_R1_REUSED_SNAPSHOT_NS_PER_OP={reused_ns}");
+        println!("OPT_CPU_P2_NOTE=informational-only-no-performance-threshold");
+    }
+
+    #[test]
     #[ignore = "informational optimized-index baseline; no performance threshold"]
     fn optimized_hash_index_benchmark_baseline() {
         use std::hint::black_box;
