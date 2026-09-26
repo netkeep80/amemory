@@ -106,15 +106,20 @@ function buildFixture() {
   const ZERO = b.U;
   const ONE = b.L;
 
+  // LinkHandle is an object in the accepted TypeScript Memory. Keep structural
+  // handle identity as Map keys; never stringify handles into transport keys.
   const args = new Map();
   for (const a of [ZERO, ONE]) {
+    const bySecond = new Map();
+    args.set(a, bySecond);
     for (const c of [ZERO, ONE]) {
-      args.set(
-        a + ":" + c,
+      bySecond.set(
+        c,
         materializeExactSequence(memory, [a, c]),
       );
     }
   }
+  const argumentSequenceOf = (a, c) => args.get(a)?.get(c);
 
   // -----------------------------------------------------------------------
   // Generic OPEN:
@@ -156,7 +161,7 @@ function buildFixture() {
 
   let ruleSeed = 30;
   for (const [a, c, sum] of xorRows) {
-    const argumentSequence = args.get(a + ":" + c);
+    const argumentSequence = argumentSequenceOf(a, c);
     assert(argumentSequence !== undefined, "XOR argument sequence");
 
     const kRole = at(ruleSeed++);
@@ -190,7 +195,7 @@ function buildFixture() {
   ];
 
   for (const [a, c, carry] of andRows) {
-    const argumentSequence = args.get(a + ":" + c);
+    const argumentSequence = argumentSequenceOf(a, c);
     assert(argumentSequence !== undefined, "AND argument sequence");
 
     const kRole = at(ruleSeed++);
@@ -258,6 +263,7 @@ function buildFixture() {
     ZERO,
     ONE,
     args,
+    argumentSequenceOf,
     fresh,
   });
 }
@@ -281,11 +287,11 @@ function runCase(f, a, b, seedBase) {
     K,
     ZERO,
     ONE,
-    args,
+    argumentSequenceOf,
     fresh,
   } = f;
 
-  const argumentSequence = args.get(a + ":" + b);
+  const argumentSequence = argumentSequenceOf(a, b);
   assert(argumentSequence !== undefined, "case argument sequence");
 
   const initial = memory.ensure(
