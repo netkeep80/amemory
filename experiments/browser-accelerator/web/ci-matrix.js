@@ -43,7 +43,7 @@
     .ci-matrix table {
       width: 100%;
       border-collapse: collapse;
-      min-width: 720px;
+      min-width: 860px;
     }
     .ci-matrix th,
     .ci-matrix td {
@@ -64,6 +64,13 @@
     .ci-matrix .ci-bad { color: var(--bad); font-weight: 760; }
     .ci-matrix .ci-pending { color: var(--muted); font-weight: 760; }
     .ci-matrix .ci-meta { color: var(--muted); font-size: .86rem; }
+    .ci-matrix .ci-suite-path {
+      display: block;
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: .76rem;
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    }
     @media (max-width: 820px) {
       .ci-matrix .ci-summary { grid-template-columns: 1fr 1fr; }
     }
@@ -75,7 +82,7 @@
 
   const section = document.createElement("section");
   section.className = "ci-matrix";
-  section.setAttribute("aria-label", "Repository CI test matrix");
+  section.setAttribute("aria-label", "Repository CI workflow matrix");
 
   const title = document.createElement("h2");
   title.textContent = "Repository test matrix";
@@ -83,22 +90,28 @@
 
   const intro = document.createElement("p");
   intro.textContent =
-    "Automatically generated from GitHub check-runs for the exact revision merged into main. " +
-    "This is CI evidence; the CPU/WASM ↔ WebGPU witnesses above execute locally in this browser.";
+    "Automatically generated from every active GitHub Actions workflow. " +
+    "Each suite shows its latest main run when available, otherwise its latest run on any branch. " +
+    "The Pages deployment workflow itself is excluded.";
   section.append(intro);
 
   const status = document.createElement("div");
   status.className = "notice";
-  status.textContent = "Loading exact-head CI evidence…";
+  status.textContent = "Loading repository workflow evidence…";
   section.append(status);
 
   root.append(section);
 
-  const shortSha = (value) => typeof value === "string" && value.length >= 8 ? value.slice(0, 12) : "unknown";
+  const shortSha = (value) =>
+    typeof value === "string" && value.length >= 8 ? value.slice(0, 12) : "unknown";
 
-  const classify = (check) => {
-    if (check.status !== "completed") return { label: check.status || "pending", className: "ci-pending" };
-    const conclusion = check.conclusion || "unknown";
+  const classify = (workflow) => {
+    const run = workflow.run;
+    if (!run) return { label: "never run", className: "ci-pending" };
+    if (run.status !== "completed") {
+      return { label: run.status || "pending", className: "ci-pending" };
+    }
+    const conclusion = run.conclusion || "unknown";
     if (["success", "neutral", "skipped"].includes(conclusion)) {
       return { label: conclusion, className: "ci-good" };
     }
@@ -127,39 +140,43 @@
       return response.json();
     })
     .then((data) => {
-      const checks = Array.isArray(data.checks) ? data.checks : [];
-      const completed = checks.filter((check) => check.status === "completed");
-      const passing = completed.filter((check) =>
-        ["success", "neutral", "skipped"].includes(check.conclusion)
+      if (data.schemaVersion !== 2) {
+        throw new Error(`unsupported CI manifest schema ${data.schemaVersion ?? "unknown"}`);
+      }
+
+      const workflows = Array.isArray(data.workflows) ? data.workflows : [];
+      const completed = workflows.filter((workflow) => workflow.run?.status === "completed");
+      const passing = completed.filter((workflow) =>
+        ["success", "neutral", "skipped"].includes(workflow.run?.conclusion)
       ).length;
       const failing = completed.length - passing;
-      const pending = checks.length - completed.length;
+      const pending = workflows.length - completed.length;
 
       status.remove();
 
       const summary = document.createElement("div");
       summary.className = "ci-summary";
       summary.append(
-        card("Checks", String(checks.length)),
+        card("Suites", String(workflows.length)),
         card("Passing", String(passing)),
         card("Failing", String(failing)),
-        card("Pending", String(pending)),
+        card("Pending / never", String(pending)),
       );
       section.append(summary);
 
       const source = document.createElement("p");
       source.className = "ci-meta";
       const sourceKind = data.source?.kind === "merged_pr_head"
-        ? `merged PR #${data.source.prNumber ?? "?"} head`
-        : "main revision";
+        ? `deployment from merged PR #${data.source.prNumber ?? "?"} head`
+        : "deployment from main revision";
       source.textContent =
-        `Source: ${sourceKind} ${shortSha(data.sourceSha)} · main ${shortSha(data.mainSha)} · generated ${data.generatedAt || "unknown"}`;
+        `${sourceKind} ${shortSha(data.sourceSha)} · main ${shortSha(data.mainSha)} · generated ${data.generatedAt || "unknown"}`;
       section.append(source);
 
-      if (checks.length === 0) {
+      if (workflows.length === 0) {
         const empty = document.createElement("div");
         empty.className = "notice fail";
-        empty.textContent = "No GitHub check-runs were found for the exact source revision.";
+        empty.textContent = "No active GitHub Actions workflows were found.";
         section.append(empty);
         return;
       }
@@ -169,7 +186,7 @@
       const table = document.createElement("table");
       const thead = document.createElement("thead");
       const header = document.createElement("tr");
-      for (const label of ["Check", "Result", "App", "Details"]) {
+      for (const label of ["Suite", "Result", "Latest source", "Details"]) {
         const th = document.createElement("th");
         th.textContent = label;
         header.append(th);
@@ -178,22 +195,37 @@
       table.append(thead);
 
       const tbody = document.createElement("tbody");
-      for (const check of checks) {
+      for (const workflow of workflows) {
         const row = document.createElement("tr");
 
-        const name = document.createElement("td");
-        name.textContent = check.name || "(unnamed check)";
+        const suite = document.createElement("td");
+        const suiteName = document.createElement("span");
+        suiteName.textContent = workflow.name || "(unnamed workflow)";
+        suite.append(suiteName);
+        if (workflow.path) {
+          const suitePath = document.createElement("span");
+          suitePath.className = "ci-suite-path";
+          suitePath.textContent = workflow.path;
+          suite.append(suitePath);
+        }
 
         const result = document.createElement("td");
-        const classification = classify(check);
+        const classification = classify(workflow);
         result.textContent = classification.label;
         result.className = classification.className;
 
-        const app = document.createElement("td");
-        app.textContent = check.app || "unknown";
+        const latestSource = document.createElement("td");
+        if (workflow.run) {
+          const branch = workflow.run.headBranch || "(no branch)";
+          const event = workflow.run.event || "unknown event";
+          latestSource.textContent =
+            `${event} · ${branch} · ${shortSha(workflow.run.headSha)}`;
+        } else {
+          latestSource.textContent = "—";
+        }
 
         const details = document.createElement("td");
-        const href = safeGithubUrl(check.detailsUrl);
+        const href = safeGithubUrl(workflow.run?.url);
         if (href) {
           const link = document.createElement("a");
           link.href = href;
@@ -205,9 +237,10 @@
           details.textContent = "—";
         }
 
-        row.append(name, result, app, details);
+        row.append(suite, result, latestSource, details);
         tbody.append(row);
       }
+
       table.append(tbody);
       wrap.append(table);
       section.append(wrap);
