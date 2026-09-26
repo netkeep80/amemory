@@ -1166,6 +1166,98 @@ fn values() -> Vec<u32> {
     out
 }
 
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct WebShiftOutcome {
+    pub(crate) value: u32,
+    pub(crate) writeback: u8,
+    pub(crate) defined_mask: u32,
+    pub(crate) value_mask: u32,
+    pub(crate) undefined_mask: u32,
+    pub(crate) preserve_mask: u32,
+    pub(crate) reactions: u32,
+    pub(crate) links_after_build: u32,
+    pub(crate) links_after_first: u32,
+    pub(crate) steady_link_delta: u32,
+    pub(crate) quiescent: u8,
+}
+
+const WEB_CF: u32 = 1 << 0;
+const WEB_PF: u32 = 1 << 2;
+const WEB_AF: u32 = 1 << 4;
+const WEB_ZF: u32 = 1 << 6;
+const WEB_SF: u32 = 1 << 7;
+const WEB_OF: u32 = 1 << 11;
+
+fn web_flag_masks(states: [(u32, FlagState); 6]) -> (u32, u32, u32, u32) {
+    let mut defined = 0u32;
+    let mut values = 0u32;
+    let mut undefined = 0u32;
+    let mut preserve = 0u32;
+    for (mask, state) in states {
+        match state {
+            FlagState::Set(bit) => {
+                defined |= mask;
+                if bit != 0 { values |= mask; }
+            }
+            FlagState::Undefined => undefined |= mask,
+            FlagState::Preserve => preserve |= mask,
+        }
+    }
+    (defined, values, undefined, preserve)
+}
+
+pub(crate) fn web_run_shift32(
+    op: u32,
+    value: u32,
+    count: u32,
+) -> Option<WebShiftOutcome> {
+    if count > u8::MAX as u32 {
+        return None;
+    }
+
+    let mut f = FullFixture::new();
+    let p = Shift32Program::install(&mut f);
+    let function = match op {
+        13 => p.shl,
+        14 => p.shr,
+        15 => p.sar,
+        _ => return None,
+    };
+    let links_after_build = f.store.link_count() as u32;
+
+    let first = run_shift(&mut f, &p, function, value, count as u8);
+    let links_after_first = f.store.link_count() as u32;
+    let second = run_shift(&mut f, &p, function, value, count as u8);
+    assert_eq!(second, first, "web SHIFT32 repeat changed result");
+    let links_after_second = f.store.link_count() as u32;
+
+    let (defined_mask, value_mask, undefined_mask, preserve_mask) =
+        web_flag_masks([
+            (WEB_CF, first.cf),
+            (WEB_PF, first.pf),
+            (WEB_AF, first.af),
+            (WEB_ZF, first.zf),
+            (WEB_SF, first.sf),
+            (WEB_OF, first.of),
+        ]);
+
+    Some(WebShiftOutcome {
+        value: first.value,
+        writeback: first.writeback,
+        defined_mask,
+        value_mask,
+        undefined_mask,
+        preserve_mask,
+        reactions: first.reactions as u32,
+        links_after_build,
+        links_after_first,
+        steady_link_delta: links_after_second - links_after_first,
+        quiescent: 1,
+    })
+}
+
+
 #[test]
 #[ignore = "heavy M4 SHIFT32 effect suite; mandatory release workflow"]
 fn m4_shift32_required_counts_match_80386_profile() {
