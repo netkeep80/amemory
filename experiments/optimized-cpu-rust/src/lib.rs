@@ -66,13 +66,10 @@ impl OptimizedLinkStore {
             by_end: HashMap::new(),
             max_links,
         };
-        store.canonical_by_pair.insert(
-            Pair {
-                start: ROOT_HANDLE,
-                end: ROOT_HANDLE,
-            },
-            ROOT_HANDLE,
-        );
+        // ROOT and self-incidence forms are not ordinary PAIR representatives.
+        // An ordinary PAIR may have the same two pole handles as such a record
+        // while remaining a distinct target Link because self-incidence is
+        // relative to the record's own handle.
         store.index_record(ROOT_HANDLE, ROOT_HANDLE, ROOT_HANDLE);
         store
     }
@@ -184,13 +181,6 @@ impl OptimizedLinkStore {
             end: child,
         };
         self.records.push(Some(record));
-        self.canonical_by_pair.insert(
-            Pair {
-                start: handle,
-                end: child,
-            },
-            handle,
-        );
         self.start_forms.insert(child, handle);
         self.index_record(handle, handle, child);
         Ok(handle)
@@ -207,13 +197,6 @@ impl OptimizedLinkStore {
             end: handle,
         };
         self.records.push(Some(record));
-        self.canonical_by_pair.insert(
-            Pair {
-                start: child,
-                end: handle,
-            },
-            handle,
-        );
         self.end_forms.insert(child, handle);
         self.index_record(handle, child, handle);
         Ok(handle)
@@ -388,6 +371,20 @@ mod tests {
         assert_eq!(store.ensure_pair(k, a).unwrap(), current);
         assert_eq!(store.ensure_pair(a, b).unwrap(), relation);
         assert_eq!(store.ensure_pair(k, b).unwrap(), successor);
+
+        // Critical cyclic/self-incidence distinction:
+        // Q = END(O) has poles (O,Q), but ordinary PAIR(O,Q) is a different
+        // target P whose end points to Q rather than to P itself.
+        let end_of_k = store.import_anum("698").unwrap();
+        let ordinary_over_end = store.ensure_pair(k, end_of_k).unwrap();
+        assert_ne!(ordinary_over_end, end_of_k);
+        assert_eq!(store.export_anum(end_of_k).unwrap(), "698");
+        assert_eq!(store.export_anum(ordinary_over_end).unwrap(), "198698");
+
+        // Likewise ROOT=(R,R) does not collapse ordinary PAIR(R,R).
+        let root_pair = store.ensure_pair(ROOT_HANDLE, ROOT_HANDLE).unwrap();
+        assert_ne!(root_pair, ROOT_HANDLE);
+        assert_eq!(store.export_anum(root_pair).unwrap(), "188");
 
         let from_k = store.start_incidence(k).unwrap();
         assert!(from_k.contains(&k)); // START(K child ROOT) is self-start incident.
