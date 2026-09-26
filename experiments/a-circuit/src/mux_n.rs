@@ -6,9 +6,10 @@ use super::{
 };
 use amemory_optimized_cpu_probe::{
     structural::{
+        define_structural_interpreter, define_structural_role_dictionary,
         materialize_exact_sequence, read_exact_sequence, OptimizedStructuralEngine,
     },
-    Handle, OptimizedLinkStore,
+    Handle, OptimizedLinkStore, ROOT_HANDLE,
 };
 use serde::Serialize;
 use std::{
@@ -697,6 +698,270 @@ pub(crate) fn web_run_mux1(
 
 
 
+#[derive(Debug)]
+struct ProofMuxFixture {
+    store: OptimizedLinkStore,
+    mux1: Handle,
+    xor2: Handle,
+    and2: Handle,
+    k: Handle,
+    zero: Handle,
+    one: Handle,
+    apply: Handle,
+    theory: Handle,
+    interpreter: Handle,
+    bit_outputs: [Handle; 2],
+    bit_result_tag: Handle,
+}
+
+fn proof_binary_call(
+    store: &mut OptimizedLinkStore,
+    apply: Handle,
+    function: Handle,
+    a: Handle,
+    b: Handle,
+) -> Handle {
+    let args = materialize_exact_sequence(store, &[a, b]).unwrap();
+    call(store, apply, function, args)
+}
+
+fn install_proof_gate(
+    store: &mut OptimizedLinkStore,
+    anchors: &mut AnchorGen,
+    theory: Handle,
+    apply: Handle,
+    trigger: Handle,
+    function: Handle,
+    bits: [Handle; 2],
+    bit_outputs: [Handle; 2],
+    rows: &[(usize, usize, usize)],
+) {
+    for &(a, b, out) in rows {
+        let caller = anchors.next(store);
+        let args = materialize_exact_sequence(store, &[bits[a], bits[b]]).unwrap();
+        let invocation = call(store, apply, function, args);
+        let before = store.ensure_pair(caller, invocation).unwrap();
+        let after = store.ensure_pair(caller, bit_outputs[out]).unwrap();
+
+        let (_, admission) = define_bundle_rule(
+            store,
+            theory,
+            &[caller],
+            before,
+            &[after],
+        );
+        index_rule_for(store, &[trigger], admission);
+    }
+}
+
+fn build_proof_mux_fixture() -> ProofMuxFixture {
+    let mut store = OptimizedLinkStore::new();
+
+    let o = store.ensure_start_self_closed(ROOT_HANDLE).unwrap();
+    let c = store.ensure_end_self_closed(ROOT_HANDLE).unwrap();
+    let l = store.ensure_pair(o, c).unwrap();
+    let u = store.ensure_pair(c, o).unwrap();
+
+    // Small deterministic namespace dedicated to the portable MUX1 proof.
+    let seed = store.ensure_pair(u, l).unwrap();
+    let mut anchors = AnchorGen::new(&mut store, seed, o, c);
+
+    let theory = store
+        .ensure_pair(anchors.next(&mut store), anchors.next(&mut store))
+        .unwrap();
+    let authority_dictionary =
+        define_structural_role_dictionary(&mut store, &[]).unwrap();
+    let grammar = store
+        .ensure_pair(anchors.next(&mut store), anchors.next(&mut store))
+        .unwrap();
+    let interpreter = define_structural_interpreter(
+        &mut store,
+        authority_dictionary,
+        grammar,
+        theory,
+    )
+    .unwrap();
+
+    let xor2 = store
+        .ensure_pair(anchors.next(&mut store), anchors.next(&mut store))
+        .unwrap();
+    let and2 = store
+        .ensure_pair(anchors.next(&mut store), anchors.next(&mut store))
+        .unwrap();
+    let mux1 = store
+        .ensure_pair(anchors.next(&mut store), anchors.next(&mut store))
+        .unwrap();
+    let k = store
+        .ensure_pair(anchors.next(&mut store), anchors.next(&mut store))
+        .unwrap();
+    let xor_ab_tag = anchors.next(&mut store);
+    let and_s_tag = anchors.next(&mut store);
+    let xor_out_tag = anchors.next(&mut store);
+    let bit_result_tag = store
+        .ensure_pair(anchors.next(&mut store), anchors.next(&mut store))
+        .unwrap();
+
+    let apply = o;
+    let zero = u;
+    let one = l;
+    let bits = [zero, one];
+    let bit_outputs = [
+        materialize_exact_sequence(&mut store, &[zero]).unwrap(),
+        materialize_exact_sequence(&mut store, &[one]).unwrap(),
+    ];
+
+    // Gate truth tables are themselves Structural Rules in Theory.
+    install_proof_gate(
+        &mut store,
+        &mut anchors,
+        theory,
+        apply,
+        o,
+        xor2,
+        bits,
+        bit_outputs,
+        &[(0, 0, 0), (0, 1, 1), (1, 0, 1), (1, 1, 0)],
+    );
+    install_proof_gate(
+        &mut store,
+        &mut anchors,
+        theory,
+        apply,
+        o,
+        and2,
+        bits,
+        bit_outputs,
+        &[(0, 0, 0), (0, 1, 0), (1, 0, 0), (1, 1, 1)],
+    );
+
+    // MUX1 = A XOR ((A XOR B) AND S), expressed only as structural calls/rules.
+    {
+        let k_role = anchors.next(&mut store);
+        let s_role = anchors.next(&mut store);
+        let a_role = anchors.next(&mut store);
+        let b_role = anchors.next(&mut store);
+
+        let args =
+            materialize_exact_sequence(&mut store, &[s_role, a_role, b_role]).unwrap();
+        let invocation = call(&mut store, apply, mux1, args);
+        let before = store.ensure_pair(k_role, invocation).unwrap();
+
+        let caller = stage_frame(
+            &mut store,
+            xor_ab_tag,
+            &[k_role, s_role, a_role],
+        );
+        let xor_call =
+            proof_binary_call(&mut store, apply, xor2, a_role, b_role);
+        let after = store.ensure_pair(caller, xor_call).unwrap();
+
+        let (_, admission) = define_bundle_rule(
+            &mut store,
+            theory,
+            &[k_role, s_role, a_role, b_role],
+            before,
+            &[after],
+        );
+        index_rule_for(&mut store, &[o], admission);
+    }
+
+    {
+        let k_role = anchors.next(&mut store);
+        let s_role = anchors.next(&mut store);
+        let a_role = anchors.next(&mut store);
+        let x_role = anchors.next(&mut store);
+
+        let caller = stage_frame(
+            &mut store,
+            xor_ab_tag,
+            &[k_role, s_role, a_role],
+        );
+        let x_result =
+            materialize_exact_sequence(&mut store, &[x_role]).unwrap();
+        let before = store.ensure_pair(caller, x_result).unwrap();
+
+        let next_caller =
+            stage_frame(&mut store, and_s_tag, &[k_role, a_role]);
+        let and_call =
+            proof_binary_call(&mut store, apply, and2, s_role, x_role);
+        let after = store.ensure_pair(next_caller, and_call).unwrap();
+
+        let (_, admission) = define_bundle_rule(
+            &mut store,
+            theory,
+            &[k_role, s_role, a_role, x_role],
+            before,
+            &[after],
+        );
+        index_rule_for(&mut store, &bit_outputs, admission);
+    }
+
+    {
+        let k_role = anchors.next(&mut store);
+        let a_role = anchors.next(&mut store);
+        let y_role = anchors.next(&mut store);
+
+        let caller = stage_frame(&mut store, and_s_tag, &[k_role, a_role]);
+        let y_result =
+            materialize_exact_sequence(&mut store, &[y_role]).unwrap();
+        let before = store.ensure_pair(caller, y_result).unwrap();
+
+        let next_caller =
+            stage_frame(&mut store, xor_out_tag, &[k_role]);
+        let xor_call =
+            proof_binary_call(&mut store, apply, xor2, a_role, y_role);
+        let after = store.ensure_pair(next_caller, xor_call).unwrap();
+
+        let (_, admission) = define_bundle_rule(
+            &mut store,
+            theory,
+            &[k_role, a_role, y_role],
+            before,
+            &[after],
+        );
+        index_rule_for(&mut store, &bit_outputs, admission);
+    }
+
+    {
+        let k_role = anchors.next(&mut store);
+        let out_role = anchors.next(&mut store);
+
+        let caller = stage_frame(&mut store, xor_out_tag, &[k_role]);
+        let out_result =
+            materialize_exact_sequence(&mut store, &[out_role]).unwrap();
+        let before = store.ensure_pair(caller, out_result).unwrap();
+
+        let payload =
+            materialize_exact_sequence(&mut store, &[out_role]).unwrap();
+        let endpoint = store.ensure_pair(bit_result_tag, payload).unwrap();
+        let after = store.ensure_pair(k_role, endpoint).unwrap();
+
+        let (_, admission) = define_bundle_rule(
+            &mut store,
+            theory,
+            &[k_role, out_role],
+            before,
+            &[after],
+        );
+        index_rule_for(&mut store, &bit_outputs, admission);
+    }
+
+    ProofMuxFixture {
+        store,
+        mux1,
+        xor2,
+        and2,
+        k,
+        zero,
+        one,
+        apply,
+        theory,
+        interpreter,
+        bit_outputs,
+        bit_result_tag,
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct WebProofPreparedRoot {
@@ -913,8 +1178,7 @@ pub(crate) fn web_prove_mux1(
     // Stage 1: compile a complete portable Aset before the runtime A-memory exists.
     // This compiler store is preparation state only; it is intentionally discarded
     // before execution. Runtime identity begins only below at ProofRuntimeMemory.
-    let mut compiler = FullFixture::new();
-    let program = MuxProgram::install(&mut compiler);
+    let mut compiler = build_proof_mux_fixture();
     let bits = [compiler.zero, compiler.one];
     let args = materialize_exact_sequence(
         &mut compiler.store,
@@ -928,15 +1192,15 @@ pub(crate) fn web_prove_mux1(
     let invocation = call(
         &mut compiler.store,
         compiler.apply,
-        program.mux1,
+        compiler.mux1,
         args,
     );
     let initial = compiler.store.ensure_pair(compiler.k, invocation).unwrap();
 
     let prepared_roots = vec![
-        semantic_source(&compiler.store, "function.mux1", program.mux1),
-        semantic_source(&compiler.store, "function.dependency.xor2", program.gates.xor2),
-        semantic_source(&compiler.store, "function.dependency.and2", program.gates.and2),
+        semantic_source(&compiler.store, "function.mux1", compiler.mux1),
+        semantic_source(&compiler.store, "function.dependency.xor2", compiler.xor2),
+        semantic_source(&compiler.store, "function.dependency.and2", compiler.and2),
         semantic_source(&compiler.store, "data.select", bits[select as usize]),
         semantic_source(&compiler.store, "data.a", bits[a as usize]),
         semantic_source(&compiler.store, "data.b", bits[b as usize]),
@@ -949,7 +1213,9 @@ pub(crate) fn web_prove_mux1(
         semantic_source(&compiler.store, "invocation.call", invocation),
         semantic_source(&compiler.store, "scope.initial", initial),
         semantic_source(&compiler.store, "context.caller", compiler.k),
-        semantic_source(&compiler.store, "result.tag", program.bit_result_tag),
+        semantic_source(&compiler.store, "result.tag", compiler.bit_result_tag),
+        semantic_source(&compiler.store, "result.zero", compiler.bit_outputs[0]),
+        semantic_source(&compiler.store, "result.one", compiler.bit_outputs[1]),
     ];
     let theory_admissions = compiler
         .store
