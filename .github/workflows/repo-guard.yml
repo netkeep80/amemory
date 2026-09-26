@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   policy-check:
-    name: repo-guard advisory check
+    name: repo-guard blocking check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -34,27 +34,3 @@ jobs:
         run: |
           echo "repo-guard result: ${{ steps.repo_guard.outputs.result }}" >> "$GITHUB_STEP_SUMMARY"
           echo "${{ steps.repo_guard.outputs.summary }}" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Checkout repo-guard diagnostic runtime
-        if: failure()
-        uses: actions/checkout@v6
-        with:
-          repository: netkeep80/repo-guard
-          ref: 37a8d4dd65ac86f683c063dd1e0a6ddb685b2da6
-          path: .repo-guard-diagnostic
-
-      - name: Print repo-guard violation details
-        if: failure()
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set +e
-          (
-            cd .repo-guard-diagnostic
-            npm install --omit=dev --silent
-          )
-          node .repo-guard-diagnostic/dist/repo-guard.mjs \
-            --repo-root "$GITHUB_WORKSPACE" \
-            --enforcement blocking \
-            check-pr --format text
-          exit 0
