@@ -57,6 +57,14 @@
     "repo-guard-workflow": {
       "path": ".github/workflows/repo-guard.yml",
       "sha": "37a8d4dd65ac86f683c063dd1e0a6ddb685b2da6"
+    },
+    "version-governance": {
+      "authority": {
+        "path": "VERSION",
+        "pointer": "",
+        "format": "plain_text"
+      },
+      "advance": "semver"
     }
   },
   "content_rules": [],
@@ -76,32 +84,5 @@
         "contracts/upstream/mts-v0.13-requirements.json"
       ]
     }
-  ],
-  "document_relations": {
-    "documents": {
-      "amemory-version": {
-        "path": "VERSION",
-        "format": "plain_text"
-      }
-    },
-    "rules": [
-      {
-        "id": "amemory-version-monotonic",
-        "kind": "scalar_strictly_greater",
-        "comparator": "semver",
-        "left": {
-          "document": "amemory-version",
-          "snapshot": "head",
-          "pointer": "",
-          "type": "string"
-        },
-        "right": {
-          "document": "amemory-version",
-          "snapshot": "base",
-          "pointer": "",
-          "type": "string"
-        }
-      }
-    ]
-  }
+  ]
 }
