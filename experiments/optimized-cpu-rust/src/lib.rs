@@ -569,7 +569,23 @@ mod tests {
         amemory_anum_cpu_pool_count,
         amemory_anum_cpu_reset_pool,
         amemory_anum_cpu_set_token,
+        amemory_reaction_current_bank,
+        amemory_reaction_current_count,
+        amemory_reaction_current_member,
+        amemory_reaction_handoff_count,
+        amemory_reaction_matched_relations,
+        amemory_reaction_quiescent,
+        amemory_reaction_reset,
+        amemory_reaction_run,
+        amemory_reaction_set_current_count,
+        amemory_reaction_set_current_member,
+        amemory_reaction_set_theory_count,
+        amemory_reaction_set_theory_relation,
+        amemory_reaction_snapshot_count,
+        amemory_reaction_snapshot_theory,
+        amemory_reaction_theory_count,
     };
+    use std::collections::HashMap as StdHashMap;
     use std::sync::Mutex;
 
     static REFERENCE_LOCK: Mutex<()> = Mutex::new(());
@@ -594,6 +610,125 @@ mod tests {
             out.push(char::from_digit(amemory_anum_cpu_output_get(index), 10).unwrap());
         }
         out
+    }
+
+    const REACTION_FIXTURES: [&str; 17] = [
+        "8",          // ROOT
+        "98",         // K / START(ROOT)
+        "68",         // A / END(ROOT)
+        "16898",      // B / also R5 C->A relation
+        "998",        // C / R5 context
+        "19868",      // K->A / also R5 A->C relation
+        "16816898",   // A->B
+        "19816898",   // K->B
+        "1688",       // A->ROOT ZERO
+        "1988",       // K->ROOT
+        "1816898",    // ROOT->B
+        "116898998",  // B->C
+        "198998",     // K->C
+        "199898",     // R5 context->START
+        "199868",     // R5 context->END
+        "168998",     // A->C
+        "18998",      // ROOT->C
+    ];
+
+    fn load_reference_fixture() -> StdHashMap<&'static str, u32> {
+        amemory_anum_cpu_reset_pool();
+        let mut map = StdHashMap::new();
+        for source in REACTION_FIXTURES {
+            let handle = reference_import(source);
+            assert_ne!(handle, u32::MAX, "reference rejected {source}");
+            map.insert(source, handle);
+        }
+        map
+    }
+
+    fn load_optimized_fixture() -> (OptimizedLinkStore, StdHashMap<&'static str, Handle>) {
+        let mut store = OptimizedLinkStore::new();
+        let mut map = StdHashMap::new();
+        for source in REACTION_FIXTURES {
+            let handle = store.import_anum(source).unwrap();
+            map.insert(source, handle);
+        }
+        (store, map)
+    }
+
+    fn reference_set_current(map: &StdHashMap<&str, u32>, current: &[&str]) {
+        for (index, source) in current.iter().enumerate() {
+            assert_eq!(
+                amemory_reaction_set_current_member(index as u32, map[*source]),
+                1,
+                "reference current rejected {source}"
+            );
+        }
+        assert_eq!(amemory_reaction_set_current_count(current.len() as u32), 1);
+    }
+
+    fn reference_set_live_theory(map: &StdHashMap<&str, u32>, theory: &[&str]) {
+        for (index, source) in theory.iter().enumerate() {
+            assert_eq!(
+                amemory_reaction_set_theory_relation(index as u32, map[*source]),
+                1,
+                "reference Theory rejected {source}"
+            );
+        }
+        assert_eq!(amemory_reaction_set_theory_count(theory.len() as u32), 1);
+    }
+
+    fn reference_configure(
+        map: &StdHashMap<&str, u32>,
+        current: &[&str],
+        theory: &[&str],
+    ) {
+        amemory_reaction_reset();
+        reference_set_current(map, current);
+        reference_set_live_theory(map, theory);
+        assert_eq!(amemory_reaction_snapshot_theory(), 1);
+    }
+
+    fn reference_observe() -> PortableReactionResult {
+        let count = amemory_reaction_current_count();
+        let mut scope = Vec::new();
+        for index in 0..count {
+            scope.push(reference_export(amemory_reaction_current_member(index)));
+        }
+        scope.sort();
+        scope.dedup();
+        PortableReactionResult {
+            scope,
+            matched_relations: amemory_reaction_matched_relations(),
+            handoff: amemory_reaction_handoff_count(),
+            quiescent: amemory_reaction_quiescent() == 1,
+        }
+    }
+
+    fn reference_run_result() -> PortableReactionResult {
+        assert_eq!(amemory_reaction_run(), 1);
+        reference_observe()
+    }
+
+    fn optimized_handles(
+        map: &StdHashMap<&str, Handle>,
+        sources: &[&str],
+    ) -> Vec<Handle> {
+        sources.iter().map(|source| map[*source]).collect()
+    }
+
+    fn optimized_configure(
+        engine: &mut OptimizedReactionEngine,
+        store: &OptimizedLinkStore,
+        map: &StdHashMap<&str, Handle>,
+        current: &[&str],
+        theory: &[&str],
+    ) {
+        engine.reset();
+        engine
+            .set_current(store, &optimized_handles(map, current))
+            .unwrap();
+        engine
+            .set_theory(store, &optimized_handles(map, theory))
+            .unwrap();
+        engine.snapshot_theory(store).unwrap();
     }
 
     #[test]
