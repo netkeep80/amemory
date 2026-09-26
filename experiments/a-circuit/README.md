@@ -300,7 +300,8 @@ SUB1                                  GREEN (#80/#81)
 -> M4 arithmetic effect + CMP               GREEN (#93/#94)
 -> M4 one-bit SHL/SHR/SAR wiring             GREEN (#95/#96)
 -> M4 variable SHL/SHR/SAR count&31 effects   GREEN (#97/#98)
--> M4 ROL/ROR count&31 effects                  CURRENT (#99)
+-> M4 ROL/ROR count&31 effects                  GREEN (#99/#100)
+-> M4 RCL/RCR Word32+CF effects                  CURRENT (#101)
 ```
 
 
@@ -619,3 +620,32 @@ SF/ZF/AF/PF are absent from the patch and therefore preserved.
 Because count>1 requires no derived flag beyond wiring, those complete rotations
 are expected to execute in one Structural Rule reaction. Only count=1 needs an
 extra XOR gate and response, for three reactions total.
+
+
+## M4 — structural RCL/RCR
+
+Issue: #101
+
+RCL/RCR treat CF as the 33rd bit of the 32-bit operand:
+
+```text
+Extended33 = [b0,b1,...,b31,CF_in]
+```
+
+The runtime interface keeps CF explicit until architectural EFLAGS state exists:
+
+```text
+ROTATE_CARRY32(
+  ExactSequence_R([Word32,Count8,CF_in])
+)
+```
+
+Count8 is structurally masked through its low five positions exactly as in
+SHIFT32/ROL/ROR.
+
+For nonzero count, RCL/RCR are direct permutations of the 33 structural roles.
+The first 32 result positions form Word32 and position 32 is CF_out.
+
+Only CF/OF appear in the FlagPatch. Count zero emits an empty patch; count one
+computes OF with the architectural single-rotate formula; multibit rotates mark
+OF undefined. SF/ZF/AF/PF are preserved by absence.
