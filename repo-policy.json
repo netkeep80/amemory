@@ -79,15 +79,9 @@
   ],
   "document_relations": {
     "documents": {
-      "base-amemory-version": {
+      "amemory-version": {
         "path": "VERSION",
-        "format": "plain_text",
-        "snapshot": "base"
-      },
-      "head-amemory-version": {
-        "path": "VERSION",
-        "format": "plain_text",
-        "snapshot": "head"
+        "format": "plain_text"
       }
     },
     "rules": [
@@ -96,12 +90,14 @@
         "kind": "scalar_strictly_greater",
         "comparator": "semver",
         "left": {
-          "document": "head-amemory-version",
+          "document": "amemory-version",
+          "snapshot": "head",
           "pointer": "",
           "type": "string"
         },
         "right": {
-          "document": "base-amemory-version",
+          "document": "amemory-version",
+          "snapshot": "base",
           "pointer": "",
           "type": "string"
         }
