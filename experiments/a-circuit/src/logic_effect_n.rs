@@ -2,6 +2,9 @@ use super::{
     full_adder::{
         call, define_bundle_rule, index_rule_for, Fixture as FullFixture,
     },
+    flag_patch::{
+        set_flag_action, undefined_flag_action, FlagPatchSchema,
+    },
     logic_n::LogicProgram,
 };
 use amemory_optimized_cpu_probe::{
@@ -89,38 +92,6 @@ fn unary_call(
     call(&mut f.store, f.apply, function, args)
 }
 
-#[derive(Clone, Copy, Debug)]
-struct FlagSchema {
-    set_tag: Handle,
-    undefined_tag: Handle,
-    cf: Handle,
-    pf: Handle,
-    af: Handle,
-    zf: Handle,
-    sf: Handle,
-    of: Handle,
-}
-
-fn set_action(
-    store: &mut OptimizedLinkStore,
-    schema: FlagSchema,
-    flag: Handle,
-    value: Handle,
-) -> Handle {
-    let payload =
-        materialize_exact_sequence(store, &[flag, value]).unwrap();
-    store.ensure_pair(schema.set_tag, payload).unwrap()
-}
-
-fn undefined_action(
-    store: &mut OptimizedLinkStore,
-    schema: FlagSchema,
-    flag: Handle,
-) -> Handle {
-    let payload = materialize_exact_sequence(store, &[flag]).unwrap();
-    store.ensure_pair(schema.undefined_tag, payload).unwrap()
-}
-
 #[derive(Clone, Debug)]
 struct LogicEffectProgram {
     width: usize,
@@ -128,7 +99,7 @@ struct LogicEffectProgram {
     binary_effect: Handle,
     not_effect: Handle,
     result_tag: Handle,
-    schema: FlagSchema,
+    schema: FlagPatchSchema,
     binary_steps: usize,
     not_steps: usize,
     links_after_build: usize,
@@ -166,25 +137,16 @@ impl LogicEffectProgram {
         let result_tag =
             f.store.ensure_pair(result_left, result_right).unwrap();
 
-        let set_left = anchors.next(&mut f.store);
-        let set_right = anchors.next(&mut f.store);
-        let set_tag = f.store.ensure_pair(set_left, set_right).unwrap();
-
-        let undef_left = anchors.next(&mut f.store);
-        let undef_right = anchors.next(&mut f.store);
-        let undefined_tag =
-            f.store.ensure_pair(undef_left, undef_right).unwrap();
-
-        let schema = FlagSchema {
-            set_tag,
-            undefined_tag,
-            cf: anchors.next(&mut f.store),
-            pf: anchors.next(&mut f.store),
-            af: anchors.next(&mut f.store),
-            zf: anchors.next(&mut f.store),
-            sf: anchors.next(&mut f.store),
-            of: anchors.next(&mut f.store),
-        };
+        // Shared component ABI. Calling this with the same FullFixture seed
+        // yields the same structural FlagId / SET / UNDEFINED Links for
+        // arithmetic and logical effect producers in one A-memory.
+        let flag_seed = f.store.ensure_pair(f.k, f.full).unwrap();
+        let schema = FlagPatchSchema::install(
+            &mut f.store,
+            flag_seed,
+            f.o,
+            f.c,
+        );
 
         let binary_result_tag = anchors.next(&mut f.store);
         let not_result_tag = anchors.next(&mut f.store);
@@ -512,33 +474,33 @@ impl LogicEffectProgram {
             let word =
                 materialize_exact_sequence(&mut f.store, &bits).unwrap();
 
-            let set_cf = set_action(
+            let set_cf = set_flag_action(
                 &mut f.store,
                 schema,
                 schema.cf,
                 f.zero,
             );
-            let set_pf = set_action(
+            let set_pf = set_flag_action(
                 &mut f.store,
                 schema,
                 schema.pf,
                 pf,
             );
             let undef_af =
-                undefined_action(&mut f.store, schema, schema.af);
-            let set_zf = set_action(
+                undefined_flag_action(&mut f.store, schema, schema.af);
+            let set_zf = set_flag_action(
                 &mut f.store,
                 schema,
                 schema.zf,
                 zf,
             );
-            let set_sf = set_action(
+            let set_sf = set_flag_action(
                 &mut f.store,
                 schema,
                 schema.sf,
                 bits[width - 1],
             );
-            let set_of = set_action(
+            let set_of = set_flag_action(
                 &mut f.store,
                 schema,
                 schema.of,
@@ -739,7 +701,7 @@ fn decode_word(
 
 fn decode_set(
     f: &FullFixture,
-    schema: FlagSchema,
+    schema: FlagPatchSchema,
     action: Handle,
     expected_flag: Handle,
 ) -> u8 {
@@ -753,7 +715,7 @@ fn decode_set(
 
 fn decode_undefined(
     f: &FullFixture,
-    schema: FlagSchema,
+    schema: FlagPatchSchema,
     action: Handle,
     expected_flag: Handle,
 ) {

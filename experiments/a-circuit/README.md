@@ -434,3 +434,9 @@ LOGIC_EFFECT_RESULT(
 
 AND/OR/XOR use `WriteBack=1`; TEST reuses exactly the same structural AND path
 with `WriteBack=0`. NOT uses `WriteBack=1` and an empty patch.
+
+
+The FlagPatch schema is shared across M4 components. Reinstalling it from the
+same fixture seed reconstructs the same structural `FlagId`, `SET` and
+`UNDEFINED` Links. This is required so later arithmetic/CMP effects and logical
+effects can be applied by one EFLAGS state-transition component.
