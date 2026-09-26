@@ -8,6 +8,7 @@ import {
   outputHtml,
   outputValue,
 } from "./i386-lab-view.mjs";
+import { renderProofPipeline } from "./i386-proof-view.mjs";
 
 function parseWord(text) {
   const value = String(text).trim();
@@ -144,9 +145,41 @@ function styleLab() {
     .lab-table input,.lab-table select { width:100%; min-width:95px; box-sizing:border-box; background:var(--surface-2); color:var(--text); border:1px solid var(--line); border-radius:7px; padding:7px; }
     .lab-vector-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
     .lab-trace { margin-top:12px; padding:10px 12px; border:1px solid var(--line); border-radius:10px; }
+    .proof-pipeline { margin-top:18px; border-top:2px solid var(--text); padding-top:18px; }
+    .proof-title { display:flex; justify-content:space-between; gap:16px; align-items:flex-start; }
+    .proof-title h3 { margin:0 0 4px; font-size:1.15rem; }
+    .proof-title p { margin:0; color:var(--muted); }
+    .proof-memory { min-width:250px; display:grid; gap:3px; padding:10px 12px; border-radius:12px; border:2px solid var(--line); }
+    .proof-memory small,.proof-memory span { color:var(--muted); }
+    .proof-memory strong { font-family:ui-monospace,SFMono-Regular,Consolas,monospace; }
+    .proof-pass { border-color:var(--good); }
+    .proof-fail { border-color:var(--bad); }
+    .proof-stages { display:grid; gap:8px; margin-top:14px; }
+    .proof-stage { display:grid; grid-template-columns:44px minmax(0,1fr); gap:12px; border:1px solid var(--line); border-radius:14px; padding:14px; background:var(--surface-2); }
+    .proof-stage-number { width:36px; height:36px; display:grid; place-items:center; border-radius:50%; background:var(--accent); color:#fff; font-weight:900; font-size:1.05rem; }
+    .proof-stage h4 { margin:3px 0 6px; }
+    .proof-stage h5 { margin:14px 0 7px; }
+    .proof-stage p { margin:4px 0 10px; }
+    .proof-arrow { text-align:center; color:var(--muted); font-weight:800; }
+    .proof-kpis { display:flex; flex-wrap:wrap; gap:8px; margin:10px 0; }
+    .proof-kpis > span { display:grid; gap:2px; min-width:120px; padding:8px 10px; border:1px solid var(--line); border-radius:9px; background:var(--surface); }
+    .proof-kpis small { color:var(--muted); }
+    .proof-root-list { display:grid; gap:6px; }
+    .proof-root { display:grid; grid-template-columns:minmax(130px,.6fr) minmax(0,2fr); gap:6px 10px; padding:8px 10px; border:1px solid var(--line); border-radius:9px; background:var(--surface); }
+    .proof-root > span { color:var(--muted); font-size:.78rem; }
+    .proof-root code { grid-column:2; overflow-wrap:anywhere; }
+    .proof-aset { max-height:340px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; padding:10px; background:var(--surface); border:1px solid var(--line); border-radius:9px; font-size:.72rem; }
+    .proof-reaction-table code { max-width:360px; display:inline-block; overflow-wrap:anywhere; }
+    .proof-result-anums { display:grid; gap:8px; margin:10px 0; }
+    .proof-result-anums > div { display:grid; gap:5px; padding:9px 10px; border:1px solid var(--line); border-radius:9px; background:var(--surface); }
+    .proof-result-anums code { overflow-wrap:anywhere; }
+    .proof-visual-toolbar { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; margin:14px 0 8px; }
+    .proof-visual-toolbar span { color:var(--muted); }
+    .proof-visual { min-height:280px; overflow:auto; border:1px solid var(--line); border-radius:12px; background:var(--surface); padding:8px; }
+    .proof-visual svg { width:100%; min-width:720px; min-height:520px; }
     .lab-hidden { display:none !important; }
     @media(max-width:1050px){ .lab-layout{grid-template-columns:1fr;} .lab-catalog-shell{position:static;max-height:none;} .lab-catalog{grid-template-columns:repeat(3,minmax(0,1fr));} }
-    @media(max-width:820px){ .lab-catalog{grid-template-columns:repeat(2,minmax(0,1fr));} .lab-constructor{grid-template-columns:1fr;} .lab-chip::before,.lab-chip::after,.lab-input-port::after,.lab-output-port::before{display:none;} .lab-evidence-io,.lab-spec-grid,.lab-metrics{grid-template-columns:1fr 1fr;} }
+    @media(max-width:820px){ .lab-catalog{grid-template-columns:repeat(2,minmax(0,1fr));} .lab-constructor{grid-template-columns:1fr;} .lab-chip::before,.lab-chip::after,.lab-input-port::after,.lab-output-port::before{display:none;} .lab-evidence-io,.lab-spec-grid,.lab-metrics{grid-template-columns:1fr 1fr;} .proof-title{flex-direction:column;} .proof-memory{min-width:0;width:100%;box-sizing:border-box;} .proof-root{grid-template-columns:1fr;} .proof-root code{grid-column:1;} }
     @media(max-width:560px){ .lab-catalog{grid-template-columns:1fr;} .lab-evidence-io,.lab-spec-grid,.lab-metrics{grid-template-columns:1fr;} .lab-modebar{align-items:flex-start;flex-direction:column;} }
   `;
   document.head.append(style);
@@ -315,13 +348,28 @@ function collectOutcome(wasm) {
   };
 }
 
+function collectProof(wasm) {
+  if (wasm.amemory_i386_lab_proof_available?.() !== 1) return null;
+  const len = wasm.amemory_i386_lab_proof_json_len?.() >>> 0;
+  if (!len) throw new Error("proof ABI reported empty JSON");
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i += 1) {
+    const value = wasm.amemory_i386_lab_proof_json_byte?.(i) >>> 0;
+    if (value > 255) throw new Error(`proof ABI emitted invalid byte at ${i}`);
+    bytes[i] = value;
+  }
+  return JSON.parse(new TextDecoder().decode(bytes));
+}
+
 function runBlock(wasm, block, values) {
   if (wasm.amemory_i386_lab_supports?.(block.opcode) !== 1) {
     throw new Error(`registry block ${block.name} is not supported by A-Circuit WASM`);
   }
   const ok = wasm.amemory_i386_lab_run(...abiArgs(block, values));
   if (ok !== 1) throw new Error(`${block.name}: A-Circuit rejected input`);
-  return collectOutcome(wasm);
+  const outcome = collectOutcome(wasm);
+  outcome.proof = collectProof(wasm);
+  return outcome;
 }
 
 function compactOutput(block, out) {
@@ -358,7 +406,8 @@ function renderSingle(section, block, wasm) {
         <div class="lab-port-stack" id="lab-output-live">${outputPlaceholder(block)}</div>
       </div>
     </div>
-    <div class="lab-evidence" id="lab-single-result"></div>`;
+    <div class="lab-evidence" id="lab-single-result"></div>
+    <div id="lab-structural-proof"></div>`;
 
   const controls = workspace.querySelector("#lab-single-inputs");
   controls.querySelectorAll("[data-input]").forEach((control) => {
@@ -375,7 +424,7 @@ function renderSingle(section, block, wasm) {
     control.addEventListener("change", updatePreview);
   });
 
-  workspace.querySelector("#lab-run-single").addEventListener("click", () => {
+  workspace.querySelector("#lab-run-single").addEventListener("click", async () => {
     const status = section.querySelector("#lab-status");
     try {
       const values = readInputs(controls, block);
@@ -384,6 +433,12 @@ function renderSingle(section, block, wasm) {
       const out = runBlock(wasm, block, values);
       workspace.querySelector("#lab-output-live").innerHTML = outputHtml(block, out);
       workspace.querySelector("#lab-single-result").innerHTML = evidenceHtml(block, values, out);
+      const proofTarget = workspace.querySelector("#lab-structural-proof");
+      if (out.proof) {
+        await renderProofPipeline(proofTarget, out.proof);
+      } else {
+        proofTarget.innerHTML = '<div class="notice">Full portable-Aset / one-memory proof is currently enabled for canonical MUX1 while the same proof ABI is generalized to the remaining blocks.</div>';
+      }
       status.textContent = `${block.name}: real structural result returned by A-Circuit WASM.`;
       status.className = "notice lab-ok";
     } catch (error) {
@@ -587,7 +642,7 @@ async function bootLab() {
     configureBlock(section, block, wasm);
   };
   setupCatalog(section, registry, selectBlock);
-  selectBlock(registry.blocks[0].id);
+  selectBlock(byId.has("mux1") ? "mux1" : registry.blocks[0].id);
 }
 
 if (typeof document !== "undefined") {
