@@ -179,6 +179,10 @@ jobs:
             "RESULT + VISUALIZATION",
             "ONE RUNTIME A-MEMORY",
             "A-memory#7",
+            "Blueprint 2D",
+            "Static 3D",
+            "Live physics 3D",
+            "@mts/visual 0.3.0",
           ]) {
             if (!proofHtml.includes(required)) {
               throw new Error("proof browser renderer missing: " + required);
@@ -221,6 +225,10 @@ jobs:
           npm --prefix /tmp/mts_visual run build --silent
           test -s /tmp/mts_visual/dist/src/index.js
           test -s /tmp/mts_visual/dist/src/blueprint-svg.js
+          test -s /tmp/mts_visual/dist/src/three/index.js
+          test "$(node -p "require('/tmp/mts_visual/node_modules/three/package.json').version")" = "0.185.1"
+          test -s /tmp/mts_visual/node_modules/three/build/three.module.js
+          test -s /tmp/mts_visual/node_modules/three/examples/jsm/controls/OrbitControls.js
 
       - name: Build the real A-Circuit WASM
         run: |
