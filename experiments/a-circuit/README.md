@@ -716,3 +716,30 @@ All results use the shared `ALU_EFFECT_RESULT` ABI.
 INC/DEC omit CF from their FlagPatch, so architectural CF is preserved by
 absence. NEG publishes the complete six-flag arithmetic patch, including CF
 directly inherited from the existing subtraction path.
+
+
+## M4 MUL preparation — Wide64 ADD64
+
+Issue: #107
+
+The first multiplication prerequisite is a canonical two-word carrier:
+
+```text
+Wide64 = ExactSequence_R([LoWord32,HiWord32])
+```
+
+ADD64 composes the already-proven 32-bit arithmetic program twice:
+
+```text
+low  = ADD32(A.lo,B.lo,Cin)
+high = ADC32(A.hi,B.hi,low.Carry)
+```
+
+The low carry is handed structurally into the high call. Host code does not
+propagate carry or construct either runtime half.
+
+Result ABI:
+
+```text
+WIDE64_ADD_RESULT(ExactSequence_R([Sum64,Cout]))
+```
