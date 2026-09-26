@@ -1,15 +1,113 @@
-name: branch hygiene
+name: branch policy and hygiene
 
+# Side branches are expected to become PR-backed work surfaces immediately.
 on:
+  push:
+    branches-ignore:
+      - main
   pull_request:
     types: [closed]
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
+  ensure-side-branch-pr:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure branch has a draft PR or delete empty branch
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const branch = context.ref.replace(/^refs\/heads\//, "");
+            const defaultBranch = context.payload.repository.default_branch;
+
+            if (!branch || branch === defaultBranch) {
+              core.info("Default branch is never handled by side-branch policy.");
+              return;
+            }
+
+            const comparison = await github.rest.repos.compareCommitsWithBasehead({
+              owner,
+              repo,
+              basehead: `${defaultBranch}...${branch}`
+            });
+
+            if (comparison.data.ahead_by === 0) {
+              core.info(`Deleting side branch with no unique commits: ${branch}`);
+              await github.rest.git.deleteRef({
+                owner,
+                repo,
+                ref: `heads/${branch}`
+              });
+              return;
+            }
+
+            const pulls = await github.paginate(github.rest.pulls.list, {
+              owner,
+              repo,
+              state: "open",
+              base: defaultBranch,
+              head: `${owner}:${branch}`,
+              per_page: 100
+            });
+
+            if (pulls.length > 0) {
+              core.info(`Open PR already exists for ${branch}: #${pulls[0].number}`);
+              return;
+            }
+
+            const files = (comparison.data.files || []).map(file => file.filename);
+            const scope = files.length > 0
+              ? files.map(path => `  - ${JSON.stringify(path)}`).join("\n")
+              : '  - "**"';
+
+            const body = [
+              "This draft PR was created automatically by the repository branch policy.",
+              "",
+              "Complete the intent/evidence before marking it ready.",
+              "",
+              "## Намерение изменения",
+              "",
+              "```repo-guard-yaml",
+              "change_type: feature",
+              "scope:",
+              scope,
+              "budgets: {}",
+              "anchors:",
+              "  affects: []",
+              "  implements: []",
+              "  verifies: []",
+              "must_touch: []",
+              "must_not_touch: []",
+              "expected_effects:",
+              '  - "Describe the intended observable effect before marking ready"',
+              "```"
+            ].join("\n");
+
+            // Requires Settings > Actions > General > "Allow GitHub Actions to create and approve pull requests".
+            const created = await github.rest.pulls.create({
+              owner,
+              repo,
+              title: `Draft: ${branch}`,
+              head: branch,
+              base: defaultBranch,
+              body,
+              draft: true
+            });
+
+            core.info(`Created draft PR #${created.data.number} for ${branch}`);
+
   delete-merged-branch:
     if: >
+      github.event_name == 'pull_request' &&
       github.event.pull_request.merged == true &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.head.ref != github.event.repository.default_branch
@@ -28,3 +126,95 @@ jobs:
               repo,
               ref: `heads/${branch}`
             });
+
+  sweep-orphan-branches:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete fully merged orphans and create PRs for live orphans
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const { data: repository } = await github.rest.repos.get({ owner, repo });
+            const defaultBranch = repository.default_branch;
+
+            const branches = await github.paginate(github.rest.repos.listBranches, {
+              owner,
+              repo,
+              per_page: 100
+            });
+
+            for (const entry of branches) {
+              const branch = entry.name;
+              if (branch === defaultBranch) continue;
+
+              const pulls = await github.paginate(github.rest.pulls.list, {
+                owner,
+                repo,
+                state: "open",
+                base: defaultBranch,
+                head: `${owner}:${branch}`,
+                per_page: 100
+              });
+
+              const comparison = await github.rest.repos.compareCommitsWithBasehead({
+                owner,
+                repo,
+                basehead: `${defaultBranch}...${branch}`
+              });
+
+              if (comparison.data.ahead_by === 0 && pulls.length === 0) {
+                core.info(`Deleting fully merged/orphaned branch: ${branch}`);
+                await github.rest.git.deleteRef({
+                  owner,
+                  repo,
+                  ref: `heads/${branch}`
+                });
+                continue;
+              }
+
+              if (comparison.data.ahead_by > 0 && pulls.length === 0) {
+                const files = (comparison.data.files || []).map(file => file.filename);
+                const scope = files.length > 0
+                  ? files.map(path => `  - ${JSON.stringify(path)}`).join("\n")
+                  : '  - "**"';
+
+                const body = [
+                  "This draft PR was created automatically by the scheduled branch sweep.",
+                  "",
+                  "The branch contains unique commits but had no open PR.",
+                  "",
+                  "## Намерение изменения",
+                  "",
+                  "```repo-guard-yaml",
+                  "change_type: feature",
+                  "scope:",
+                  scope,
+                  "budgets: {}",
+                  "anchors:",
+                  "  affects: []",
+                  "  implements: []",
+                  "  verifies: []",
+                  "must_touch: []",
+                  "must_not_touch: []",
+                  "expected_effects:",
+                  '  - "Describe the intended observable effect before marking ready"',
+                  "```"
+                ].join("\n");
+
+                // Requires Settings > Actions > General > "Allow GitHub Actions to create and approve pull requests".
+            const created = await github.rest.pulls.create({
+                  owner,
+                  repo,
+                  title: `Draft: ${branch}`,
+                  head: branch,
+                  base: defaultBranch,
+                  body,
+                  draft: true
+                });
+
+                core.warning(`Recovered orphan branch ${branch} as draft PR #${created.data.number}`);
+              }
+            }
