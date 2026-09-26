@@ -293,9 +293,9 @@ Required order:
 SUB1                                  GREEN (#80/#81)
 -> SUB_N 4/8/16/32                   GREEN (#83/#84)
 -> shared ADD/ADC/SUB/SBB datapath       GREEN (#85/#86)
--> CF/PF/AF/ZF/SF/OF                      CURRENT (#87)
--> M3 complete
--> M4 32-bit ALU
+-> CF/PF/AF/ZF/SF/OF                      GREEN (#87/#88)
+-> M3 complete                              GREEN
+-> M4 32-bit ALU                           CURRENT (#89)
 ```
 
 
@@ -343,3 +343,45 @@ The final flagged payload is ordered as:
 ```
 
 and is itself placed under a stable result envelope so M4 can compose it directly.
+
+
+## M4 — structural Word logic
+
+Issue: #89
+
+M3 arithmetic is complete. M4 starts with word-level logical functions.
+
+Binary operation selection is itself structural data:
+
+```text
+WORD_BIN + ExactSequence_R([Gate,Aword,Bword])
+```
+
+where `Gate` is the actual structural function Link for `AND2`, `OR2` or
+`XOR2`. One generic word controller invokes that function at every bit position;
+there is no host operation dispatch inside execution and no giant ALU truth table.
+
+Unary NOT keeps its natural arity:
+
+```text
+WORD_NOT + ExactSequence_R([Aword])
+```
+
+Both return under the stable component ABI:
+
+```text
+WORD_LOGIC_RESULT(ExactSequence_R([Word]))
+```
+
+The same AND result is the value source for x86 TEST. Destination suppression is
+an architectural-state concern and is intentionally deferred.
+
+Flag behavior is also deferred rather than falsified:
+
+```text
+AND/OR/XOR/TEST: CF=0, OF=0, SF/ZF/PF from result, AF undefined
+NOT:             flags unchanged
+```
+
+The follow-up must therefore represent a partial flag update instead of inventing
+a deterministic AF value.

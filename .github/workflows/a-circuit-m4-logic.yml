@@ -1,0 +1,39 @@
+name: A-Circuit M4 Word32 logic
+
+on:
+  pull_request:
+    paths:
+      - "experiments/a-circuit/**"
+      - ".github/workflows/a-circuit-m4-logic.yml"
+  push:
+    branches: [main]
+    paths:
+      - "experiments/a-circuit/**"
+      - ".github/workflows/a-circuit-m4-logic.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  logic:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal
+
+      - name: Structural Word logic suite
+        run: |
+          cargo +1.98.1 test \
+            --release \
+            --manifest-path experiments/a-circuit/Cargo.toml \
+            m4_logic_ \
+            -- --ignored --nocapture --test-threads=1
+
+      - name: M4 logic architecture policy
+        run: |
+          echo "WORD_BIN takes the structural gate function Link as input data."
+          echo "One controller executes AND OR XOR; WORD_NOT preserves unary arity."
+          echo "TEST reuses AND result; partial flag update remains a separate layer."
