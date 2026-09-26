@@ -43,7 +43,10 @@
     code, pre { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
     .hero { display: flex; justify-content: space-between; gap: 24px; align-items: end; margin-bottom: 24px; }
     .hero p { max-width: 720px; margin: 8px 0 0; }
+    .hero-badges { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
     .badge { padding: 7px 11px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--muted); font-size: .82rem; white-space: nowrap; }
+    .badge strong { color: var(--text); }
+    .badge code { color: var(--text); }
     .status-grid { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 12px; margin: 22px 0; }
     .status-card, .flow-card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); }
     .status-card { padding: 16px; min-height: 104px; }
@@ -89,7 +92,10 @@
       <h1>A-memory</h1>
       <p>Browser CPU/WASM ↔ WebGPU diagnostic dashboard. Portable structure is shown first; backend-local handles and raw evidence remain available below.</p>
     </div>
-    <span class="badge">minimal-portable-amemory-execution @ 0.1.0</span>
+    <div class="hero-badges">
+      <span class="badge" id="browser-lab-build">browser lab <strong id="browser-lab-version">loading…</strong> · main <code id="browser-lab-sha">loading…</code></span>
+      <span class="badge">execution profile · minimal-portable-amemory-execution @ 0.1.0</span>
+    </div>
   </header>
 
   <section class="status-grid" aria-label="System overview">
@@ -272,6 +278,7 @@
     <pre id="details"></pre>
   </details>
 
+  <script type="module" src="./build-info.js"></script>
   <script type="module" src="./app.js"></script>
   <script type="module" src="./i386-lab.js"></script>
 </main>
