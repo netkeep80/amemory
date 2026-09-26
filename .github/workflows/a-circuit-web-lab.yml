@@ -118,6 +118,7 @@ jobs:
             prepare: {
               compilerLabel: "compiler only",
               runtimeMemoryExists: false,
+              compiledLinks: 12,
               asetAnums: ["8", "98"],
               semanticRoots: [
                 { role: "function.mux1", source: "98" },
@@ -329,6 +330,9 @@ jobs:
             if (!proof.load.portableRoundTrip || proof.load.linksBeforeLoad !== 1 || proof.load.linksAfterLoad <= 1) {
               throw new Error("portable load witness failed");
             }
+            if (proof.load.linksAfterLoad !== proof.prepare.compiledLinks) {
+              throw new Error("runtime A-memory does not contain the complete compiled Aset");
+            }
             if (!proof.execute.reactions.every((step) => step.memoryInstanceId === memoryId)) {
               throw new Error("reaction trace used more than one A-memory");
             }
@@ -337,6 +341,9 @@ jobs:
             }
             if (!proof.result.oracleMatches || proof.result.identicalRerunLinkDelta !== 0) {
               throw new Error("MUX1 proof result/or rerun witness failed");
+            }
+            if (proof.result.visualLinks.length !== proof.result.linksFinal) {
+              throw new Error("visual snapshot does not contain every runtime Link");
             }
             const visualKeys = new Set(proof.result.visualLinks.map((link) => link.key));
             for (const link of proof.result.visualLinks) {
