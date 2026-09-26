@@ -171,6 +171,11 @@ static mut ANUM_CPU_END: [u32; ANUM_CPU_SLOTS] = [0; ANUM_CPU_SLOTS];
 static mut ANUM_CPU_USED: [u32; ANUM_CPU_SLOTS] = [0; ANUM_CPU_SLOTS];
 static mut ANUM_CPU_INPUT: [u32; ANUM_CPU_MAX_TOKENS] = [0; ANUM_CPU_MAX_TOKENS];
 static mut ANUM_CPU_OUTPUT: [u32; ANUM_CPU_MAX_TOKENS] = [0; ANUM_CPU_MAX_TOKENS];
+static mut ANUM_CPU_STAGE_START: [u32; ANUM_CPU_SLOTS] = [0; ANUM_CPU_SLOTS];
+static mut ANUM_CPU_STAGE_END: [u32; ANUM_CPU_SLOTS] = [0; ANUM_CPU_SLOTS];
+static mut ANUM_CPU_STAGE_USED: [u32; ANUM_CPU_SLOTS] = [0; ANUM_CPU_SLOTS];
+static mut ANUM_CPU_STAGE_ACTIVE: u32 = 0;
+static mut ANUM_CPU_STAGE_MEMBER_COUNT: u32 = 0;
 
 #[derive(Clone, Copy)]
 struct AnumCpuPool {
@@ -310,6 +315,51 @@ impl AnumCpuPool {
     }
 }
 
+fn anum_cpu_root_only_pool() -> AnumCpuPool {
+    let mut pool = AnumCpuPool {
+        start: [0; ANUM_CPU_SLOTS],
+        end: [0; ANUM_CPU_SLOTS],
+        used: [0; ANUM_CPU_SLOTS],
+    };
+    pool.used[ANUM_CPU_ROOT as usize] = 1;
+    pool.start[ANUM_CPU_ROOT as usize] = ANUM_CPU_ROOT;
+    pool.end[ANUM_CPU_ROOT as usize] = ANUM_CPU_ROOT;
+    pool
+}
+
+fn anum_cpu_stage_snapshot() -> Option<AnumCpuPool> {
+    if unsafe { ANUM_CPU_STAGE_ACTIVE } == 0 {
+        return None;
+    }
+    let mut pool = AnumCpuPool {
+        start: [0; ANUM_CPU_SLOTS],
+        end: [0; ANUM_CPU_SLOTS],
+        used: [0; ANUM_CPU_SLOTS],
+    };
+    let mut i = 0;
+    while i < ANUM_CPU_SLOTS {
+        unsafe {
+            pool.start[i] = ANUM_CPU_STAGE_START[i];
+            pool.end[i] = ANUM_CPU_STAGE_END[i];
+            pool.used[i] = ANUM_CPU_STAGE_USED[i];
+        }
+        i += 1;
+    }
+    Some(pool)
+}
+
+fn anum_cpu_stage_publish(pool: &AnumCpuPool) {
+    let mut i = 0;
+    while i < ANUM_CPU_SLOTS {
+        unsafe {
+            ANUM_CPU_STAGE_START[i] = pool.start[i];
+            ANUM_CPU_STAGE_END[i] = pool.end[i];
+            ANUM_CPU_STAGE_USED[i] = pool.used[i];
+        }
+        i += 1;
+    }
+}
+
 fn anum_cpu_import_node(
     tokens: &[u32],
     cursor: &mut usize,
@@ -396,11 +446,16 @@ pub extern "C" fn amemory_anum_cpu_reset_pool() {
             ANUM_CPU_START[i] = 0;
             ANUM_CPU_END[i] = 0;
             ANUM_CPU_USED[i] = 0;
+            ANUM_CPU_STAGE_START[i] = 0;
+            ANUM_CPU_STAGE_END[i] = 0;
+            ANUM_CPU_STAGE_USED[i] = 0;
             i += 1;
         }
         ANUM_CPU_USED[ANUM_CPU_ROOT as usize] = 1;
         ANUM_CPU_START[ANUM_CPU_ROOT as usize] = ANUM_CPU_ROOT;
         ANUM_CPU_END[ANUM_CPU_ROOT as usize] = ANUM_CPU_ROOT;
+        ANUM_CPU_STAGE_ACTIVE = 0;
+        ANUM_CPU_STAGE_MEMBER_COUNT = 0;
     }
 }
 
@@ -416,10 +471,91 @@ pub extern "C" fn amemory_anum_cpu_set_token(index: u32, token: u32) -> u32 {
     1
 }
 
-/// Transactional bounded import. The global pool is published only after the
-/// complete prefix Anum is consumed and a local handle is obtained.
+/// Begin an atomic Aset replacement load. The published pool remains untouched
+/// until commit; staging starts from the canonical ROOT-only pool.
+#[no_mangle]
+pub extern "C" fn amemory_anum_cpu_load_begin() -> u32 {
+    let stage = anum_cpu_root_only_pool();
+    anum_cpu_stage_publish(&stage);
+    unsafe {
+        ANUM_CPU_STAGE_ACTIVE = 1;
+        ANUM_CPU_STAGE_MEMBER_COUNT = 0;
+    }
+    1
+}
+
+/// Import one complete Anum into the unpublished Aset staging pool.
+/// A failed member alters neither published state nor prior staged members.
+#[no_mangle]
+pub extern "C" fn amemory_anum_cpu_load_member(token_count: u32) -> u32 {
+    if unsafe { ANUM_CPU_STAGE_ACTIVE } == 0 {
+        return ANUM_CPU_NONE;
+    }
+    let count = token_count as usize;
+    if count == 0 || count > ANUM_CPU_MAX_TOKENS {
+        return ANUM_CPU_NONE;
+    }
+
+    let mut tokens = [0_u32; ANUM_CPU_MAX_TOKENS];
+    let mut i = 0;
+    while i < count {
+        unsafe { tokens[i] = ANUM_CPU_INPUT[i]; }
+        i += 1;
+    }
+
+    let Some(mut scratch) = anum_cpu_stage_snapshot() else {
+        return ANUM_CPU_NONE;
+    };
+    let mut cursor = 0;
+    let Some(handle) = anum_cpu_import_node(&tokens[..count], &mut cursor, &mut scratch) else {
+        return ANUM_CPU_NONE;
+    };
+    if cursor != count {
+        return ANUM_CPU_NONE;
+    }
+
+    anum_cpu_stage_publish(&scratch);
+    unsafe { ANUM_CPU_STAGE_MEMBER_COUNT += 1; }
+    handle
+}
+
+/// Publish the complete staged Aset in one handoff.
+#[no_mangle]
+pub extern "C" fn amemory_anum_cpu_load_commit() -> u32 {
+    if unsafe { ANUM_CPU_STAGE_ACTIVE } == 0 || unsafe { ANUM_CPU_STAGE_MEMBER_COUNT } == 0 {
+        return 0;
+    }
+    let Some(stage) = anum_cpu_stage_snapshot() else {
+        return 0;
+    };
+    stage.publish();
+    unsafe {
+        ANUM_CPU_STAGE_ACTIVE = 0;
+        ANUM_CPU_STAGE_MEMBER_COUNT = 0;
+    }
+    1
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_anum_cpu_load_abort() {
+    unsafe {
+        ANUM_CPU_STAGE_ACTIVE = 0;
+        ANUM_CPU_STAGE_MEMBER_COUNT = 0;
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_anum_cpu_load_active() -> u32 {
+    unsafe { ANUM_CPU_STAGE_ACTIVE }
+}
+
+/// Transactional bounded single-Anum import. It is disabled while a batch Aset
+/// load is active so published state cannot bypass the staging boundary.
 #[no_mangle]
 pub extern "C" fn amemory_anum_cpu_import(token_count: u32) -> u32 {
+    if unsafe { ANUM_CPU_STAGE_ACTIVE } != 0 {
+        return ANUM_CPU_NONE;
+    }
     let count = token_count as usize;
     if count == 0 || count > ANUM_CPU_MAX_TOKENS {
         return ANUM_CPU_NONE;
@@ -682,6 +818,11 @@ pub extern "C" fn amemory_reaction_run() -> u32 {
     // Quiescence is a semantic result of a successful complete reaction evaluation,
     // never a stale scheduler/runtime condition. Clear it before any fail-closed exit.
     unsafe { REACTION_QUIESCENT = 0; }
+
+    // An Aset still in staging is not a published executable network.
+    if unsafe { ANUM_CPU_STAGE_ACTIVE } != 0 {
+        return 0;
+    }
 
     let pool = AnumCpuPool::snapshot();
 
@@ -976,6 +1117,65 @@ mod anum_boundary_tests {
         let capacity = format!("{}8", "9".repeat(70));
         assert_eq!(import(&capacity), ANUM_CPU_NONE);
         assert_eq!(amemory_anum_cpu_pool_count(), stable_count);
+    }
+
+    #[test]
+    fn atomic_multi_anum_aset_load() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        amemory_anum_cpu_reset_pool();
+
+        let baseline = import("998");
+        assert_ne!(baseline, ANUM_CPU_NONE);
+        let baseline_count = amemory_anum_cpu_pool_count();
+        assert_eq!(export(baseline), "998");
+
+        assert_eq!(amemory_anum_cpu_load_begin(), 1);
+        assert_eq!(amemory_anum_cpu_load_active(), 1);
+
+        for (i, byte) in "98".bytes().enumerate() {
+            assert_eq!(amemory_anum_cpu_set_token(i as u32, (byte - b'0') as u32), 1);
+        }
+        assert_ne!(amemory_anum_cpu_load_member(2), ANUM_CPU_NONE);
+
+        assert_eq!(amemory_anum_cpu_set_token(0, 5), 1);
+        assert_eq!(amemory_anum_cpu_load_member(1), ANUM_CPU_NONE);
+        assert_eq!(amemory_anum_cpu_pool_count(), baseline_count);
+        assert_eq!(export(baseline), "998");
+
+        // No ordinary publication or execution may bypass LOADING.
+        assert_eq!(import("68"), ANUM_CPU_NONE);
+        assert_eq!(amemory_reaction_run(), 0);
+        assert_eq!(amemory_reaction_quiescent(), 0);
+
+        amemory_anum_cpu_load_abort();
+        assert_eq!(amemory_anum_cpu_load_active(), 0);
+        assert_eq!(amemory_anum_cpu_pool_count(), baseline_count);
+
+        assert_eq!(amemory_anum_cpu_load_begin(), 1);
+        let mut staged = [ANUM_CPU_NONE; 3];
+        for (index, source) in ["98", "68", "19868"].iter().enumerate() {
+            for (i, byte) in source.bytes().enumerate() {
+                assert_eq!(amemory_anum_cpu_set_token(i as u32, (byte - b'0') as u32), 1);
+            }
+            staged[index] = amemory_anum_cpu_load_member(source.len() as u32);
+            assert_ne!(staged[index], ANUM_CPU_NONE);
+        }
+
+        // New Aset is still invisible until the single commit.
+        assert_eq!(amemory_anum_cpu_pool_count(), baseline_count);
+        assert_eq!(amemory_anum_cpu_load_commit(), 1);
+        assert_eq!(amemory_anum_cpu_load_active(), 0);
+
+        // ROOT + START(ROOT) + END(ROOT) + PAIR(START, END).
+        assert_eq!(amemory_anum_cpu_pool_count(), 4);
+        assert_eq!(export(staged[0]), "98");
+        assert_eq!(export(staged[1]), "68");
+        assert_eq!(export(staged[2]), "19868");
+
+        assert_eq!(amemory_anum_cpu_load_begin(), 1);
+        assert_eq!(amemory_anum_cpu_load_commit(), 0);
+        amemory_anum_cpu_load_abort();
+        assert_eq!(amemory_anum_cpu_pool_count(), 4);
     }
 
     #[test]

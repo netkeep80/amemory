@@ -175,15 +175,58 @@ export function cpuPoolCount(wasm) {
   return wasm.anumCpuPoolCount();
 }
 
-export function cpuImportRaw(wasm, source, memory = "cpu-A") {
+function writeCpuTokens(wasm, source) {
   const tokens = sourceTokens(source);
   if (tokens.length > 256) return null;
   for (let i = 0; i < tokens.length; i += 1) {
     if (wasm.anumCpuSetToken(i, tokens[i]) !== 1) return null;
   }
-  const handle = wasmU32(wasm.anumCpuImport(tokens.length));
+  return tokens.length;
+}
+
+export function cpuImportRaw(wasm, source, memory = "cpu-A") {
+  const tokenCount = writeCpuTokens(wasm, source);
+  if (tokenCount === null) return null;
+  const handle = wasmU32(wasm.anumCpuImport(tokenCount));
   if (handle === LOCAL_HANDLE_NONE) return null;
   return localRef(memory, handle);
+}
+
+export function cpuImportBatchAtomic(wasm, sources, memory = "cpu-A") {
+  if (!Array.isArray(sources) || sources.length === 0) return null;
+  if (typeof wasm.anumCpuLoadBegin !== "function" ||
+      typeof wasm.anumCpuLoadMember !== "function" ||
+      typeof wasm.anumCpuLoadCommit !== "function" ||
+      typeof wasm.anumCpuLoadAbort !== "function") {
+    throw new Error("CPU atomic Aset load exports are missing");
+  }
+
+  if (wasm.anumCpuLoadBegin() !== 1) return null;
+  const handles = [];
+  try {
+    for (const source of sources) {
+      const tokenCount = writeCpuTokens(wasm, source);
+      if (tokenCount === null) {
+        wasm.anumCpuLoadAbort();
+        return null;
+      }
+      const handle = wasmU32(wasm.anumCpuLoadMember(tokenCount));
+      if (handle === LOCAL_HANDLE_NONE) {
+        wasm.anumCpuLoadAbort();
+        return null;
+      }
+      handles.push(handle);
+    }
+
+    if (wasm.anumCpuLoadCommit() !== 1) {
+      wasm.anumCpuLoadAbort();
+      return null;
+    }
+    return handles.map((handle) => localRef(memory, handle));
+  } catch (error) {
+    wasm.anumCpuLoadAbort();
+    throw error;
+  }
 }
 
 export function cpuExport(wasm, ref, memory = "cpu-A") {
@@ -441,6 +484,36 @@ export async function gpuImport(device, gpuPool, source) {
   return localRef(gpuPool.memory, result[1]);
 }
 
+export async function gpuImportBatchAtomic(device, gpuPool, sources) {
+  if (!Array.isArray(sources) || sources.length === 0) return null;
+
+  // The live GPU pool remains untouched until the staging pool contains the
+  // entire valid Aset. Per-member gpuImport commits only into this scratch pool.
+  const staging = createGpuAnumPool(device, gpuPool.memory + ":staging");
+  const handles = [];
+  try {
+    for (const source of sources) {
+      let ref;
+      try {
+        ref = await gpuImport(device, staging, source);
+      } catch {
+        return null;
+      }
+      if (!ref) return null;
+      handles.push(ref.value);
+    }
+
+    const encoder = device.createCommandEncoder();
+    encoder.copyBufferToBuffer(staging.buffer, 0, gpuPool.buffer, 0, GPU_BUFFER_BYTES);
+    device.queue.submit([encoder.finish()]);
+    await device.queue.onSubmittedWorkDone();
+
+    return handles.map((handle) => localRef(gpuPool.memory, handle));
+  } finally {
+    destroyGpuAnumPool(staging);
+  }
+}
+
 export async function gpuExport(device, gpuPool, ref) {
   const handle = requireLocalRef(ref, gpuPool.memory);
   const topology = await readGpuTopology(device, gpuPool);
@@ -547,6 +620,42 @@ export async function runAnumBoundaryBrowser(wasm, device) {
     must(await gpuPoolCount(device, gpuPool) === gpuBeforeNegatives,
       "GPU negative witnesses changed semantic pool");
 
+    // Multi-Anum Aset load is atomic across the whole batch, not only per Anum.
+    // First prove a malformed middle member cannot replace the published pool.
+    const cpuBeforeBatchFailure = cpuPoolCount(wasm);
+    const gpuBeforeBatchFailure = await gpuPoolCount(device, gpuPool);
+    must(cpuImportBatchAtomic(wasm, ["98", "5", "68"]) === null,
+      "CPU accepted malformed multi-Anum Aset");
+    must(cpuPoolCount(wasm) === cpuBeforeBatchFailure,
+      "CPU failed batch partially published Aset");
+
+    const gpuFailedBatch = await gpuImportBatchAtomic(device, gpuPool, ["98", "5", "68"]);
+    must(gpuFailedBatch === null, "GPU accepted malformed multi-Anum Aset");
+    must(await gpuPoolCount(device, gpuPool) === gpuBeforeBatchFailure,
+      "GPU failed batch partially published Aset");
+
+    // Successful replacement batch shares ROOT/O/C across the PAIR and must
+    // canonicalize to exactly four Links in both independently allocated memories.
+    const asetSources = ["98", "68", "19868"];
+    const cpuBatchRefs = cpuImportBatchAtomic(wasm, asetSources);
+    const gpuBatchRefs = await gpuImportBatchAtomic(device, gpuPool, asetSources);
+    must(cpuBatchRefs && gpuBatchRefs, "atomic multi-Anum Aset load failed");
+    must(cpuPoolCount(wasm) === 4, "CPU Aset canonical Link count mismatch");
+    must(await gpuPoolCount(device, gpuPool) === 4, "GPU Aset canonical Link count mismatch");
+    for (let i = 0; i < asetSources.length; i += 1) {
+      must(cpuExport(wasm, cpuBatchRefs[i]) === asetSources[i],
+        "CPU batch export mismatch for " + asetSources[i]);
+      must(await gpuExport(device, gpuPool, gpuBatchRefs[i]) === asetSources[i],
+        "GPU batch export mismatch for " + asetSources[i]);
+      must(cpuExport(wasm, cpuBatchRefs[i]) === await gpuExport(device, gpuPool, gpuBatchRefs[i]),
+        "atomic Aset CPU/GPU differential mismatch for " + asetSources[i]);
+    }
+
+    logs.push(`aset.atomic.sources = [${asetSources.join(", ")}]`);
+    logs.push(`aset.atomic.cpu.links = ${cpuPoolCount(wasm)}`);
+    logs.push(`aset.atomic.gpu.links = ${await gpuPoolCount(device, gpuPool)}`);
+    logs.push("aset.atomic.failed-middle = NO_PARTIAL_PUBLICATION");
+
     logs.push(`anum.sample.source = ${sample}`);
     logs.push(`anum.sample.cpu.handle = ${cpuSample.value}`);
     logs.push(`anum.sample.gpu.handle = ${gpuSample.value}`);
@@ -562,6 +671,9 @@ export async function runAnumBoundaryBrowser(wasm, device) {
       handlesDiffer: true,
       canonicalReuse: true,
       negativeControls: true,
+      atomicAsetLoad: true,
+      atomicAsetDifferential: true,
+      atomicAsetLinkCount: 4,
       sample: {
         source: sample,
         cpuHandle: cpuSample.value,

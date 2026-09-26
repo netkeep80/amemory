@@ -145,6 +145,11 @@ async function loadWasm() {
   const anumCpuResetPool = instance.exports.amemory_anum_cpu_reset_pool;
   const anumCpuSetToken = instance.exports.amemory_anum_cpu_set_token;
   const anumCpuImport = instance.exports.amemory_anum_cpu_import;
+  const anumCpuLoadBegin = instance.exports.amemory_anum_cpu_load_begin;
+  const anumCpuLoadMember = instance.exports.amemory_anum_cpu_load_member;
+  const anumCpuLoadCommit = instance.exports.amemory_anum_cpu_load_commit;
+  const anumCpuLoadAbort = instance.exports.amemory_anum_cpu_load_abort;
+  const anumCpuLoadActive = instance.exports.amemory_anum_cpu_load_active;
   const anumCpuExport = instance.exports.amemory_anum_cpu_export;
   const anumCpuOutputGet = instance.exports.amemory_anum_cpu_output_get;
   const anumCpuPoolCount = instance.exports.amemory_anum_cpu_pool_count;
@@ -170,8 +175,9 @@ async function loadWasm() {
     probe, cpuStep, incidenceFlag,
     canonicalSetExisting, canonicalSetCandidate, canonicalFlag,
     stateReset, stateCommit, stateGet,
-    anumCpuResetPool, anumCpuSetToken, anumCpuImport, anumCpuExport,
-    anumCpuOutputGet, anumCpuPoolCount,
+    anumCpuResetPool, anumCpuSetToken, anumCpuImport,
+    anumCpuLoadBegin, anumCpuLoadMember, anumCpuLoadCommit, anumCpuLoadAbort, anumCpuLoadActive,
+    anumCpuExport, anumCpuOutputGet, anumCpuPoolCount,
     reactionReset, reactionSetCurrentMember, reactionSetCurrentCount,
     reactionSetTheoryRelation, reactionSetTheoryCount, reactionSnapshotTheory,
     reactionRun, reactionCurrentBank, reactionCurrentCount, reactionCurrentMember,
@@ -207,6 +213,11 @@ async function loadWasm() {
     anumCpuResetPool,
     anumCpuSetToken,
     anumCpuImport,
+    anumCpuLoadBegin,
+    anumCpuLoadMember,
+    anumCpuLoadCommit,
+    anumCpuLoadAbort,
+    anumCpuLoadActive,
     anumCpuExport,
     anumCpuOutputGet,
     anumCpuPoolCount,
