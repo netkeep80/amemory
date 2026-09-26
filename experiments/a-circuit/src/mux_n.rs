@@ -977,6 +977,7 @@ pub(crate) struct WebProofLoadedRoot {
 pub(crate) struct WebProofPrepareStage {
     pub(crate) compiler_label: String,
     pub(crate) runtime_memory_exists: bool,
+    pub(crate) compiled_links: u32,
     pub(crate) aset_anums: Vec<String>,
     pub(crate) semantic_roots: Vec<WebProofPreparedRoot>,
     pub(crate) theory_admissions: Vec<String>,
@@ -1232,6 +1233,7 @@ pub(crate) fn web_prove_mux1(
     let prepare = WebProofPrepareStage {
         compiler_label: "portable Aset compiler/preparation state (not runtime A-memory)".to_owned(),
         runtime_memory_exists: false,
+        compiled_links: compiler.store.link_count() as u32,
         aset_anums: prepared_anums.clone(),
         semantic_roots: prepared_roots.clone(),
         theory_admissions,
@@ -1414,6 +1416,7 @@ fn web_mux1_proof_uses_one_runtime_memory_for_all_eight_cases() {
                 assert!(proof.load.portable_round_trip);
                 assert!(!proof.prepare.theory_admissions.is_empty());
                 assert_eq!(proof.load.links_before_load, 1);
+                assert_eq!(proof.load.links_after_load, proof.prepare.compiled_links);
                 assert!(proof.load.links_after_load > proof.load.links_before_load);
                 assert_eq!(proof.execute.active_reaction_count, 7);
                 assert!(proof.execute.final_quiescent);
@@ -1431,6 +1434,11 @@ fn web_mux1_proof_uses_one_runtime_memory_for_all_eight_cases() {
                     previous = step.links_after;
                 }
                 assert_eq!(proof.result.links_final, previous);
+                assert_eq!(
+                    proof.result.visual_links.len(),
+                    proof.result.links_final as usize,
+                    "visual snapshot must contain every runtime Link",
+                );
 
                 let keys = proof.result.visual_links
                     .iter()
