@@ -1,11 +1,15 @@
 import {
   cpuExport,
   cpuImportRaw,
+  cpuImportBatchAtomic,
+  cpuPoolCount,
   cpuResetPool,
   createGpuAnumPool,
   destroyGpuAnumPool,
   gpuExport,
   gpuImport,
+  gpuImportBatchAtomic,
+  gpuPoolCount,
   readGpuTopology,
   localRef,
   normalizeAnum,
@@ -1075,6 +1079,56 @@ async function runGpuRecurrenceEnd(device, pool, refs) {
   }
 }
 
+async function runAtomicAsetToResultBrowser(wasm, device) {
+  const names = ["K", "A", "B", "current", "relation", "successor"];
+  const sources = names.map((name) => R1_FIXTURE[name]);
+
+  cpuResetPool(wasm);
+  const cpuBatch = cpuImportBatchAtomic(wasm, sources);
+  must(cpuBatch, "CPU atomic R1 Aset load failed");
+  const cpuRefs = Object.fromEntries(names.map((name, index) => [name, cpuBatch[index]]));
+  const cpuLinks = cpuPoolCount(wasm);
+
+  const gpuPool = createGpuAnumPool(device, "gpu-lifecycle-C");
+  try {
+    const gpuBatch = await gpuImportBatchAtomic(device, gpuPool, sources);
+    must(gpuBatch, "GPU atomic R1 Aset load failed");
+    const gpuRefs = Object.fromEntries(names.map((name, index) => [name, gpuBatch[index]]));
+    const gpuLinks = await gpuPoolCount(device, gpuPool);
+
+    must(cpuLinks === gpuLinks, "atomic Aset CPU/GPU Link-count mismatch");
+
+    const cpu = runCpuPositive(wasm, cpuRefs);
+    const gpu = await runGpuPositive(device, gpuPool, gpuRefs);
+    const expected = makePortableReactionResult([R1_FIXTURE.successor], 1, 1, false);
+
+    must(
+      JSON.stringify(cpu.portableResult) === JSON.stringify(expected),
+      "CPU loaded-Aset portable result mismatch",
+    );
+    must(
+      JSON.stringify(gpu.portableResult) === JSON.stringify(expected),
+      "GPU loaded-Aset portable result mismatch",
+    );
+    must(
+      JSON.stringify(cpu.portableResult) === JSON.stringify(gpu.portableResult),
+      "loaded-Aset CPU/GPU portable result differential mismatch",
+    );
+
+    return {
+      sources,
+      linkCountCpu: cpuLinks,
+      linkCountGpu: gpuLinks,
+      cpuResult: cpu.portableResult,
+      gpuResult: gpu.portableResult,
+      differential: true,
+      sameLoadedAsetPath: true,
+    };
+  } finally {
+    destroyGpuAnumPool(gpuPool);
+  }
+}
+
 export async function runReactionBrowser(wasm, device) {
   assertR1Fixture();
   assertR2Fixture();
@@ -1083,6 +1137,7 @@ export async function runReactionBrowser(wasm, device) {
   assertR5Fixture();
   assertR6Fixture();
   const logs = [];
+  const lifecycle = await runAtomicAsetToResultBrowser(wasm, device);
   const cpuRefs = importCpuFixture(wasm);
   const gpuPool = createGpuAnumPool(device, "gpu-reaction-B");
 
@@ -1276,6 +1331,11 @@ export async function runReactionBrowser(wasm, device) {
       requireLocalRef(cpuRefs.successor, "cpu-A") !== requireLocalRef(gpuRefs.successor, gpuPool.memory);
     must(handlesDiffer, "CPU/GPU local reaction handles did not differ");
 
+    logs.push("lifecycle.aset.sources = [" + lifecycle.sources.join(", ") + "]");
+    logs.push("lifecycle.aset.links = CPU " + lifecycle.linkCountCpu + " / GPU " + lifecycle.linkCountGpu);
+    logs.push("lifecycle.result.cpu = " + JSON.stringify(lifecycle.cpuResult));
+    logs.push("lifecycle.result.gpu = " + JSON.stringify(lifecycle.gpuResult));
+    logs.push("lifecycle.end-to-end = PASS atomic-load -> reaction -> portable-result");
     logs.push("reaction.profile = minimal-portable-amemory-execution@0.1.0");
     logs.push("reaction.gpu.topology = K " + gpuTopologyHandles.K + ", A " + gpuTopologyHandles.A + ", B " + gpuTopologyHandles.B + ", current " + gpuTopologyHandles.current + ", relation " + gpuTopologyHandles.relation + ", successor " + gpuTopologyHandles.successor);
     logs.push("reaction.before.cpu = [" + cpu.before.join(", ") + "]");
@@ -1354,6 +1414,13 @@ export async function runReactionBrowser(wasm, device) {
     logs.push("reaction.old-scope-retained = PASS");
 
     return {
+      lifecycleAsetSources: lifecycle.sources,
+      lifecycleLinkCountCpu: lifecycle.linkCountCpu,
+      lifecycleLinkCountGpu: lifecycle.linkCountGpu,
+      lifecyclePortableResultCpu: lifecycle.cpuResult,
+      lifecyclePortableResultGpu: lifecycle.gpuResult,
+      lifecycleDifferential: lifecycle.differential,
+      lifecycleSameLoadedAsetPath: lifecycle.sameLoadedAsetPath,
       cpuBefore: cpu.before,
       gpuBefore: gpu.before,
       cpuAfter: cpu.after,
