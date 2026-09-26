@@ -36,6 +36,8 @@ mod unary_arith_n;
 mod wide64_n;
 #[cfg(test)]
 mod mul32_n;
+#[cfg(test)]
+mod mul_effect_n;
 
 use amemory_optimized_cpu_probe::{OptimizedLinkStore, OptimizedReactionEngine};
 use std::collections::BTreeSet;

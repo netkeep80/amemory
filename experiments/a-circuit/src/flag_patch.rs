@@ -126,3 +126,20 @@ pub(crate) fn install_alu_effect_result_tag(
     }
     current
 }
+
+
+pub(crate) fn install_wide_alu_effect_result_tag(
+    store: &mut OptimizedLinkStore,
+    seed: Handle,
+    o: Handle,
+    c: Handle,
+) -> Handle {
+    // Stable envelope for double-word ALU results:
+    // ExactSequence_R([Wide64, FlagPatch]).
+    // Intended for one-operand MUL/IMUL and later quotient/remainder effects.
+    let mut current = store.ensure_pair(seed, seed).unwrap();
+    for pole in [c, c, o, o, c, o, o, c, c, o, c, o, o, c, o, c] {
+        current = store.ensure_pair(current, pole).unwrap();
+    }
+    current
+}
