@@ -455,7 +455,7 @@ function renderSingle(section, block, wasm) {
       if (out.proof) {
         await renderProofPipeline(proofTarget, out.proof);
       } else {
-        proofTarget.innerHTML = '<div class="notice">Full portable-Aset / one-memory proof is currently enabled for canonical MUX1 while the same proof ABI is generalized to the remaining blocks.</div>';
+        proofTarget.innerHTML = '<div class="notice">Full portable-Aset / one-memory proof is not yet enabled for this registry block. Proof coverage is being generalized across the structural block registry.</div>';
       }
       status.textContent = `${block.name}: real structural result returned by A-Circuit WASM.`;
       status.className = "notice lab-ok";
