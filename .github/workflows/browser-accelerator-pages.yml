@@ -200,6 +200,65 @@ jobs:
               raise SystemExit("CI matrix script was not attached")
           PY
 
+      - name: Verify published 80386 lab payload
+        run: |
+          set -euo pipefail
+
+          test -s _site/i386-lab.js
+          test -s _site/i386-lab-view.mjs
+          test -s _site/i386-blocks.json
+          test -s _site/amemory_a_circuit.wasm
+          grep -F '<script type="module" src="./i386-lab.js"></script>' _site/index.html
+
+          cp _site/i386-lab.js /tmp/i386-lab.mjs
+          node --check /tmp/i386-lab.mjs
+          node --check _site/i386-lab-view.mjs
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          import os
+
+          info = json.loads(Path("_site/build-info.json").read_text(encoding="utf-8"))
+          expected_version = Path("VERSION").read_text(encoding="utf-8").strip()
+          expected_sha = os.environ["GITHUB_SHA"]
+
+          if info["version"] != expected_version:
+              raise SystemExit(f"Pages version mismatch: {info['version']} != {expected_version}")
+          if info["mainSha"] != expected_sha:
+              raise SystemExit(f"Pages SHA mismatch: {info['mainSha']} != {expected_sha}")
+
+          registry = json.loads(Path("_site/i386-blocks.json").read_text(encoding="utf-8"))
+          if len(registry.get("blocks", [])) < 24:
+              raise SystemExit("Pages artifact lost 80386 registry blocks")
+
+          print(f"Pages 80386 payload PASS: v{expected_version} @ {expected_sha[:12]} / {len(registry['blocks'])} blocks")
+          PY
+
+      - name: Cache-bust interactive lab modules
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+
+          sha = os.environ["GITHUB_SHA"]
+          index = Path("_site/index.html")
+          html = index.read_text(encoding="utf-8")
+          html = html.replace(
+              'src="./i386-lab.js"',
+              f'src="./i386-lab.js?v={sha}"',
+          )
+          index.write_text(html, encoding="utf-8")
+
+          lab = Path("_site/i386-lab.js")
+          source = lab.read_text(encoding="utf-8")
+          source = source.replace(
+              'from "./i386-lab-view.mjs"',
+              f'from "./i386-lab-view.mjs?v={sha}"',
+          )
+          lab.write_text(source, encoding="utf-8")
+          PY
+
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
