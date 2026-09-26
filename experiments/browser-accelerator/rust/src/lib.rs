@@ -1072,6 +1072,18 @@ mod anum_boundary_tests {
         amemory_anum_cpu_import(source.len() as u32)
     }
 
+    fn stage_import(source: &str) -> u32 {
+        for (i, byte) in source.bytes().enumerate() {
+            let token = if byte.is_ascii_digit() {
+                (byte - b'0') as u32
+            } else {
+                255
+            };
+            assert_eq!(amemory_anum_cpu_set_token(i as u32, token), 1);
+        }
+        amemory_anum_cpu_load_member(source.len() as u32)
+    }
+
     fn export(handle: u32) -> String {
         let len = amemory_anum_cpu_export(handle);
         assert_ne!(len, ANUM_CPU_NONE);
@@ -1176,6 +1188,47 @@ mod anum_boundary_tests {
         assert_eq!(amemory_anum_cpu_load_commit(), 0);
         amemory_anum_cpu_load_abort();
         assert_eq!(amemory_anum_cpu_pool_count(), 4);
+    }
+
+    #[test]
+    fn atomic_aset_load_executes_without_reimport() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        amemory_anum_cpu_reset_pool();
+
+        assert_eq!(amemory_anum_cpu_load_begin(), 1);
+        let k = stage_import("98");
+        let a = stage_import("68");
+        let b = stage_import("16898");
+        let current = stage_import("19868");
+        let relation = stage_import("16816898");
+        let successor = stage_import("19816898");
+        for handle in [k, a, b, current, relation, successor] {
+            assert_ne!(handle, ANUM_CPU_NONE);
+        }
+
+        assert_eq!(amemory_anum_cpu_load_commit(), 1);
+        assert_eq!(amemory_anum_cpu_load_active(), 0);
+        assert_eq!(export(current), "19868");
+        assert_eq!(export(relation), "16816898");
+        assert_eq!(export(successor), "19816898");
+
+        // Configure and execute directly against handles reconstructed by the
+        // committed Aset transaction. No ordinary import occurs after commit.
+        amemory_reaction_reset();
+        assert_eq!(amemory_reaction_set_current_member(0, current), 1);
+        assert_eq!(amemory_reaction_set_current_count(1), 1);
+        assert_eq!(amemory_reaction_set_theory_relation(0, relation), 1);
+        assert_eq!(amemory_reaction_set_theory_count(1), 1);
+        assert_eq!(amemory_reaction_snapshot_theory(), 1);
+
+        // The bounded executor currently requires the canonical successor Link
+        // to be present in the loaded A-network; it was part of the batch above.
+        assert_eq!(amemory_reaction_run(), 1);
+        assert_eq!(amemory_reaction_matched_relations(), 1);
+        assert_eq!(amemory_reaction_handoff_count(), 1);
+        assert_eq!(amemory_reaction_quiescent(), 0);
+        assert_eq!(amemory_reaction_current_count(), 1);
+        assert_eq!(export(amemory_reaction_current_member(0)), "19816898");
     }
 
     #[test]

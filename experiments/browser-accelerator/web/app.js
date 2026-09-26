@@ -1043,6 +1043,22 @@ async function main() {
   if (wasm) {
     try {
       const reaction = await runReactionBrowser(wasm, device);
+      report(
+        ui.asetAtomic,
+        "PASS end-to-end (" + reaction.lifecycleAsetSources.length + " Anums → " +
+          reaction.lifecycleLinkCountCpu + " Links → R1 result)",
+        reaction.lifecycleDifferential && reaction.lifecycleSameLoadedAsetPath,
+      );
+      report(
+        ui.flowInput,
+        reaction.lifecycleAsetSources.length + " Anums atomically committed",
+        reaction.lifecycleSameLoadedAsetPath,
+      );
+      report(
+        ui.flowMemory,
+        reaction.lifecycleLinkCountCpu + " canonical Links (same executed Aset)",
+        reaction.lifecycleLinkCountCpu === reaction.lifecycleLinkCountGpu,
+      );
       report(ui.reactionBeforeCpu, "PASS [" + reaction.cpuBefore.join(", ") + "]", true);
       report(ui.reactionBeforeGpu, "PASS [" + reaction.gpuBefore.join(", ") + "]", true);
       report(ui.reactionAfterCpu, "PASS [" + reaction.cpuAfter.join(", ") + "]", true);
@@ -1060,20 +1076,25 @@ async function main() {
       report(ui.reactionDiff, "PASS", reaction.normalizedDifferential);
       report(
         ui.reactionPortableResult,
-        "PASS " + JSON.stringify(reaction.portableResultCpu),
-        reaction.portableResultDifferential,
+        "PASS same-loaded-Aset " + JSON.stringify(reaction.lifecyclePortableResultCpu),
+        reaction.lifecycleDifferential && reaction.lifecycleSameLoadedAsetPath,
       );
       report(
         ui.flowExecution,
-        "R1 witness: matched=" + reaction.cpuMatched + ", handoff=" + reaction.cpuHandoff,
-        reaction.normalizedDifferential,
+        "same loaded Aset: matched=" + reaction.lifecyclePortableResultCpu.matchedRelations +
+          ", handoff=" + reaction.lifecyclePortableResultCpu.handoff,
+        reaction.lifecycleDifferential,
       );
       report(
         ui.flowResult,
-        "[" + reaction.portableResultCpu.scope.join(", ") + "]",
-        reaction.portableResultDifferential,
+        "[" + reaction.lifecyclePortableResultCpu.scope.join(", ") + "]",
+        reaction.lifecycleDifferential,
       );
-      report(ui.overviewLifecycle, "RESULT / READY", reaction.portableResultDifferential);
+      report(
+        ui.overviewLifecycle,
+        "RESULT / READY",
+        reaction.lifecycleDifferential && reaction.lifecycleSameLoadedAsetPath,
+      );
       report(ui.reactionHandles, "PASS (backend-local handles differ)", reaction.handlesDiffer);
       report(
         ui.reactionScope,
