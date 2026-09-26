@@ -1,0 +1,39 @@
+name: A-Circuit M4 logical effects
+
+on:
+  pull_request:
+    paths:
+      - "experiments/a-circuit/**"
+      - ".github/workflows/a-circuit-m4-logic-effects.yml"
+  push:
+    branches: [main]
+    paths:
+      - "experiments/a-circuit/**"
+      - ".github/workflows/a-circuit-m4-logic-effects.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  logic-effects:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal
+
+      - name: Structural logical effect suite
+        run: |
+          cargo +1.98.1 test \
+            --release \
+            --manifest-path experiments/a-circuit/Cargo.toml \
+            m4_logic_effects_ \
+            -- --ignored --nocapture --test-threads=1
+
+      - name: M4 logical effect policy
+        run: |
+          echo "FlagPatch distinguishes SET, UNDEFINED and absence/PRESERVE."
+          echo "TEST reuses AND with WriteBack=0; NOT emits an empty patch."
+          echo "No concrete AF value is fabricated for logical instructions."

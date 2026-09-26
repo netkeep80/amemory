@@ -1,7 +1,11 @@
 #[cfg(test)]
+mod flag_patch;
+#[cfg(test)]
 mod flags_n;
 #[cfg(test)]
 mod logic_n;
+#[cfg(test)]
+mod logic_effect_n;
 #[cfg(test)]
 mod full_adder;
 #[cfg(test)]

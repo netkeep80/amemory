@@ -65,12 +65,12 @@ fn stage_frame(
 }
 
 #[derive(Clone, Copy, Debug)]
-struct GateSet {
-    and2: Handle,
-    or2: Handle,
-    xor2: Handle,
-    not1: Handle,
-    bit_outputs: [Handle; 2],
+pub(crate) struct GateSet {
+    pub(crate) and2: Handle,
+    pub(crate) or2: Handle,
+    pub(crate) xor2: Handle,
+    pub(crate) not1: Handle,
+    pub(crate) bit_outputs: [Handle; 2],
 }
 
 fn install_binary_gate(
@@ -186,19 +186,19 @@ fn install_gates(
 }
 
 #[derive(Clone, Debug)]
-struct LogicProgram {
-    width: usize,
-    word_binary: Handle,
-    word_not: Handle,
-    result_tag: Handle,
-    gates: GateSet,
-    binary_steps: usize,
-    unary_steps: usize,
-    links_after_build: usize,
+pub(crate) struct LogicProgram {
+    pub(crate) width: usize,
+    pub(crate) word_binary: Handle,
+    pub(crate) word_not: Handle,
+    pub(crate) result_tag: Handle,
+    pub(crate) gates: GateSet,
+    pub(crate) binary_steps: usize,
+    pub(crate) unary_steps: usize,
+    pub(crate) links_after_build: usize,
 }
 
 impl LogicProgram {
-    fn install(f: &mut FullFixture, width: usize) -> Self {
+    pub(crate) fn install(f: &mut FullFixture, width: usize) -> Self {
         assert!((8..=32).contains(&width));
 
         let seed0 = f.store.ensure_pair(f.k, f.full).unwrap();
