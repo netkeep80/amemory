@@ -324,6 +324,14 @@ pub extern "C" fn amemory_i386_lab_proof_json_len() -> u32 {
 }
 
 #[no_mangle]
+pub extern "C" fn amemory_i386_lab_proof_json_ptr() -> u32 {
+    let guard = LAST_PROOF_JSON
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    guard.as_ptr() as usize as u32
+}
+
+#[no_mangle]
 pub extern "C" fn amemory_i386_lab_proof_json_byte(index: u32) -> u32 {
     let guard = LAST_PROOF_JSON
         .lock()
