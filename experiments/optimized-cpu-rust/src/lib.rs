@@ -8,7 +8,6 @@ const NO_HANDLE: Handle = 0;
 pub struct IncidenceIter<'a> {
     next: &'a [Handle],
     current: Handle,
-    remaining: usize,
 }
 
 impl Iterator for IncidenceIter<'_> {
@@ -16,23 +15,11 @@ impl Iterator for IncidenceIter<'_> {
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.current == NO_HANDLE {
-            self.remaining = 0;
             return None;
         }
         let out = self.current;
         self.current = self.next[out as usize];
-        self.remaining = self.remaining.saturating_sub(1);
         Some(out)
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.remaining, Some(self.remaining))
-    }
-}
-
-impl ExactSizeIterator for IncidenceIter<'_> {
-    fn len(&self) -> usize {
-        self.remaining
     }
 }
 
@@ -69,8 +56,6 @@ pub struct OptimizedLinkStore {
     end_head: Vec<Handle>,
     next_by_start: Vec<Handle>,
     next_by_end: Vec<Handle>,
-    start_count: Vec<u32>,
-    end_count: Vec<u32>,
     max_links: Option<usize>,
 }
 
@@ -101,8 +86,6 @@ impl OptimizedLinkStore {
             end_head: vec![NO_HANDLE; 2],
             next_by_start: vec![NO_HANDLE; 2],
             next_by_end: vec![NO_HANDLE; 2],
-            start_count: vec![0; 2],
-            end_count: vec![0; 2],
             max_links,
         };
         // ROOT and self-incidence forms are not ordinary PAIR representatives.
@@ -173,7 +156,6 @@ impl OptimizedLinkStore {
         Ok(IncidenceIter {
             next: &self.next_by_start,
             current: self.start_head[start as usize],
-            remaining: self.start_count[start as usize] as usize,
         })
     }
 
@@ -182,7 +164,6 @@ impl OptimizedLinkStore {
         Ok(IncidenceIter {
             next: &self.next_by_end,
             current: self.end_head[end as usize],
-            remaining: self.end_count[end as usize] as usize,
         })
     }
 
@@ -273,8 +254,6 @@ impl OptimizedLinkStore {
             self.end_head.resize(required, NO_HANDLE);
             self.next_by_start.resize(required, NO_HANDLE);
             self.next_by_end.resize(required, NO_HANDLE);
-            self.start_count.resize(required, 0);
-            self.end_count.resize(required, 0);
         }
 
         let hi = handle as usize;
@@ -283,11 +262,9 @@ impl OptimizedLinkStore {
 
         self.next_by_start[hi] = self.start_head[si];
         self.start_head[si] = handle;
-        self.start_count[si] = self.start_count[si].saturating_add(1);
 
         self.next_by_end[hi] = self.end_head[ei];
         self.end_head[ei] = handle;
-        self.end_count[ei] = self.end_count[ei].saturating_add(1);
     }
 
     fn parse_node(&mut self, bytes: &[u8], cursor: &mut usize) -> Result<Handle, StoreError> {
@@ -1271,14 +1248,25 @@ mod tests {
         assert_eq!(last, current);
         assert_eq!(store.link_count(), LINKS + 1);
 
+        // Full incidence count is intentionally O(k); count arrays are not kept.
+        assert_eq!(
+            store.start_incidence(ROOT_HANDLE).unwrap().count(),
+            LINKS + 1
+        );
+
+        // Measure only O(1) entry into the intrusive list.
         let incidence_started = Instant::now();
-        let mut observed = 0usize;
+        let mut observed = NO_HANDLE;
         for _ in 0..ITERS {
-            observed = store.start_incidence(ROOT_HANDLE).unwrap().len();
+            observed = store
+                .start_incidence(ROOT_HANDLE)
+                .unwrap()
+                .next()
+                .unwrap_or(NO_HANDLE);
             black_box(observed);
         }
         let incidence_ns = incidence_started.elapsed().as_nanos() / ITERS;
-        assert_eq!(observed, LINKS + 1); // ROOT plus all ordinary root-start pairs.
+        assert_ne!(observed, NO_HANDLE);
 
         println!("OPT_CPU_P1_LINKS={LINKS}");
         println!("OPT_CPU_P1_ITERS={ITERS}");
