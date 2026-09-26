@@ -1,0 +1,45 @@
+name: A-Circuit M4 structural MUL32
+
+on:
+  pull_request:
+    paths:
+      - "experiments/a-circuit/src/mul32_n.rs"
+      - "experiments/a-circuit/src/wide64_n.rs"
+      - "experiments/a-circuit/src/arithmetic_n.rs"
+      - "experiments/a-circuit/src/full_adder.rs"
+      - "experiments/a-circuit/src/lib.rs"
+      - ".github/workflows/a-circuit-m4-mul32.yml"
+  push:
+    branches: [main]
+    paths:
+      - "experiments/a-circuit/src/mul32_n.rs"
+      - "experiments/a-circuit/src/wide64_n.rs"
+      - "experiments/a-circuit/src/arithmetic_n.rs"
+      - "experiments/a-circuit/src/full_adder.rs"
+      - "experiments/a-circuit/src/lib.rs"
+      - ".github/workflows/a-circuit-m4-mul32.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mul32:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal
+      - name: Structural unsigned MUL32 suite
+        run: |
+          cargo +1.98.1 test \
+            --release \
+            --manifest-path experiments/a-circuit/Cargo.toml \
+            m4_mul32_ \
+            -- --ignored --nocapture --test-threads=1
+      - name: MUL32 architecture policy
+        run: |
+          echo "MUL32 is 32 structural multiplier-bit stages."
+          echo "Set bits reuse ADD64; zero bits bypass it."
+          echo "Partial A<<i values are role templates, not host runtime shifts."

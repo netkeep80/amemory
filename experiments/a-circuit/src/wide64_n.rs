@@ -50,16 +50,16 @@ fn stage_frame(
 }
 
 #[derive(Clone,Debug)]
-struct Wide64Program{
-    add64:Handle,
-    result_tag:Handle,
+pub(crate) struct Wide64Program{
+    pub(crate) add64:Handle,
+    pub(crate) result_tag:Handle,
     arithmetic:ArithmeticProgram,
-    active_steps:usize,
-    links_after_build:usize,
+    pub(crate) active_steps:usize,
+    pub(crate) links_after_build:usize,
 }
 
 impl Wide64Program{
-    fn install(f:&mut FullFixture)->Self{
+    pub(crate) fn install(f:&mut FullFixture)->Self{
         let arithmetic=ArithmeticProgram::install(f,WIDTH);
         let seed=f.store.ensure_pair(arithmetic.arithmetic,arithmetic.result_tag).unwrap();
         let mut a=AnchorGen::new(&mut f.store,seed,f.o,f.c);
