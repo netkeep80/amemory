@@ -4,11 +4,13 @@ on:
   pull_request:
     paths:
       - "experiments/a-circuit/**"
+      - "experiments/optimized-cpu-rust/**"
       - ".github/workflows/a-circuit-m3-performance.yml"
   push:
     branches: [main]
     paths:
       - "experiments/a-circuit/**"
+      - "experiments/optimized-cpu-rust/**"
       - ".github/workflows/a-circuit-m3-performance.yml"
   workflow_dispatch:
 

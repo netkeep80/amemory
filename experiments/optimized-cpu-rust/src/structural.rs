@@ -237,49 +237,12 @@ pub fn read_structural_interpreter(
     })
 }
 
-fn contains_role(
-    store: &OptimizedLinkStore,
-    node: Handle,
-    roles: &HashSet<Handle>,
-    memo: &mut HashMap<Handle, bool>,
-    active: &mut HashSet<Handle>,
-    profile: &mut Option<&mut StructuralRunProfile>,
-) -> Result<bool, StructuralError> {
-    if let Some(profile) = profile.as_deref_mut() {
-        profile.contains_role_nodes_visited += 1;
-    }
-    if roles.contains(&node) {
-        return Ok(true);
-    }
-    if let Some(value) = memo.get(&node) {
-        return Ok(*value);
-    }
-    if !active.insert(node) {
-        return Ok(false);
-    }
-
-    let result = (|| {
-        let (start, end) = store.poles(node)?;
-        if contains_role(store, start, roles, memo, active, profile)? {
-            return Ok(true);
-        }
-        contains_role(store, end, roles, memo, active, profile)
-    })();
-
-    active.remove(&node);
-    let result = result?;
-    memo.insert(node, result);
-    Ok(result)
-}
-
 fn unify_node(
     store: &OptimizedLinkStore,
     template: Handle,
     claimed: Handle,
     roles: &HashSet<Handle>,
     inferred: &mut HashMap<Handle, Handle>,
-    contains_memo: &mut HashMap<Handle, bool>,
-    contains_active: &mut HashSet<Handle>,
     visited: &mut HashSet<(Handle, Handle)>,
     profile: &mut Option<&mut StructuralRunProfile>,
 ) -> Result<(), StructuralError> {
@@ -297,20 +260,12 @@ fn unify_node(
         return Ok(());
     }
 
-    if !contains_role(
-        store,
-        template,
-        roles,
-        contains_memo,
-        contains_active,
-        profile,
-    )? {
-        if template != claimed {
-            return Err(StructuralError::TemplateMismatch);
-        }
-        return Ok(());
-    }
-
+    // Directly compare structural topology. The previous implementation first
+    // traversed the entire template subtree with contains_role() merely to
+    // decide whether recursive unification was necessary. On wide generic
+    // rules that pre-scan dominated runtime and was repeated for every rejected
+    // candidate. Role placeholders are already handled above; all remaining
+    // nodes can be compared structurally in one pass.
     if !visited.insert((template, claimed)) {
         return Ok(());
     }
@@ -330,8 +285,6 @@ fn unify_node(
         claimed_start,
         roles,
         inferred,
-        contains_memo,
-        contains_active,
         visited,
         profile,
     )?;
@@ -341,8 +294,6 @@ fn unify_node(
         claimed_end,
         roles,
         inferred,
-        contains_memo,
-        contains_active,
         visited,
         profile,
     )
@@ -363,8 +314,6 @@ fn unify_structural_rule_template_internal(
     }
 
     let mut inferred = HashMap::new();
-    let mut contains_memo = HashMap::new();
-    let mut contains_active = HashSet::new();
     let mut visited = HashSet::new();
 
     unify_node(
@@ -373,8 +322,6 @@ fn unify_structural_rule_template_internal(
         claimed,
         &role_set,
         &mut inferred,
-        &mut contains_memo,
-        &mut contains_active,
         &mut visited,
         profile,
     )?;
@@ -942,6 +889,65 @@ mod tests {
                 &[role],
             ),
             Err(StructuralError::TemplateMismatch)
+        );
+    }
+
+    #[test]
+    fn direct_unifier_matches_grounded_and_role_templates_without_prescan() {
+        let mut store = OptimizedLinkStore::new();
+        let anchors = fresh(&mut store, 24);
+        let role = anchors[20];
+        let left = anchors[4];
+        let right = anchors[5];
+
+        let grounded_template = store.ensure_pair(left, right).unwrap();
+        let grounded_same = store.ensure_pair(left, right).unwrap();
+        let grounded_wrong = store.ensure_pair(right, left).unwrap();
+
+        let mut profile = StructuralRunProfile::default();
+        let same = {
+            let mut slot = Some(&mut profile);
+            unify_structural_rule_template_internal(
+                &store,
+                grounded_template,
+                grounded_same,
+                &[],
+                &mut slot,
+            )
+            .unwrap()
+        };
+        assert!(same.is_empty());
+        assert_eq!(profile.contains_role_nodes_visited, 0);
+
+        let mut mismatch_profile = StructuralRunProfile::default();
+        let mismatch = {
+            let mut slot = Some(&mut mismatch_profile);
+            unify_structural_rule_template_internal(
+                &store,
+                grounded_template,
+                grounded_wrong,
+                &[],
+                &mut slot,
+            )
+        };
+        assert_eq!(mismatch, Err(StructuralError::TemplateMismatch));
+        assert_eq!(mismatch_profile.contains_role_nodes_visited, 0);
+
+        let role_template = store.ensure_pair(role, right).unwrap();
+        let claimed = store.ensure_pair(left, right).unwrap();
+        let bindings = unify_structural_rule_template(
+            &store,
+            role_template,
+            claimed,
+            &[role],
+        )
+        .unwrap();
+        assert_eq!(
+            bindings,
+            vec![StructuralRoleBinding {
+                role,
+                value: left,
+            }]
         );
     }
 
