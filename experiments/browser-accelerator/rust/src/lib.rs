@@ -1238,7 +1238,7 @@ mod anum_boundary_tests {
         use std::time::Instant;
 
         let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        const ITERS: u128 = 10_000;
+        const ITERS: u128 = 1_000_000;
         const SOURCES: [&str; 6] = ["98", "68", "16898", "19868", "16816898", "19816898"];
 
         // 1) Atomic multi-Anum load. This includes parsing, canonical lookup,
