@@ -237,7 +237,7 @@ pub fn read_structural_interpreter(
     })
 }
 
-const STRUCTURAL_DISCRIMINATION_BUDGET: usize = 128;
+const STRUCTURAL_DISCRIMINATION_BUDGET: usize = 256;
 
 fn structural_discriminator_matches(
     store: &OptimizedLinkStore,
