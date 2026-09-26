@@ -91,6 +91,7 @@ jobs:
               "```"
             ].join("\n");
 
+            // Requires Settings > Actions > General > "Allow GitHub Actions to create and approve pull requests".
             const created = await github.rest.pulls.create({
               owner,
               repo,
@@ -202,7 +203,8 @@ jobs:
                   "```"
                 ].join("\n");
 
-                const created = await github.rest.pulls.create({
+                // Requires Settings > Actions > General > "Allow GitHub Actions to create and approve pull requests".
+            const created = await github.rest.pulls.create({
                   owner,
                   repo,
                   title: `Draft: ${branch}`,
