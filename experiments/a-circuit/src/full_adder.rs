@@ -173,6 +173,7 @@ impl Fixture {
         let h2_tag = store.ensure_pair(at(18), at(19)).unwrap();
         let or_tag = store.ensure_pair(at(20), at(21)).unwrap();
         let full_finish_tag = store.ensure_pair(at(22), at(23)).unwrap();
+        let full_done_tag = store.ensure_pair(at(24), at(25)).unwrap();
 
         // Benchmark-local call/done tags use accepted structural Links.
         let apply = o;
@@ -469,7 +470,10 @@ impl Fixture {
                 k_role,
                 sum_role,
             );
-            let done_cout = done(&mut store, done_tag, cout);
+            // Full Adder return uses a dedicated structural namespace.
+            // Reusing C⟼cout here would also match the generic Half Adder
+            // FINALIZE rule, which is correctly broad enough for any caller.
+            let done_cout = done(&mut store, full_done_tag, cout);
             let after = store.ensure_pair(finish, done_cout).unwrap();
 
             admit_bundle_rule(
@@ -494,7 +498,7 @@ impl Fixture {
                 k_role,
                 sum_role,
             );
-            let done_cout = done(&mut store, done_tag, cout_role);
+            let done_cout = done(&mut store, full_done_tag, cout_role);
             let before = store.ensure_pair(finish, done_cout).unwrap();
 
             let result =
@@ -505,7 +509,7 @@ impl Fixture {
             admit_bundle_rule(
                 &mut store,
                 theory,
-                c,
+                full_done_tag,
                 &[k_role, sum_role, cout_role],
                 before,
                 &[after],
