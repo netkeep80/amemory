@@ -352,11 +352,21 @@ function collectProof(wasm) {
   if (wasm.amemory_i386_lab_proof_available?.() !== 1) return null;
   const len = wasm.amemory_i386_lab_proof_json_len?.() >>> 0;
   if (!len) throw new Error("proof ABI reported empty JSON");
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i += 1) {
-    const value = wasm.amemory_i386_lab_proof_json_byte?.(i) >>> 0;
-    if (value > 255) throw new Error(`proof ABI emitted invalid byte at ${i}`);
-    bytes[i] = value;
+
+  let bytes;
+  if (wasm.memory && wasm.amemory_i386_lab_proof_json_ptr) {
+    const ptr = wasm.amemory_i386_lab_proof_json_ptr() >>> 0;
+    if (ptr + len > wasm.memory.buffer.byteLength) {
+      throw new Error("proof JSON pointer is outside WASM memory");
+    }
+    bytes = new Uint8Array(wasm.memory.buffer, ptr, len);
+  } else {
+    bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i += 1) {
+      const value = wasm.amemory_i386_lab_proof_json_byte?.(i) >>> 0;
+      if (value > 255) throw new Error(`proof ABI emitted invalid byte at ${i}`);
+      bytes[i] = value;
+    }
   }
   return JSON.parse(new TextDecoder().decode(bytes));
 }
