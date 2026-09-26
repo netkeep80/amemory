@@ -30,6 +30,8 @@ mod rotate32_n;
 mod rotate_carry32_n;
 #[cfg(test)]
 mod mux_n;
+#[cfg(test)]
+mod unary_arith_n;
 
 use amemory_optimized_cpu_probe::{OptimizedLinkStore, OptimizedReactionEngine};
 use std::collections::BTreeSet;

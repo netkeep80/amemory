@@ -302,7 +302,8 @@ SUB1                                  GREEN (#80/#81)
 -> M4 variable SHL/SHR/SAR count&31 effects   GREEN (#97/#98)
 -> M4 ROL/ROR count&31 effects                  GREEN (#99/#100)
 -> M4 RCL/RCR Word32+CF effects                  GREEN (#101/#102)
--> M1 reusable MUX1/MUX32 selector                 CURRENT (#104)
+-> M1 reusable MUX1/MUX32 selector                 GREEN (#104/#105)
+-> M4 INC/DEC/NEG reuse                              CURRENT (#103)
 ```
 
 
@@ -693,3 +694,25 @@ DIRECT_MUX1 = 1
 MUX1        = 7
 MUX32       = 257
 ```
+
+
+## M4 — unary arithmetic reuse
+
+Issue: #103
+
+INC/DEC/NEG are structural wrappers over the existing flagged ADD/SUB path:
+
+```text
+INC(A) = ADD(A,1)
+DEC(A) = SUB(A,1)
+NEG(A) = SUB(0,A)
+```
+
+Canonical Word(0) and Word(1) values are structural inputs. Runtime host code
+does not perform the arithmetic or recompute flags.
+
+All results use the shared `ALU_EFFECT_RESULT` ABI.
+
+INC/DEC omit CF from their FlagPatch, so architectural CF is preserved by
+absence. NEG publishes the complete six-flag arithmetic patch, including CF
+directly inherited from the existing subtraction path.
