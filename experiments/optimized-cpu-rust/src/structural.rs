@@ -1023,8 +1023,23 @@ mod tests {
         engine.set_interpreter(&store, interpreter).unwrap();
         engine.set_current(&store, &[active]).unwrap();
 
+        let mut profiled_store = store.clone();
+        let mut profiled_engine = engine.clone();
+
         let reaction = engine.run(&mut store).unwrap();
         let expected = store.ensure_pair(caller, output).unwrap();
+
+        let (profiled_reaction, profile) =
+            profiled_engine.run_profiled(&mut profiled_store).unwrap();
+        let profiled_expected =
+            profiled_store.ensure_pair(caller, output).unwrap();
+
+        assert_eq!(profiled_reaction, reaction, "profiled path changed reaction semantics");
+        assert_eq!(profiled_engine.current(), &[profiled_expected]);
+        assert!(profile.trigger_incidence_candidates > 0);
+        assert!(profile.unification_attempts > 0);
+        assert_eq!(profile.unification_successes, 1);
+        assert!(profile.total_ns > 0);
 
         assert_eq!(reaction.raw_rule_matches, 1);
         assert_eq!(reaction.transitioned_members, 1);
