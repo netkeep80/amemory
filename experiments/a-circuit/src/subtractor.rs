@@ -269,7 +269,6 @@ impl Sub1Program {
         }
 
         Self {
-        Self {
             sub,
             // OPEN
             // + NOT(B) + continuation
