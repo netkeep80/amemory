@@ -160,6 +160,25 @@ export function normalizeReactionState(anums) {
   return [...new Set(anums.map(normalizeAnum))].sort();
 }
 
+export function makePortableReactionResult(scope, matchedRelations, handoff, quiescent) {
+  if (!Array.isArray(scope)) throw new Error("portable reaction result scope must be an array");
+  if (!Number.isInteger(matchedRelations) || matchedRelations < 0) {
+    throw new Error("portable reaction result matchedRelations must be a non-negative integer");
+  }
+  if (handoff !== 0 && handoff !== 1) {
+    throw new Error("portable reaction result handoff must be 0 or 1");
+  }
+  if (typeof quiescent !== "boolean") {
+    throw new Error("portable reaction result quiescent must be boolean");
+  }
+  return Object.freeze({
+    scope: Object.freeze(normalizeReactionState(scope)),
+    matchedRelations,
+    handoff,
+    quiescent,
+  });
+}
+
 export function assertReactionStateExact(expected, actual, label = "reaction") {
   const left = normalizeReactionState(expected);
   const right = normalizeReactionState(actual);
@@ -308,14 +327,19 @@ function runCpuPositive(wasm, refs) {
   );
 
   must(wasm.reactionRun() === 1, "CPU reaction failed");
+  const after = cpuCurrent(wasm);
+  const matched = wasmU32(wasm.reactionMatchedRelations());
+  const handoff = wasmU32(wasm.reactionHandoffCount());
+  const quiescent = wasmU32(wasm.reactionQuiescent()) === 1;
   return {
     before,
-    after: cpuCurrent(wasm),
+    after,
     oldPhysical: cpuBank(wasm, oldBank),
-    matched: wasmU32(wasm.reactionMatchedRelations()),
-    handoff: wasmU32(wasm.reactionHandoffCount()),
-    quiescent: wasmU32(wasm.reactionQuiescent()) === 1,
+    matched,
+    handoff,
+    quiescent,
     snapshotCount: wasmU32(wasm.reactionSnapshotCount()),
+    portableResult: makePortableReactionResult(after, matched, handoff, quiescent),
   };
 }
 
@@ -778,6 +802,12 @@ async function runGpuPositive(device, pool, refs) {
       handoff: after.handoff,
       quiescent: after.quiescent,
       snapshotCount: 1,
+      portableResult: makePortableReactionResult(
+        after.anums,
+        after.matched,
+        after.handoff,
+        after.quiescent,
+      ),
     };
   } finally {
     destroyGpuState(state);
@@ -1067,6 +1097,10 @@ export async function runReactionBrowser(wasm, device) {
     assertReactionStateExact([R1_FIXTURE.successor], cpu.after, "CPU successor");
     assertReactionStateExact([R1_FIXTURE.successor], gpu.after, "GPU successor");
     assertReactionStateExact(cpu.after, gpu.after, "CPU/GPU successor differential");
+    must(
+      JSON.stringify(cpu.portableResult) === JSON.stringify(gpu.portableResult),
+      "portable reaction result CPU/GPU mismatch",
+    );
     assertReactionStateExact([R1_FIXTURE.current], cpu.oldPhysical, "CPU old Scope");
     assertReactionStateExact([R1_FIXTURE.current], gpu.oldPhysical, "GPU old Scope");
 
@@ -1248,6 +1282,9 @@ export async function runReactionBrowser(wasm, device) {
     logs.push("reaction.before.gpu = [" + gpu.before.join(", ") + "]");
     logs.push("reaction.after.cpu = [" + cpu.after.join(", ") + "]");
     logs.push("reaction.after.gpu = [" + gpu.after.join(", ") + "]");
+    logs.push("reaction.portable-result.cpu = " + JSON.stringify(cpu.portableResult));
+    logs.push("reaction.portable-result.gpu = " + JSON.stringify(gpu.portableResult));
+    logs.push("reaction.portable-result.differential = PASS");
     logs.push("reaction.cpu.matched = " + cpu.matched);
     logs.push("reaction.gpu.matched = " + gpu.matched);
     logs.push("reaction.cpu.handoff = " + cpu.handoff);
@@ -1325,6 +1362,9 @@ export async function runReactionBrowser(wasm, device) {
       gpuMatched: gpu.matched,
       cpuHandoff: cpu.handoff,
       gpuHandoff: gpu.handoff,
+      portableResultCpu: cpu.portableResult,
+      portableResultGpu: gpu.portableResult,
+      portableResultDifferential: true,
       normalizedDifferential: true,
       handlesDiffer,
       snapshotIsolation: true,
