@@ -1,10 +1,20 @@
 pub mod structural;
 
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::atomic::{AtomicU32, Ordering},
+};
 
 pub type Handle = u32;
 pub const ROOT_HANDLE: Handle = 1;
 const NO_HANDLE: Handle = 0;
+static NEXT_STORE_INSTANCE_ID: AtomicU32 = AtomicU32::new(1);
+
+fn next_store_instance_id() -> u32 {
+    let id = NEXT_STORE_INSTANCE_ID.fetch_add(1, Ordering::Relaxed);
+    assert!(id != u32::MAX, "OptimizedLinkStore instance id exhausted");
+    id
+}
 
 #[derive(Clone, Debug)]
 pub struct IncidenceIter<'a> {
@@ -42,8 +52,11 @@ pub enum StoreError {
     NonWellFounded(Handle),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct OptimizedLinkStore {
+    // Non-semantic runtime identity used only to scope executor caches. It is
+    // never exported as Link/Anum identity.
+    instance_id: u32,
     // Dense SoA carrier. Every index >=1 and <len is a valid local Link handle;
     // no per-record Option/discriminant is needed because this prototype does
     // not delete physical records in place.
@@ -59,6 +72,24 @@ pub struct OptimizedLinkStore {
     next_by_start: Vec<Handle>,
     next_by_end: Vec<Handle>,
     max_links: Option<usize>,
+}
+
+impl Clone for OptimizedLinkStore {
+    fn clone(&self) -> Self {
+        Self {
+            instance_id: next_store_instance_id(),
+            starts: self.starts.clone(),
+            ends: self.ends.clone(),
+            canonical_by_pair: self.canonical_by_pair.clone(),
+            start_forms: self.start_forms.clone(),
+            end_forms: self.end_forms.clone(),
+            start_head: self.start_head.clone(),
+            end_head: self.end_head.clone(),
+            next_by_start: self.next_by_start.clone(),
+            next_by_end: self.next_by_end.clone(),
+            max_links: self.max_links,
+        }
+    }
 }
 
 impl Default for OptimizedLinkStore {
@@ -79,6 +110,7 @@ impl OptimizedLinkStore {
     fn with_optional_limit(max_links: Option<usize>) -> Self {
         assert!(max_links.map_or(true, |limit| limit >= 1));
         let mut store = Self {
+            instance_id: next_store_instance_id(),
             starts: vec![NO_HANDLE, ROOT_HANDLE],
             ends: vec![NO_HANDLE, ROOT_HANDLE],
             canonical_by_pair: HashMap::new(),
@@ -102,6 +134,10 @@ impl OptimizedLinkStore {
         self.starts.len() - 1
     }
 
+    pub(crate) fn instance_id(&self) -> u32 {
+        self.instance_id
+    }
+
     pub fn is_valid(&self, handle: Handle) -> bool {
         handle > 0 && (handle as usize) < self.starts.len()
     }
@@ -121,7 +157,12 @@ impl OptimizedLinkStore {
 
         // Whole-Anum import is transactional. Parsing/canonicalization happens
         // against a staging clone; only complete success replaces live state.
+        let runtime_instance_id = self.instance_id;
         let mut staging = self.clone();
+        // Transactional staging is still the same logical runtime store. A
+        // normal external clone receives a fresh cache identity, but a
+        // successful import must preserve this store's identity.
+        staging.instance_id = runtime_instance_id;
         let bytes = source.as_bytes();
         let mut cursor = 0usize;
         let handle = staging.parse_node(bytes, &mut cursor)?;
