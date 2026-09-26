@@ -237,6 +237,65 @@ pub fn read_structural_interpreter(
     })
 }
 
+const STRUCTURAL_DISCRIMINATION_BUDGET: usize = 128;
+
+fn structural_discriminator_matches(
+    store: &OptimizedLinkStore,
+    template: Handle,
+    claimed: Handle,
+    roles: &[Handle],
+) -> Result<bool, StructuralError> {
+    // This is a sound prefilter, never a semantic matcher. Role nodes are
+    // wildcards. A structural mismatch at any inspected non-role position is
+    // sufficient to reject the candidate. Budget exhaustion is deliberately
+    // fail-open *to the full unifier* (not to execution): the candidate simply
+    // survives for authoritative matching.
+    let mut pending = vec![(template, claimed)];
+    let mut visited: Vec<(Handle, Handle)> = Vec::new();
+    let mut inspected = 0usize;
+
+    while let Some((template, claimed)) = pending.pop() {
+        if roles.contains(&template) {
+            continue;
+        }
+
+        // Exact local identity inside one store proves this subtree is
+        // structurally compatible. It is only an optimization shortcut; local
+        // identity is never exported as portable semantics.
+        if template == claimed {
+            continue;
+        }
+
+        if visited.contains(&(template, claimed)) {
+            continue;
+        }
+        visited.push((template, claimed));
+
+        if inspected >= STRUCTURAL_DISCRIMINATION_BUDGET {
+            return Ok(true);
+        }
+        inspected += 1;
+
+        let (template_start, template_end) = store.poles(template)?;
+        let (claimed_start, claimed_end) = store.poles(claimed)?;
+
+        if (template_start == template) != (claimed_start == claimed)
+            || (template_end == template) != (claimed_end == claimed)
+        {
+            return Ok(false);
+        }
+
+        // Prefilter ordering is deliberately non-semantic. Explore END first:
+        // in nested Link carriers this often reaches grounded discriminators
+        // before large role-heavy prefixes. Any uncertainty still falls
+        // through to the authoritative full unifier.
+        pending.push((template_start, claimed_start));
+        pending.push((template_end, claimed_end));
+    }
+
+    Ok(true)
+}
+
 fn unify_node(
     store: &OptimizedLinkStore,
     template: Handle,
@@ -529,6 +588,13 @@ fn discover_triggered_rule_images_internal(
             }
             continue;
         };
+
+        if !structural_discriminator_matches(store, before, active, &roles)? {
+            if let Some(profile) = profile.as_deref_mut() {
+                profile.candidates_rejected_before_unification += 1;
+            }
+            continue;
+        }
 
         if let Some(profile) = profile.as_deref_mut() {
             profile.unification_attempts += 1;
@@ -882,6 +948,67 @@ mod tests {
                 &[role],
             ),
             Err(StructuralError::TemplateMismatch)
+        );
+    }
+
+    #[test]
+    fn structural_discriminator_only_rejects_proven_mismatch() {
+        let mut store = OptimizedLinkStore::new();
+        let anchors = fresh(&mut store, 40);
+        let role = anchors[30];
+        let left = anchors[4];
+        let right = anchors[5];
+        let other = anchors[6];
+
+        let template = store.ensure_pair(role, right).unwrap();
+        let arbitrary_start = store.ensure_pair(left, other).unwrap();
+        let arbitrary = store.ensure_pair(arbitrary_start, right).unwrap();
+
+        assert!(
+            structural_discriminator_matches(&store, template, arbitrary, &[role]).unwrap(),
+            "role wildcard must never cause an early false negative"
+        );
+
+        let grounded = store.ensure_pair(left, right).unwrap();
+        let wrong = store.ensure_pair(other, right).unwrap();
+        assert!(
+            !structural_discriminator_matches(&store, grounded, wrong, &[]).unwrap(),
+            "grounded structural mismatch should be rejected before unification"
+        );
+
+        assert!(
+            structural_discriminator_matches(&store, grounded, grounded, &[]).unwrap(),
+            "identical grounded structure must survive discrimination"
+        );
+
+        // Put the first real mismatch deeper than the bounded prefilter can
+        // inspect. The discriminator must return "possible" and delegate the
+        // final decision to the authoritative full matcher.
+        let mut deep_template = left;
+        let mut deep_claimed = other;
+        for _ in 0..(STRUCTURAL_DISCRIMINATION_BUDGET + 8) {
+            deep_template = store.ensure_pair(deep_template, right).unwrap();
+            deep_claimed = store.ensure_pair(deep_claimed, right).unwrap();
+        }
+        assert!(
+            structural_discriminator_matches(
+                &store,
+                deep_template,
+                deep_claimed,
+                &[],
+            )
+            .unwrap(),
+            "budget exhaustion must fail open to full unification"
+        );
+        assert_eq!(
+            unify_structural_rule_template(
+                &store,
+                deep_template,
+                deep_claimed,
+                &[],
+            ),
+            Err(StructuralError::TemplateMismatch),
+            "full matcher remains final authority after discriminator uncertainty"
         );
     }
 
