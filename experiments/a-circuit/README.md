@@ -295,7 +295,8 @@ SUB1                                  GREEN (#80/#81)
 -> shared ADD/ADC/SUB/SBB datapath       GREEN (#85/#86)
 -> CF/PF/AF/ZF/SF/OF                      GREEN (#87/#88)
 -> M3 complete                              GREEN
--> M4 32-bit ALU                           CURRENT (#89)
+-> M4 Word logic                           GREEN (#89/#90)
+-> M4 logical flag/writeback effects       CURRENT (#91)
 ```
 
 
@@ -385,3 +386,51 @@ NOT:             flags unchanged
 
 The follow-up must therefore represent a partial flag update instead of inventing
 a deterministic AF value.
+
+
+## M4 — partial FlagPatch and TEST effect
+
+Issue: #91
+
+Logical instructions do not all produce a complete deterministic EFLAGS value.
+The benchmark therefore uses a structural **patch**, not a fake full flag tuple.
+
+Defined assignments are data:
+
+```text
+SET(FlagId, Bit)
+```
+
+Undefined flags are explicit:
+
+```text
+UNDEFINED(FlagId)
+```
+
+A flag absent from the patch means preserve its existing architectural value.
+
+Thus:
+
+```text
+AND/OR/XOR/TEST:
+  SET(CF,0)
+  SET(PF,parity)
+  UNDEFINED(AF)
+  SET(ZF,zero)
+  SET(SF,sign)
+  SET(OF,0)
+
+NOT:
+  FlagPatch = ExactSequence_R([])
+```
+
+The logical effect result is composable:
+
+```text
+LOGIC_EFFECT_RESULT(
+  ExactSequence_R([WriteBack, Word, FlagPatch])
+)
+```
+
+AND/OR/XOR use `WriteBack=1`; TEST reuses exactly the same structural AND path
+with `WriteBack=0`. NOT uses `WriteBack=1` and an empty patch.
