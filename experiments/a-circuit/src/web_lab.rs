@@ -3,12 +3,13 @@ use crate::{
     logic_effect_n::web_run_logic,
     mul32_n::web_run_mul32,
     mul_effect_n::web_run_mul_effect,
-    mux_n::{web_run_mux1, web_run_mux32},
+    mux_n::{web_prove_mux1, web_run_mux32},
     rotate32_n::web_run_rotate32,
     rotate_carry32_n::web_run_rotate_carry32,
     shift32_n::web_run_shift32,
     unary_arith_n::web_run_unary32,
 };
+use std::sync::Mutex;
 
 const FLAG_CF: u32 = 1 << 0;
 const FLAG_PF: u32 = 1 << 2;
@@ -34,7 +35,21 @@ struct LabOutcome {
     quiescent: u32,
 }
 
+static LAST_PROOF_JSON: Mutex<String> = Mutex::new(String::new());
+
+fn set_last_proof_json(value: String) {
+    let mut guard = LAST_PROOF_JSON
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *guard = value;
+}
+
+fn clear_last_proof_json() {
+    set_last_proof_json(String::new());
+}
+
 fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
+    clear_last_proof_json();
     if let Some(out) = web_run_logic(op, a, b) {
         return Some(LabOutcome {
             value: out.value,
@@ -88,21 +103,24 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
     }
 
     if op == 12 {
-        let out = web_run_mux1(input_flag, a, b)?;
-        return Some(LabOutcome {
-            value: u32::from(out.value),
+        let proof = web_prove_mux1(input_flag, a, b)?;
+        let proof_json = serde_json::to_string(&proof).ok()?;
+        let out = LabOutcome {
+            value: u32::from(proof.result.decoded_value),
             value_hi: 0,
             writeback: 1,
             defined_mask: 0,
             value_mask: 0,
             undefined_mask: 0,
             preserve_mask: STATUS_FLAGS,
-            reactions: out.reactions,
-            links_after_build: out.links_after_build,
-            links_after_first: out.links_after_first,
-            steady_link_delta: out.steady_link_delta,
-            quiescent: u32::from(out.quiescent),
-        });
+            reactions: proof.execute.active_reaction_count,
+            links_after_build: proof.load.links_after_load,
+            links_after_first: proof.result.links_final,
+            steady_link_delta: proof.result.identical_rerun_link_delta,
+            quiescent: u32::from(proof.execute.final_quiescent),
+        };
+        set_last_proof_json(proof_json);
+        return Some(out);
     }
 
 
@@ -289,6 +307,35 @@ pub extern "C" fn amemory_i386_lab_steady_link_delta() -> u32 { unsafe { LAST_ST
 #[no_mangle]
 pub extern "C" fn amemory_i386_lab_quiescent() -> u32 { unsafe { LAST_QUIESCENT } }
 
+#[no_mangle]
+pub extern "C" fn amemory_i386_lab_proof_available() -> u32 {
+    let guard = LAST_PROOF_JSON
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    u32::from(!guard.is_empty())
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_lab_proof_json_len() -> u32 {
+    let guard = LAST_PROOF_JSON
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    guard.len() as u32
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_lab_proof_json_byte(index: u32) -> u32 {
+    let guard = LAST_PROOF_JSON
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    guard
+        .as_bytes()
+        .get(index as usize)
+        .copied()
+        .map(u32::from)
+        .unwrap_or(u32::MAX)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -328,6 +375,23 @@ mod tests {
                 }
             }
         }
+
+        let proof_mux1 = execute(12, 1, 0, 1).unwrap();
+        assert_eq!(proof_mux1.value, 1);
+        assert_eq!(amemory_i386_lab_proof_available(), 1);
+        let proof_json = {
+            let guard = LAST_PROOF_JSON
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            guard.clone()
+        };
+        let proof: serde_json::Value = serde_json::from_str(&proof_json).unwrap();
+        let memory_id = proof["load"]["memoryInstanceId"].as_str().unwrap();
+        assert_eq!(proof["execute"]["memoryInstanceId"].as_str().unwrap(), memory_id);
+        assert_eq!(proof["result"]["memoryInstanceId"].as_str().unwrap(), memory_id);
+        assert_eq!(proof["prepare"]["runtimeMemoryExists"], false);
+        assert_eq!(proof["result"]["oracleMatches"], true);
+        assert_eq!(proof["result"]["identicalRerunLinkDelta"], 0);
 
         let shl = execute(13, 0x8000_0001, 1, 0).unwrap();
         assert_eq!(shl.value, 2);
