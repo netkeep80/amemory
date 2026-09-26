@@ -8,7 +8,6 @@ on:
 permissions:
   contents: read
   actions: read
-  checks: read
   pull-requests: read
   pages: write
   id-token: write
@@ -44,7 +43,7 @@ jobs:
             _site/amemory_browser_probe.wasm
           touch _site/.nojekyll
 
-      - name: Generate exact-head CI manifest
+      - name: Generate complete workflow matrix
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -68,44 +67,82 @@ jobs:
             source_sha="${GITHUB_SHA}"
           fi
 
+          workflows_json="$(gh api --paginate \
+            -H "Accept: application/vnd.github+json" \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows?per_page=100" \
+            | jq -s '[
+                .[] | .workflows[]
+                | select(.state == "active")
+                | select(.path != ".github/workflows/browser-accelerator-pages.yml")
+              ] | sort_by(.name)')"
+
+          rows_file="$(mktemp)"
+          : > "${rows_file}"
+
+          while IFS= read -r workflow; do
+            workflow_id="$(jq -r '.id' <<<"${workflow}")"
+
+            latest_json="$(gh api \
+              -H "Accept: application/vnd.github+json" \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow_id}/runs?branch=main&per_page=1")"
+
+            if [[ "$(jq -r '.workflow_runs | length' <<<"${latest_json}")" == "0" ]]; then
+              latest_json="$(gh api \
+                -H "Accept: application/vnd.github+json" \
+                "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow_id}/runs?per_page=1")"
+            fi
+
+            jq -cn \
+              --argjson workflow "${workflow}" \
+              --argjson latest "${latest_json}" \
+              '{
+                id: $workflow.id,
+                name: $workflow.name,
+                path: $workflow.path,
+                state: $workflow.state,
+                run: (
+                  if ($latest.workflow_runs | length) == 0 then null
+                  else ($latest.workflow_runs[0] | {
+                    id,
+                    status,
+                    conclusion,
+                    event,
+                    headBranch: .head_branch,
+                    headSha: .head_sha,
+                    url: .html_url,
+                    createdAt: .created_at,
+                    updatedAt: .updated_at
+                  })
+                  end
+                )
+              }' >> "${rows_file}"
+          done < <(jq -c '.[]' <<<"${workflows_json}")
+
           generated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-          gh api --paginate \
-            -H "Accept: application/vnd.github+json" \
-            "repos/${GITHUB_REPOSITORY}/commits/${source_sha}/check-runs?per_page=100" \
-          | jq -s \
-              --arg generated_at "${generated_at}" \
-              --arg main_sha "${GITHUB_SHA}" \
-              --arg source_sha "${source_sha}" \
-              --arg source_kind "${source_kind}" \
-              --arg pr_number "${pr_number}" \
-              '{
-                schemaVersion: 1,
-                generatedAt: $generated_at,
-                mainSha: $main_sha,
-                sourceSha: $source_sha,
-                source: {
-                  kind: $source_kind,
-                  prNumber: (if $pr_number == "" then null else ($pr_number | tonumber) end)
-                },
-                checks: (
-                  [ .[] | .check_runs[] ]
-                  | unique_by(.id)
-                  | sort_by(.name)
-                  | map({
-                      id,
-                      name,
-                      status,
-                      conclusion,
-                      app: (.app.name // "unknown"),
-                      detailsUrl: .details_url,
-                      startedAt: .started_at,
-                      completedAt: .completed_at
-                    })
-                )
-              }' > _site/ci-results.json
+          jq -s \
+            --arg generated_at "${generated_at}" \
+            --arg main_sha "${GITHUB_SHA}" \
+            --arg source_sha "${source_sha}" \
+            --arg source_kind "${source_kind}" \
+            --arg pr_number "${pr_number}" \
+            '{
+              schemaVersion: 2,
+              generatedAt: $generated_at,
+              mainSha: $main_sha,
+              sourceSha: $source_sha,
+              source: {
+                kind: $source_kind,
+                prNumber: (if $pr_number == "" then null else ($pr_number | tonumber) end)
+              },
+              workflows: .
+            }' "${rows_file}" > _site/ci-results.json
 
-          jq -e '.schemaVersion == 1 and (.checks | type == "array")' _site/ci-results.json >/dev/null
+          jq -e '
+            .schemaVersion == 2
+            and (.workflows | type == "array")
+            and ([.workflows[].path] | index(".github/workflows/browser-accelerator-pages.yml") | not)
+          ' _site/ci-results.json >/dev/null
 
       - name: Attach automatic CI matrix to dashboard
         run: |
