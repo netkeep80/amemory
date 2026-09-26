@@ -16,6 +16,16 @@ import { runAnumBoundaryBrowser } from "./anum-boundary.mjs";
 import { runReactionBrowser } from "./reaction.mjs";
 
 const ui = {
+  overviewWasm: document.querySelector("#overview-wasm"),
+  overviewWebgpu: document.querySelector("#overview-webgpu"),
+  overviewDifferential: document.querySelector("#overview-differential"),
+  overviewLifecycle: document.querySelector("#overview-lifecycle"),
+  flowInput: document.querySelector("#flow-input"),
+  flowMemory: document.querySelector("#flow-memory"),
+  flowExecution: document.querySelector("#flow-execution"),
+  flowResult: document.querySelector("#flow-result"),
+  asetAtomic: document.querySelector("#aset-atomic"),
+  reactionPortableResult: document.querySelector("#reaction-portable-result"),
   wasm: document.querySelector("#wasm"),
   cpu: document.querySelector("#cpu"),
   webgpu: document.querySelector("#webgpu"),
@@ -193,6 +203,7 @@ async function loadWasm() {
   }
 
   report(ui.wasm, "LOADED", true);
+  report(ui.overviewWasm, "LOADED", true);
   log(`wasm.marker = 0x${marker.toString(16)}`);
 
   const cpuResult = cpuStep(41);
@@ -244,6 +255,7 @@ async function loadWasm() {
 async function initWebGpu() {
   if (!("gpu" in navigator)) {
     report(ui.webgpu, "WEBGPU_UNAVAILABLE", false);
+    report(ui.overviewWebgpu, "UNAVAILABLE", false);
     return null;
   }
 
@@ -252,12 +264,14 @@ async function initWebGpu() {
     adapter = await navigator.gpu.requestAdapter();
   } catch (error) {
     report(ui.webgpu, "WEBGPU_INIT_FAILED", false);
+    report(ui.overviewWebgpu, "INIT FAILED", false);
     log(`requestAdapter failed: ${error}`);
     return null;
   }
 
   if (!adapter) {
     report(ui.webgpu, "WEBGPU_UNAVAILABLE", false);
+    report(ui.overviewWebgpu, "UNAVAILABLE", false);
     log("WebGPU exists, but no GPUAdapter was returned.");
     return null;
   }
@@ -265,11 +279,13 @@ async function initWebGpu() {
   try {
     const device = await adapter.requestDevice();
     report(ui.webgpu, "WEBGPU_AVAILABLE", true);
+    report(ui.overviewWebgpu, "AVAILABLE", true);
     log(`adapter.features = ${[...adapter.features].join(", ") || "(none exposed)"}`);
     log(`device.features = ${[...device.features].join(", ") || "(none exposed)"}`);
     return device;
   } catch (error) {
     report(ui.webgpu, "WEBGPU_INIT_FAILED", false);
+    report(ui.overviewWebgpu, "INIT FAILED", false);
     log(`requestDevice failed: ${error}`);
     return null;
   }
@@ -464,6 +480,7 @@ async function runDifferential(wasm, device) {
 
   assertExactU32(cpu, gpu, "CPU/GPU differential");
   report(ui.differential, "PASS", true);
+  report(ui.overviewDifferential, "PASS", true);
 
   let mismatchDetected = false;
   try {
@@ -872,6 +889,8 @@ async function main() {
     wasm = await loadWasm();
   } catch (error) {
     report(ui.wasm, "FAILED", false);
+    report(ui.overviewWasm, "FAILED", false);
+    report(ui.overviewLifecycle, "BLOCKED", false);
     report(ui.cpu, "NOT_RUN", false);
     report(ui.incidenceCpu, "NOT_RUN", false);
     log(`WASM error: ${error?.stack || error}`);
@@ -882,6 +901,14 @@ async function main() {
     report(ui.compute, "NOT_RUN", false);
     report(ui.incidenceGpu, "NOT_RUN", false);
     report(ui.differential, "NOT_RUN", false);
+    report(ui.overviewDifferential, "NOT RUN", false);
+    report(ui.overviewLifecycle, "BLOCKED", false);
+    report(ui.flowInput, "NOT RUN", false);
+    report(ui.flowMemory, "NOT RUN", false);
+    report(ui.flowExecution, "NOT RUN", false);
+    report(ui.flowResult, "NOT RUN", false);
+    report(ui.asetAtomic, "NOT RUN", false);
+    report(ui.reactionPortableResult, "NOT RUN", false);
     report(ui.negative, "NOT_RUN", false);
     report(ui.canonicalGpu, "NOT_RUN", false);
     report(ui.canonicalDiff, "NOT_RUN", false);
@@ -933,6 +960,7 @@ async function main() {
       await runDifferential(wasm, device);
     } catch (error) {
       report(ui.differential, "FAIL", false);
+      report(ui.overviewDifferential, "FAIL", false);
       if (ui.incidenceCpu.textContent === "WAITING") report(ui.incidenceCpu, "FAIL", false);
       if (ui.incidenceGpu.textContent === "WAITING") report(ui.incidenceGpu, "FAIL", false);
       if (ui.negative.textContent === "WAITING") report(ui.negative, "FAIL", false);
@@ -978,6 +1006,14 @@ async function main() {
       report(ui.anumExportGpu, "PASS", anum.gpuExport);
       report(ui.anumDiff, "PASS", anum.differential);
       report(
+        ui.asetAtomic,
+        "PASS (3 Anums → " + anum.atomicAsetLinkCount + " canonical Links; failed middle member published nothing)",
+        anum.atomicAsetLoad && anum.atomicAsetDifferential,
+      );
+      report(ui.flowInput, "3-Anum atomic-load witness PASS", anum.atomicAsetLoad);
+      report(ui.flowMemory, anum.atomicAsetLinkCount + " canonical Links (load witness)", true);
+      report(ui.overviewLifecycle, "READY (load witness)", true);
+      report(
         ui.anumHandles,
         `PASS (CPU ${anum.sample.cpuHandle} != GPU ${anum.sample.gpuHandle})`,
         anum.handlesDiffer,
@@ -990,6 +1026,10 @@ async function main() {
       );
       for (const line of anum.logs) log(line);
     } catch (error) {
+      report(ui.asetAtomic, "FAIL", false);
+      report(ui.flowInput, "LOAD FAILED", false);
+      report(ui.flowMemory, "NOT PUBLISHED", false);
+      report(ui.overviewLifecycle, "LOAD FAILED", false);
       for (const element of [
         ui.anumImportCpu, ui.anumImportGpu, ui.anumExportCpu, ui.anumExportGpu,
         ui.anumDiff, ui.anumHandles, ui.anumReuse, ui.anumNegative,
@@ -1018,6 +1058,22 @@ async function main() {
         reaction.cpuHandoff === 1 && reaction.gpuHandoff === 1,
       );
       report(ui.reactionDiff, "PASS", reaction.normalizedDifferential);
+      report(
+        ui.reactionPortableResult,
+        "PASS " + JSON.stringify(reaction.portableResultCpu),
+        reaction.portableResultDifferential,
+      );
+      report(
+        ui.flowExecution,
+        "R1 witness: matched=" + reaction.cpuMatched + ", handoff=" + reaction.cpuHandoff,
+        reaction.normalizedDifferential,
+      );
+      report(
+        ui.flowResult,
+        "[" + reaction.portableResultCpu.scope.join(", ") + "]",
+        reaction.portableResultDifferential,
+      );
+      report(ui.overviewLifecycle, "RESULT / READY", reaction.portableResultDifferential);
       report(ui.reactionHandles, "PASS (backend-local handles differ)", reaction.handlesDiffer);
       report(
         ui.reactionScope,
@@ -1220,6 +1276,10 @@ async function main() {
       report(ui.reactionR6Diff, "PASS", reaction.r6NormalizedDifferential);
       for (const line of reaction.logs) log(line);
     } catch (error) {
+      report(ui.reactionPortableResult, "FAIL", false);
+      report(ui.flowExecution, "REACTION FAILED", false);
+      report(ui.flowResult, "NO RESULT", false);
+      report(ui.overviewLifecycle, "REACTION FAILED", false);
       for (const element of [
         ui.reactionBeforeCpu, ui.reactionBeforeGpu, ui.reactionAfterCpu, ui.reactionAfterGpu,
         ui.reactionMatched, ui.reactionHandoff, ui.reactionDiff, ui.reactionHandles,
