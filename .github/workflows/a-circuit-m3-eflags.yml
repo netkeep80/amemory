@@ -1,0 +1,39 @@
+name: A-Circuit M3 x86 arithmetic flags
+
+on:
+  pull_request:
+    paths:
+      - "experiments/a-circuit/**"
+      - ".github/workflows/a-circuit-m3-eflags.yml"
+  push:
+    branches: [main]
+    paths:
+      - "experiments/a-circuit/**"
+      - ".github/workflows/a-circuit-m3-eflags.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  eflags:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal
+
+      - name: Structural x86 arithmetic flag suite
+        run: |
+          cargo +1.98.1 test \
+            --release \
+            --manifest-path experiments/a-circuit/Cargo.toml \
+            m3_eflags_ \
+            -- --ignored --nocapture --test-threads=1
+
+      - name: Flag architecture policy
+        run: |
+          echo "Flags consume one shared ARITH result; arithmetic is not re-run."
+          echo "CF/PF/AF/ZF/SF/OF are derived structurally."
+          echo "ARITH_RESULT and FLAGGED_RESULT use stable composable envelopes."

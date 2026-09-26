@@ -69,11 +69,12 @@ fn stage_frame(
 }
 
 #[derive(Clone, Debug)]
-struct ArithmeticProgram {
-    width: usize,
-    arithmetic: Handle,
-    active_steps: usize,
-    links_after_build: usize,
+pub(crate) struct ArithmeticProgram {
+    pub(crate) width: usize,
+    pub(crate) arithmetic: Handle,
+    pub(crate) result_tag: Handle,
+    pub(crate) active_steps: usize,
+    pub(crate) links_after_build: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -87,7 +88,7 @@ struct ArithmeticOutcome {
 }
 
 impl ArithmeticProgram {
-    fn install(f: &mut FullFixture, width: usize) -> Self {
+    pub(crate) fn install(f: &mut FullFixture, width: usize) -> Self {
         assert!((4..=32).contains(&width));
 
         let seed0 = f.store.ensure_pair(f.k, f.full).unwrap();
@@ -142,6 +143,16 @@ impl ArithmeticProgram {
         let arith_right = anchors.next(&mut f.store);
         let arithmetic =
             f.store.ensure_pair(arith_left, arith_right).unwrap();
+
+        // Stable component-result envelope tag. A large ExactSequence payload
+        // is self-starting, so using it directly as the endpoint would make
+        // trigger discovery depend on the entire concrete result value. The
+        // stable tag keeps the payload fully structural while allowing later
+        // components (EFLAGS/ALU) to index one generic continuation.
+        let result_left = anchors.next(&mut f.store);
+        let result_right = anchors.next(&mut f.store);
+        let result_tag =
+            f.store.ensure_pair(result_left, result_right).unwrap();
 
         let c0_tag = anchors.next(&mut f.store);
         let status_tag = anchors.next(&mut f.store);
@@ -503,7 +514,9 @@ impl ArithmeticProgram {
                 &[word, status, aux, sign_in, final_raw, mode],
             )
             .unwrap();
-            let after = f.store.ensure_pair(k, outcome).unwrap();
+            let envelope =
+                f.store.ensure_pair(result_tag, outcome).unwrap();
+            let after = f.store.ensure_pair(k, envelope).unwrap();
 
             let mut roles = Vec::with_capacity(width + 6);
             roles.push(k);
@@ -530,6 +543,7 @@ impl ArithmeticProgram {
         Self {
             width,
             arithmetic,
+            result_tag,
             active_steps,
             links_after_build,
         }
@@ -588,7 +602,7 @@ fn decode_bit(f: &FullFixture, bit: Handle) -> u8 {
     }
 }
 
-fn run_arithmetic(
+pub(crate) fn run_arithmetic(
     f: &mut FullFixture,
     program: &ArithmeticProgram,
     a: u32,
@@ -647,7 +661,9 @@ fn run_arithmetic(
     let (caller, result) = f.store.poles(final_link).unwrap();
     assert_eq!(caller, f.k);
 
-    let values = read_exact_sequence(&f.store, result).unwrap();
+    let (result_tag, payload) = f.store.poles(result).unwrap();
+    assert_eq!(result_tag, program.result_tag);
+    let values = read_exact_sequence(&f.store, payload).unwrap();
     assert_eq!(values.len(), 6);
 
     ArithmeticOutcome {
