@@ -3,22 +3,22 @@ use super::{
         call, define_bundle_rule, index_rule_for, Fixture as FullFixture,
     },
     logic_n::{install_gate_basis, GateSet},
+    proof_n::{
+        execute_to_quiescence, identical_rerun, load_runtime, loaded_handle,
+        prepare_stage, semantic_source, theory_admissions, visual_snapshot,
+        WebMux1Proof, WebProofResultStage, WebStructuralProof,
+    },
 };
 use amemory_optimized_cpu_probe::{
     structural::{
         define_structural_interpreter, define_structural_role_dictionary,
-        materialize_exact_sequence, read_exact_sequence, OptimizedStructuralEngine,
+        materialize_exact_sequence, read_exact_sequence,
     },
     Handle, OptimizedLinkStore, ROOT_HANDLE,
 };
-use serde::Serialize;
-use std::{
-    collections::{HashMap, HashSet},
-    sync::atomic::{AtomicU32, Ordering},
-};
+use std::collections::HashSet;
 
 const WIDTH: usize = 32;
-static NEXT_PROOF_MEMORY_ID: AtomicU32 = AtomicU32::new(1);
 
 struct AnchorGen {
     current: Handle,
@@ -957,211 +957,6 @@ fn build_proof_mux_fixture() -> ProofMuxFixture {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct WebProofPreparedRoot {
-    pub(crate) role: String,
-    pub(crate) source: String,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct WebProofLoadedRoot {
-    pub(crate) role: String,
-    pub(crate) source: String,
-    pub(crate) local_handle: u32,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct WebProofPrepareStage {
-    pub(crate) compiler_label: String,
-    pub(crate) runtime_memory_exists: bool,
-    pub(crate) compiled_links: u32,
-    pub(crate) aset_anums: Vec<String>,
-    pub(crate) semantic_roots: Vec<WebProofPreparedRoot>,
-    pub(crate) theory_admissions: Vec<String>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct WebProofLoadStage {
-    pub(crate) memory_instance_id: String,
-    pub(crate) links_before_load: u32,
-    pub(crate) links_after_load: u32,
-    pub(crate) imported_anums: u32,
-    pub(crate) portable_round_trip: bool,
-    pub(crate) semantic_roots: Vec<WebProofLoadedRoot>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct WebProofReactionStep {
-    pub(crate) memory_instance_id: String,
-    pub(crate) step: u32,
-    pub(crate) scope_before: Vec<String>,
-    pub(crate) raw_rule_matches: u32,
-    pub(crate) transitioned_members: u32,
-    pub(crate) handoff_count: u32,
-    pub(crate) scope_after: Vec<String>,
-    pub(crate) links_after: u32,
-    pub(crate) quiescent: bool,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct WebProofVisualLink {
-    pub(crate) key: String,
-    pub(crate) start_key: String,
-    pub(crate) end_key: String,
-    pub(crate) local_handle: u32,
-    pub(crate) label: Option<String>,
-    pub(crate) tags: Vec<String>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct WebProofExecuteStage {
-    pub(crate) memory_instance_id: String,
-    pub(crate) reactions: Vec<WebProofReactionStep>,
-    pub(crate) active_reaction_count: u32,
-    pub(crate) final_quiescent: bool,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct WebProofResultStage {
-    pub(crate) memory_instance_id: String,
-    pub(crate) result_anum: String,
-    pub(crate) result_sequence_anum: String,
-    pub(crate) decoded_value: u8,
-    pub(crate) oracle_value: u8,
-    pub(crate) oracle_matches: bool,
-    pub(crate) links_final: u32,
-    pub(crate) identical_rerun_link_delta: u32,
-    pub(crate) visual_links: Vec<WebProofVisualLink>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct WebMux1Proof {
-    pub(crate) schema_version: u32,
-    pub(crate) block: String,
-    pub(crate) prepare: WebProofPrepareStage,
-    pub(crate) load: WebProofLoadStage,
-    pub(crate) execute: WebProofExecuteStage,
-    pub(crate) result: WebProofResultStage,
-}
-
-#[derive(Debug)]
-struct ProofRuntimeMemory {
-    id: String,
-    store: OptimizedLinkStore,
-}
-
-fn export_portable_aset(store: &OptimizedLinkStore) -> Vec<String> {
-    // Start with containment roots: Links that are not a non-self pole of any
-    // other Link. Importing one portable Anum recursively reconstructs its pole
-    // closure, so exporting every local handle separately would be redundant.
-    let count = store.link_count() as u32;
-    let mut referenced = HashSet::new();
-    for handle in 1..=count {
-        let (start, end) = store.poles(handle).expect("proof poles");
-        if start != handle {
-            referenced.insert(start);
-        }
-        if end != handle {
-            referenced.insert(end);
-        }
-    }
-
-    let mut sources = Vec::new();
-    let mut reconstructed = OptimizedLinkStore::new();
-
-    for handle in 1..=count {
-        if referenced.contains(&handle) {
-            continue;
-        }
-        let source = store.export_anum(handle).expect("proof root export");
-        reconstructed.import_anum(&source).expect("proof root import");
-        sources.push(source);
-    }
-
-    // Defensive completion: if an unusual topology was not reachable from a
-    // containment root, add only the portable Anum(s) that actually extend the
-    // reconstructed image. This keeps the transport complete without coupling
-    // it to compiler-local handle numbering.
-    for handle in 1..=count {
-        let source = store.export_anum(handle).expect("proof completion export");
-        let before = reconstructed.link_count();
-        let imported = reconstructed.import_anum(&source).expect("proof completion import");
-        assert_eq!(
-            reconstructed.export_anum(imported).expect("proof completion round-trip"),
-            source,
-        );
-        if reconstructed.link_count() > before {
-            sources.push(source);
-        }
-    }
-
-    // Every compiler Link must now already exist structurally in the transport image.
-    for handle in 1..=count {
-        let source = store.export_anum(handle).expect("proof coverage export");
-        let before = reconstructed.link_count();
-        let imported = reconstructed.import_anum(&source).expect("proof coverage import");
-        assert_eq!(reconstructed.link_count(), before, "portable Aset omitted topology");
-        assert_eq!(reconstructed.export_anum(imported).unwrap(), source);
-    }
-
-    sources
-}
-
-fn export_scope(store: &OptimizedLinkStore, scope: &[Handle]) -> Vec<String> {
-    scope
-        .iter()
-        .map(|handle| store.export_anum(*handle).expect("scope export"))
-        .collect()
-}
-
-fn semantic_source(
-    store: &OptimizedLinkStore,
-    role: &str,
-    handle: Handle,
-) -> WebProofPreparedRoot {
-    WebProofPreparedRoot {
-        role: role.to_owned(),
-        source: store.export_anum(handle).expect("semantic root export"),
-    }
-}
-
-fn visual_snapshot(
-    memory: &ProofRuntimeMemory,
-    loaded_roots: &[WebProofLoadedRoot],
-) -> Vec<WebProofVisualLink> {
-    let mut roles_by_handle: HashMap<u32, Vec<String>> = HashMap::new();
-    for root in loaded_roots {
-        roles_by_handle
-            .entry(root.local_handle)
-            .or_default()
-            .push(root.role.clone());
-    }
-
-    (1..=memory.store.link_count() as u32)
-        .map(|handle| {
-            let (start, end) = memory.store.poles(handle).expect("visual poles");
-            let roles = roles_by_handle.get(&handle).cloned().unwrap_or_default();
-            WebProofVisualLink {
-                key: format!("{}:L{}", memory.id, handle),
-                start_key: format!("{}:L{}", memory.id, start),
-                end_key: format!("{}:L{}", memory.id, end),
-                local_handle: handle,
-                label: (!roles.is_empty()).then(|| roles.join(" + ")),
-                tags: roles,
-            }
-        })
-        .collect()
-}
-
 pub(crate) fn web_prove_mux1(
     select: u32,
     a: u32,
@@ -1171,9 +966,8 @@ pub(crate) fn web_prove_mux1(
         return None;
     }
 
-    // Stage 1: compile a complete portable Aset before the runtime A-memory exists.
-    // This compiler store is preparation state only; it is intentionally discarded
-    // before execution. Runtime identity begins only below at ProofRuntimeMemory.
+    // Stage 1: prepare a complete portable image. This compiler store is not
+    // the runtime A-memory and is discarded as execution authority.
     let mut compiler = build_proof_mux_fixture();
     let bits = [compiler.zero, compiler.one];
     let args = materialize_exact_sequence(
@@ -1184,154 +978,118 @@ pub(crate) fn web_prove_mux1(
             bits[b as usize],
         ],
     )
-    .unwrap();
+    .ok()?;
     let invocation = call(
         &mut compiler.store,
         compiler.apply,
         compiler.mux1,
         args,
     );
-    let initial = compiler.store.ensure_pair(compiler.k, invocation).unwrap();
+    let initial = compiler
+        .store
+        .ensure_pair(compiler.k, invocation)
+        .ok()?;
 
     let prepared_roots = vec![
         semantic_source(&compiler.store, "function.mux1", compiler.mux1),
-        semantic_source(&compiler.store, "function.dependency.xor2", compiler.xor2),
-        semantic_source(&compiler.store, "function.dependency.and2", compiler.and2),
-        semantic_source(&compiler.store, "data.select", bits[select as usize]),
+        semantic_source(
+            &compiler.store,
+            "function.dependency.xor2",
+            compiler.xor2,
+        ),
+        semantic_source(
+            &compiler.store,
+            "function.dependency.and2",
+            compiler.and2,
+        ),
+        semantic_source(
+            &compiler.store,
+            "data.select",
+            bits[select as usize],
+        ),
         semantic_source(&compiler.store, "data.a", bits[a as usize]),
         semantic_source(&compiler.store, "data.b", bits[b as usize]),
         semantic_source(&compiler.store, "data.zero", compiler.zero),
         semantic_source(&compiler.store, "data.one", compiler.one),
-        semantic_source(&compiler.store, "execution.interpreter", compiler.interpreter),
-        semantic_source(&compiler.store, "execution.theory", compiler.theory),
-        semantic_source(&compiler.store, "execution.apply", compiler.apply),
+        semantic_source(
+            &compiler.store,
+            "execution.interpreter",
+            compiler.interpreter,
+        ),
+        semantic_source(
+            &compiler.store,
+            "execution.theory",
+            compiler.theory,
+        ),
+        semantic_source(
+            &compiler.store,
+            "execution.apply",
+            compiler.apply,
+        ),
         semantic_source(&compiler.store, "invocation.args", args),
-        semantic_source(&compiler.store, "invocation.call", invocation),
+        semantic_source(
+            &compiler.store,
+            "invocation.call",
+            invocation,
+        ),
         semantic_source(&compiler.store, "scope.initial", initial),
-        semantic_source(&compiler.store, "context.caller", compiler.k),
-        semantic_source(&compiler.store, "result.tag", compiler.bit_result_tag),
-        semantic_source(&compiler.store, "result.zero", compiler.bit_outputs[0]),
-        semantic_source(&compiler.store, "result.one", compiler.bit_outputs[1]),
+        semantic_source(
+            &compiler.store,
+            "context.caller",
+            compiler.k,
+        ),
+        semantic_source(
+            &compiler.store,
+            "result.tag",
+            compiler.bit_result_tag,
+        ),
+        semantic_source(
+            &compiler.store,
+            "result.zero",
+            compiler.bit_outputs[0],
+        ),
+        semantic_source(
+            &compiler.store,
+            "result.one",
+            compiler.bit_outputs[1],
+        ),
     ];
-    let theory_admissions = compiler
-        .store
-        .start_incidence(compiler.theory)
-        .ok()?
-        .filter_map(|handle| {
-            let (start, _end) = compiler.store.poles(handle).ok()?;
-            (start == compiler.theory)
-                .then(|| compiler.store.export_anum(handle).ok())
-                .flatten()
-        })
-        .collect::<Vec<_>>();
-    if theory_admissions.is_empty() {
-        return None;
-    }
 
-    let prepared_anums = export_portable_aset(&compiler.store);
+    let admissions =
+        theory_admissions(&compiler.store, compiler.theory)?;
+    let prepare = prepare_stage(
+        &compiler.store,
+        prepared_roots,
+        admissions,
+    );
 
-    let prepare = WebProofPrepareStage {
-        compiler_label: "portable Aset compiler/preparation state (not runtime A-memory)".to_owned(),
-        runtime_memory_exists: false,
-        compiled_links: compiler.store.link_count() as u32,
-        aset_anums: prepared_anums.clone(),
-        semantic_roots: prepared_roots.clone(),
-        theory_admissions,
-    };
+    // Stage 2: create exactly one runtime A-memory and import the portable Aset.
+    let (mut memory, load) = load_runtime(&prepare)?;
 
-    // Stage 2: exactly one runtime A-memory is created. Every following stage
-    // keeps and mutates this one ProofRuntimeMemory.store instance.
-    let memory_number = NEXT_PROOF_MEMORY_ID.fetch_add(1, Ordering::SeqCst);
-    let mut memory = ProofRuntimeMemory {
-        id: format!("A-memory#{}", memory_number),
-        store: OptimizedLinkStore::new(),
-    };
-    let links_before_load = memory.store.link_count() as u32;
-    for source in &prepared_anums {
-        memory.store.import_anum(source).ok()?;
-    }
-    let links_after_load = memory.store.link_count() as u32;
+    let interpreter = loaded_handle(&load, "execution.interpreter")?;
+    let initial = loaded_handle(&load, "scope.initial")?;
+    let caller = loaded_handle(&load, "context.caller")?;
+    let result_tag = loaded_handle(&load, "result.tag")?;
+    let zero = loaded_handle(&load, "data.zero")?;
+    let one = loaded_handle(&load, "data.one")?;
 
-    let mut loaded_roots = Vec::with_capacity(prepared_roots.len());
-    let mut portable_round_trip = true;
-    for root in &prepared_roots {
-        let before = memory.store.link_count();
-        let handle = memory.store.import_anum(&root.source).ok()?;
-        // Semantic-root resolution must reuse already loaded topology.
-        if memory.store.link_count() != before {
-            return None;
-        }
-        if memory.store.export_anum(handle).ok().as_deref() != Some(root.source.as_str()) {
-            portable_round_trip = false;
-        }
-        loaded_roots.push(WebProofLoadedRoot {
-            role: root.role.clone(),
-            source: root.source.clone(),
-            local_handle: handle,
-        });
-    }
+    // Stage 3: execute the generic structural engine in that same runtime memory.
+    let (mut engine, execute) = execute_to_quiescence(
+        &mut memory,
+        interpreter,
+        initial,
+        32,
+        64,
+    )?;
 
-    let find = |role: &str| -> Option<Handle> {
-        loaded_roots
-            .iter()
-            .find(|root| root.role == role)
-            .map(|root| root.local_handle)
-    };
-    let interpreter = find("execution.interpreter")?;
-    let initial = find("scope.initial")?;
-    let caller = find("context.caller")?;
-    let result_tag = find("result.tag")?;
-    let zero = find("data.zero")?;
-    let one = find("data.one")?;
-
-    let load = WebProofLoadStage {
-        memory_instance_id: memory.id.clone(),
-        links_before_load,
-        links_after_load,
-        imported_anums: prepared_anums.len() as u32,
-        portable_round_trip,
-        semantic_roots: loaded_roots.clone(),
-    };
-
-    // Stage 3: execute against the exact same runtime store.
-    let mut engine = OptimizedStructuralEngine::new(32);
-    engine.set_interpreter(&memory.store, interpreter).ok()?;
-    engine.set_current(&memory.store, &[initial]).ok()?;
-
-    let mut reactions = Vec::new();
-    for step in 0..64u32 {
-        let scope_before = export_scope(&memory.store, engine.current());
-        let reaction = engine.run(&mut memory.store).ok()?;
-        let scope_after = export_scope(&memory.store, engine.current());
-        let quiescent = reaction.quiescent;
-        reactions.push(WebProofReactionStep {
-            memory_instance_id: memory.id.clone(),
-            step,
-            scope_before,
-            raw_rule_matches: reaction.raw_rule_matches,
-            transitioned_members: reaction.transitioned_members,
-            handoff_count: reaction.handoff_count,
-            scope_after,
-            links_after: memory.store.link_count() as u32,
-            quiescent,
-        });
-        if quiescent {
-            break;
-        }
-    }
-    if !reactions.last().map(|step| step.quiescent).unwrap_or(false) {
-        return None;
-    }
-    let active_reaction_count =
-        reactions.iter().filter(|step| !step.quiescent).count() as u32;
-
-    // Stage 4: result is decoded from this same memory, then visual topology is
-    // projected directly from this same store. Host MUX arithmetic is oracle only.
+    // Stage 4: decode the result from the same store. Host MUX arithmetic is
+    // independent oracle only, never runtime authority.
     if engine.current().len() != 1 {
         return None;
     }
     let final_link = engine.current()[0];
-    let (final_caller, endpoint) = memory.store.poles(final_link).ok()?;
+    let (final_caller, endpoint) =
+        memory.store.poles(final_link).ok()?;
     if final_caller != caller {
         return None;
     }
@@ -1343,6 +1101,7 @@ pub(crate) fn web_prove_mux1(
     if values.len() != 1 {
         return None;
     }
+
     let decoded_value = if values[0] == one {
         1
     } else if values[0] == zero {
@@ -1351,39 +1110,22 @@ pub(crate) fn web_prove_mux1(
         return None;
     };
     let oracle_value = if select == 0 { a as u8 } else { b as u8 };
+
     let result_anum = memory.store.export_anum(final_link).ok()?;
-    let result_sequence_anum = memory.store.export_anum(payload).ok()?;
+    let result_sequence_anum =
+        memory.store.export_anum(payload).ok()?;
 
-    // Re-run the exact same invocation in the same runtime A-memory. This is
-    // not a second authority: it is an idempotence witness over the same store.
-    let links_before_rerun = memory.store.link_count();
-    engine.set_current(&memory.store, &[initial]).ok()?;
-    for _ in 0..64u32 {
-        let repeat = engine.run(&mut memory.store).ok()?;
-        if repeat.quiescent {
-            break;
-        }
-    }
-    if !engine.quiescent() {
-        return None;
-    }
-    if engine.current().len() != 1 {
-        return None;
-    }
-    let repeat_result = memory.store.export_anum(engine.current()[0]).ok()?;
-    if repeat_result != result_anum {
-        return None;
-    }
-    let identical_rerun_link_delta =
-        (memory.store.link_count() - links_before_rerun) as u32;
-    let visual_links = visual_snapshot(&memory, &loaded_roots);
+    let identical_rerun_link_delta = identical_rerun(
+        &mut memory,
+        &mut engine,
+        initial,
+        &result_anum,
+        64,
+    )?;
 
-    let execute = WebProofExecuteStage {
-        memory_instance_id: memory.id.clone(),
-        reactions,
-        active_reaction_count,
-        final_quiescent: true,
-    };
+    let visual_links =
+        visual_snapshot(&memory, &load.semantic_roots);
+
     let result = WebProofResultStage {
         memory_instance_id: memory.id.clone(),
         result_anum,
@@ -1396,7 +1138,7 @@ pub(crate) fn web_prove_mux1(
         visual_links,
     };
 
-    Some(WebMux1Proof {
+    Some(WebStructuralProof {
         schema_version: 1,
         block: "MUX1".to_owned(),
         prepare,
