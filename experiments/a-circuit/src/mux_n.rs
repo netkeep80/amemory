@@ -591,6 +591,45 @@ fn word_vectors() -> Vec<(u32, u32)> {
     out
 }
 
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct WebMuxOutcome {
+    pub(crate) value: u32,
+    pub(crate) reactions: u32,
+    pub(crate) links_after_build: u32,
+    pub(crate) links_after_first: u32,
+    pub(crate) steady_link_delta: u32,
+    pub(crate) quiescent: u8,
+}
+
+pub(crate) fn web_run_mux32(
+    select: u32,
+    a: u32,
+    b: u32,
+) -> Option<WebMuxOutcome> {
+    if select > 1 {
+        return None;
+    }
+    let mut f = FullFixture::new();
+    let program = MuxProgram::install(&mut f);
+    let links_after_build = f.store.link_count() as u32;
+    let first = run_mux32(&mut f, &program, select as u8, a, b);
+    let links_after_first = f.store.link_count() as u32;
+    let second = run_mux32(&mut f, &program, select as u8, a, b);
+    assert_eq!(second, first, "web MUX32 repeat changed result");
+    let links_after_second = f.store.link_count() as u32;
+
+    Some(WebMuxOutcome {
+        value: first,
+        reactions: program.mux32_steps as u32,
+        links_after_build,
+        links_after_first,
+        steady_link_delta: links_after_second - links_after_first,
+        quiescent: 1,
+    })
+}
+
+
 #[test]
 fn m1_mux1_direct_and_composed_all_rows() {
     let mut f = FullFixture::new();
