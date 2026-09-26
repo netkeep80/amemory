@@ -49,13 +49,13 @@ fn stage_frame(
 }
 
 #[derive(Clone, Debug)]
-struct Sub1Program {
-    sub: Handle,
-    active_steps: usize,
+pub(crate) struct Sub1Program {
+    pub(crate) sub: Handle,
+    pub(crate) active_steps: usize,
 }
 
 impl Sub1Program {
-    fn install(f: &mut FullFixture) -> Self {
+    pub(crate) fn install(f: &mut FullFixture) -> Self {
         let seed = f.store.ensure_pair(f.full, f.k).unwrap();
         let mut anchors = AnchorGen::new(
             &mut f.store,
@@ -212,8 +212,6 @@ impl Sub1Program {
             index_rule_for(&mut f.store, &not_outputs, admission);
         }
 
-        // Full Adder returns [diff,carry_out]. For subtraction, x86-style
-        // Full Adder returns [diff,carry_out]. For subtraction, x86-style
         // Full Adder returns [diff,carry_out]. For subtraction, x86-style
         // unsigned borrow is NOT(carry_out).
         let full_outputs = [

@@ -6,6 +6,8 @@ mod ripple4;
 mod ripple_n;
 #[cfg(test)]
 mod subtractor;
+#[cfg(test)]
+mod subtractor_n;
 
 use amemory_optimized_cpu_probe::{OptimizedLinkStore, OptimizedReactionEngine};
 use std::collections::BTreeSet;

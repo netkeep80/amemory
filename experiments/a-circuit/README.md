@@ -290,8 +290,8 @@ x86 SUB/SBB carry-flag semantics where CF represents unsigned borrow.
 Required order:
 
 ```text
-SUB1
--> SUB_N 4/8/16/32
+SUB1                                  GREEN (#80/#81)
+-> SUB_N 4/8/16/32                   CURRENT (#83)
 -> shared ADD/SUB datapath
 -> CF/ZF/SF/OF/PF/AF
 -> M3 complete
