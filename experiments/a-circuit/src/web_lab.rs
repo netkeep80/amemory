@@ -1,6 +1,6 @@
 use crate::{
     arithmetic_effect_n::web_run_arithmetic,
-    logic_effect_n::web_run_logic,
+    logic_effect_n::{web_prove_logic, web_run_logic},
     mul32_n::web_run_mul32,
     mul_effect_n::web_run_mul_effect,
     mux_n::{web_prove_mux1, web_run_mux32},
@@ -50,6 +50,28 @@ fn clear_last_proof_json() {
 
 fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
     clear_last_proof_json();
+
+    if (1..=4).contains(&op) {
+        let execution = web_prove_logic(op, a, b)?;
+        let proof_json = serde_json::to_string(&execution.proof).ok()?;
+        let out = execution.outcome;
+        set_last_proof_json(proof_json);
+        return Some(LabOutcome {
+            value: out.value,
+            value_hi: 0,
+            writeback: u32::from(out.writeback),
+            defined_mask: out.defined_mask,
+            value_mask: out.value_mask,
+            undefined_mask: out.undefined_mask,
+            preserve_mask: out.preserve_mask,
+            reactions: out.reactions,
+            links_after_build: out.links_after_build,
+            links_after_first: out.links_after_first,
+            steady_link_delta: out.steady_link_delta,
+            quiescent: u32::from(out.quiescent),
+        });
+    }
+
     if let Some(out) = web_run_logic(op, a, b) {
         return Some(LabOutcome {
             value: out.value,
@@ -357,6 +379,80 @@ mod tests {
         assert_eq!(and.undefined_mask & FLAG_AF, FLAG_AF);
         assert_eq!(and.steady_link_delta, 0);
         assert_eq!(and.quiescent, 1);
+
+        for (op, a, b, expected, block) in [
+            (1u32, 0xaaaa_aaaau32, 0x0f0f_0f0fu32, 0x0a0a_0a0au32, "AND32"),
+            (2u32, 0xaaaa_0000u32, 0x0000_5555u32, 0xaaaa_5555u32, "OR32"),
+            (3u32, 0xffff_0000u32, 0x0f0f_0f0fu32, 0xf0f0_0f0fu32, "XOR32"),
+            (4u32, 0x1234_5678u32, 0u32, !0x1234_5678u32, "NOT32"),
+        ] {
+            let out = execute(op, a, b, 0).unwrap();
+            assert_eq!(out.value, expected, "{block}");
+            assert_eq!(out.steady_link_delta, 0, "{block}");
+            assert_eq!(amemory_i386_lab_proof_available(), 1, "{block}");
+
+            let proof_json = {
+                let guard = LAST_PROOF_JSON
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                guard.clone()
+            };
+            let proof: serde_json::Value =
+                serde_json::from_str(&proof_json).unwrap();
+            assert_eq!(proof["block"], block);
+            let memory_id =
+                proof["load"]["memoryInstanceId"].as_str().unwrap();
+            assert_eq!(
+                proof["execute"]["memoryInstanceId"].as_str().unwrap(),
+                memory_id
+            );
+            assert_eq!(
+                proof["result"]["memoryInstanceId"].as_str().unwrap(),
+                memory_id
+            );
+            assert_eq!(proof["prepare"]["runtimeMemoryExists"], false);
+            assert_eq!(proof["load"]["linksBeforeLoad"], 1);
+            assert_eq!(proof["load"]["portableRoundTrip"], true);
+            assert_eq!(proof["execute"]["finalQuiescent"], true);
+            assert_eq!(proof["result"]["oracleMatches"], true);
+            assert_eq!(
+                proof["result"]["decodedValue"].as_u64().unwrap() as u32,
+                out.value
+            );
+            assert_eq!(proof["result"]["identicalRerunLinkDelta"], 0);
+            assert_eq!(
+                proof["result"]["visualLinks"].as_array().unwrap().len() as u64,
+                proof["result"]["linksFinal"].as_u64().unwrap()
+            );
+
+            let roles = proof["prepare"]["semanticRoots"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(|root| root["role"].as_str())
+                .collect::<std::collections::HashSet<_>>();
+            for required in [
+                "data.a.word",
+                "data.bit.zero",
+                "data.bit.one",
+                "execution.interpreter",
+                "execution.theory",
+                "execution.apply",
+                "invocation.call",
+                "scope.initial",
+                "result.tag",
+            ] {
+                assert!(roles.contains(required), "{block}: missing {required}");
+            }
+            if op == 4 {
+                assert!(roles.contains("function.word_not"));
+                assert!(roles.contains("function.gate.not1"));
+            } else {
+                assert!(roles.contains("function.word_binary"));
+                assert!(roles.iter().any(|role| role.starts_with("function.gate.")));
+                assert!(roles.contains("data.b.word"));
+            }
+        }
 
         let add = execute(6, u32::MAX, 1, 0).unwrap();
         assert_eq!(add.value, 0);
