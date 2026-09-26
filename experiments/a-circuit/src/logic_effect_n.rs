@@ -1005,7 +1005,7 @@ fn web_logic_masks(out: EffectOutcome) -> (u32, u32, u32, u32) {
 
 
 fn runtime_bit(
-    memory: &ProofRuntimeMemory,
+    _memory: &ProofRuntimeMemory,
     bit: Handle,
     zero: Handle,
     one: Handle,
