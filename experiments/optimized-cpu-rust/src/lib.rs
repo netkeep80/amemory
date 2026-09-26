@@ -142,6 +142,31 @@ impl OptimizedLinkStore {
         Ok(self.by_end.get(&end).map(Vec::as_slice).unwrap_or(&[]))
     }
 
+    fn ordinary_pair_poles(&self, handle: Handle) -> Result<Option<(Handle, Handle)>, StoreError> {
+        let (start, end) = self.poles(handle)?;
+        if start == handle || end == handle {
+            return Ok(None);
+        }
+        self.require_valid(start)?;
+        self.require_valid(end)?;
+        Ok(Some((start, end)))
+    }
+
+    fn is_root_link(&self, handle: Handle) -> Result<bool, StoreError> {
+        let (start, end) = self.poles(handle)?;
+        Ok(start == handle && end == handle)
+    }
+
+    fn find_ordinary_pair(
+        &self,
+        start: Handle,
+        end: Handle,
+    ) -> Result<Option<Handle>, StoreError> {
+        self.require_valid(start)?;
+        self.require_valid(end)?;
+        Ok(self.canonical_by_pair.get(&Pair { start, end }).copied())
+    }
+
     fn require_valid(&self, handle: Handle) -> Result<(), StoreError> {
         if self.is_valid(handle) {
             Ok(())
@@ -263,6 +288,274 @@ impl OptimizedLinkStore {
 
         visiting.remove(&handle);
         Ok(result)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ReactionError {
+    ScopeCapacity { requested: usize, cap: usize },
+    UnknownHandle(Handle),
+    InvalidCurrentRecord(Handle),
+    InvalidTheoryRelation(Handle),
+    MissingPreexistingSuccessor { context: Handle, output: Handle },
+    Store(StoreError),
+}
+
+impl From<StoreError> for ReactionError {
+    fn from(value: StoreError) -> Self {
+        Self::Store(value)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PortableReactionResult {
+    pub scope: Vec<String>,
+    pub matched_relations: u32,
+    pub handoff: u32,
+    pub quiescent: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct OptimizedReactionEngine {
+    cap: usize,
+    scope_banks: [Vec<Handle>; 2],
+    current_bank: usize,
+    live_theory: Vec<Handle>,
+    snapshot: Vec<Handle>,
+    snapshot_by_antecedent: HashMap<Handle, Vec<Handle>>,
+    matched_relations: u32,
+    handoff_count: u32,
+    quiescent: bool,
+}
+
+impl OptimizedReactionEngine {
+    pub fn new(cap: usize) -> Self {
+        assert!(cap > 0);
+        Self {
+            cap,
+            scope_banks: [Vec::new(), Vec::new()],
+            current_bank: 0,
+            live_theory: Vec::new(),
+            snapshot: Vec::new(),
+            snapshot_by_antecedent: HashMap::new(),
+            matched_relations: 0,
+            handoff_count: 0,
+            quiescent: false,
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.scope_banks[0].clear();
+        self.scope_banks[1].clear();
+        self.current_bank = 0;
+        self.live_theory.clear();
+        self.snapshot.clear();
+        self.snapshot_by_antecedent.clear();
+        self.matched_relations = 0;
+        self.handoff_count = 0;
+        self.quiescent = false;
+    }
+
+    pub fn set_current(
+        &mut self,
+        store: &OptimizedLinkStore,
+        members: &[Handle],
+    ) -> Result<(), ReactionError> {
+        self.check_cap(members.len())?;
+        for handle in members {
+            if !store.is_valid(*handle) {
+                return Err(ReactionError::UnknownHandle(*handle));
+            }
+        }
+        self.scope_banks[self.current_bank] = members.to_vec();
+        Ok(())
+    }
+
+    pub fn set_theory(
+        &mut self,
+        store: &OptimizedLinkStore,
+        relations: &[Handle],
+    ) -> Result<(), ReactionError> {
+        self.check_cap(relations.len())?;
+        for relation in relations {
+            if store.ordinary_pair_poles(*relation)?.is_none() {
+                return Err(ReactionError::InvalidTheoryRelation(*relation));
+            }
+        }
+        self.live_theory = relations.to_vec();
+        Ok(())
+    }
+
+    pub fn snapshot_theory(
+        &mut self,
+        store: &OptimizedLinkStore,
+    ) -> Result<(), ReactionError> {
+        self.check_cap(self.live_theory.len())?;
+
+        let mut snapshot_by_antecedent: HashMap<Handle, Vec<Handle>> = HashMap::new();
+        for relation in &self.live_theory {
+            let Some((antecedent, _)) = store.ordinary_pair_poles(*relation)? else {
+                return Err(ReactionError::InvalidTheoryRelation(*relation));
+            };
+            snapshot_by_antecedent
+                .entry(antecedent)
+                .or_default()
+                .push(*relation);
+        }
+
+        self.snapshot = self.live_theory.clone();
+        self.snapshot_by_antecedent = snapshot_by_antecedent;
+        Ok(())
+    }
+
+    pub fn run(&mut self, store: &OptimizedLinkStore) -> Result<(), ReactionError> {
+        // Runtime rejection is never semantic quiescence.
+        self.quiescent = false;
+
+        let current = self.scope_banks[self.current_bank].clone();
+        self.check_cap(current.len())?;
+        self.check_cap(self.snapshot.len())?;
+
+        let mut successor = Vec::with_capacity(self.cap.min(current.len().saturating_mul(2)));
+        let mut successor_seen = HashSet::new();
+        let mut matched = 0u32;
+
+        for member in current {
+            let Some((context, antecedent)) = store.ordinary_pair_poles(member)? else {
+                return Err(ReactionError::InvalidCurrentRecord(member));
+            };
+
+            let admitted = self
+                .snapshot_by_antecedent
+                .get(&antecedent)
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
+
+            let mut member_matches = 0u32;
+            for relation in admitted {
+                let Some((relation_antecedent, output)) =
+                    store.ordinary_pair_poles(*relation)?
+                else {
+                    return Err(ReactionError::InvalidTheoryRelation(*relation));
+                };
+
+                if relation_antecedent != antecedent {
+                    // Snapshot index corruption must fail closed rather than
+                    // silently broadening admitted Theory authority.
+                    return Err(ReactionError::InvalidTheoryRelation(*relation));
+                }
+
+                matched = matched.saturating_add(1);
+                member_matches = member_matches.saturating_add(1);
+
+                // ROOT is the bounded empty ExactSequence contribution.
+                if !store.is_root_link(output)? {
+                    let candidate = store
+                        .find_ordinary_pair(context, output)?
+                        .ok_or(ReactionError::MissingPreexistingSuccessor {
+                            context,
+                            output,
+                        })?;
+                    if successor_seen.insert(candidate) {
+                        if successor.len() >= self.cap {
+                            return Err(ReactionError::ScopeCapacity {
+                                requested: successor.len() + 1,
+                                cap: self.cap,
+                            });
+                        }
+                        successor.push(candidate);
+                    }
+                }
+            }
+
+            if member_matches == 0 && successor_seen.insert(member) {
+                if successor.len() >= self.cap {
+                    return Err(ReactionError::ScopeCapacity {
+                        requested: successor.len() + 1,
+                        cap: self.cap,
+                    });
+                }
+                successor.push(member);
+            }
+        }
+
+        // Only a complete successful evaluation publishes diagnostics/state.
+        self.matched_relations = matched;
+        self.handoff_count = 0;
+
+        if matched == 0 {
+            self.quiescent = true;
+            return Ok(());
+        }
+
+        let target_bank = 1usize - self.current_bank;
+        self.scope_banks[target_bank] = successor;
+        self.current_bank = target_bank;
+        self.handoff_count = 1;
+        Ok(())
+    }
+
+    pub fn current(&self) -> &[Handle] {
+        &self.scope_banks[self.current_bank]
+    }
+
+    pub fn bank(&self, bank: usize) -> Option<&[Handle]> {
+        self.scope_banks.get(bank).map(Vec::as_slice)
+    }
+
+    pub fn current_bank(&self) -> usize {
+        self.current_bank
+    }
+
+    pub fn live_theory_count(&self) -> usize {
+        self.live_theory.len()
+    }
+
+    pub fn snapshot_count(&self) -> usize {
+        self.snapshot.len()
+    }
+
+    pub fn matched_relations(&self) -> u32 {
+        self.matched_relations
+    }
+
+    pub fn handoff_count(&self) -> u32 {
+        self.handoff_count
+    }
+
+    pub fn quiescent(&self) -> bool {
+        self.quiescent
+    }
+
+    pub fn portable_result(
+        &self,
+        store: &OptimizedLinkStore,
+    ) -> Result<PortableReactionResult, ReactionError> {
+        let mut scope = self
+            .current()
+            .iter()
+            .map(|handle| store.export_anum(*handle).map_err(ReactionError::Store))
+            .collect::<Result<Vec<_>, _>>()?;
+        scope.sort();
+        scope.dedup();
+
+        Ok(PortableReactionResult {
+            scope,
+            matched_relations: self.matched_relations,
+            handoff: self.handoff_count,
+            quiescent: self.quiescent,
+        })
+    }
+
+    fn check_cap(&self, count: usize) -> Result<(), ReactionError> {
+        if count > self.cap {
+            Err(ReactionError::ScopeCapacity {
+                requested: count,
+                cap: self.cap,
+            })
+        } else {
+            Ok(())
+        }
     }
 }
 
