@@ -1,0 +1,39 @@
+name: Reference CPU benchmark baseline
+
+on:
+  pull_request:
+    paths:
+      - "experiments/browser-accelerator/rust/**"
+      - ".github/workflows/reference-cpu-benchmark.yml"
+  push:
+    branches: [main]
+    paths:
+      - "experiments/browser-accelerator/rust/**"
+      - ".github/workflows/reference-cpu-benchmark.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  baseline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal
+
+      - name: Reference CPU informational baseline
+        run: |
+          cargo +1.98.1 test \
+            --release \
+            --manifest-path experiments/browser-accelerator/rust/Cargo.toml \
+            reference_cpu_benchmark_baseline \
+            -- --ignored --nocapture --test-threads=1
+
+      - name: Benchmark policy
+        run: |
+          echo "This workflow records an informational baseline only."
+          echo "There is intentionally no performance threshold."
+          echo "Semantic/conformance failures remain authoritative."
