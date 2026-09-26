@@ -297,7 +297,8 @@ SUB1                                  GREEN (#80/#81)
 -> M3 complete                              GREEN
 -> M4 Word logic                           GREEN (#89/#90)
 -> M4 logical flag/writeback effects       GREEN (#91/#92)
--> M4 arithmetic effect + CMP               CURRENT (#93)
+-> M4 arithmetic effect + CMP               GREEN (#93/#94)
+-> M4 one-bit SHL/SHR/SAR wiring             CURRENT (#95)
 ```
 
 
@@ -489,3 +490,50 @@ WriteBack=0
 ```
 
 so CMP introduces no second subtractor and no dedicated truth table.
+
+
+## M4 — one-bit structural shifts
+
+Issue: #95
+
+Before variable-count x86 shift semantics, prove the raw wiring itself.
+
+For the LSB-first carrier:
+
+```text
+WordN = ExactSequence_R([b0,b1,...,bN-1])
+```
+
+the one-bit transformations are:
+
+```text
+SHL1 / SAL1:
+  Result = [0,b0,b1,...,bN-2]
+  CF     = bN-1
+
+SHR1:
+  Result = [b1,b2,...,bN-1,0]
+  CF     = b0
+
+SAR1:
+  Result = [b1,b2,...,bN-1,bN-1]
+  CF     = b0
+```
+
+These are structural role rearrangements, not iterative arithmetic. Each operation
+is therefore expected to complete in one Structural Rule reaction independent of
+word width.
+
+The raw composable return is:
+
+```text
+SHIFT1_RESULT(
+  ExactSequence_R([Word, CF, Kind])
+)
+```
+
+where `Kind` is the structural function identity. `SAL1` is exactly the same
+function Link as `SHL1`.
+
+Variable count masking and x86 flag effects are deliberately deferred until this
+wiring witness is GREEN.

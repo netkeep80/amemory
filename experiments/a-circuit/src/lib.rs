@@ -20,6 +20,8 @@ mod subtractor_n;
 mod arithmetic_n;
 #[cfg(test)]
 mod arithmetic_effect_n;
+#[cfg(test)]
+mod shift1_n;
 
 use amemory_optimized_cpu_probe::{OptimizedLinkStore, OptimizedReactionEngine};
 use std::collections::BTreeSet;
