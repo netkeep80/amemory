@@ -53,81 +53,28 @@
     "max_new_files": 30,
     "max_net_added_lines": 4000
   },
+  "packs": {
+    "repo-guard-workflow": {
+      "path": ".github/workflows/repo-guard.yml",
+      "sha": "37a8d4dd65ac86f683c063dd1e0a6ddb685b2da6"
+    }
+  },
   "content_rules": [],
-  "cochange_rules": [
+  "cochange_rules": [],
+  "cochange_groups": [
     {
-      "if_changed": [
-        "contracts/amemory-contract-v0.1.json"
-      ],
-      "must_change_any": [
+      "id": "amemory-contract-conformance",
+      "members": [
+        "contracts/amemory-contract-v0.1.json",
         "contracts/amemory-conformance-v0.1.json"
       ]
     },
     {
-      "if_changed": [
-        "contracts/amemory-conformance-v0.1.json"
-      ],
-      "must_change_any": [
-        "contracts/amemory-contract-v0.1.json"
-      ]
-    },
-    {
-      "if_changed": [
-        "contracts/upstream/mts-v0.13.lock.json"
-      ],
-      "must_change_any": [
+      "id": "mts-upstream-lock-projection",
+      "members": [
+        "contracts/upstream/mts-v0.13.lock.json",
         "contracts/upstream/mts-v0.13-requirements.json"
-      ]
-    },
-    {
-      "if_changed": [
-        "contracts/upstream/mts-v0.13-requirements.json"
-      ],
-      "must_change_any": [
-        "contracts/upstream/mts-v0.13.lock.json"
       ]
     }
-  ],
-  "integration": {
-    "workflows": [
-      {
-        "id": "repo-guard-pr-gate",
-        "kind": "github_actions",
-        "path": ".github/workflows/repo-guard.yml",
-        "role": "repo_guard_pr_gate",
-        "expect": {
-          "events": [
-            "pull_request"
-          ],
-          "event_types": [
-            "opened",
-            "synchronize",
-            "reopened",
-            "ready_for_review"
-          ],
-          "action": {
-            "uses": "netkeep80/repo-guard",
-            "ref": "92432809fcddc290080beb51ba151e13a5761869",
-            "ref_pinning": "sha"
-          },
-          "mode": "check-pr",
-          "enforcement": "advisory",
-          "permissions": {
-            "contents": "read",
-            "pull_requests": "read",
-            "issues": "read"
-          },
-          "token_env": [
-            "GH_TOKEN"
-          ],
-          "summary": true,
-          "disallow": [
-            "continue_on_error",
-            "manual_clone",
-            "direct_temp_cli_execution"
-          ]
-        }
-      }
-    ]
-  }
+  ]
 }
