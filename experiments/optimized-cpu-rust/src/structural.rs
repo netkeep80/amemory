@@ -957,10 +957,8 @@ mod tests {
         let other = anchors[6];
 
         let template = store.ensure_pair(role, right).unwrap();
-        let arbitrary = store.ensure_pair(
-            store.ensure_pair(left, other).unwrap(),
-            right,
-        ).unwrap();
+        let arbitrary_start = store.ensure_pair(left, other).unwrap();
+        let arbitrary = store.ensure_pair(arbitrary_start, right).unwrap();
 
         assert!(
             structural_discriminator_matches(&store, template, arbitrary, &[role]).unwrap(),
