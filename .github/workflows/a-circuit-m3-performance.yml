@@ -37,6 +37,23 @@ jobs:
           grep -q "RIPPLE_PERF width=16 " /tmp/ripple-perf.log
           grep -q "RIPPLE_PERF width=32 " /tmp/ripple-perf.log
           grep -q "RIPPLE_PERF_NOTE=informational-only-no-performance-threshold" /tmp/ripple-perf.log
+          grep -q "RIPPLE_PROFILE width=4 " /tmp/ripple-perf.log
+          grep -q "RIPPLE_PROFILE width=8 " /tmp/ripple-perf.log
+          grep -q "RIPPLE_PROFILE width=16 " /tmp/ripple-perf.log
+          grep -q "RIPPLE_PROFILE width=32 " /tmp/ripple-perf.log
+
+      - name: Informational SHIFT32 candidate-selectivity profile
+        run: |
+          cargo +1.98.1 test \
+            --release \
+            --manifest-path experiments/a-circuit/Cargo.toml \
+            m4_shift32_profile_candidate_selectivity \
+            -- --ignored --nocapture --test-threads=1 2>&1 | tee /tmp/shift32-profile.log
+
+          grep -q "SHIFT32_PROFILE op=SHL " /tmp/shift32-profile.log
+          grep -q "SHIFT32_PROFILE op=SHR " /tmp/shift32-profile.log
+          grep -q "SHIFT32_PROFILE op=SAR " /tmp/shift32-profile.log
+          grep -q "SHIFT32_PROFILE_NOTE=informational-only-no-performance-threshold" /tmp/shift32-profile.log
 
       - name: Performance policy
         run: |
