@@ -35,12 +35,21 @@ jobs:
             --target wasm32-unknown-unknown \
             --release
 
+      - name: Build real A-Circuit 80386 lab WASM
+        run: |
+          cargo +1.98.1 build \
+            --manifest-path experiments/a-circuit/Cargo.toml \
+            --target wasm32-unknown-unknown \
+            --release
+
       - name: Assemble static Pages artifact
         run: |
           mkdir -p _site
           cp -R experiments/browser-accelerator/web/. _site/
           cp experiments/browser-accelerator/rust/target/wasm32-unknown-unknown/release/amemory_browser_probe.wasm \
             _site/amemory_browser_probe.wasm
+          cp experiments/a-circuit/target/wasm32-unknown-unknown/release/amemory_a_circuit.wasm \
+            _site/amemory_a_circuit.wasm
           touch _site/.nojekyll
 
       - name: Generate complete workflow matrix

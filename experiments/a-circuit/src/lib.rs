@@ -1,43 +1,24 @@
-#[cfg(test)]
 mod flag_patch;
-#[cfg(test)]
 mod flags_n;
-#[cfg(test)]
 mod logic_n;
-#[cfg(test)]
 mod logic_effect_n;
-#[cfg(test)]
 mod full_adder;
-#[cfg(test)]
 mod ripple4;
-#[cfg(test)]
 mod ripple_n;
-#[cfg(test)]
 mod subtractor;
-#[cfg(test)]
 mod subtractor_n;
-#[cfg(test)]
 mod arithmetic_n;
-#[cfg(test)]
 mod arithmetic_effect_n;
-#[cfg(test)]
 mod shift1_n;
-#[cfg(test)]
 mod shift32_n;
-#[cfg(test)]
 mod rotate32_n;
-#[cfg(test)]
 mod rotate_carry32_n;
-#[cfg(test)]
 mod mux_n;
-#[cfg(test)]
 mod unary_arith_n;
-#[cfg(test)]
 mod wide64_n;
-#[cfg(test)]
 mod mul32_n;
-#[cfg(test)]
 mod mul_effect_n;
+mod web_lab;
 
 use amemory_optimized_cpu_probe::{OptimizedLinkStore, OptimizedReactionEngine};
 use std::collections::BTreeSet;

@@ -9,7 +9,7 @@ amemory-optimized-cpu-probe = { path = "../optimized-cpu-rust" }
 amemory-browser-probe = { path = "../browser-accelerator/rust" }
 
 [lib]
-crate-type = ["rlib"]
+crate-type = ["rlib", "cdylib"]
 
 [profile.release]
 opt-level = 3

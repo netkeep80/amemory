@@ -1,0 +1,688 @@
+{
+  "schemaVersion": 1,
+  "abi": "amemory_i386_lab_v1",
+  "blocks": [
+    {
+      "id": "and32",
+      "opcode": 1,
+      "category": "Logic",
+      "name": "AND32",
+      "formula": "A & B",
+      "inputs": [
+        {
+          "key": "A",
+          "slot": "a",
+          "type": "word32",
+          "default": "0x12345678"
+        },
+        {
+          "key": "B",
+          "slot": "b",
+          "type": "word32",
+          "default": "0x0f0f00ff"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Result",
+          "type": "word32"
+        }
+      ],
+      "modes": [
+        "single",
+        "vectors"
+      ],
+      "vectors": [
+        {
+          "name": "zero",
+          "inputs": {
+            "A": "0x00000000",
+            "B": "0xffffffff"
+          },
+          "expect": {
+            "value": "0x00000000"
+          }
+        },
+        {
+          "name": "mask",
+          "inputs": {
+            "A": "0xaaaaaaaa",
+            "B": "0x0f0f0f0f"
+          },
+          "expect": {
+            "value": "0x0a0a0a0a"
+          }
+        }
+      ]
+    },
+    {
+      "id": "or32",
+      "opcode": 2,
+      "category": "Logic",
+      "name": "OR32",
+      "formula": "A | B",
+      "inputs": [
+        {
+          "key": "A",
+          "slot": "a",
+          "type": "word32",
+          "default": "0x12345678"
+        },
+        {
+          "key": "B",
+          "slot": "b",
+          "type": "word32",
+          "default": "0x0f0f00ff"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Result",
+          "type": "word32"
+        }
+      ],
+      "modes": [
+        "single",
+        "vectors"
+      ],
+      "vectors": [
+        {
+          "name": "zero",
+          "inputs": {
+            "A": "0x00000000",
+            "B": "0x80000001"
+          },
+          "expect": {
+            "value": "0x80000001"
+          }
+        },
+        {
+          "name": "all ones",
+          "inputs": {
+            "A": "0xaaaaaaaa",
+            "B": "0x55555555"
+          },
+          "expect": {
+            "value": "0xffffffff"
+          }
+        }
+      ]
+    },
+    {
+      "id": "xor32",
+      "opcode": 3,
+      "category": "Logic",
+      "name": "XOR32",
+      "formula": "A ^ B",
+      "inputs": [
+        {
+          "key": "A",
+          "slot": "a",
+          "type": "word32",
+          "default": "0x12345678"
+        },
+        {
+          "key": "B",
+          "slot": "b",
+          "type": "word32",
+          "default": "0x0f0f00ff"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Result",
+          "type": "word32"
+        }
+      ],
+      "modes": [
+        "single",
+        "vectors"
+      ],
+      "vectors": [
+        {
+          "name": "self",
+          "inputs": {
+            "A": "0xdeadbeef",
+            "B": "0xdeadbeef"
+          },
+          "expect": {
+            "value": "0x00000000"
+          }
+        },
+        {
+          "name": "complement",
+          "inputs": {
+            "A": "0xaaaaaaaa",
+            "B": "0x55555555"
+          },
+          "expect": {
+            "value": "0xffffffff"
+          }
+        }
+      ]
+    },
+    {
+      "id": "not32",
+      "opcode": 4,
+      "category": "Logic",
+      "name": "NOT32",
+      "formula": "~A",
+      "inputs": [
+        {
+          "key": "A",
+          "slot": "a",
+          "type": "word32",
+          "default": "0x12345678"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Result",
+          "type": "word32"
+        }
+      ],
+      "modes": [
+        "single",
+        "vectors"
+      ],
+      "vectors": [
+        {
+          "name": "zero",
+          "inputs": {
+            "A": "0x00000000"
+          },
+          "expect": {
+            "value": "0xffffffff"
+          }
+        },
+        {
+          "name": "ones",
+          "inputs": {
+            "A": "0xffffffff"
+          },
+          "expect": {
+            "value": "0x00000000"
+          }
+        }
+      ]
+    },
+    {
+      "id": "test32",
+      "opcode": 5,
+      "category": "Logic",
+      "name": "TEST32",
+      "formula": "A & B (flags only)",
+      "inputs": [
+        {
+          "key": "A",
+          "slot": "a",
+          "type": "word32",
+          "default": "0x12345678"
+        },
+        {
+          "key": "B",
+          "slot": "b",
+          "type": "word32",
+          "default": "0x0f0f00ff"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Computed",
+          "type": "word32"
+        }
+      ],
+      "modes": [
+        "single",
+        "vectors"
+      ],
+      "vectors": [
+        {
+          "name": "zero flags",
+          "inputs": {
+            "A": "0x80000000",
+            "B": "0x00000001"
+          },
+          "expect": {
+            "value": "0x00000000",
+            "writeback": 0
+          }
+        },
+        {
+          "name": "sign",
+          "inputs": {
+            "A": "0x80000000",
+            "B": "0xffffffff"
+          },
+          "expect": {
+            "value": "0x80000000",
+            "writeback": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "add32",
+      "opcode": 6,
+      "category": "Arithmetic",
+      "name": "ADD32",
+      "formula": "A + B",
+      "inputs": [
+        {
+          "key": "A",
+          "slot": "a",
+          "type": "word32",
+          "default": "0x12345678"
+        },
+        {
+          "key": "B",
+          "slot": "b",
+          "type": "word32",
+          "default": "0x00000001"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Result",
+          "type": "word32"
+        }
+      ],
+      "modes": [
+        "single",
+        "vectors"
+      ],
+      "vectors": [
+        {
+          "name": "wrap",
+          "inputs": {
+            "A": "0xffffffff",
+            "B": "0x00000001"
+          },
+          "expect": {
+            "value": "0x00000000"
+          }
+        },
+        {
+          "name": "signed overflow",
+          "inputs": {
+            "A": "0x7fffffff",
+            "B": "0x00000001"
+          },
+          "expect": {
+            "value": "0x80000000"
+          }
+        }
+      ]
+    },
+    {
+      "id": "adc32",
+      "opcode": 7,
+      "category": "Arithmetic",
+      "name": "ADC32",
+      "formula": "A + B + CF",
+      "inputs": [
+        {
+          "key": "A",
+          "slot": "a",
+          "type": "word32",
+          "default": "0xffffffff"
+        },
+        {
+          "key": "B",
+          "slot": "b",
+          "type": "word32",
+          "default": "0x00000000"
+        },
+        {
+          "key": "CF",
+          "slot": "flag",
+          "type": "bit",
+          "default": 1
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Result",
+          "type": "word32"
+        }
+      ],
+      "modes": [
+        "single",
+        "vectors"
+      ],
+      "vectors": [
+        {
+          "name": "carry in",
+          "inputs": {
+            "A": "0xffffffff",
+            "B": "0x00000000",
+            "CF": 1
+          },
+          "expect": {
+            "value": "0x00000000"
+          }
+        },
+        {
+          "name": "no carry",
+          "inputs": {
+            "A": "0x00000001",
+            "B": "0x00000002",
+            "CF": 0
+          },
+          "expect": {
+            "value": "0x00000003"
+          }
+        }
+      ]
+    },
+    {
+      "id": "sub32",
+      "opcode": 8,
+      "category": "Arithmetic",
+      "name": "SUB32",
+      "formula": "A - B",
+      "inputs": [
+        {
+          "key": "A",
+          "slot": "a",
+          "type": "word32",
+          "default": "0x12345678"
+        },
+        {
+          "key": "B",
+          "slot": "b",
+          "type": "word32",
+          "default": "0x00000001"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Result",
+          "type": "word32"
+        }
+      ],
+      "modes": [
+        "single",
+        "vectors"
+      ],
+      "vectors": [
+        {
+          "name": "borrow",
+          "inputs": {
+            "A": "0x00000000",
+            "B": "0x00000001"
+          },
+          "expect": {
+            "value": "0xffffffff"
+          }
+        },
+        {
+          "name": "identity",
+          "inputs": {
+            "A": "0x12345678",
+            "B": "0x00000000"
+          },
+          "expect": {
+            "value": "0x12345678"
+          }
+        }
+      ]
+    },
+    {
+      "id": "sbb32",
+      "opcode": 9,
+      "category": "Arithmetic",
+      "name": "SBB32",
+      "formula": "A - B - CF",
+      "inputs": [
+        {
+          "key": "A",
+          "slot": "a",
+          "type": "word32",
+          "default": "0x00000000"
+        },
+        {
+          "key": "B",
+          "slot": "b",
+          "type": "word32",
+          "default": "0x00000000"
+        },
+        {
+          "key": "CF",
+          "slot": "flag",
+          "type": "bit",
+          "default": 1
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Result",
+          "type": "word32"
+        }
+      ],
+      "modes": [
+        "single",
+        "vectors"
+      ],
+      "vectors": [
+        {
+          "name": "borrow in",
+          "inputs": {
+            "A": "0x00000000",
+            "B": "0x00000000",
+            "CF": 1
+          },
+          "expect": {
+            "value": "0xffffffff"
+          }
+        },
+        {
+          "name": "exact",
+          "inputs": {
+            "A": "0x00000005",
+            "B": "0x00000003",
+            "CF": 1
+          },
+          "expect": {
+            "value": "0x00000001"
+          }
+        }
+      ]
+    },
+    {
+      "id": "cmp32",
+      "opcode": 10,
+      "category": "Arithmetic",
+      "name": "CMP32",
+      "formula": "A - B (flags only)",
+      "inputs": [
+        {
+          "key": "A",
+          "slot": "a",
+          "type": "word32",
+          "default": "0x00000007"
+        },
+        {
+          "key": "B",
+          "slot": "b",
+          "type": "word32",
+          "default": "0x00000009"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Computed",
+          "type": "word32"
+        }
+      ],
+      "modes": [
+        "single",
+        "vectors"
+      ],
+      "vectors": [
+        {
+          "name": "equal",
+          "inputs": {
+            "A": "0x12345678",
+            "B": "0x12345678"
+          },
+          "expect": {
+            "value": "0x00000000",
+            "writeback": 0
+          }
+        },
+        {
+          "name": "less",
+          "inputs": {
+            "A": "0x00000007",
+            "B": "0x00000009"
+          },
+          "expect": {
+            "value": "0xfffffffe",
+            "writeback": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "mux32",
+      "opcode": 11,
+      "category": "Select",
+      "name": "MUX32",
+      "formula": "S ? B : A",
+      "inputs": [
+        {
+          "key": "A",
+          "slot": "a",
+          "type": "word32",
+          "default": "0xaaaaaaaa"
+        },
+        {
+          "key": "B",
+          "slot": "b",
+          "type": "word32",
+          "default": "0x55555555"
+        },
+        {
+          "key": "S",
+          "slot": "flag",
+          "type": "bit",
+          "default": 0
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Result",
+          "type": "word32"
+        }
+      ],
+      "modes": [
+        "single",
+        "vectors"
+      ],
+      "vectors": [
+        {
+          "name": "select A",
+          "inputs": {
+            "A": "0xaaaaaaaa",
+            "B": "0x55555555",
+            "S": 0
+          },
+          "expect": {
+            "value": "0xaaaaaaaa"
+          }
+        },
+        {
+          "name": "select B",
+          "inputs": {
+            "A": "0xaaaaaaaa",
+            "B": "0x55555555",
+            "S": 1
+          },
+          "expect": {
+            "value": "0x55555555"
+          }
+        }
+      ]
+    },
+    {
+      "id": "mux1",
+      "opcode": 12,
+      "category": "Primitive",
+      "name": "MUX1",
+      "formula": "S ? B : A",
+      "inputs": [
+        {
+          "key": "A",
+          "slot": "a",
+          "type": "bit",
+          "default": 0
+        },
+        {
+          "key": "B",
+          "slot": "b",
+          "type": "bit",
+          "default": 1
+        },
+        {
+          "key": "S",
+          "slot": "flag",
+          "type": "bit",
+          "default": 0
+        }
+      ],
+      "outputs": [
+        {
+          "key": "Result",
+          "type": "bit"
+        }
+      ],
+      "modes": [
+        "single",
+        "vectors",
+        "sweep"
+      ],
+      "vectors": [
+        {
+          "name": "select A",
+          "inputs": {
+            "A": 1,
+            "B": 0,
+            "S": 0
+          },
+          "expect": {
+            "value": 1
+          }
+        },
+        {
+          "name": "select B",
+          "inputs": {
+            "A": 1,
+            "B": 0,
+            "S": 1
+          },
+          "expect": {
+            "value": 0
+          }
+        }
+      ],
+      "sweep": {
+        "kind": "cartesian",
+        "values": {
+          "A": [
+            0,
+            1
+          ],
+          "B": [
+            0,
+            1
+          ],
+          "S": [
+            0,
+            1
+          ]
+        }
+      }
+    }
+  ]
+}
