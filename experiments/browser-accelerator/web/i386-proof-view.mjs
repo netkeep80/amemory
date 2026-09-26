@@ -198,7 +198,7 @@ async function destroyProofVisual(target) {
 }
 
 async function renderBlueprint(target, network) {
-  const mts = await import("./vendor/mts-visual/index.js");
+  const mts = await import("./vendor/mts-visual-core.bundle.js");
   const scene = mts.buildBlueprintSvgScene(network);
   target.classList.remove("proof-visual-three");
   target.innerHTML = mts.serializeBlueprintSvg(scene);
@@ -207,8 +207,8 @@ async function renderBlueprint(target, network) {
 
 async function renderStatic3D(target, network) {
   const [mts, threeVisual] = await Promise.all([
-    import("./vendor/mts-visual/index.js"),
-    import("./vendor/mts-visual/three/index.js"),
+    import("./vendor/mts-visual-core.bundle.js"),
+    import("./vendor/mts-visual-three.bundle.js"),
   ]);
   const initial = mts.createInitialPhysics3DState(network);
   const data = threeVisual.buildVisualThreeSceneData(network, initial);
@@ -223,8 +223,8 @@ async function renderStatic3D(target, network) {
 
 async function renderLive3D(target, network) {
   const [mts, threeVisual] = await Promise.all([
-    import("./vendor/mts-visual/index.js"),
-    import("./vendor/mts-visual/three/index.js"),
+    import("./vendor/mts-visual-core.bundle.js"),
+    import("./vendor/mts-visual-three.bundle.js"),
   ]);
   const initial = mts.createInitialPhysics3DState(network);
   const controller = mts.createLivePhysics3D(network, initial);

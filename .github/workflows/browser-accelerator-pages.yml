@@ -55,9 +55,21 @@ jobs:
           npm --prefix /tmp/mts_visual run build --silent
           test -s /tmp/mts_visual/dist/src/index.js
           test -s /tmp/mts_visual/dist/src/blueprint-svg.js
+          test -s /tmp/mts_visual/dist/src/three/index.js
           test "$(node -p "require('/tmp/mts_visual/node_modules/three/package.json').version")" = "0.185.1"
           test -s /tmp/mts_visual/node_modules/three/build/three.module.js
           test -s /tmp/mts_visual/node_modules/three/examples/jsm/controls/OrbitControls.js
+
+          npx --yes esbuild@0.24.2             /tmp/mts_visual/src/index.ts             --bundle --format=esm --platform=browser --target=es2022             --outfile=/tmp/mts-visual-core.bundle.js
+          npx --yes esbuild@0.24.2             /tmp/mts_visual/src/three/index.ts             --bundle --format=esm --platform=browser --target=es2022             --outfile=/tmp/mts-visual-three.bundle.js
+
+          test -s /tmp/mts-visual-core.bundle.js
+          test -s /tmp/mts-visual-three.bundle.js
+
+          cp /tmp/mts-visual-core.bundle.js /tmp/mts-visual-core.bundle.mjs
+          cp /tmp/mts-visual-three.bundle.js /tmp/mts-visual-three.bundle.mjs
+          node --input-type=module -e 'import("file:///tmp/mts-visual-core.bundle.mjs").then(m => { if (typeof m.buildBlueprintSvgScene !== "function") process.exit(1); })'
+          node --input-type=module -e 'import("file:///tmp/mts-visual-three.bundle.mjs").then(m => { if (typeof m.createVisualThreeRenderer !== "function" || typeof m.createVisualThreeLiveRenderer !== "function") process.exit(1); })'
 
       - name: Assemble static Pages artifact
         run: |
@@ -74,6 +86,8 @@ jobs:
           mkdir -p _site/vendor/three/addons
           cp /tmp/mts_visual/node_modules/three/build/three.module.js _site/vendor/three/three.module.js
           cp -R /tmp/mts_visual/node_modules/three/examples/jsm/. _site/vendor/three/addons/
+          cp /tmp/mts-visual-core.bundle.js _site/vendor/mts-visual-core.bundle.js
+          cp /tmp/mts-visual-three.bundle.js _site/vendor/mts-visual-three.bundle.js
           touch _site/.nojekyll
 
       - name: Generate browser lab build identity
@@ -238,6 +252,18 @@ jobs:
           test -s _site/vendor/mts-visual/three/index.js
           test -s _site/vendor/three/three.module.js
           test -s _site/vendor/three/addons/controls/OrbitControls.js
+          test -s _site/vendor/mts-visual-core.bundle.js
+          test -s _site/vendor/mts-visual-three.bundle.js
+          grep -F 'import("./vendor/mts-visual-core.bundle.js")' _site/i386-proof-view.mjs
+          grep -F 'import("./vendor/mts-visual-three.bundle.js")' _site/i386-proof-view.mjs
+          if grep -Fq 'vendor/mts-visual/three/index.js' _site/i386-proof-view.mjs; then
+            echo "published proof renderer still references unbundled 3D entrypoint" >&2
+            exit 1
+          fi
+          cp _site/vendor/mts-visual-core.bundle.js /tmp/pages-mts-visual-core.bundle.mjs
+          cp _site/vendor/mts-visual-three.bundle.js /tmp/pages-mts-visual-three.bundle.mjs
+          node --input-type=module -e 'import("file:///tmp/pages-mts-visual-core.bundle.mjs").then(m => { if (typeof m.buildBlueprintSvgScene !== "function") process.exit(1); })'
+          node --input-type=module -e 'import("file:///tmp/pages-mts-visual-three.bundle.mjs").then(m => { if (typeof m.createVisualThreeRenderer !== "function" || typeof m.createVisualThreeLiveRenderer !== "function") process.exit(1); })'
           grep -F '<script type="importmap">' _site/index.html
           grep -F '"three": "./vendor/three/three.module.js"' _site/index.html
           grep -F '"three/addons/": "./vendor/three/addons/"' _site/index.html
@@ -311,14 +337,19 @@ jobs:
           )
           visual_commit = json.loads(Path("_site/mts-visual-lock.json").read_text(encoding="utf-8"))["commit"]
           proof_source = proof_source.replace(
-              'import("./vendor/mts-visual/index.js")',
-              f'import("./vendor/mts-visual/index.js?v={visual_commit}")',
+              'import("./vendor/mts-visual-core.bundle.js")',
+              f'import("./vendor/mts-visual-core.bundle.js?v={visual_commit}")',
           )
           proof_source = proof_source.replace(
-              'import("./vendor/mts-visual/three/index.js")',
-              f'import("./vendor/mts-visual/three/index.js?v={visual_commit}")',
+              'import("./vendor/mts-visual-three.bundle.js")',
+              f'import("./vendor/mts-visual-three.bundle.js?v={visual_commit}")',
           )
           proof.write_text(proof_source, encoding="utf-8")
+
+          if 'vendor/mts-visual/three/index.js' in proof_source:
+              raise SystemExit("cache-busted proof renderer still references legacy 3D module graph")
+          if f'mts-visual-three.bundle.js?v={visual_commit}' not in proof_source:
+              raise SystemExit("3D visual bundle cache-bust was not applied")
           PY
 
       - name: Configure Pages
@@ -339,3 +370,35 @@ jobs:
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: Verify deployed proof visualization entrypoints
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          set -euo pipefail
+
+          base="${PAGE_URL%/}/"
+          mkdir -p /tmp/pages-live-smoke
+
+          fetch() {
+            local path="$1"
+            local target="$2"
+            curl               --fail --location --silent --show-error               --retry 12 --retry-delay 5 --retry-all-errors               -H 'Cache-Control: no-cache'               "${base}${path}?smoke=${GITHUB_SHA}"               -o "${target}"
+            test -s "${target}"
+          }
+
+          fetch "build-info.json" /tmp/pages-live-smoke/build-info.json
+          fetch "i386-proof-view.mjs" /tmp/pages-live-smoke/i386-proof-view.mjs
+          fetch "vendor/mts-visual-core.bundle.js" /tmp/pages-live-smoke/mts-visual-core.bundle.js
+          fetch "vendor/mts-visual-three.bundle.js" /tmp/pages-live-smoke/mts-visual-three.bundle.js
+
+          jq -e --arg sha "${GITHUB_SHA}" '.mainSha == $sha'             /tmp/pages-live-smoke/build-info.json >/dev/null
+          grep -F 'mts-visual-core.bundle.js' /tmp/pages-live-smoke/i386-proof-view.mjs
+          grep -F 'mts-visual-three.bundle.js' /tmp/pages-live-smoke/i386-proof-view.mjs
+
+          cp /tmp/pages-live-smoke/mts-visual-core.bundle.js /tmp/pages-live-smoke/mts-visual-core.bundle.mjs
+          cp /tmp/pages-live-smoke/mts-visual-three.bundle.js /tmp/pages-live-smoke/mts-visual-three.bundle.mjs
+          node --input-type=module -e 'import("file:///tmp/pages-live-smoke/mts-visual-core.bundle.mjs").then(m => { if (typeof m.buildBlueprintSvgScene !== "function") process.exit(1); })'
+          node --input-type=module -e 'import("file:///tmp/pages-live-smoke/mts-visual-three.bundle.mjs").then(m => { if (typeof m.createVisualThreeRenderer !== "function" || typeof m.createVisualThreeLiveRenderer !== "function") process.exit(1); })'
+
+          echo "Live Pages proof visualization entrypoints PASS: ${base}"
