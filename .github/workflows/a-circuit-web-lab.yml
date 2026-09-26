@@ -41,6 +41,7 @@ jobs:
           cp experiments/browser-accelerator/web/i386-lab.js /tmp/i386-lab.mjs
           node --check /tmp/i386-lab.mjs
           node --check experiments/browser-accelerator/web/i386-lab-view.mjs
+          node --check experiments/browser-accelerator/web/i386-proof-view.mjs
 
           node --input-type=module <<'NODE'
           import {
@@ -48,6 +49,9 @@ jobs:
             catalogCardHtml,
             evidenceHtml,
           } from "./experiments/browser-accelerator/web/i386-lab-view.mjs";
+          import {
+            proofPipelineHtml,
+          } from "./experiments/browser-accelerator/web/i386-proof-view.mjs";
 
           const outcome = {
             value: 0x0a0a0a0a,
@@ -110,7 +114,85 @@ jobs:
             throw new Error("constructor definition/catalog renderer witness failed");
           }
 
-          console.log("browser syntax + one-output + Wide64 constructor rendering PASS");
+          const proofFixture = {
+            prepare: {
+              compilerLabel: "compiler only",
+              runtimeMemoryExists: false,
+              compiledLinks: 12,
+              asetAnums: ["8", "98"],
+              semanticRoots: [
+                { role: "function.mux1", source: "98" },
+                { role: "execution.interpreter", source: "68" },
+                { role: "invocation.call", source: "19868" },
+              ],
+              theoryAdmissions: ["16898"],
+            },
+            load: {
+              memoryInstanceId: "A-memory#7",
+              linksBeforeLoad: 1,
+              linksAfterLoad: 12,
+              importedAnums: 2,
+              portableRoundTrip: true,
+              semanticRoots: [
+                { role: "function.mux1", source: "98", localHandle: 2 },
+              ],
+            },
+            execute: {
+              memoryInstanceId: "A-memory#7",
+              activeReactionCount: 1,
+              finalQuiescent: true,
+              reactions: [{
+                memoryInstanceId: "A-memory#7",
+                step: 0,
+                scopeBefore: ["19868"],
+                rawRuleMatches: 1,
+                transitionedMembers: 1,
+                handoffCount: 1,
+                scopeAfter: ["16898"],
+                linksAfter: 12,
+                quiescent: false,
+              }],
+            },
+            result: {
+              memoryInstanceId: "A-memory#7",
+              resultAnum: "16898",
+              resultSequenceAnum: "98",
+              decodedValue: 1,
+              oracleValue: 1,
+              oracleMatches: true,
+              linksFinal: 12,
+              identicalRerunLinkDelta: 0,
+              visualLinks: [{
+                key: "A-memory#7:L1",
+                startKey: "A-memory#7:L1",
+                endKey: "A-memory#7:L1",
+                localHandle: 1,
+                anum: "8",
+                label: "ROOT",
+                tags: [],
+              }],
+            },
+          };
+          const proofHtml = proofPipelineHtml(proofFixture);
+          for (const required of [
+            "PREPARE ASET",
+            "LOAD INTO A-MEMORY",
+            "EXECUTE IN THE SAME A-MEMORY",
+            "RESULT + VISUALIZATION",
+            "ONE RUNTIME A-MEMORY",
+            "A-memory#7",
+            "Blueprint 2D",
+            "Static 3D",
+            "Live physics 3D",
+            "@mts/visual 0.3.0",
+            "Structural rules admitted to Theory",
+          ]) {
+            if (!proofHtml.includes(required)) {
+              throw new Error("proof browser renderer missing: " + required);
+            }
+          }
+
+          console.log("browser syntax + one-output + Wide64 + four-stage proof rendering PASS");
           NODE
 
       - name: Native web-lab structural tests
@@ -125,6 +207,31 @@ jobs:
             --manifest-path experiments/a-circuit/Cargo.toml \
             web_lab_rejects_unknown_op_and_invalid_select \
             -- --nocapture --test-threads=1
+          cargo +1.98.1 test \
+            --release \
+            --manifest-path experiments/a-circuit/Cargo.toml \
+            web_mux1_proof_uses_one_runtime_memory_for_all_eight_cases \
+            -- --nocapture --test-threads=1
+
+      - name: Verify exact mts_visual proof renderer pin
+        run: |
+          set -euo pipefail
+          commit="$(jq -r '.commit' experiments/browser-accelerator/mts-visual.lock.json)"
+          package_version="$(jq -r '.packageVersion' experiments/browser-accelerator/mts-visual.lock.json)"
+          test "${commit}" = "4b7c8e97fab8d84a31783a4d8e422dcb12a4e795"
+          test "${package_version}" = "0.3.0"
+
+          git clone --quiet https://github.com/netkeep80/mts_visual.git /tmp/mts_visual
+          git -C /tmp/mts_visual checkout --quiet "${commit}"
+          test "$(git -C /tmp/mts_visual rev-parse HEAD)" = "${commit}"
+          npm --prefix /tmp/mts_visual ci --silent
+          npm --prefix /tmp/mts_visual run build --silent
+          test -s /tmp/mts_visual/dist/src/index.js
+          test -s /tmp/mts_visual/dist/src/blueprint-svg.js
+          test -s /tmp/mts_visual/dist/src/three/index.js
+          test "$(node -p "require('/tmp/mts_visual/node_modules/three/package.json').version")" = "0.185.1"
+          test -s /tmp/mts_visual/node_modules/three/build/three.module.js
+          test -s /tmp/mts_visual/node_modules/three/examples/jsm/controls/OrbitControls.js
 
       - name: Build the real A-Circuit WASM
         run: |
@@ -194,6 +301,57 @@ jobs:
             if (w.amemory_i386_lab_steady_link_delta() !== 0) {
               throw new Error("MUX1 repeated run grew Links");
             }
+            if (w.amemory_i386_lab_proof_available() !== 1) {
+              throw new Error("MUX1 structural proof JSON missing");
+            }
+            const proofLen = w.amemory_i386_lab_proof_json_len() >>> 0;
+            const proofPtr = w.amemory_i386_lab_proof_json_ptr() >>> 0;
+            if (!proofLen || proofPtr + proofLen > w.memory.buffer.byteLength) {
+              throw new Error("MUX1 proof JSON pointer/length invalid");
+            }
+            const proofText = Buffer
+              .from(w.memory.buffer, proofPtr, proofLen)
+              .toString("utf8");
+            const proof = JSON.parse(proofText);
+            const memoryId = proof.load.memoryInstanceId;
+            if (!memoryId || proof.execute.memoryInstanceId !== memoryId || proof.result.memoryInstanceId !== memoryId) {
+              throw new Error("proof changed runtime A-memory identity");
+            }
+            if (proof.prepare.runtimeMemoryExists !== false) {
+              throw new Error("runtime A-memory existed during PREPARE stage");
+            }
+            const roles = new Set(proof.prepare.semanticRoots.map((root) => root.role));
+            for (const role of ["function.mux1", "function.dependency.xor2", "function.dependency.and2", "data.select", "data.a", "data.b", "execution.interpreter", "execution.theory", "invocation.call", "scope.initial"]) {
+              if (!roles.has(role)) throw new Error("prepared Aset missing semantic root " + role);
+            }
+            if (!Array.isArray(proof.prepare.theoryAdmissions) || proof.prepare.theoryAdmissions.length === 0) {
+              throw new Error("prepared Aset did not expose admitted Structural Rules");
+            }
+            if (!proof.load.portableRoundTrip || proof.load.linksBeforeLoad !== 1 || proof.load.linksAfterLoad <= 1) {
+              throw new Error("portable load witness failed");
+            }
+            if (proof.load.linksAfterLoad !== proof.prepare.compiledLinks) {
+              throw new Error("runtime A-memory does not contain the complete compiled Aset");
+            }
+            if (!proof.execute.reactions.every((step) => step.memoryInstanceId === memoryId)) {
+              throw new Error("reaction trace used more than one A-memory");
+            }
+            if (!proof.execute.finalQuiescent || proof.execute.activeReactionCount !== 7) {
+              throw new Error("MUX1 proof execution trajectory mismatch");
+            }
+            if (!proof.result.oracleMatches || proof.result.identicalRerunLinkDelta !== 0) {
+              throw new Error("MUX1 proof result/or rerun witness failed");
+            }
+            if (proof.result.visualLinks.length !== proof.result.linksFinal) {
+              throw new Error("visual snapshot does not contain every runtime Link");
+            }
+            const visualKeys = new Set(proof.result.visualLinks.map((link) => link.key));
+            for (const link of proof.result.visualLinks) {
+              if (!link.key.startsWith(memoryId + ":L")) throw new Error("visual Link from foreign memory");
+              if (!visualKeys.has(link.startKey) || !visualKeys.has(link.endKey)) {
+                throw new Error("visual topology has foreign/missing pole");
+              }
+            }
             const run = (op, a, b, flag, expected, label) => {
               if (w.amemory_i386_lab_run(op, a, b, flag) !== 1) {
                 throw new Error(label + " WASM execution rejected");
@@ -231,6 +389,9 @@ jobs:
             };
 
             run(13, 0x80000001, 33, 0, 0x00000002, "SHL32 count-mask");
+            if (w.amemory_i386_lab_proof_available() !== 0) {
+              throw new Error("non-MUX1 run leaked stale proof JSON");
+            }
             run(17, 0x00000001, 1, 0, 0x80000000, "ROR32");
             run(18, 0x00000000, 1, 1, 0x00000001, "RCL32 CF-in");
             run(20, 0x7fffffff, 0, 0, 0x80000000, "INC32");

@@ -5,11 +5,20 @@ use super::{
     logic_n::{install_gate_basis, GateSet},
 };
 use amemory_optimized_cpu_probe::{
-    structural::{materialize_exact_sequence, read_exact_sequence},
-    Handle, OptimizedLinkStore,
+    structural::{
+        define_structural_interpreter, define_structural_role_dictionary,
+        materialize_exact_sequence, read_exact_sequence, OptimizedStructuralEngine,
+    },
+    Handle, OptimizedLinkStore, ROOT_HANDLE,
+};
+use serde::Serialize;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::atomic::{AtomicU32, Ordering},
 };
 
 const WIDTH: usize = 32;
+static NEXT_PROOF_MEMORY_ID: AtomicU32 = AtomicU32::new(1);
 
 struct AnchorGen {
     current: Handle,
@@ -685,6 +694,764 @@ pub(crate) fn web_run_mux1(
         steady_link_delta: links_after_second - links_after_first,
         quiescent: 1,
     })
+}
+
+
+
+#[derive(Debug)]
+struct ProofMuxFixture {
+    store: OptimizedLinkStore,
+    mux1: Handle,
+    xor2: Handle,
+    and2: Handle,
+    k: Handle,
+    zero: Handle,
+    one: Handle,
+    apply: Handle,
+    theory: Handle,
+    interpreter: Handle,
+    bit_outputs: [Handle; 2],
+    bit_result_tag: Handle,
+}
+
+fn proof_binary_call(
+    store: &mut OptimizedLinkStore,
+    apply: Handle,
+    function: Handle,
+    a: Handle,
+    b: Handle,
+) -> Handle {
+    let args = materialize_exact_sequence(store, &[a, b]).unwrap();
+    call(store, apply, function, args)
+}
+
+fn proof_fresh_pair(
+    store: &mut OptimizedLinkStore,
+    anchors: &mut AnchorGen,
+) -> Handle {
+    let left = anchors.next(store);
+    let right = anchors.next(store);
+    store.ensure_pair(left, right).unwrap()
+}
+
+fn install_proof_gate(
+    store: &mut OptimizedLinkStore,
+    anchors: &mut AnchorGen,
+    theory: Handle,
+    apply: Handle,
+    trigger: Handle,
+    function: Handle,
+    bits: [Handle; 2],
+    bit_outputs: [Handle; 2],
+    rows: &[(usize, usize, usize)],
+) {
+    for &(a, b, out) in rows {
+        let caller = anchors.next(store);
+        let args = materialize_exact_sequence(store, &[bits[a], bits[b]]).unwrap();
+        let invocation = call(store, apply, function, args);
+        let before = store.ensure_pair(caller, invocation).unwrap();
+        let after = store.ensure_pair(caller, bit_outputs[out]).unwrap();
+
+        let (_, admission) = define_bundle_rule(
+            store,
+            theory,
+            &[caller],
+            before,
+            &[after],
+        );
+        index_rule_for(store, &[trigger], admission);
+    }
+}
+
+fn build_proof_mux_fixture() -> ProofMuxFixture {
+    let mut store = OptimizedLinkStore::new();
+
+    let o = store.ensure_start_self_closed(ROOT_HANDLE).unwrap();
+    let c = store.ensure_end_self_closed(ROOT_HANDLE).unwrap();
+    let l = store.ensure_pair(o, c).unwrap();
+    let u = store.ensure_pair(c, o).unwrap();
+
+    // Small deterministic namespace dedicated to the portable MUX1 proof.
+    let seed = store.ensure_pair(u, l).unwrap();
+    let mut anchors = AnchorGen::new(&mut store, seed, o, c);
+
+    let theory = proof_fresh_pair(&mut store, &mut anchors);
+    let authority_dictionary =
+        define_structural_role_dictionary(&mut store, &[]).unwrap();
+    let grammar = proof_fresh_pair(&mut store, &mut anchors);
+    let interpreter = define_structural_interpreter(
+        &mut store,
+        authority_dictionary,
+        grammar,
+        theory,
+    )
+    .unwrap();
+
+    let xor2 = proof_fresh_pair(&mut store, &mut anchors);
+    let and2 = proof_fresh_pair(&mut store, &mut anchors);
+    let mux1 = proof_fresh_pair(&mut store, &mut anchors);
+    let k = proof_fresh_pair(&mut store, &mut anchors);
+    let xor_ab_tag = anchors.next(&mut store);
+    let and_s_tag = anchors.next(&mut store);
+    let xor_out_tag = anchors.next(&mut store);
+    let bit_result_tag = proof_fresh_pair(&mut store, &mut anchors);
+
+    let apply = o;
+    let zero = u;
+    let one = l;
+    let bits = [zero, one];
+    let bit_outputs = [
+        materialize_exact_sequence(&mut store, &[zero]).unwrap(),
+        materialize_exact_sequence(&mut store, &[one]).unwrap(),
+    ];
+
+    // Gate truth tables are themselves Structural Rules in Theory.
+    install_proof_gate(
+        &mut store,
+        &mut anchors,
+        theory,
+        apply,
+        o,
+        xor2,
+        bits,
+        bit_outputs,
+        &[(0, 0, 0), (0, 1, 1), (1, 0, 1), (1, 1, 0)],
+    );
+    install_proof_gate(
+        &mut store,
+        &mut anchors,
+        theory,
+        apply,
+        o,
+        and2,
+        bits,
+        bit_outputs,
+        &[(0, 0, 0), (0, 1, 0), (1, 0, 0), (1, 1, 1)],
+    );
+
+    // MUX1 = A XOR ((A XOR B) AND S), expressed only as structural calls/rules.
+    {
+        let k_role = anchors.next(&mut store);
+        let s_role = anchors.next(&mut store);
+        let a_role = anchors.next(&mut store);
+        let b_role = anchors.next(&mut store);
+
+        let args =
+            materialize_exact_sequence(&mut store, &[s_role, a_role, b_role]).unwrap();
+        let invocation = call(&mut store, apply, mux1, args);
+        let before = store.ensure_pair(k_role, invocation).unwrap();
+
+        let caller = stage_frame(
+            &mut store,
+            xor_ab_tag,
+            &[k_role, s_role, a_role],
+        );
+        let xor_call =
+            proof_binary_call(&mut store, apply, xor2, a_role, b_role);
+        let after = store.ensure_pair(caller, xor_call).unwrap();
+
+        let (_, admission) = define_bundle_rule(
+            &mut store,
+            theory,
+            &[k_role, s_role, a_role, b_role],
+            before,
+            &[after],
+        );
+        index_rule_for(&mut store, &[o], admission);
+    }
+
+    {
+        let k_role = anchors.next(&mut store);
+        let s_role = anchors.next(&mut store);
+        let a_role = anchors.next(&mut store);
+        let x_role = anchors.next(&mut store);
+
+        let caller = stage_frame(
+            &mut store,
+            xor_ab_tag,
+            &[k_role, s_role, a_role],
+        );
+        let x_result =
+            materialize_exact_sequence(&mut store, &[x_role]).unwrap();
+        let before = store.ensure_pair(caller, x_result).unwrap();
+
+        let next_caller =
+            stage_frame(&mut store, and_s_tag, &[k_role, a_role]);
+        let and_call =
+            proof_binary_call(&mut store, apply, and2, s_role, x_role);
+        let after = store.ensure_pair(next_caller, and_call).unwrap();
+
+        let (_, admission) = define_bundle_rule(
+            &mut store,
+            theory,
+            &[k_role, s_role, a_role, x_role],
+            before,
+            &[after],
+        );
+        index_rule_for(&mut store, &bit_outputs, admission);
+    }
+
+    {
+        let k_role = anchors.next(&mut store);
+        let a_role = anchors.next(&mut store);
+        let y_role = anchors.next(&mut store);
+
+        let caller = stage_frame(&mut store, and_s_tag, &[k_role, a_role]);
+        let y_result =
+            materialize_exact_sequence(&mut store, &[y_role]).unwrap();
+        let before = store.ensure_pair(caller, y_result).unwrap();
+
+        let next_caller =
+            stage_frame(&mut store, xor_out_tag, &[k_role]);
+        let xor_call =
+            proof_binary_call(&mut store, apply, xor2, a_role, y_role);
+        let after = store.ensure_pair(next_caller, xor_call).unwrap();
+
+        let (_, admission) = define_bundle_rule(
+            &mut store,
+            theory,
+            &[k_role, a_role, y_role],
+            before,
+            &[after],
+        );
+        index_rule_for(&mut store, &bit_outputs, admission);
+    }
+
+    {
+        let k_role = anchors.next(&mut store);
+        let out_role = anchors.next(&mut store);
+
+        let caller = stage_frame(&mut store, xor_out_tag, &[k_role]);
+        let out_result =
+            materialize_exact_sequence(&mut store, &[out_role]).unwrap();
+        let before = store.ensure_pair(caller, out_result).unwrap();
+
+        let payload =
+            materialize_exact_sequence(&mut store, &[out_role]).unwrap();
+        let endpoint = store.ensure_pair(bit_result_tag, payload).unwrap();
+        let after = store.ensure_pair(k_role, endpoint).unwrap();
+
+        let (_, admission) = define_bundle_rule(
+            &mut store,
+            theory,
+            &[k_role, out_role],
+            before,
+            &[after],
+        );
+        index_rule_for(&mut store, &bit_outputs, admission);
+    }
+
+    ProofMuxFixture {
+        store,
+        mux1,
+        xor2,
+        and2,
+        k,
+        zero,
+        one,
+        apply,
+        theory,
+        interpreter,
+        bit_outputs,
+        bit_result_tag,
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WebProofPreparedRoot {
+    pub(crate) role: String,
+    pub(crate) source: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WebProofLoadedRoot {
+    pub(crate) role: String,
+    pub(crate) source: String,
+    pub(crate) local_handle: u32,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WebProofPrepareStage {
+    pub(crate) compiler_label: String,
+    pub(crate) runtime_memory_exists: bool,
+    pub(crate) compiled_links: u32,
+    pub(crate) aset_anums: Vec<String>,
+    pub(crate) semantic_roots: Vec<WebProofPreparedRoot>,
+    pub(crate) theory_admissions: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WebProofLoadStage {
+    pub(crate) memory_instance_id: String,
+    pub(crate) links_before_load: u32,
+    pub(crate) links_after_load: u32,
+    pub(crate) imported_anums: u32,
+    pub(crate) portable_round_trip: bool,
+    pub(crate) semantic_roots: Vec<WebProofLoadedRoot>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WebProofReactionStep {
+    pub(crate) memory_instance_id: String,
+    pub(crate) step: u32,
+    pub(crate) scope_before: Vec<String>,
+    pub(crate) raw_rule_matches: u32,
+    pub(crate) transitioned_members: u32,
+    pub(crate) handoff_count: u32,
+    pub(crate) scope_after: Vec<String>,
+    pub(crate) links_after: u32,
+    pub(crate) quiescent: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WebProofVisualLink {
+    pub(crate) key: String,
+    pub(crate) start_key: String,
+    pub(crate) end_key: String,
+    pub(crate) local_handle: u32,
+    pub(crate) label: Option<String>,
+    pub(crate) tags: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WebProofExecuteStage {
+    pub(crate) memory_instance_id: String,
+    pub(crate) reactions: Vec<WebProofReactionStep>,
+    pub(crate) active_reaction_count: u32,
+    pub(crate) final_quiescent: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WebProofResultStage {
+    pub(crate) memory_instance_id: String,
+    pub(crate) result_anum: String,
+    pub(crate) result_sequence_anum: String,
+    pub(crate) decoded_value: u8,
+    pub(crate) oracle_value: u8,
+    pub(crate) oracle_matches: bool,
+    pub(crate) links_final: u32,
+    pub(crate) identical_rerun_link_delta: u32,
+    pub(crate) visual_links: Vec<WebProofVisualLink>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WebMux1Proof {
+    pub(crate) schema_version: u32,
+    pub(crate) block: String,
+    pub(crate) prepare: WebProofPrepareStage,
+    pub(crate) load: WebProofLoadStage,
+    pub(crate) execute: WebProofExecuteStage,
+    pub(crate) result: WebProofResultStage,
+}
+
+#[derive(Debug)]
+struct ProofRuntimeMemory {
+    id: String,
+    store: OptimizedLinkStore,
+}
+
+fn export_portable_aset(store: &OptimizedLinkStore) -> Vec<String> {
+    // Start with containment roots: Links that are not a non-self pole of any
+    // other Link. Importing one portable Anum recursively reconstructs its pole
+    // closure, so exporting every local handle separately would be redundant.
+    let count = store.link_count() as u32;
+    let mut referenced = HashSet::new();
+    for handle in 1..=count {
+        let (start, end) = store.poles(handle).expect("proof poles");
+        if start != handle {
+            referenced.insert(start);
+        }
+        if end != handle {
+            referenced.insert(end);
+        }
+    }
+
+    let mut sources = Vec::new();
+    let mut reconstructed = OptimizedLinkStore::new();
+
+    for handle in 1..=count {
+        if referenced.contains(&handle) {
+            continue;
+        }
+        let source = store.export_anum(handle).expect("proof root export");
+        reconstructed.import_anum(&source).expect("proof root import");
+        sources.push(source);
+    }
+
+    // Defensive completion: if an unusual topology was not reachable from a
+    // containment root, add only the portable Anum(s) that actually extend the
+    // reconstructed image. This keeps the transport complete without coupling
+    // it to compiler-local handle numbering.
+    for handle in 1..=count {
+        let source = store.export_anum(handle).expect("proof completion export");
+        let before = reconstructed.link_count();
+        let imported = reconstructed.import_anum(&source).expect("proof completion import");
+        assert_eq!(
+            reconstructed.export_anum(imported).expect("proof completion round-trip"),
+            source,
+        );
+        if reconstructed.link_count() > before {
+            sources.push(source);
+        }
+    }
+
+    // Every compiler Link must now already exist structurally in the transport image.
+    for handle in 1..=count {
+        let source = store.export_anum(handle).expect("proof coverage export");
+        let before = reconstructed.link_count();
+        let imported = reconstructed.import_anum(&source).expect("proof coverage import");
+        assert_eq!(reconstructed.link_count(), before, "portable Aset omitted topology");
+        assert_eq!(reconstructed.export_anum(imported).unwrap(), source);
+    }
+
+    sources
+}
+
+fn export_scope(store: &OptimizedLinkStore, scope: &[Handle]) -> Vec<String> {
+    scope
+        .iter()
+        .map(|handle| store.export_anum(*handle).expect("scope export"))
+        .collect()
+}
+
+fn semantic_source(
+    store: &OptimizedLinkStore,
+    role: &str,
+    handle: Handle,
+) -> WebProofPreparedRoot {
+    WebProofPreparedRoot {
+        role: role.to_owned(),
+        source: store.export_anum(handle).expect("semantic root export"),
+    }
+}
+
+fn visual_snapshot(
+    memory: &ProofRuntimeMemory,
+    loaded_roots: &[WebProofLoadedRoot],
+) -> Vec<WebProofVisualLink> {
+    let mut roles_by_handle: HashMap<u32, Vec<String>> = HashMap::new();
+    for root in loaded_roots {
+        roles_by_handle
+            .entry(root.local_handle)
+            .or_default()
+            .push(root.role.clone());
+    }
+
+    (1..=memory.store.link_count() as u32)
+        .map(|handle| {
+            let (start, end) = memory.store.poles(handle).expect("visual poles");
+            let roles = roles_by_handle.get(&handle).cloned().unwrap_or_default();
+            WebProofVisualLink {
+                key: format!("{}:L{}", memory.id, handle),
+                start_key: format!("{}:L{}", memory.id, start),
+                end_key: format!("{}:L{}", memory.id, end),
+                local_handle: handle,
+                label: (!roles.is_empty()).then(|| roles.join(" + ")),
+                tags: roles,
+            }
+        })
+        .collect()
+}
+
+pub(crate) fn web_prove_mux1(
+    select: u32,
+    a: u32,
+    b: u32,
+) -> Option<WebMux1Proof> {
+    if select > 1 || a > 1 || b > 1 {
+        return None;
+    }
+
+    // Stage 1: compile a complete portable Aset before the runtime A-memory exists.
+    // This compiler store is preparation state only; it is intentionally discarded
+    // before execution. Runtime identity begins only below at ProofRuntimeMemory.
+    let mut compiler = build_proof_mux_fixture();
+    let bits = [compiler.zero, compiler.one];
+    let args = materialize_exact_sequence(
+        &mut compiler.store,
+        &[
+            bits[select as usize],
+            bits[a as usize],
+            bits[b as usize],
+        ],
+    )
+    .unwrap();
+    let invocation = call(
+        &mut compiler.store,
+        compiler.apply,
+        compiler.mux1,
+        args,
+    );
+    let initial = compiler.store.ensure_pair(compiler.k, invocation).unwrap();
+
+    let prepared_roots = vec![
+        semantic_source(&compiler.store, "function.mux1", compiler.mux1),
+        semantic_source(&compiler.store, "function.dependency.xor2", compiler.xor2),
+        semantic_source(&compiler.store, "function.dependency.and2", compiler.and2),
+        semantic_source(&compiler.store, "data.select", bits[select as usize]),
+        semantic_source(&compiler.store, "data.a", bits[a as usize]),
+        semantic_source(&compiler.store, "data.b", bits[b as usize]),
+        semantic_source(&compiler.store, "data.zero", compiler.zero),
+        semantic_source(&compiler.store, "data.one", compiler.one),
+        semantic_source(&compiler.store, "execution.interpreter", compiler.interpreter),
+        semantic_source(&compiler.store, "execution.theory", compiler.theory),
+        semantic_source(&compiler.store, "execution.apply", compiler.apply),
+        semantic_source(&compiler.store, "invocation.args", args),
+        semantic_source(&compiler.store, "invocation.call", invocation),
+        semantic_source(&compiler.store, "scope.initial", initial),
+        semantic_source(&compiler.store, "context.caller", compiler.k),
+        semantic_source(&compiler.store, "result.tag", compiler.bit_result_tag),
+        semantic_source(&compiler.store, "result.zero", compiler.bit_outputs[0]),
+        semantic_source(&compiler.store, "result.one", compiler.bit_outputs[1]),
+    ];
+    let theory_admissions = compiler
+        .store
+        .start_incidence(compiler.theory)
+        .ok()?
+        .filter_map(|handle| {
+            let (start, _end) = compiler.store.poles(handle).ok()?;
+            (start == compiler.theory)
+                .then(|| compiler.store.export_anum(handle).ok())
+                .flatten()
+        })
+        .collect::<Vec<_>>();
+    if theory_admissions.is_empty() {
+        return None;
+    }
+
+    let prepared_anums = export_portable_aset(&compiler.store);
+
+    let prepare = WebProofPrepareStage {
+        compiler_label: "portable Aset compiler/preparation state (not runtime A-memory)".to_owned(),
+        runtime_memory_exists: false,
+        compiled_links: compiler.store.link_count() as u32,
+        aset_anums: prepared_anums.clone(),
+        semantic_roots: prepared_roots.clone(),
+        theory_admissions,
+    };
+
+    // Stage 2: exactly one runtime A-memory is created. Every following stage
+    // keeps and mutates this one ProofRuntimeMemory.store instance.
+    let memory_number = NEXT_PROOF_MEMORY_ID.fetch_add(1, Ordering::SeqCst);
+    let mut memory = ProofRuntimeMemory {
+        id: format!("A-memory#{}", memory_number),
+        store: OptimizedLinkStore::new(),
+    };
+    let links_before_load = memory.store.link_count() as u32;
+    for source in &prepared_anums {
+        memory.store.import_anum(source).ok()?;
+    }
+    let links_after_load = memory.store.link_count() as u32;
+
+    let mut loaded_roots = Vec::with_capacity(prepared_roots.len());
+    let mut portable_round_trip = true;
+    for root in &prepared_roots {
+        let before = memory.store.link_count();
+        let handle = memory.store.import_anum(&root.source).ok()?;
+        // Semantic-root resolution must reuse already loaded topology.
+        if memory.store.link_count() != before {
+            return None;
+        }
+        if memory.store.export_anum(handle).ok().as_deref() != Some(root.source.as_str()) {
+            portable_round_trip = false;
+        }
+        loaded_roots.push(WebProofLoadedRoot {
+            role: root.role.clone(),
+            source: root.source.clone(),
+            local_handle: handle,
+        });
+    }
+
+    let find = |role: &str| -> Option<Handle> {
+        loaded_roots
+            .iter()
+            .find(|root| root.role == role)
+            .map(|root| root.local_handle)
+    };
+    let interpreter = find("execution.interpreter")?;
+    let initial = find("scope.initial")?;
+    let caller = find("context.caller")?;
+    let result_tag = find("result.tag")?;
+    let zero = find("data.zero")?;
+    let one = find("data.one")?;
+
+    let load = WebProofLoadStage {
+        memory_instance_id: memory.id.clone(),
+        links_before_load,
+        links_after_load,
+        imported_anums: prepared_anums.len() as u32,
+        portable_round_trip,
+        semantic_roots: loaded_roots.clone(),
+    };
+
+    // Stage 3: execute against the exact same runtime store.
+    let mut engine = OptimizedStructuralEngine::new(32);
+    engine.set_interpreter(&memory.store, interpreter).ok()?;
+    engine.set_current(&memory.store, &[initial]).ok()?;
+
+    let mut reactions = Vec::new();
+    for step in 0..64u32 {
+        let scope_before = export_scope(&memory.store, engine.current());
+        let reaction = engine.run(&mut memory.store).ok()?;
+        let scope_after = export_scope(&memory.store, engine.current());
+        let quiescent = reaction.quiescent;
+        reactions.push(WebProofReactionStep {
+            memory_instance_id: memory.id.clone(),
+            step,
+            scope_before,
+            raw_rule_matches: reaction.raw_rule_matches,
+            transitioned_members: reaction.transitioned_members,
+            handoff_count: reaction.handoff_count,
+            scope_after,
+            links_after: memory.store.link_count() as u32,
+            quiescent,
+        });
+        if quiescent {
+            break;
+        }
+    }
+    if !reactions.last().map(|step| step.quiescent).unwrap_or(false) {
+        return None;
+    }
+    let active_reaction_count =
+        reactions.iter().filter(|step| !step.quiescent).count() as u32;
+
+    // Stage 4: result is decoded from this same memory, then visual topology is
+    // projected directly from this same store. Host MUX arithmetic is oracle only.
+    if engine.current().len() != 1 {
+        return None;
+    }
+    let final_link = engine.current()[0];
+    let (final_caller, endpoint) = memory.store.poles(final_link).ok()?;
+    if final_caller != caller {
+        return None;
+    }
+    let (tag, payload) = memory.store.poles(endpoint).ok()?;
+    if tag != result_tag {
+        return None;
+    }
+    let values = read_exact_sequence(&memory.store, payload).ok()?;
+    if values.len() != 1 {
+        return None;
+    }
+    let decoded_value = if values[0] == one {
+        1
+    } else if values[0] == zero {
+        0
+    } else {
+        return None;
+    };
+    let oracle_value = if select == 0 { a as u8 } else { b as u8 };
+    let result_anum = memory.store.export_anum(final_link).ok()?;
+    let result_sequence_anum = memory.store.export_anum(payload).ok()?;
+
+    // Re-run the exact same invocation in the same runtime A-memory. This is
+    // not a second authority: it is an idempotence witness over the same store.
+    let links_before_rerun = memory.store.link_count();
+    engine.set_current(&memory.store, &[initial]).ok()?;
+    for _ in 0..64u32 {
+        let repeat = engine.run(&mut memory.store).ok()?;
+        if repeat.quiescent {
+            break;
+        }
+    }
+    if !engine.quiescent() {
+        return None;
+    }
+    if engine.current().len() != 1 {
+        return None;
+    }
+    let repeat_result = memory.store.export_anum(engine.current()[0]).ok()?;
+    if repeat_result != result_anum {
+        return None;
+    }
+    let identical_rerun_link_delta =
+        (memory.store.link_count() - links_before_rerun) as u32;
+    let visual_links = visual_snapshot(&memory, &loaded_roots);
+
+    let execute = WebProofExecuteStage {
+        memory_instance_id: memory.id.clone(),
+        reactions,
+        active_reaction_count,
+        final_quiescent: true,
+    };
+    let result = WebProofResultStage {
+        memory_instance_id: memory.id.clone(),
+        result_anum,
+        result_sequence_anum,
+        decoded_value,
+        oracle_value,
+        oracle_matches: decoded_value == oracle_value,
+        links_final: memory.store.link_count() as u32,
+        identical_rerun_link_delta,
+        visual_links,
+    };
+
+    Some(WebMux1Proof {
+        schema_version: 1,
+        block: "MUX1".to_owned(),
+        prepare,
+        load,
+        execute,
+        result,
+    })
+}
+
+#[test]
+fn web_mux1_proof_uses_one_runtime_memory_for_all_eight_cases() {
+    for select in 0..=1 {
+        for a in 0..=1 {
+            for b in 0..=1 {
+                let proof = web_prove_mux1(select, a, b).expect("MUX1 proof");
+                assert!(!proof.prepare.runtime_memory_exists);
+                assert!(proof.load.portable_round_trip);
+                assert!(!proof.prepare.theory_admissions.is_empty());
+                assert_eq!(proof.load.links_before_load, 1);
+                assert_eq!(proof.load.links_after_load, proof.prepare.compiled_links);
+                assert!(proof.load.links_after_load > proof.load.links_before_load);
+                assert_eq!(proof.execute.active_reaction_count, 7);
+                assert!(proof.execute.final_quiescent);
+                assert!(proof.result.oracle_matches);
+                assert_eq!(proof.result.identical_rerun_link_delta, 0);
+
+                let id = &proof.load.memory_instance_id;
+                assert_eq!(&proof.execute.memory_instance_id, id);
+                assert_eq!(&proof.result.memory_instance_id, id);
+                assert!(proof.execute.reactions.iter().all(|step| &step.memory_instance_id == id));
+
+                let mut previous = proof.load.links_after_load;
+                for step in &proof.execute.reactions {
+                    assert!(step.links_after >= previous);
+                    previous = step.links_after;
+                }
+                assert_eq!(proof.result.links_final, previous);
+                assert_eq!(
+                    proof.result.visual_links.len(),
+                    proof.result.links_final as usize,
+                    "visual snapshot must contain every runtime Link",
+                );
+
+                let keys = proof.result.visual_links
+                    .iter()
+                    .map(|link| link.key.as_str())
+                    .collect::<std::collections::HashSet<_>>();
+                for link in &proof.result.visual_links {
+                    assert!(keys.contains(link.start_key.as_str()));
+                    assert!(keys.contains(link.end_key.as_str()));
+                    assert!(link.key.starts_with(id));
+                }
+            }
+        }
+    }
 }
 
 

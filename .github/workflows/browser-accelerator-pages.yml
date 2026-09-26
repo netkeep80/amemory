@@ -42,6 +42,23 @@ jobs:
             --target wasm32-unknown-unknown \
             --release
 
+      - name: Build exact-pinned mts_visual proof renderer
+        run: |
+          set -euo pipefail
+          commit="$(jq -r '.commit' experiments/browser-accelerator/mts-visual.lock.json)"
+          test "${commit}" = "4b7c8e97fab8d84a31783a4d8e422dcb12a4e795"
+
+          git clone --quiet https://github.com/netkeep80/mts_visual.git /tmp/mts_visual
+          git -C /tmp/mts_visual checkout --quiet "${commit}"
+          test "$(git -C /tmp/mts_visual rev-parse HEAD)" = "${commit}"
+          npm --prefix /tmp/mts_visual ci --silent
+          npm --prefix /tmp/mts_visual run build --silent
+          test -s /tmp/mts_visual/dist/src/index.js
+          test -s /tmp/mts_visual/dist/src/blueprint-svg.js
+          test "$(node -p "require('/tmp/mts_visual/node_modules/three/package.json').version")" = "0.185.1"
+          test -s /tmp/mts_visual/node_modules/three/build/three.module.js
+          test -s /tmp/mts_visual/node_modules/three/examples/jsm/controls/OrbitControls.js
+
       - name: Assemble static Pages artifact
         run: |
           mkdir -p _site
@@ -51,6 +68,12 @@ jobs:
           cp experiments/a-circuit/target/wasm32-unknown-unknown/release/amemory_a_circuit.wasm \
             _site/amemory_a_circuit.wasm
           cp VERSION _site/VERSION
+          cp experiments/browser-accelerator/mts-visual.lock.json _site/mts-visual-lock.json
+          mkdir -p _site/vendor/mts-visual
+          cp -R /tmp/mts_visual/dist/src/. _site/vendor/mts-visual/
+          mkdir -p _site/vendor/three/addons
+          cp /tmp/mts_visual/node_modules/three/build/three.module.js _site/vendor/three/three.module.js
+          cp -R /tmp/mts_visual/node_modules/three/examples/jsm/. _site/vendor/three/addons/
           touch _site/.nojekyll
 
       - name: Generate browser lab build identity
@@ -206,13 +229,24 @@ jobs:
 
           test -s _site/i386-lab.js
           test -s _site/i386-lab-view.mjs
+          test -s _site/i386-proof-view.mjs
           test -s _site/i386-blocks.json
           test -s _site/amemory_a_circuit.wasm
+          test -s _site/mts-visual-lock.json
+          test -s _site/vendor/mts-visual/index.js
+          test -s _site/vendor/mts-visual/blueprint-svg.js
+          test -s _site/vendor/mts-visual/three/index.js
+          test -s _site/vendor/three/three.module.js
+          test -s _site/vendor/three/addons/controls/OrbitControls.js
+          grep -F '<script type="importmap">' _site/index.html
+          grep -F '"three": "./vendor/three/three.module.js"' _site/index.html
+          grep -F '"three/addons/": "./vendor/three/addons/"' _site/index.html
           grep -F '<script type="module" src="./i386-lab.js"></script>' _site/index.html
 
           cp _site/i386-lab.js /tmp/i386-lab.mjs
           node --check /tmp/i386-lab.mjs
           node --check _site/i386-lab-view.mjs
+          node --check _site/i386-proof-view.mjs
 
           python3 - <<'PY'
           from pathlib import Path
@@ -228,17 +262,24 @@ jobs:
           if info["mainSha"] != expected_sha:
               raise SystemExit(f"Pages SHA mismatch: {info['mainSha']} != {expected_sha}")
 
+          visual_lock = json.loads(Path("_site/mts-visual-lock.json").read_text(encoding="utf-8"))
+          if visual_lock["commit"] != "4b7c8e97fab8d84a31783a4d8e422dcb12a4e795":
+              raise SystemExit("Pages artifact has wrong mts_visual commit")
+          if visual_lock["packageVersion"] != "0.3.0":
+              raise SystemExit("Pages artifact has wrong mts_visual package version")
+
           registry = json.loads(Path("_site/i386-blocks.json").read_text(encoding="utf-8"))
           if len(registry.get("blocks", [])) < 24:
               raise SystemExit("Pages artifact lost 80386 registry blocks")
 
-          print(f"Pages 80386 payload PASS: v{expected_version} @ {expected_sha[:12]} / {len(registry['blocks'])} blocks")
+          print(f"Pages 80386 payload PASS: v{expected_version} @ {expected_sha[:12]} / {len(registry['blocks'])} blocks / mts_visual {visual_lock['commit'][:12]}")
           PY
 
       - name: Cache-bust interactive lab modules
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import json
           import os
 
           sha = os.environ["GITHUB_SHA"]
@@ -256,7 +297,28 @@ jobs:
               'from "./i386-lab-view.mjs"',
               f'from "./i386-lab-view.mjs?v={sha}"',
           )
+          source = source.replace(
+              'from "./i386-proof-view.mjs"',
+              f'from "./i386-proof-view.mjs?v={sha}"',
+          )
           lab.write_text(source, encoding="utf-8")
+
+          proof = Path("_site/i386-proof-view.mjs")
+          proof_source = proof.read_text(encoding="utf-8")
+          proof_source = proof_source.replace(
+              'from "./i386-lab-view.mjs"',
+              f'from "./i386-lab-view.mjs?v={sha}"',
+          )
+          visual_commit = json.loads(Path("_site/mts-visual-lock.json").read_text(encoding="utf-8"))["commit"]
+          proof_source = proof_source.replace(
+              'import("./vendor/mts-visual/index.js")',
+              f'import("./vendor/mts-visual/index.js?v={visual_commit}")',
+          )
+          proof_source = proof_source.replace(
+              'import("./vendor/mts-visual/three/index.js")',
+              f'import("./vendor/mts-visual/three/index.js?v={visual_commit}")',
+          )
+          proof.write_text(proof_source, encoding="utf-8")
           PY
 
       - name: Configure Pages
