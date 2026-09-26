@@ -233,6 +233,23 @@ jobs:
           test -s /tmp/mts_visual/node_modules/three/build/three.module.js
           test -s /tmp/mts_visual/node_modules/three/examples/jsm/controls/OrbitControls.js
 
+          npx --yes esbuild@0.24.2             /tmp/mts_visual/src/index.ts             --bundle --format=esm --platform=browser --target=es2022             --outfile=/tmp/mts-visual-core.bundle.js
+          npx --yes esbuild@0.24.2             /tmp/mts_visual/src/three/index.ts             --bundle --format=esm --platform=browser --target=es2022             --outfile=/tmp/mts-visual-three.bundle.js
+
+          test -s /tmp/mts-visual-core.bundle.js
+          test -s /tmp/mts-visual-three.bundle.js
+          cp /tmp/mts-visual-core.bundle.js /tmp/mts-visual-core.bundle.mjs
+          cp /tmp/mts-visual-three.bundle.js /tmp/mts-visual-three.bundle.mjs
+          node --input-type=module -e 'import("file:///tmp/mts-visual-core.bundle.mjs").then(m => { if (typeof m.buildBlueprintSvgScene !== "function") process.exit(1); })'
+          node --input-type=module -e 'import("file:///tmp/mts-visual-three.bundle.mjs").then(m => { if (typeof m.createVisualThreeRenderer !== "function" || typeof m.createVisualThreeLiveRenderer !== "function") process.exit(1); })'
+
+          grep -F 'import("./vendor/mts-visual-core.bundle.js")' experiments/browser-accelerator/web/i386-proof-view.mjs
+          grep -F 'import("./vendor/mts-visual-three.bundle.js")' experiments/browser-accelerator/web/i386-proof-view.mjs
+          if grep -Fq 'vendor/mts-visual/three/index.js' experiments/browser-accelerator/web/i386-proof-view.mjs; then
+            echo "proof renderer still references the fragile unbundled 3D entrypoint" >&2
+            exit 1
+          fi
+
       - name: Build the real A-Circuit WASM
         run: |
           cargo +1.98.1 build \
