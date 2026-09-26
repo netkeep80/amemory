@@ -40,6 +40,7 @@ fn run_once(
     normalized_handles(engine.current())
 }
 
+#[cfg(test)]
 mod tests {
     use super::*;
     use amemory_browser_probe::{
