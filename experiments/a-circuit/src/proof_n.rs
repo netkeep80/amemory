@@ -419,3 +419,37 @@ pub(crate) fn visual_snapshot(
         })
         .collect()
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use amemory_optimized_cpu_probe::ROOT_HANDLE;
+
+    #[test]
+    fn portable_aset_reconstructs_complete_shared_topology() {
+        let mut store = OptimizedLinkStore::new();
+        let o = store.import_anum("98").unwrap();
+        let c = store.import_anum("68").unwrap();
+        let l = store.ensure_pair(o, c).unwrap();
+        let u = store.ensure_pair(c, o).unwrap();
+        let left = store.ensure_pair(l, u).unwrap();
+        let right = store.ensure_pair(u, l).unwrap();
+        let _top = store.ensure_pair(left, right).unwrap();
+        let _second_top = store.ensure_pair(right, ROOT_HANDLE).unwrap();
+
+        let sources = export_portable_aset(&store);
+        assert!(
+            sources.len() < store.link_count(),
+            "portable Aset should carry structural roots, not one source per Link"
+        );
+
+        let mut reconstructed = OptimizedLinkStore::new();
+        for source in &sources {
+            let handle = reconstructed.import_anum(source).unwrap();
+            assert_eq!(reconstructed.export_anum(handle).unwrap(), *source);
+        }
+
+        assert_eq!(reconstructed.link_count(), store.link_count());
+    }
+}
