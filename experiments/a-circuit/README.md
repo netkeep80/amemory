@@ -296,7 +296,8 @@ SUB1                                  GREEN (#80/#81)
 -> CF/PF/AF/ZF/SF/OF                      GREEN (#87/#88)
 -> M3 complete                              GREEN
 -> M4 Word logic                           GREEN (#89/#90)
--> M4 logical flag/writeback effects       CURRENT (#91)
+-> M4 logical flag/writeback effects       GREEN (#91/#92)
+-> M4 arithmetic effect + CMP               CURRENT (#93)
 ```
 
 
@@ -446,3 +447,45 @@ The effect envelope tag is shared as `ALU_EFFECT_RESULT` for every producer of
 `[WriteBack, Word, FlagPatch]`. Logical effects use it now; the next arithmetic/CMP
 effect wrapper must reconstruct the same tag. A future architectural state applier
 can therefore consume one effect ABI independent of which ALU family produced it.
+
+
+## M4 — common arithmetic effect and CMP
+
+Issue: #93
+
+The arithmetic family is adapted to the same effect ABI already used by logical
+instructions:
+
+```text
+ALU_EFFECT_RESULT(
+  ExactSequence_R([WriteBack, Word, FlagPatch])
+)
+```
+
+The existing flagged arithmetic component is reused without recomputation. Its
+six defined flags become six `SET` actions in the shared FlagPatch schema.
+
+Generic input:
+
+```text
+ARITH_EFFECT([Aword,Bword,X,Mode,WriteBack])
+```
+
+with:
+
+```text
+Mode=0 X=0 -> ADD
+Mode=0 X=1 -> ADC
+Mode=1 X=0 -> SUB
+Mode=1 X=1 -> SBB
+```
+
+CMP is exactly the existing SUB path with:
+
+```text
+Mode=1
+X=0
+WriteBack=0
+```
+
+so CMP introduces no second subtractor and no dedicated truth table.
