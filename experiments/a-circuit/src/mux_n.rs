@@ -10,7 +10,7 @@ use amemory_optimized_cpu_probe::{
 };
 use serde::Serialize;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::atomic::{AtomicU32, Ordering},
 };
 
@@ -751,7 +751,6 @@ pub(crate) struct WebProofVisualLink {
     pub(crate) start_key: String,
     pub(crate) end_key: String,
     pub(crate) local_handle: u32,
-    pub(crate) anum: String,
     pub(crate) label: Option<String>,
     pub(crate) tags: Vec<String>,
 }
@@ -796,10 +795,61 @@ struct ProofRuntimeMemory {
     store: OptimizedLinkStore,
 }
 
-fn export_all_anums(store: &OptimizedLinkStore) -> Vec<String> {
-    (1..=store.link_count() as u32)
-        .map(|handle| store.export_anum(handle).expect("proof export"))
-        .collect()
+fn export_portable_aset(store: &OptimizedLinkStore) -> Vec<String> {
+    // Start with containment roots: Links that are not a non-self pole of any
+    // other Link. Importing one portable Anum recursively reconstructs its pole
+    // closure, so exporting every local handle separately would be redundant.
+    let count = store.link_count() as u32;
+    let mut referenced = HashSet::new();
+    for handle in 1..=count {
+        let (start, end) = store.poles(handle).expect("proof poles");
+        if start != handle {
+            referenced.insert(start);
+        }
+        if end != handle {
+            referenced.insert(end);
+        }
+    }
+
+    let mut sources = Vec::new();
+    let mut reconstructed = OptimizedLinkStore::new();
+
+    for handle in 1..=count {
+        if referenced.contains(&handle) {
+            continue;
+        }
+        let source = store.export_anum(handle).expect("proof root export");
+        reconstructed.import_anum(&source).expect("proof root import");
+        sources.push(source);
+    }
+
+    // Defensive completion: if an unusual topology was not reachable from a
+    // containment root, add only the portable Anum(s) that actually extend the
+    // reconstructed image. This keeps the transport complete without coupling
+    // it to compiler-local handle numbering.
+    for handle in 1..=count {
+        let source = store.export_anum(handle).expect("proof completion export");
+        let before = reconstructed.link_count();
+        let imported = reconstructed.import_anum(&source).expect("proof completion import");
+        assert_eq!(
+            reconstructed.export_anum(imported).expect("proof completion round-trip"),
+            source,
+        );
+        if reconstructed.link_count() > before {
+            sources.push(source);
+        }
+    }
+
+    // Every compiler Link must now already exist structurally in the transport image.
+    for handle in 1..=count {
+        let source = store.export_anum(handle).expect("proof coverage export");
+        let before = reconstructed.link_count();
+        let imported = reconstructed.import_anum(&source).expect("proof coverage import");
+        assert_eq!(reconstructed.link_count(), before, "portable Aset omitted topology");
+        assert_eq!(reconstructed.export_anum(imported).unwrap(), source);
+    }
+
+    sources
 }
 
 fn export_scope(store: &OptimizedLinkStore, scope: &[Handle]) -> Vec<String> {
@@ -841,7 +891,6 @@ fn visual_snapshot(
                 start_key: format!("{}:L{}", memory.id, start),
                 end_key: format!("{}:L{}", memory.id, end),
                 local_handle: handle,
-                anum: memory.store.export_anum(handle).expect("visual Anum"),
                 label: (!roles.is_empty()).then(|| roles.join(" + ")),
                 tags: roles,
             }
@@ -897,7 +946,7 @@ pub(crate) fn web_prove_mux1(
         semantic_source(&compiler.store, "context.caller", compiler.k),
         semantic_source(&compiler.store, "result.tag", program.bit_result_tag),
     ];
-    let prepared_anums = export_all_anums(&compiler.store);
+    let prepared_anums = export_portable_aset(&compiler.store);
 
     let prepare = WebProofPrepareStage {
         compiler_label: "portable Aset compiler/preparation state (not runtime A-memory)".to_owned(),
