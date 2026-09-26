@@ -1,0 +1,59 @@
+name: Optimized CPU scale ladder
+
+on:
+  pull_request:
+    paths:
+      - "experiments/optimized-cpu-rust/**"
+      - ".github/workflows/optimized-cpu-scale.yml"
+  push:
+    branches: [main]
+    paths:
+      - "experiments/optimized-cpu-rust/**"
+      - ".github/workflows/optimized-cpu-scale.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal
+
+      - name: Build scale runner
+        run: |
+          cargo +1.98.1 build \
+            --release \
+            --manifest-path experiments/optimized-cpu-rust/Cargo.toml \
+            --bin scale_ladder
+
+      - name: Storage scale ladder
+        run: |
+          for n in 1000 10000 100000 1000000 10000000; do
+            echo "=== STORAGE $n ==="
+            cargo +1.98.1 run \
+              --quiet \
+              --release \
+              --manifest-path experiments/optimized-cpu-rust/Cargo.toml \
+              --bin scale_ladder -- storage "$n" 200000
+          done
+
+      - name: Reaction/Theory scale ladder
+        run: |
+          for n in 1000 10000 100000 1000000; do
+            echo "=== REACTION $n ==="
+            cargo +1.98.1 run \
+              --quiet \
+              --release \
+              --manifest-path experiments/optimized-cpu-rust/Cargo.toml \
+              --bin scale_ladder -- reaction "$n" 200000
+          done
+
+      - name: Scale policy
+        run: |
+          echo "Informational scale evidence only; no timing threshold."
+          echo "Storage is exercised through 10^7 Links; Theory/reaction through 10^6 relations."
