@@ -55,164 +55,31 @@ jobs:
 
       - name: Generate browser lab build identity
         run: |
-          set -euo pipefail
-          version="$(tr -d '\r\n' < experiments/browser-accelerator/VERSION)"
-          if ! grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-
-          pulls_json="$(gh api \
-            -H "Accept: application/vnd.github+json" \
-            "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls?per_page=20")"
-
-          pr_number="$(jq -r \
-            'map(select(.merged_at != null)) | sort_by(.merged_at) | last | .number // empty' \
-            <<<"${pulls_json}")"
-          source_sha="$(jq -r \
-            'map(select(.merged_at != null)) | sort_by(.merged_at) | last | .head.sha // empty' \
-            <<<"${pulls_json}")"
-
-          if [[ -n "${source_sha}" ]]; then
-            source_kind="merged_pr_head"
-          else
-            source_kind="main"
-            source_sha="${GITHUB_SHA}"
-          fi
-
-          workflows_json="$(gh api --paginate \
-            -H "Accept: application/vnd.github+json" \
-            "repos/${GITHUB_REPOSITORY}/actions/workflows?per_page=100" \
-            | jq -s '[
-                .[] | .workflows[]
-                | select(.state == "active")
-                | select(.path != ".github/workflows/browser-accelerator-pages.yml")
-              ] | sort_by(.name)')"
-
-          rows_file="$(mktemp)"
-          : > "${rows_file}"
-
-          while IFS= read -r workflow; do
-            workflow_id="$(jq -r '.id' <<<"${workflow}")"
-
-            latest_json="$(gh api \
-              -H "Accept: application/vnd.github+json" \
-              "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow_id}/runs?branch=main&per_page=1")"
-
-            if [[ "$(jq -r '.workflow_runs | length' <<<"${latest_json}")" == "0" ]]; then
-              latest_json="$(gh api \
-                -H "Accept: application/vnd.github+json" \
-                "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow_id}/runs?per_page=1")"
-            fi
-
-            jq -cn \
-              --argjson workflow "${workflow}" \
-              --argjson latest "${latest_json}" \
-              '{
-                id: $workflow.id,
-                name: $workflow.name,
-                path: $workflow.path,
-                state: $workflow.state,
-                run: (
-                  if ($latest.workflow_runs | length) == 0 then null
-                  else ($latest.workflow_runs[0] | {
-                    id,
-                    status,
-                    conclusion,
-                    event,
-                    headBranch: .head_branch,
-                    headSha: .head_sha,
-                    url: .html_url,
-                    createdAt: .created_at,
-                    updatedAt: .updated_at
-                  })
-                  end
-                )
-              }' >> "${rows_file}"
-          done < <(jq -c '.[]' <<<"${workflows_json}")
-
-          generated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-
-          jq -s \
-            --arg generated_at "${generated_at}" \
-            --arg main_sha "${GITHUB_SHA}" \
-            --arg source_sha "${source_sha}" \
-            --arg source_kind "${source_kind}" \
-            --arg pr_number "${pr_number}" \
-            '{
-              schemaVersion: 2,
-              generatedAt: $generated_at,
-              mainSha: $main_sha,
-              sourceSha: $source_sha,
-              source: {
-                kind: $source_kind,
-                prNumber: (if $pr_number == "" then null else ($pr_number | tonumber) end)
-              },
-              workflows: .
-            }' "${rows_file}" > _site/ci-results.json
-
-          jq -e '
-            .schemaVersion == 2
-            and (.workflows | type == "array")
-            and ([.workflows[].path] | index(".github/workflows/browser-accelerator-pages.yml") | not)
-          ' _site/ci-results.json >/dev/null
-
-      - name: Attach automatic CI matrix to dashboard
-        run: |
           python3 - <<'PY'
+          from datetime import datetime, timezone
           from pathlib import Path
+          import json
+          import os
+          import re
 
-          path = Path("_site/index.html")
-          html = path.read_text(encoding="utf-8")
-          script = '  <script src="./ci-matrix.js"></script>\n'
-          marker = "</body>"
+          version = Path("experiments/browser-accelerator/VERSION").read_text(encoding="utf-8").strip()
+          pattern = r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?"
+          if re.fullmatch(pattern, version) is None:
+              raise SystemExit(f"Invalid SemVer: {version}")
 
-          if script not in html:
-              if marker not in html:
-                  raise SystemExit("index.html has no </body> marker")
-              html = html.replace(marker, script + marker, 1)
-              path.write_text(html, encoding="utf-8")
+          main_sha = os.environ["GITHUB_SHA"]
+          if re.fullmatch(r"[0-9a-f]{40}", main_sha) is None:
+              raise SystemExit(f"Invalid main SHA: {main_sha}")
 
-          if "ci-matrix.js" not in path.read_text(encoding="utf-8"):
-              raise SystemExit("CI matrix script was not attached")
+          info = {
+              "schemaVersion": 1,
+              "version": version,
+              "mainSha": main_sha,
+              "builtAt": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+          }
+          Path("_site/build-info.json").write_text(json.dumps(info, indent=2) + "\n", encoding="utf-8")
+          print(json.dumps(info, indent=2))
           PY
-
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v4
-        with:
-          path: _site
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy
-        id: deployment
-        uses: actions/deploy-pages@v4
- <<<"${version}"; then
-            echo "Invalid SemVer in experiments/browser-accelerator/VERSION: ${version}" >&2
-            exit 1
-          fi
-          built_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          jq -n \
-            --arg version "${version}" \
-            --arg main_sha "${GITHUB_SHA}" \
-            --arg built_at "${built_at}" \
-            '{
-              schemaVersion: 1,
-              version: $version,
-              mainSha: $main_sha,
-              builtAt: $built_at
-            }' > _site/build-info.json
-          jq -e '.schemaVersion == 1 and (.version | type == "string") and (.mainSha | length == 40)' \
-            _site/build-info.json >/dev/null
       - name: Generate complete workflow matrix
         env:
           GH_TOKEN: ${{ github.token }}
