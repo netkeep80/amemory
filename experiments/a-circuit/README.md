@@ -132,3 +132,116 @@ C8+ 32/64/128/... bit multiplier
 
 Performance comparison starts only after the circuit is actually executed by
 A-memory rather than by the host.
+
+
+## S1/P1 — binary AND in two multi-argument encodings
+
+Status:
+
+```text
+SEQUENTIAL_AND = GREEN
+PARALLEL_AND   = GREEN
+```
+
+Sequential encoding is partial application:
+
+```text
+AND + a  -> AND_a
+AND_a + b -> value
+```
+
+The partial function `AND_a` is a real portable Link.
+
+Parallel encoding takes one complete ROOT-originating MTS ExactSequence:
+
+```text
+args = ExactSequence_R([a,b])
+AND + args -> value
+```
+
+Important negative witness retained from the earlier C1 probe:
+
+```text
+independent Scope members {a,b}
+!=
+multi-argument function invocation
+```
+
+## C2a — Half Adder as a multi-argument / multi-result function
+
+C2a deliberately tests the function boundary before testing actual gate composition.
+
+Truth table:
+
+```text
+a b | Sum Carry
+0 0 |  0    0
+0 1 |  1    0
+1 0 |  1    0
+1 1 |  0    1
+```
+
+The result is one canonical ROOT-originating ExactSequence:
+
+```text
+Half(a,b) -> ExactSequence_R([Sum,Carry])
+```
+
+not an unordered set and not an ordinary pair.
+
+Sequential form:
+
+```text
+HALF + a
+  -> HALF_a
+
+HALF_a + b
+  -> ExactSequence_R([Sum,Carry])
+```
+
+Parallel form:
+
+```text
+HALF + ExactSequence_R([a,b])
+  -> ExactSequence_R([Sum,Carry])
+```
+
+Required C2a evidence:
+
+- all four rows;
+- one fixed structural Theory per encoding;
+- reference CPU / optimized CPU portable differential;
+- exact first-stage partial function for sequential form;
+- exact ordered two-position result sequence;
+- `ExactSequence_R([Sum,Carry]) != PAIR(Sum,Carry)`;
+- host checks expected arithmetic truth table but does not evaluate the function transition.
+
+C2a is still not yet a composed circuit.
+
+## C2b — actual Half Adder circuit
+
+Next required stage:
+
+```text
+Sum   = XOR(a,b)
+Carry = AND(a,b)
+```
+
+XOR and AND must execute as distinct function/gate structures.
+
+The key research obligation is to produce the final:
+
+```text
+ExactSequence_R([Sum,Carry])
+```
+
+from those independently produced gate outputs **inside A-memory**.
+
+Forbidden:
+
+- host reading XOR/AND outputs and assembling the final sequence;
+- host evaluating either gate;
+- special HalfAdder opcode;
+- replacing the actual gate network with one direct truth-table lookup and calling it a circuit.
+
+C2b is the first real gate-composition test. Full Adder remains blocked until C2b is GREEN.
