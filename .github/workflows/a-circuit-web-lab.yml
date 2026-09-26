@@ -6,7 +6,7 @@ on:
       - "experiments/a-circuit/**"
       - "experiments/browser-accelerator/web/i386-lab.js"
       - "experiments/browser-accelerator/web/build-info.js"
-      - "experiments/browser-accelerator/VERSION"
+      - "VERSION"
       - "experiments/browser-accelerator/web/i386-blocks.json"
       - "experiments/browser-accelerator/web/index.html"
       - ".github/workflows/a-circuit-web-lab.yml"
@@ -17,7 +17,7 @@ on:
       - "experiments/a-circuit/**"
       - "experiments/browser-accelerator/web/i386-lab.js"
       - "experiments/browser-accelerator/web/build-info.js"
-      - "experiments/browser-accelerator/VERSION"
+      - "VERSION"
       - "experiments/browser-accelerator/web/i386-blocks.json"
       - "experiments/browser-accelerator/web/index.html"
       - ".github/workflows/a-circuit-web-lab.yml"
@@ -67,8 +67,8 @@ jobs:
             fs.readFileSync("experiments/browser-accelerator/web/i386-blocks.json", "utf8")
           );
           if (registry.schemaVersion !== 1) throw new Error("unexpected registry schema");
-          if (!Array.isArray(registry.blocks) || registry.blocks.length < 22) {
-            throw new Error("expected at least 22 registered blocks");
+          if (!Array.isArray(registry.blocks) || registry.blocks.length < 24) {
+            throw new Error("expected at least 24 registered blocks");
           }
           const ids = new Set();
           const opcodes = new Set();
@@ -135,13 +135,53 @@ jobs:
               }
             };
 
+            const runWide = (op, a, b, expectedLo, expectedHi, reactions, label) => {
+              if (w.amemory_i386_lab_run(op, a, b, 0) !== 1) {
+                throw new Error(label + " WASM execution rejected");
+              }
+              if ((w.amemory_i386_lab_value() >>> 0) !== (expectedLo >>> 0)) {
+                throw new Error(label + " WASM wrong low half");
+              }
+              if ((w.amemory_i386_lab_value_hi() >>> 0) !== (expectedHi >>> 0)) {
+                throw new Error(label + " WASM wrong high half");
+              }
+              if (w.amemory_i386_lab_reactions() !== reactions) {
+                throw new Error(label + " WASM wrong reaction count");
+              }
+              if (w.amemory_i386_lab_quiescent() !== 1) {
+                throw new Error(label + " WASM did not reach quiescence");
+              }
+              if (w.amemory_i386_lab_steady_link_delta() !== 0) {
+                throw new Error(label + " repeated run grew Links");
+              }
+            };
+
             run(13, 0x80000001, 33, 0, 0x00000002, "SHL32 count-mask");
             run(17, 0x00000001, 1, 0, 0x80000000, "ROR32");
             run(18, 0x00000000, 1, 1, 0x00000001, "RCL32 CF-in");
             run(20, 0x7fffffff, 0, 0, 0x80000000, "INC32");
             run(22, 0x00000001, 0, 0, 0xffffffff, "NEG32");
 
-            console.log("WASM registry + MUX1/shift/rotate/unary structural smoke PASS");
+            runWide(23, 0xffffffff, 2, 0xfffffffe, 1, 33 + 1038, "MUL32 raw Wide64");
+            if ((w.amemory_i386_lab_preserve_mask() >>> 0) !== 0x000008d5) {
+              throw new Error("MUL32 raw must preserve status flags");
+            }
+
+            runWide(24, 0xffffffff, 2, 0xfffffffe, 1, 97 + 1038, "x86 MUL32 effect");
+            if ((w.amemory_i386_lab_defined_mask() >>> 0) !== 0x00000801) {
+              throw new Error("x86 MUL32 wrong defined flag mask");
+            }
+            if ((w.amemory_i386_lab_value_mask() >>> 0) !== 0x00000801) {
+              throw new Error("x86 MUL32 must set CF and OF when high half is non-zero");
+            }
+            if ((w.amemory_i386_lab_undefined_mask() >>> 0) !== 0x000000d4) {
+              throw new Error("x86 MUL32 wrong undefined flag mask");
+            }
+            if ((w.amemory_i386_lab_preserve_mask() >>> 0) !== 0) {
+              throw new Error("x86 MUL32 must not preserve status flags");
+            }
+
+            console.log("WASM registry + MUX1/shift/rotate/unary/MUL structural smoke PASS");
           }).catch((error) => {
             console.error(error);
             process.exit(1);

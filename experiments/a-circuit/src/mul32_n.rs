@@ -319,6 +319,45 @@ fn run(
     (decode_wide(f,values[0]),steps)
 }
 
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct WebMul32Outcome {
+    pub(crate) lo: u32,
+    pub(crate) hi: u32,
+    pub(crate) reactions: u32,
+    pub(crate) links_after_build: u32,
+    pub(crate) links_after_first: u32,
+    pub(crate) steady_link_delta: u32,
+    pub(crate) quiescent: u8,
+}
+
+pub(crate) fn web_run_mul32(
+    a: u32,
+    b: u32,
+) -> WebMul32Outcome {
+    let mut f = FullFixture::new();
+    let p = Mul32Program::install(&mut f);
+    let links_after_build = f.store.link_count() as u32;
+
+    let (first, reactions) = run(&mut f, &p, a, b);
+    let links_after_first = f.store.link_count() as u32;
+    let (second, second_reactions) = run(&mut f, &p, a, b);
+    assert_eq!(second, first, "web MUL32 repeat changed result");
+    assert_eq!(second_reactions, reactions, "web MUL32 repeat changed reaction count");
+    let links_after_second = f.store.link_count() as u32;
+
+    WebMul32Outcome {
+        lo: first as u32,
+        hi: (first >> 32) as u32,
+        reactions: reactions as u32,
+        links_after_build,
+        links_after_first,
+        steady_link_delta: links_after_second - links_after_first,
+        quiescent: 1,
+    }
+}
+
+
 #[test]
 #[ignore="heavy structural MUL32 suite; mandatory dedicated workflow"]
 fn m4_mul32_shift_add_edges_and_reaction_formula(){

@@ -1502,6 +1502,155 @@
           }
         }
       ]
+    },
+    {
+      "id": "mul32-raw",
+      "opcode": 23,
+      "category": "Multiply",
+      "name": "MUL32 raw Wide64",
+      "formula": "Wide64 = A × B → ExactSequence_R([LoWord32, HiWord32])",
+      "inputs": [
+        {
+          "key": "A",
+          "slot": "a",
+          "type": "word32",
+          "default": "0xffffffff"
+        },
+        {
+          "key": "B",
+          "slot": "b",
+          "type": "word32",
+          "default": "0x00000002"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "LoWord32",
+          "slot": "value",
+          "type": "word32"
+        },
+        {
+          "key": "HiWord32",
+          "slot": "valueHi",
+          "type": "word32"
+        }
+      ],
+      "modes": [
+        "single",
+        "vectors"
+      ],
+      "vectors": [
+        {
+          "name": "zero",
+          "inputs": {
+            "A": "0xffffffff",
+            "B": "0x00000000"
+          },
+          "expect": {
+            "value": "0x00000000",
+            "valueHi": "0x00000000",
+            "writeback": 1,
+            "preserveMask": "0x000008d5"
+          }
+        },
+        {
+          "name": "high half",
+          "inputs": {
+            "A": "0xffffffff",
+            "B": "0x00000002"
+          },
+          "expect": {
+            "value": "0xfffffffe",
+            "valueHi": "0x00000001",
+            "writeback": 1,
+            "preserveMask": "0x000008d5"
+          }
+        },
+        {
+          "name": "bit 16 square",
+          "inputs": {
+            "A": "0x00010000",
+            "B": "0x00010000"
+          },
+          "expect": {
+            "value": "0x00000000",
+            "valueHi": "0x00000001",
+            "writeback": 1,
+            "preserveMask": "0x000008d5"
+          }
+        }
+      ]
+    },
+    {
+      "id": "mul32-effect",
+      "opcode": 24,
+      "category": "Multiply",
+      "name": "x86 MUL32 effect",
+      "formula": "EDX:EAX = A × B; CF=OF=(HiWord32 != 0)",
+      "inputs": [
+        {
+          "key": "A",
+          "slot": "a",
+          "type": "word32",
+          "default": "0xffffffff"
+        },
+        {
+          "key": "B",
+          "slot": "b",
+          "type": "word32",
+          "default": "0x00000002"
+        }
+      ],
+      "outputs": [
+        {
+          "key": "LoWord32",
+          "slot": "value",
+          "type": "word32"
+        },
+        {
+          "key": "HiWord32",
+          "slot": "valueHi",
+          "type": "word32"
+        }
+      ],
+      "modes": [
+        "single",
+        "vectors"
+      ],
+      "vectors": [
+        {
+          "name": "fits low word",
+          "inputs": {
+            "A": "0x0000ffff",
+            "B": "0x0000ffff"
+          },
+          "expect": {
+            "value": "0xfffe0001",
+            "valueHi": "0x00000000",
+            "writeback": 1,
+            "definedMask": "0x00000801",
+            "valueMask": "0x00000000",
+            "undefinedMask": "0x000000d4",
+            "preserveMask": "0x00000000"
+          }
+        },
+        {
+          "name": "high half sets CF OF",
+          "inputs": {
+            "A": "0xffffffff",
+            "B": "0x00000002"
+          },
+          "expect": {
+            "value": "0xfffffffe",
+            "valueHi": "0x00000001",
+            "writeback": 1,
+            "definedMask": "0x00000801",
+            "valueMask": "0x00000801",
+            "undefinedMask": "0x000000d4",
+            "preserveMask": "0x00000000"
+          }
+        }
+      ]
     }
   ]
 }

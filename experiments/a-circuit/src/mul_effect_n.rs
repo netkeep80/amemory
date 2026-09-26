@@ -427,6 +427,87 @@ fn expected(a: u32, b: u32) -> Outcome {
     }
 }
 
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct WebMulEffectOutcome {
+    pub(crate) lo: u32,
+    pub(crate) hi: u32,
+    pub(crate) defined_mask: u32,
+    pub(crate) value_mask: u32,
+    pub(crate) undefined_mask: u32,
+    pub(crate) preserve_mask: u32,
+    pub(crate) reactions: u32,
+    pub(crate) links_after_build: u32,
+    pub(crate) links_after_first: u32,
+    pub(crate) steady_link_delta: u32,
+    pub(crate) quiescent: u8,
+}
+
+const WEB_CF: u32 = 1 << 0;
+const WEB_PF: u32 = 1 << 2;
+const WEB_AF: u32 = 1 << 4;
+const WEB_ZF: u32 = 1 << 6;
+const WEB_SF: u32 = 1 << 7;
+const WEB_OF: u32 = 1 << 11;
+
+fn web_mul_effect_flag(
+    mask: u32,
+    state: FlagState,
+    defined: &mut u32,
+    values: &mut u32,
+    undefined: &mut u32,
+) {
+    match state {
+        FlagState::Set(bit) => {
+            *defined |= mask;
+            if bit != 0 {
+                *values |= mask;
+            }
+        }
+        FlagState::Undefined => *undefined |= mask,
+    }
+}
+
+pub(crate) fn web_run_mul_effect(
+    a: u32,
+    b: u32,
+) -> WebMulEffectOutcome {
+    let mut f = FullFixture::new();
+    let p = MulEffectProgram::install(&mut f);
+    let links_after_build = f.store.link_count() as u32;
+
+    let first = run(&mut f, &p, a, b);
+    let links_after_first = f.store.link_count() as u32;
+    let second = run(&mut f, &p, a, b);
+    assert_eq!(second, first, "web MUL effect repeat changed result");
+    let links_after_second = f.store.link_count() as u32;
+
+    let mut defined_mask = 0u32;
+    let mut value_mask = 0u32;
+    let mut undefined_mask = 0u32;
+    web_mul_effect_flag(WEB_CF, first.cf, &mut defined_mask, &mut value_mask, &mut undefined_mask);
+    web_mul_effect_flag(WEB_PF, first.pf, &mut defined_mask, &mut value_mask, &mut undefined_mask);
+    web_mul_effect_flag(WEB_AF, first.af, &mut defined_mask, &mut value_mask, &mut undefined_mask);
+    web_mul_effect_flag(WEB_ZF, first.zf, &mut defined_mask, &mut value_mask, &mut undefined_mask);
+    web_mul_effect_flag(WEB_SF, first.sf, &mut defined_mask, &mut value_mask, &mut undefined_mask);
+    web_mul_effect_flag(WEB_OF, first.of, &mut defined_mask, &mut value_mask, &mut undefined_mask);
+
+    WebMulEffectOutcome {
+        lo: first.product as u32,
+        hi: (first.product >> 32) as u32,
+        defined_mask,
+        value_mask,
+        undefined_mask,
+        preserve_mask: 0,
+        reactions: first.reactions as u32,
+        links_after_build,
+        links_after_first,
+        steady_link_delta: links_after_second - links_after_first,
+        quiescent: 1,
+    }
+}
+
+
 #[test]
 #[ignore = "heavy x86 MUL effect suite; dedicated workflow"]
 fn m4_mul_effect_high_half_drives_cf_of() {

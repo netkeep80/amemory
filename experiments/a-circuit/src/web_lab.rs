@@ -1,6 +1,8 @@
 use crate::{
     arithmetic_effect_n::web_run_arithmetic,
     logic_effect_n::web_run_logic,
+    mul32_n::web_run_mul32,
+    mul_effect_n::web_run_mul_effect,
     mux_n::{web_run_mux1, web_run_mux32},
     rotate32_n::web_run_rotate32,
     rotate_carry32_n::web_run_rotate_carry32,
@@ -19,6 +21,7 @@ const STATUS_FLAGS: u32 = FLAG_CF | FLAG_PF | FLAG_AF | FLAG_ZF | FLAG_SF | FLAG
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct LabOutcome {
     value: u32,
+    value_hi: u32,
     writeback: u32,
     defined_mask: u32,
     value_mask: u32,
@@ -35,6 +38,7 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
     if let Some(out) = web_run_logic(op, a, b) {
         return Some(LabOutcome {
             value: out.value,
+            value_hi: 0,
             writeback: u32::from(out.writeback),
             defined_mask: out.defined_mask,
             value_mask: out.value_mask,
@@ -51,6 +55,7 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
     if let Some(out) = web_run_arithmetic(op, a, b, input_flag) {
         return Some(LabOutcome {
             value: out.value,
+            value_hi: 0,
             writeback: u32::from(out.writeback),
             defined_mask: out.defined_mask,
             value_mask: out.value_mask,
@@ -68,6 +73,7 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
         let out = web_run_mux32(input_flag, a, b)?;
         return Some(LabOutcome {
             value: out.value,
+            value_hi: 0,
             writeback: 1,
             defined_mask: 0,
             value_mask: 0,
@@ -85,6 +91,7 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
         let out = web_run_mux1(input_flag, a, b)?;
         return Some(LabOutcome {
             value: u32::from(out.value),
+            value_hi: 0,
             writeback: 1,
             defined_mask: 0,
             value_mask: 0,
@@ -102,6 +109,7 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
     if let Some(out) = web_run_shift32(op, a, b) {
         return Some(LabOutcome {
             value: out.value,
+            value_hi: 0,
             writeback: u32::from(out.writeback),
             defined_mask: out.defined_mask,
             value_mask: out.value_mask,
@@ -118,6 +126,7 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
     if let Some(out) = web_run_rotate32(op, a, b) {
         return Some(LabOutcome {
             value: out.value,
+            value_hi: 0,
             writeback: u32::from(out.writeback),
             defined_mask: out.defined_mask,
             value_mask: out.value_mask,
@@ -134,6 +143,7 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
     if let Some(out) = web_run_rotate_carry32(op, a, b, input_flag) {
         return Some(LabOutcome {
             value: out.value,
+            value_hi: 0,
             writeback: u32::from(out.writeback),
             defined_mask: out.defined_mask,
             value_mask: out.value_mask,
@@ -150,7 +160,44 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
     if let Some(out) = web_run_unary32(op, a) {
         return Some(LabOutcome {
             value: out.value,
+            value_hi: 0,
             writeback: u32::from(out.writeback),
+            defined_mask: out.defined_mask,
+            value_mask: out.value_mask,
+            undefined_mask: out.undefined_mask,
+            preserve_mask: out.preserve_mask,
+            reactions: out.reactions,
+            links_after_build: out.links_after_build,
+            links_after_first: out.links_after_first,
+            steady_link_delta: out.steady_link_delta,
+            quiescent: u32::from(out.quiescent),
+        });
+    }
+
+    if op == 23 {
+        let out = web_run_mul32(a, b);
+        return Some(LabOutcome {
+            value: out.lo,
+            value_hi: out.hi,
+            writeback: 1,
+            defined_mask: 0,
+            value_mask: 0,
+            undefined_mask: 0,
+            preserve_mask: STATUS_FLAGS,
+            reactions: out.reactions,
+            links_after_build: out.links_after_build,
+            links_after_first: out.links_after_first,
+            steady_link_delta: out.steady_link_delta,
+            quiescent: u32::from(out.quiescent),
+        });
+    }
+
+    if op == 24 {
+        let out = web_run_mul_effect(a, b);
+        return Some(LabOutcome {
+            value: out.lo,
+            value_hi: out.hi,
+            writeback: 1,
             defined_mask: out.defined_mask,
             value_mask: out.value_mask,
             undefined_mask: out.undefined_mask,
@@ -167,6 +214,7 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
 }
 
 static mut LAST_VALUE: u32 = 0;
+static mut LAST_VALUE_HI: u32 = 0;
 static mut LAST_WRITEBACK: u32 = 0;
 static mut LAST_DEFINED_MASK: u32 = 0;
 static mut LAST_VALUE_MASK: u32 = 0;
@@ -185,7 +233,7 @@ pub extern "C" fn amemory_i386_lab_probe() -> u32 {
 
 #[no_mangle]
 pub extern "C" fn amemory_i386_lab_supports(op: u32) -> u32 {
-    u32::from((1..=22).contains(&op))
+    u32::from((1..=24).contains(&op))
 }
 
 #[no_mangle]
@@ -201,6 +249,7 @@ pub extern "C" fn amemory_i386_lab_run(
 
     unsafe {
         LAST_VALUE = out.value;
+        LAST_VALUE_HI = out.value_hi;
         LAST_WRITEBACK = out.writeback;
         LAST_DEFINED_MASK = out.defined_mask;
         LAST_VALUE_MASK = out.value_mask;
@@ -217,6 +266,8 @@ pub extern "C" fn amemory_i386_lab_run(
 
 #[no_mangle]
 pub extern "C" fn amemory_i386_lab_value() -> u32 { unsafe { LAST_VALUE } }
+#[no_mangle]
+pub extern "C" fn amemory_i386_lab_value_hi() -> u32 { unsafe { LAST_VALUE_HI } }
 #[no_mangle]
 pub extern "C" fn amemory_i386_lab_writeback() -> u32 { unsafe { LAST_WRITEBACK } }
 #[no_mangle]
@@ -302,6 +353,23 @@ mod tests {
         let neg = execute(22, 1, 0, 0).unwrap();
         assert_eq!(neg.value, u32::MAX);
         assert_eq!(neg.value_mask & FLAG_CF, FLAG_CF);
+
+        let raw_mul = execute(23, u32::MAX, 2, 0).unwrap();
+        assert_eq!(raw_mul.value, 0xffff_fffe);
+        assert_eq!(raw_mul.value_hi, 1);
+        assert_eq!(raw_mul.reactions, 33 + 1038);
+        assert_eq!(raw_mul.preserve_mask, STATUS_FLAGS);
+        assert_eq!(raw_mul.steady_link_delta, 0);
+
+        let mul = execute(24, u32::MAX, 2, 0).unwrap();
+        assert_eq!(mul.value, 0xffff_fffe);
+        assert_eq!(mul.value_hi, 1);
+        assert_eq!(mul.reactions, 97 + 1038);
+        assert_eq!(mul.defined_mask, FLAG_CF | FLAG_OF);
+        assert_eq!(mul.value_mask, FLAG_CF | FLAG_OF);
+        assert_eq!(mul.undefined_mask, FLAG_PF | FLAG_AF | FLAG_ZF | FLAG_SF);
+        assert_eq!(mul.preserve_mask, 0);
+        assert_eq!(mul.steady_link_delta, 0);
     }
 
     #[test]
@@ -311,7 +379,9 @@ mod tests {
         assert!(execute(12, 2, 0, 0).is_none());
         assert_eq!(amemory_i386_lab_supports(12), 1);
         assert_eq!(amemory_i386_lab_supports(22), 1);
-        assert_eq!(amemory_i386_lab_supports(23), 0);
+        assert_eq!(amemory_i386_lab_supports(23), 1);
+        assert_eq!(amemory_i386_lab_supports(24), 1);
+        assert_eq!(amemory_i386_lab_supports(25), 0);
         assert!(execute(13, 0, 256, 0).is_none());
         assert!(execute(18, 0, 1, 2).is_none());
     }
