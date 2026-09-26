@@ -1109,7 +1109,7 @@ pub(crate) fn web_prove_mux1(
     } else {
         return None;
     };
-    let oracle_value = if select == 0 { a as u8 } else { b as u8 };
+    let oracle_value = if select == 0 { a } else { b };
 
     let result_anum = memory.store.export_anum(final_link).ok()?;
     let result_sequence_anum =
