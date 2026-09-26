@@ -1,0 +1,51 @@
+name: A-Circuit M4 x86 MUL effect
+
+on:
+  pull_request:
+    paths:
+      - "experiments/a-circuit/src/mul_effect_n.rs"
+      - "experiments/a-circuit/src/mul32_n.rs"
+      - "experiments/a-circuit/src/wide64_n.rs"
+      - "experiments/a-circuit/src/flag_patch.rs"
+      - "experiments/a-circuit/src/logic_n.rs"
+      - "experiments/a-circuit/src/arithmetic_n.rs"
+      - "experiments/a-circuit/src/full_adder.rs"
+      - "experiments/a-circuit/src/lib.rs"
+      - ".github/workflows/a-circuit-m4-mul-effect.yml"
+  push:
+    branches: [main]
+    paths:
+      - "experiments/a-circuit/src/mul_effect_n.rs"
+      - "experiments/a-circuit/src/mul32_n.rs"
+      - "experiments/a-circuit/src/wide64_n.rs"
+      - "experiments/a-circuit/src/flag_patch.rs"
+      - "experiments/a-circuit/src/logic_n.rs"
+      - "experiments/a-circuit/src/arithmetic_n.rs"
+      - "experiments/a-circuit/src/full_adder.rs"
+      - "experiments/a-circuit/src/lib.rs"
+      - ".github/workflows/a-circuit-m4-mul-effect.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mul-effect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal
+      - name: Structural x86 MUL effect suite
+        run: |
+          cargo +1.98.1 test \
+            --release \
+            --manifest-path experiments/a-circuit/Cargo.toml \
+            m4_mul_effect_ \
+            -- --ignored --nocapture --test-threads=1
+      - name: MUL effect architecture policy
+        run: |
+          echo "Raw Product64 is reused; product is not recomputed."
+          echo "CF and OF share structural high-half-nonzero."
+          echo "PF AF ZF SF are explicit UNDEFINED actions."

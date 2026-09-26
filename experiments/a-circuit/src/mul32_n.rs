@@ -78,15 +78,15 @@ fn zero_wide(f:&mut FullFixture)->Handle{
 }
 
 #[derive(Clone,Debug)]
-struct Mul32Program{
-    mul32:Handle,
-    result_tag:Handle,
+pub(crate) struct Mul32Program{
+    pub(crate) mul32:Handle,
+    pub(crate) result_tag:Handle,
     add64:Wide64Program,
-    links_after_build:usize,
+    pub(crate) links_after_build:usize,
 }
 
 impl Mul32Program{
-    fn install(f:&mut FullFixture)->Self{
+    pub(crate) fn install(f:&mut FullFixture)->Self{
         let add64=Wide64Program::install(f);
         let seed=f.store.ensure_pair(add64.add64,add64.result_tag).unwrap();
         let mut a=AnchorGen::new(&mut f.store,seed,f.o,f.c);
