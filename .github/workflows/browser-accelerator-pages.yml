@@ -60,6 +60,7 @@ jobs:
           from pathlib import Path
           import json
           import os
+          import re
 
           version = Path("VERSION").read_text(encoding="utf-8").strip()
           if not version:
