@@ -246,57 +246,50 @@ fn unify_node(
     visited: &mut HashSet<(Handle, Handle)>,
     profile: &mut Option<&mut StructuralRunProfile>,
 ) -> Result<(), StructuralError> {
-    if let Some(profile) = profile.as_deref_mut() {
-        profile.unification_nodes_visited += 1;
-    }
-    if roles.contains(&template) {
-        if let Some(previous) = inferred.get(&template) {
-            if *previous != claimed {
-                return Err(StructuralError::TemplateMismatch);
-            }
-        } else {
-            inferred.insert(template, claimed);
+    // Use an explicit work stack rather than Rust recursion. Structural Anums
+    // can be deeply nested, and native stacks are much larger than the WASM
+    // call stack used by Pages. The algorithm is still the same direct
+    // structural comparison: role nodes bind, all other nodes compare their
+    // incidence shape and enqueue start/end pairs.
+    let mut pending = vec![(template, claimed)];
+
+    while let Some((template, claimed)) = pending.pop() {
+        if let Some(profile) = profile.as_deref_mut() {
+            profile.unification_nodes_visited += 1;
         }
-        return Ok(());
+
+        if roles.contains(&template) {
+            if let Some(previous) = inferred.get(&template) {
+                if *previous != claimed {
+                    return Err(StructuralError::TemplateMismatch);
+                }
+            } else {
+                inferred.insert(template, claimed);
+            }
+            continue;
+        }
+
+        if !visited.insert((template, claimed)) {
+            continue;
+        }
+
+        let (template_start, template_end) = store.poles(template)?;
+        let (claimed_start, claimed_end) = store.poles(claimed)?;
+
+        if (template_start == template) != (claimed_start == claimed)
+            || (template_end == template) != (claimed_end == claimed)
+        {
+            return Err(StructuralError::TemplateMismatch);
+        }
+
+        // LIFO: push END first so START retains the previous recursive
+        // traversal order. Ordering is not semantic, but keeping it stable
+        // makes profiling and debugging easier to compare.
+        pending.push((template_end, claimed_end));
+        pending.push((template_start, claimed_start));
     }
 
-    // Directly compare structural topology. The previous implementation first
-    // traversed the entire template subtree with contains_role() merely to
-    // decide whether recursive unification was necessary. On wide generic
-    // rules that pre-scan dominated runtime and was repeated for every rejected
-    // candidate. Role placeholders are already handled above; all remaining
-    // nodes can be compared structurally in one pass.
-    if !visited.insert((template, claimed)) {
-        return Ok(());
-    }
-
-    let (template_start, template_end) = store.poles(template)?;
-    let (claimed_start, claimed_end) = store.poles(claimed)?;
-
-    if (template_start == template) != (claimed_start == claimed)
-        || (template_end == template) != (claimed_end == claimed)
-    {
-        return Err(StructuralError::TemplateMismatch);
-    }
-
-    unify_node(
-        store,
-        template_start,
-        claimed_start,
-        roles,
-        inferred,
-        visited,
-        profile,
-    )?;
-    unify_node(
-        store,
-        template_end,
-        claimed_end,
-        roles,
-        inferred,
-        visited,
-        profile,
-    )
+    Ok(())
 }
 
 fn unify_structural_rule_template_internal(
