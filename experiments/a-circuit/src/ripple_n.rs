@@ -484,16 +484,16 @@ fn m3_scale_8_16_32_same_architecture() {
 #[test]
 fn m3_scale_word_order_is_semantic_at_32_bits() {
     let mut f = FullFixture::new();
-    let bits = bit_handles(&f, 32, 0x8000_0001);
+    let bits = bit_handles(&f, 32, 0x8000_0003);
     let word =
         materialize_exact_sequence(&mut f.store, &bits).unwrap();
-    assert_eq!(decode_word(&f, 32, word), 0x8000_0001);
+    assert_eq!(decode_word(&f, 32, word), 0x8000_0003);
 
     let reversed = bits.iter().copied().rev().collect::<Vec<_>>();
     let reversed_word =
         materialize_exact_sequence(&mut f.store, &reversed).unwrap();
     assert_ne!(word, reversed_word);
-    assert_eq!(decode_word(&f, 32, reversed_word), 0x8000_0001);
+    assert_eq!(decode_word(&f, 32, reversed_word), 0xc000_0001);
 
     // Use a non-palindromic pattern to prove positional direction too.
     let bits = bit_handles(&f, 32, 0x0000_0003);
