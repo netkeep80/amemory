@@ -135,40 +135,47 @@ pub(crate) fn export_portable_aset(store: &OptimizedLinkStore) -> Vec<String> {
             continue;
         }
         let source = store.export_anum(handle).expect("proof root export");
-        reconstructed.import_anum(&source).expect("proof root import");
-        sources.push(source);
-    }
-
-    for handle in 1..=count {
-        let source = store.export_anum(handle).expect("proof completion export");
-        let before = reconstructed.link_count();
         let imported = reconstructed
             .import_anum(&source)
-            .expect("proof completion import");
+            .expect("proof root import");
         assert_eq!(
             reconstructed
                 .export_anum(imported)
-                .expect("proof completion round-trip"),
+                .expect("proof root round-trip"),
             source,
         );
-        if reconstructed.link_count() > before {
-            sources.push(source);
+        sources.push(source);
+    }
+
+    if reconstructed.link_count() < count as usize {
+        for handle in 1..=count {
+            if reconstructed.link_count() == count as usize {
+                break;
+            }
+
+            let source =
+                store.export_anum(handle).expect("proof completion export");
+            let before = reconstructed.link_count();
+            let imported = reconstructed
+                .import_anum(&source)
+                .expect("proof completion import");
+            assert_eq!(
+                reconstructed
+                    .export_anum(imported)
+                    .expect("proof completion round-trip"),
+                source,
+            );
+            if reconstructed.link_count() > before {
+                sources.push(source);
+            }
         }
     }
 
-    for handle in 1..=count {
-        let source = store.export_anum(handle).expect("proof coverage export");
-        let before = reconstructed.link_count();
-        let imported = reconstructed
-            .import_anum(&source)
-            .expect("proof coverage import");
-        assert_eq!(
-            reconstructed.link_count(),
-            before,
-            "portable Aset omitted topology"
-        );
-        assert_eq!(reconstructed.export_anum(imported).unwrap(), source);
-    }
+    assert_eq!(
+        reconstructed.link_count(),
+        count as usize,
+        "portable Aset omitted topology"
+    );
 
     sources
 }
