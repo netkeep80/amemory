@@ -56,7 +56,7 @@
   "packs": {
     "repo-guard-workflow": {
       "path": ".github/workflows/repo-guard.yml",
-      "sha": "37a8d4dd65ac86f683c063dd1e0a6ddb685b2da6"
+      "sha": "92432809fcddc290080beb51ba151e13a5761869"
     }
   },
   "content_rules": [],
