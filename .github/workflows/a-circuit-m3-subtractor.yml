@@ -1,0 +1,38 @@
+name: A-Circuit M3 SUB1 shared-adder witness
+
+on:
+  pull_request:
+    paths:
+      - "experiments/a-circuit/**"
+      - ".github/workflows/a-circuit-m3-subtractor.yml"
+  push:
+    branches: [main]
+    paths:
+      - "experiments/a-circuit/**"
+      - ".github/workflows/a-circuit-m3-subtractor.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sub1:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal
+
+      - name: Exhaustive structural SUB1 witness
+        run: |
+          cargo +1.98.1 test \
+            --release \
+            --manifest-path experiments/a-circuit/Cargo.toml \
+            m3_sub1_ \
+            -- --nocapture --test-threads=1
+
+      - name: Architecture guard
+        run: |
+          echo "SUB1 reuses Full Adder: A + NOT(B) + NOT(Bin)."
+          echo "BorrowOut = NOT(CarryOut); no new MTS semantic law."
