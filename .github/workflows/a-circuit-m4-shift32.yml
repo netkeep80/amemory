@@ -1,0 +1,39 @@
+name: A-Circuit M4 variable 32-bit shifts
+
+on:
+  pull_request:
+    paths:
+      - "experiments/a-circuit/**"
+      - ".github/workflows/a-circuit-m4-shift32.yml"
+  push:
+    branches: [main]
+    paths:
+      - "experiments/a-circuit/**"
+      - ".github/workflows/a-circuit-m4-shift32.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  shift32:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal
+
+      - name: Structural variable-shift suite
+        run: |
+          cargo +1.98.1 test \
+            --release \
+            --manifest-path experiments/a-circuit/Cargo.toml \
+            m4_shift32_ \
+            -- --ignored --nocapture --test-threads=1
+
+      - name: 80386 variable-shift policy
+        run: |
+          echo "Count8 masking is structural: only c0..c4 constrain the generated rule."
+          echo "count5=0 preserves flags; nonzero AF is undefined."
+          echo "OF is defined only for count5=1 and undefined for count5>1."

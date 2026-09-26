@@ -298,7 +298,8 @@ SUB1                                  GREEN (#80/#81)
 -> M4 Word logic                           GREEN (#89/#90)
 -> M4 logical flag/writeback effects       GREEN (#91/#92)
 -> M4 arithmetic effect + CMP               GREEN (#93/#94)
--> M4 one-bit SHL/SHR/SAR wiring             CURRENT (#95)
+-> M4 one-bit SHL/SHR/SAR wiring             GREEN (#95/#96)
+-> M4 variable SHL/SHR/SAR count&31 effects   CURRENT (#97)
 ```
 
 
@@ -537,3 +538,53 @@ function Link as `SHL1`.
 
 Variable count masking and x86 flag effects are deliberately deferred until this
 wiring witness is GREEN.
+
+
+## M4 — variable 32-bit shifts
+
+Issue: #97
+
+The 80386 32-bit variable shifter consumes an explicit structural Count8:
+
+```text
+SHIFT32 + ExactSequence_R([Word32, Count8])
+```
+
+Only the low five count positions are constrained by each generated Structural
+Rule. The upper three Count8 positions remain ordinary roles. Therefore counts
+that differ only by 32/64/96... select the same runtime rule without host masking.
+
+The raw 32-bit shift itself remains role rearrangement. For every masked count
+0..31, the Theory contains one generic rule per SHL/SHR/SAR wiring form. Those
+rules are generic over all Word32 values; they are not per-value truth tables.
+
+The final result uses the common ALU effect ABI:
+
+```text
+ALU_EFFECT_RESULT(
+  ExactSequence_R([WriteBack=1, Word, FlagPatch])
+)
+```
+
+Flag behavior follows the 80386 profile:
+
+```text
+count5=0:
+  empty FlagPatch -> preserve all flags
+
+count5!=0:
+  CF = last shifted-out bit
+  PF/ZF/SF from result
+  AF = UNDEFINED
+
+count5=1:
+  SHL OF = MSB(result) XOR CF
+  SHR OF = original MSB
+  SAR OF = 0
+
+count5>1:
+  OF = UNDEFINED
+```
+
+This issue intentionally targets r/m32. Byte/word count>=operand-width semantics
+remain outside this witness.
