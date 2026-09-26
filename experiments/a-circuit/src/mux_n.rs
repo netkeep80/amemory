@@ -775,6 +775,7 @@ pub(crate) struct WebProofResultStage {
     pub(crate) oracle_value: u8,
     pub(crate) oracle_matches: bool,
     pub(crate) links_final: u32,
+    pub(crate) identical_rerun_link_delta: u32,
     pub(crate) visual_links: Vec<WebProofVisualLink>,
 }
 
@@ -1019,6 +1020,29 @@ pub(crate) fn web_prove_mux1(
     let oracle_value = if select == 0 { a as u8 } else { b as u8 };
     let result_anum = memory.store.export_anum(final_link).ok()?;
     let result_sequence_anum = memory.store.export_anum(payload).ok()?;
+
+    // Re-run the exact same invocation in the same runtime A-memory. This is
+    // not a second authority: it is an idempotence witness over the same store.
+    let links_before_rerun = memory.store.link_count();
+    engine.set_current(&memory.store, &[initial]).ok()?;
+    for _ in 0..64u32 {
+        let repeat = engine.run(&mut memory.store).ok()?;
+        if repeat.quiescent {
+            break;
+        }
+    }
+    if !engine.quiescent() {
+        return None;
+    }
+    if engine.current().len() != 1 {
+        return None;
+    }
+    let repeat_result = memory.store.export_anum(engine.current()[0]).ok()?;
+    if repeat_result != result_anum {
+        return None;
+    }
+    let identical_rerun_link_delta =
+        (memory.store.link_count() - links_before_rerun) as u32;
     let visual_links = visual_snapshot(&memory, &loaded_roots);
 
     let execute = WebProofExecuteStage {
@@ -1035,6 +1059,7 @@ pub(crate) fn web_prove_mux1(
         oracle_value,
         oracle_matches: decoded_value == oracle_value,
         links_final: memory.store.link_count() as u32,
+        identical_rerun_link_delta,
         visual_links,
     };
 
@@ -1061,6 +1086,7 @@ fn web_mux1_proof_uses_one_runtime_memory_for_all_eight_cases() {
                 assert_eq!(proof.execute.active_reaction_count, 7);
                 assert!(proof.execute.final_quiescent);
                 assert!(proof.result.oracle_matches);
+                assert_eq!(proof.result.identical_rerun_link_delta, 0);
 
                 let id = &proof.load.memory_instance_id;
                 assert_eq!(&proof.execute.memory_instance_id, id);
