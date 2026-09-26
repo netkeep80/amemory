@@ -55,6 +55,9 @@ jobs:
           npm --prefix /tmp/mts_visual run build --silent
           test -s /tmp/mts_visual/dist/src/index.js
           test -s /tmp/mts_visual/dist/src/blueprint-svg.js
+          test "$(node -p "require('/tmp/mts_visual/node_modules/three/package.json').version")" = "0.185.1"
+          test -s /tmp/mts_visual/node_modules/three/build/three.module.js
+          test -s /tmp/mts_visual/node_modules/three/examples/jsm/controls/OrbitControls.js
 
       - name: Assemble static Pages artifact
         run: |
@@ -68,6 +71,9 @@ jobs:
           cp experiments/browser-accelerator/mts-visual.lock.json _site/mts-visual-lock.json
           mkdir -p _site/vendor/mts-visual
           cp -R /tmp/mts_visual/dist/src/. _site/vendor/mts-visual/
+          mkdir -p _site/vendor/three/addons
+          cp /tmp/mts_visual/node_modules/three/build/three.module.js _site/vendor/three/three.module.js
+          cp -R /tmp/mts_visual/node_modules/three/examples/jsm/. _site/vendor/three/addons/
           touch _site/.nojekyll
 
       - name: Generate browser lab build identity
@@ -229,6 +235,12 @@ jobs:
           test -s _site/mts-visual-lock.json
           test -s _site/vendor/mts-visual/index.js
           test -s _site/vendor/mts-visual/blueprint-svg.js
+          test -s _site/vendor/mts-visual/three/index.js
+          test -s _site/vendor/three/three.module.js
+          test -s _site/vendor/three/addons/controls/OrbitControls.js
+          grep -F '<script type="importmap">' _site/index.html
+          grep -F '"three": "./vendor/three/three.module.js"' _site/index.html
+          grep -F '"three/addons/": "./vendor/three/addons/"' _site/index.html
           grep -F '<script type="module" src="./i386-lab.js"></script>' _site/index.html
 
           cp _site/i386-lab.js /tmp/i386-lab.mjs
@@ -301,6 +313,10 @@ jobs:
           proof_source = proof_source.replace(
               'import("./vendor/mts-visual/index.js")',
               f'import("./vendor/mts-visual/index.js?v={visual_commit}")',
+          )
+          proof_source = proof_source.replace(
+              'import("./vendor/mts-visual/three/index.js")',
+              f'import("./vendor/mts-visual/three/index.js?v={visual_commit}")',
           )
           proof.write_text(proof_source, encoding="utf-8")
           PY
