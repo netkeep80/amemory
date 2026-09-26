@@ -24,6 +24,8 @@ mod arithmetic_effect_n;
 mod shift1_n;
 #[cfg(test)]
 mod shift32_n;
+#[cfg(test)]
+mod rotate32_n;
 
 use amemory_optimized_cpu_probe::{OptimizedLinkStore, OptimizedReactionEngine};
 use std::collections::BTreeSet;
