@@ -2,6 +2,10 @@ use crate::{
     arithmetic_effect_n::web_run_arithmetic,
     logic_effect_n::web_run_logic,
     mux_n::{web_run_mux1, web_run_mux32},
+    rotate32_n::web_run_rotate32,
+    rotate_carry32_n::web_run_rotate_carry32,
+    shift32_n::web_run_shift32,
+    unary_arith_n::web_run_unary32,
 };
 
 const FLAG_CF: u32 = 1 << 0;
@@ -94,6 +98,71 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
         });
     }
 
+
+    if let Some(out) = web_run_shift32(op, a, b) {
+        return Some(LabOutcome {
+            value: out.value,
+            writeback: u32::from(out.writeback),
+            defined_mask: out.defined_mask,
+            value_mask: out.value_mask,
+            undefined_mask: out.undefined_mask,
+            preserve_mask: out.preserve_mask,
+            reactions: out.reactions,
+            links_after_build: out.links_after_build,
+            links_after_first: out.links_after_first,
+            steady_link_delta: out.steady_link_delta,
+            quiescent: u32::from(out.quiescent),
+        });
+    }
+
+    if let Some(out) = web_run_rotate32(op, a, b) {
+        return Some(LabOutcome {
+            value: out.value,
+            writeback: u32::from(out.writeback),
+            defined_mask: out.defined_mask,
+            value_mask: out.value_mask,
+            undefined_mask: out.undefined_mask,
+            preserve_mask: out.preserve_mask,
+            reactions: out.reactions,
+            links_after_build: out.links_after_build,
+            links_after_first: out.links_after_first,
+            steady_link_delta: out.steady_link_delta,
+            quiescent: u32::from(out.quiescent),
+        });
+    }
+
+    if let Some(out) = web_run_rotate_carry32(op, a, b, input_flag) {
+        return Some(LabOutcome {
+            value: out.value,
+            writeback: u32::from(out.writeback),
+            defined_mask: out.defined_mask,
+            value_mask: out.value_mask,
+            undefined_mask: out.undefined_mask,
+            preserve_mask: out.preserve_mask,
+            reactions: out.reactions,
+            links_after_build: out.links_after_build,
+            links_after_first: out.links_after_first,
+            steady_link_delta: out.steady_link_delta,
+            quiescent: u32::from(out.quiescent),
+        });
+    }
+
+    if let Some(out) = web_run_unary32(op, a) {
+        return Some(LabOutcome {
+            value: out.value,
+            writeback: u32::from(out.writeback),
+            defined_mask: out.defined_mask,
+            value_mask: out.value_mask,
+            undefined_mask: out.undefined_mask,
+            preserve_mask: out.preserve_mask,
+            reactions: out.reactions,
+            links_after_build: out.links_after_build,
+            links_after_first: out.links_after_first,
+            steady_link_delta: out.steady_link_delta,
+            quiescent: u32::from(out.quiescent),
+        });
+    }
+
     None
 }
 
@@ -116,7 +185,7 @@ pub extern "C" fn amemory_i386_lab_probe() -> u32 {
 
 #[no_mangle]
 pub extern "C" fn amemory_i386_lab_supports(op: u32) -> u32 {
-    u32::from((1..=12).contains(&op))
+    u32::from((1..=22).contains(&op))
 }
 
 #[no_mangle]
@@ -174,6 +243,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "heavy web-lab structural integration; mandatory dedicated release workflow"]
     fn web_lab_executes_real_logic_arithmetic_and_mux_blocks() {
         let and = execute(1, 0xf0f0_1234, 0x0ff0_ffff, 0).unwrap();
         assert_eq!(and.value, 0x00f0_1234);
@@ -207,6 +277,31 @@ mod tests {
                 }
             }
         }
+
+        let shl = execute(13, 0x8000_0001, 1, 0).unwrap();
+        assert_eq!(shl.value, 2);
+        assert_eq!(shl.value_mask & FLAG_CF, FLAG_CF);
+        assert_eq!(shl.steady_link_delta, 0);
+
+        let shl_alias = execute(13, 0x8000_0001, 33, 0).unwrap();
+        assert_eq!(shl_alias.value, shl.value);
+        assert_eq!(shl_alias.value_mask, shl.value_mask);
+
+        let ror = execute(17, 1, 1, 0).unwrap();
+        assert_eq!(ror.value, 0x8000_0000);
+        assert_eq!(ror.steady_link_delta, 0);
+
+        let rcl = execute(18, 0x8000_0000, 1, 0).unwrap();
+        assert_eq!(rcl.quiescent, 1);
+        assert_eq!(rcl.steady_link_delta, 0);
+
+        let inc = execute(20, 0x7fff_ffff, 0, 0).unwrap();
+        assert_eq!(inc.value, 0x8000_0000);
+        assert_eq!(inc.preserve_mask & FLAG_CF, FLAG_CF);
+
+        let neg = execute(22, 1, 0, 0).unwrap();
+        assert_eq!(neg.value, u32::MAX);
+        assert_eq!(neg.value_mask & FLAG_CF, FLAG_CF);
     }
 
     #[test]
@@ -215,6 +310,9 @@ mod tests {
         assert!(execute(11, 0, 0, 2).is_none());
         assert!(execute(12, 2, 0, 0).is_none());
         assert_eq!(amemory_i386_lab_supports(12), 1);
-        assert_eq!(amemory_i386_lab_supports(13), 0);
+        assert_eq!(amemory_i386_lab_supports(22), 1);
+        assert_eq!(amemory_i386_lab_supports(23), 0);
+        assert!(execute(13, 0, 256, 0).is_none());
+        assert!(execute(18, 0, 1, 2).is_none());
     }
 }

@@ -27,6 +27,13 @@ function parseTyped(type, value) {
     if (n !== 0 && n !== 1) throw new Error(\`bit must be 0 or 1: \${value}\`);
     return n;
   }
+  if (type === "count8") {
+    const n = Number(value);
+    if (!Number.isInteger(n) || n < 0 || n > 255) {
+      throw new Error(\`count8 must be 0..255: \${value}\`);
+    }
+    return n;
+  }
   throw new Error(\`unsupported input type: \${type}\`);
 }
 
