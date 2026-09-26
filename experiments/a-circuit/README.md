@@ -244,4 +244,56 @@ Forbidden:
 - special HalfAdder opcode;
 - replacing the actual gate network with one direct truth-table lookup and calling it a circuit.
 
-C2b is the first real gate-composition test. Full Adder remains blocked until C2b is GREEN.
+C2b is the first real gate-composition test. This gate is now GREEN; the later M2/M3 checkpoint below records the accepted continuation.
+
+
+## M2/M3 — machine-directed arithmetic checkpoint
+
+The benchmark route is now aligned with the 80386 construction roadmap in #70.
+
+Current GREEN stages:
+
+```text
+C2b gate-composed Half Adder
+C3 hierarchical Full Adder = 2 x Half Adder + OR
+C3 flattened Full Adder = XOR/AND/XOR/AND/OR
+M3 RippleAdder(N), N=4/8/16/32
+```
+
+The word carrier is:
+
+```text
+WordN = ExactSequence_R([b0,b1,...,bN-1])
+```
+
+with LSB-first logical bit position. This is not x86 byte endianness.
+
+The generated ripple architecture uses no new semantic law as width grows and
+executes 32-bit addition inside A-memory.
+
+### M3 subtraction proving stage
+
+Issue: #80
+
+Before scaling subtraction to 4/8/16/32 bits, prove one structural subtract/borrow
+cell by reusing the existing Full Adder:
+
+```text
+A - B - Bin = A + NOT(B) + NOT(Bin)
+BorrowOut   = NOT(CarryOut)
+```
+
+This is intentionally a shared-adder construction rather than an unrelated SUB
+truth-table opcode. It is the basis for a later unified ADD/SUB datapath and for
+x86 SUB/SBB carry-flag semantics where CF represents unsigned borrow.
+
+Required order:
+
+```text
+SUB1
+-> SUB_N 4/8/16/32
+-> shared ADD/SUB datapath
+-> CF/ZF/SF/OF/PF/AF
+-> M3 complete
+-> M4 32-bit ALU
+```
