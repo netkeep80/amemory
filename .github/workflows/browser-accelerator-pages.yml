@@ -3,13 +3,13 @@ name: browser accelerator Pages
 on:
   push:
     branches: [main]
-    paths:
-      - "experiments/browser-accelerator/**"
-      - ".github/workflows/browser-accelerator-pages.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
+  actions: read
+  checks: read
+  pull-requests: read
   pages: write
   id-token: write
 
@@ -43,6 +43,89 @@ jobs:
           cp experiments/browser-accelerator/rust/target/wasm32-unknown-unknown/release/amemory_browser_probe.wasm \
             _site/amemory_browser_probe.wasm
           touch _site/.nojekyll
+
+      - name: Generate exact-head CI manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          pulls_json="$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls?per_page=20")"
+
+          pr_number="$(jq -r \
+            'map(select(.merged_at != null)) | sort_by(.merged_at) | last | .number // empty' \
+            <<<"${pulls_json}")"
+          source_sha="$(jq -r \
+            'map(select(.merged_at != null)) | sort_by(.merged_at) | last | .head.sha // empty' \
+            <<<"${pulls_json}")"
+
+          if [[ -n "${source_sha}" ]]; then
+            source_kind="merged_pr_head"
+          else
+            source_kind="main"
+            source_sha="${GITHUB_SHA}"
+          fi
+
+          generated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          gh api --paginate \
+            -H "Accept: application/vnd.github+json" \
+            "repos/${GITHUB_REPOSITORY}/commits/${source_sha}/check-runs?per_page=100" \
+          | jq -s \
+              --arg generated_at "${generated_at}" \
+              --arg main_sha "${GITHUB_SHA}" \
+              --arg source_sha "${source_sha}" \
+              --arg source_kind "${source_kind}" \
+              --arg pr_number "${pr_number}" \
+              '{
+                schemaVersion: 1,
+                generatedAt: $generated_at,
+                mainSha: $main_sha,
+                sourceSha: $source_sha,
+                source: {
+                  kind: $source_kind,
+                  prNumber: (if $pr_number == "" then null else ($pr_number | tonumber) end)
+                },
+                checks: (
+                  [ .[] | .check_runs[] ]
+                  | unique_by(.id)
+                  | sort_by(.name)
+                  | map({
+                      id,
+                      name,
+                      status,
+                      conclusion,
+                      app: (.app.name // "unknown"),
+                      detailsUrl: .details_url,
+                      startedAt: .started_at,
+                      completedAt: .completed_at
+                    })
+                )
+              }' > _site/ci-results.json
+
+          jq -e '.schemaVersion == 1 and (.checks | type == "array")' _site/ci-results.json >/dev/null
+
+      - name: Attach automatic CI matrix to dashboard
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("_site/index.html")
+          html = path.read_text(encoding="utf-8")
+          script = '  <script src="./ci-matrix.js"></script>\n'
+          marker = "</body>"
+
+          if script not in html:
+              if marker not in html:
+                  raise SystemExit("index.html has no </body> marker")
+              html = html.replace(marker, script + marker, 1)
+              path.write_text(html, encoding="utf-8")
+
+          if "ci-matrix.js" not in path.read_text(encoding="utf-8"):
+              raise SystemExit("CI matrix script was not attached")
+          PY
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
