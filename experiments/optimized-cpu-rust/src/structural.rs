@@ -1,5 +1,5 @@
 use crate::{Handle, OptimizedLinkStore, StoreError, ROOT_HANDLE};
-use std::collections::{HashMap, HashSet};
+use std::{collections::{HashMap, HashSet}, time::Instant};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StructuralError {
@@ -44,6 +44,53 @@ pub struct StructuralReactionResult {
     pub transitioned_members: u32,
     pub quiescent: bool,
     pub handoff_count: u32,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StructuralRunProfile {
+    pub trigger_incidence_candidates: u64,
+    pub candidates_rejected_before_unification: u64,
+    pub role_dictionary_decodes: u64,
+    pub decoded_roles: u64,
+    pub unification_attempts: u64,
+    pub unification_successes: u64,
+    pub contains_role_nodes_visited: u64,
+    pub unification_nodes_visited: u64,
+    pub instantiation_nodes_visited: u64,
+    pub instantiation_constructor_attempts: u64,
+    pub instantiation_canonical_hits: u64,
+    pub instantiation_new_links: u64,
+    pub publication_outputs: u64,
+    pub discovery_ns: u128,
+    pub role_decode_ns: u128,
+    pub unification_ns: u128,
+    pub instantiation_ns: u128,
+    pub publication_ns: u128,
+    pub total_ns: u128,
+}
+
+impl StructuralRunProfile {
+    pub fn accumulate(&mut self, other: &Self) {
+        self.trigger_incidence_candidates += other.trigger_incidence_candidates;
+        self.candidates_rejected_before_unification += other.candidates_rejected_before_unification;
+        self.role_dictionary_decodes += other.role_dictionary_decodes;
+        self.decoded_roles += other.decoded_roles;
+        self.unification_attempts += other.unification_attempts;
+        self.unification_successes += other.unification_successes;
+        self.contains_role_nodes_visited += other.contains_role_nodes_visited;
+        self.unification_nodes_visited += other.unification_nodes_visited;
+        self.instantiation_nodes_visited += other.instantiation_nodes_visited;
+        self.instantiation_constructor_attempts += other.instantiation_constructor_attempts;
+        self.instantiation_canonical_hits += other.instantiation_canonical_hits;
+        self.instantiation_new_links += other.instantiation_new_links;
+        self.publication_outputs += other.publication_outputs;
+        self.discovery_ns += other.discovery_ns;
+        self.role_decode_ns += other.role_decode_ns;
+        self.unification_ns += other.unification_ns;
+        self.instantiation_ns += other.instantiation_ns;
+        self.publication_ns += other.publication_ns;
+        self.total_ns += other.total_ns;
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -196,7 +243,11 @@ fn contains_role(
     roles: &HashSet<Handle>,
     memo: &mut HashMap<Handle, bool>,
     active: &mut HashSet<Handle>,
+    profile: &mut Option<&mut StructuralRunProfile>,
 ) -> Result<bool, StructuralError> {
+    if let Some(profile) = profile.as_deref_mut() {
+        profile.contains_role_nodes_visited += 1;
+    }
     if roles.contains(&node) {
         return Ok(true);
     }
@@ -209,10 +260,10 @@ fn contains_role(
 
     let result = (|| {
         let (start, end) = store.poles(node)?;
-        if contains_role(store, start, roles, memo, active)? {
+        if contains_role(store, start, roles, memo, active, profile)? {
             return Ok(true);
         }
-        contains_role(store, end, roles, memo, active)
+        contains_role(store, end, roles, memo, active, profile)
     })();
 
     active.remove(&node);
@@ -230,7 +281,11 @@ fn unify_node(
     contains_memo: &mut HashMap<Handle, bool>,
     contains_active: &mut HashSet<Handle>,
     visited: &mut HashSet<(Handle, Handle)>,
+    profile: &mut Option<&mut StructuralRunProfile>,
 ) -> Result<(), StructuralError> {
+    if let Some(profile) = profile.as_deref_mut() {
+        profile.unification_nodes_visited += 1;
+    }
     if roles.contains(&template) {
         if let Some(previous) = inferred.get(&template) {
             if *previous != claimed {
@@ -248,6 +303,7 @@ fn unify_node(
         roles,
         contains_memo,
         contains_active,
+        profile,
     )? {
         if template != claimed {
             return Err(StructuralError::TemplateMismatch);
@@ -277,6 +333,7 @@ fn unify_node(
         contains_memo,
         contains_active,
         visited,
+        profile,
     )?;
     unify_node(
         store,
@@ -287,14 +344,16 @@ fn unify_node(
         contains_memo,
         contains_active,
         visited,
+        profile,
     )
 }
 
-pub fn unify_structural_rule_template(
+fn unify_structural_rule_template_internal(
     store: &OptimizedLinkStore,
     template: Handle,
     claimed: Handle,
     roles: &[Handle],
+    profile: &mut Option<&mut StructuralRunProfile>,
 ) -> Result<Vec<StructuralRoleBinding>, StructuralError> {
     let mut role_set = HashSet::new();
     for role in roles {
@@ -317,6 +376,7 @@ pub fn unify_structural_rule_template(
         &mut contains_memo,
         &mut contains_active,
         &mut visited,
+        profile,
     )?;
 
     roles
@@ -334,13 +394,27 @@ pub fn unify_structural_rule_template(
         .collect()
 }
 
+pub fn unify_structural_rule_template(
+    store: &OptimizedLinkStore,
+    template: Handle,
+    claimed: Handle,
+    roles: &[Handle],
+) -> Result<Vec<StructuralRoleBinding>, StructuralError> {
+    let mut profile = None;
+    unify_structural_rule_template_internal(store, template, claimed, roles, &mut profile)
+}
+
 fn instantiate_node(
     store: &mut OptimizedLinkStore,
     source: Handle,
     bindings: &HashMap<Handle, Handle>,
     visiting: &mut HashSet<Handle>,
     memo: &mut HashMap<Handle, Handle>,
+    profile: &mut Option<&mut StructuralRunProfile>,
 ) -> Result<Handle, StructuralError> {
+    if let Some(profile) = profile.as_deref_mut() {
+        profile.instantiation_nodes_visited += 1;
+    }
     if let Some(bound) = bindings.get(&source) {
         return Ok(*bound);
     }
@@ -353,29 +427,54 @@ fn instantiate_node(
     let value = if start == source && end == source {
         ROOT_HANDLE
     } else if start == source {
-        let child = instantiate_node(store, end, bindings, visiting, memo)?;
-        store.ensure_start_self_closed(child)?
+        let child = instantiate_node(store, end, bindings, visiting, memo, profile)?;
+        let before = store.link_count();
+        let value = store.ensure_start_self_closed(child)?;
+        if let Some(profile) = profile.as_deref_mut() {
+            profile.instantiation_constructor_attempts += 1;
+            let delta = store.link_count() - before;
+            profile.instantiation_new_links += delta as u64;
+            if delta == 0 { profile.instantiation_canonical_hits += 1; }
+        }
+        value
     } else if end == source {
-        let child = instantiate_node(store, start, bindings, visiting, memo)?;
-        store.ensure_end_self_closed(child)?
+        let child = instantiate_node(store, start, bindings, visiting, memo, profile)?;
+        let before = store.link_count();
+        let value = store.ensure_end_self_closed(child)?;
+        if let Some(profile) = profile.as_deref_mut() {
+            profile.instantiation_constructor_attempts += 1;
+            let delta = store.link_count() - before;
+            profile.instantiation_new_links += delta as u64;
+            if delta == 0 { profile.instantiation_canonical_hits += 1; }
+        }
+        value
     } else {
         if !visiting.insert(source) {
             return Err(StructuralError::UnsupportedCycle(source));
         }
-        let new_start = instantiate_node(store, start, bindings, visiting, memo)?;
-        let new_end = instantiate_node(store, end, bindings, visiting, memo)?;
+        let new_start = instantiate_node(store, start, bindings, visiting, memo, profile)?;
+        let new_end = instantiate_node(store, end, bindings, visiting, memo, profile)?;
         visiting.remove(&source);
-        store.ensure_pair(new_start, new_end)?
+        let before = store.link_count();
+        let value = store.ensure_pair(new_start, new_end)?;
+        if let Some(profile) = profile.as_deref_mut() {
+            profile.instantiation_constructor_attempts += 1;
+            let delta = store.link_count() - before;
+            profile.instantiation_new_links += delta as u64;
+            if delta == 0 { profile.instantiation_canonical_hits += 1; }
+        }
+        value
     };
 
     memo.insert(source, value);
     Ok(value)
 }
 
-pub fn instantiate_structural_template(
+fn instantiate_structural_template_internal(
     store: &mut OptimizedLinkStore,
     template: Handle,
     bindings: &[StructuralRoleBinding],
+    profile: &mut Option<&mut StructuralRunProfile>,
 ) -> Result<Handle, StructuralError> {
     let mut mapping = HashMap::new();
     for binding in bindings {
@@ -392,14 +491,26 @@ pub fn instantiate_structural_template(
         &mapping,
         &mut HashSet::new(),
         &mut HashMap::new(),
+        profile,
     )
 }
 
-fn discover_triggered_rule_images(
+pub fn instantiate_structural_template(
+    store: &mut OptimizedLinkStore,
+    template: Handle,
+    bindings: &[StructuralRoleBinding],
+) -> Result<Handle, StructuralError> {
+    let mut profile = None;
+    instantiate_structural_template_internal(store, template, bindings, &mut profile)
+}
+
+fn discover_triggered_rule_images_internal(
     store: &OptimizedLinkStore,
     theory: Handle,
     active: Handle,
+    profile: &mut Option<&mut StructuralRunProfile>,
 ) -> Result<Vec<StructuralImage>, StructuralError> {
+    let discovery_started = profile.as_ref().map(|_| Instant::now());
     let (_, endpoint) = store.poles(active)?;
     let (trigger_key, _) = store.poles(endpoint)?;
 
@@ -407,42 +518,95 @@ fn discover_triggered_rule_images(
         .start_incidence(trigger_key)?
         .collect::<Vec<_>>();
 
+    if let Some(profile) = profile.as_deref_mut() {
+        profile.trigger_incidence_candidates += triggers.len() as u64;
+    }
+
     let mut images = Vec::new();
 
     for trigger in triggers {
         if trigger == trigger_key {
+            if let Some(profile) = profile.as_deref_mut() {
+                profile.candidates_rejected_before_unification += 1;
+            }
             continue;
         }
 
         let Ok((trigger_start, admission)) = store.poles(trigger) else {
+            if let Some(profile) = profile.as_deref_mut() {
+                profile.candidates_rejected_before_unification += 1;
+            }
             continue;
         };
         if trigger_start != trigger_key {
+            if let Some(profile) = profile.as_deref_mut() {
+                profile.candidates_rejected_before_unification += 1;
+            }
             continue;
         }
 
         let Ok((admission_theory, rule)) = store.poles(admission) else {
+            if let Some(profile) = profile.as_deref_mut() {
+                profile.candidates_rejected_before_unification += 1;
+            }
             continue;
         };
         if admission_theory != theory || rule == admission {
+            if let Some(profile) = profile.as_deref_mut() {
+                profile.candidates_rejected_before_unification += 1;
+            }
             continue;
         }
 
         let Ok((role_dictionary, body)) = store.poles(rule) else {
-            continue;
-        };
-        let Ok(roles) = read_structural_role_dictionary(store, role_dictionary) else {
-            continue;
-        };
-        let Ok((before, output_bundle_template)) = store.poles(body) else {
+            if let Some(profile) = profile.as_deref_mut() {
+                profile.candidates_rejected_before_unification += 1;
+            }
             continue;
         };
 
-        let Ok(bindings) =
-            unify_structural_rule_template(store, before, active, &roles)
-        else {
+        let role_started = profile.as_ref().map(|_| Instant::now());
+        let roles_result = read_structural_role_dictionary(store, role_dictionary);
+        if let Some(profile) = profile.as_deref_mut() {
+            profile.role_dictionary_decodes += 1;
+            if let Some(started) = role_started {
+                profile.role_decode_ns += started.elapsed().as_nanos();
+            }
+        }
+        let Ok(roles) = roles_result else {
+            if let Some(profile) = profile.as_deref_mut() {
+                profile.candidates_rejected_before_unification += 1;
+            }
             continue;
         };
+        if let Some(profile) = profile.as_deref_mut() {
+            profile.decoded_roles += roles.len() as u64;
+        }
+
+        let Ok((before, output_bundle_template)) = store.poles(body) else {
+            if let Some(profile) = profile.as_deref_mut() {
+                profile.candidates_rejected_before_unification += 1;
+            }
+            continue;
+        };
+
+        if let Some(profile) = profile.as_deref_mut() {
+            profile.unification_attempts += 1;
+        }
+        let unify_started = profile.as_ref().map(|_| Instant::now());
+        let bindings_result =
+            unify_structural_rule_template_internal(store, before, active, &roles, profile);
+        if let Some(profile) = profile.as_deref_mut() {
+            if let Some(started) = unify_started {
+                profile.unification_ns += started.elapsed().as_nanos();
+            }
+        }
+        let Ok(bindings) = bindings_result else {
+            continue;
+        };
+        if let Some(profile) = profile.as_deref_mut() {
+            profile.unification_successes += 1;
+        }
 
         images.push(StructuralImage {
             output_bundle_template,
@@ -450,7 +614,21 @@ fn discover_triggered_rule_images(
         });
     }
 
+    if let Some(profile) = profile.as_deref_mut() {
+        if let Some(started) = discovery_started {
+            profile.discovery_ns += started.elapsed().as_nanos();
+        }
+    }
     Ok(images)
+}
+
+fn discover_triggered_rule_images(
+    store: &OptimizedLinkStore,
+    theory: Handle,
+    active: Handle,
+) -> Result<Vec<StructuralImage>, StructuralError> {
+    let mut profile = None;
+    discover_triggered_rule_images_internal(store, theory, active, &mut profile)
 }
 
 #[derive(Clone, Debug)]
@@ -520,6 +698,29 @@ impl OptimizedStructuralEngine {
         &mut self,
         store: &mut OptimizedLinkStore,
     ) -> Result<StructuralReactionResult, StructuralError> {
+        let mut profile = None;
+        self.run_internal(store, &mut profile)
+    }
+
+    pub fn run_profiled(
+        &mut self,
+        store: &mut OptimizedLinkStore,
+    ) -> Result<(StructuralReactionResult, StructuralRunProfile), StructuralError> {
+        let started = Instant::now();
+        let mut owned = StructuralRunProfile::default();
+        let result = {
+            let mut profile = Some(&mut owned);
+            self.run_internal(store, &mut profile)?
+        };
+        owned.total_ns = started.elapsed().as_nanos();
+        Ok((result, owned))
+    }
+
+    fn run_internal(
+        &mut self,
+        store: &mut OptimizedLinkStore,
+        profile: &mut Option<&mut StructuralRunProfile>,
+    ) -> Result<StructuralReactionResult, StructuralError> {
         self.quiescent = false;
 
         let interpreter = self.interpreter.ok_or(StructuralError::MissingInterpreter)?;
@@ -552,10 +753,22 @@ impl OptimizedStructuralEngine {
         };
 
         for active in old_members.iter().copied() {
-            let images = discover_triggered_rule_images(store, authority.theory, active)?;
+            let images = discover_triggered_rule_images_internal(
+                store,
+                authority.theory,
+                active,
+                profile,
+            )?;
 
             if images.is_empty() {
+                let publication_started = profile.as_ref().map(|_| Instant::now());
                 add_next(active)?;
+                if let Some(profile) = profile.as_deref_mut() {
+                    profile.publication_outputs += 1;
+                    if let Some(started) = publication_started {
+                        profile.publication_ns += started.elapsed().as_nanos();
+                    }
+                }
                 continue;
             }
 
@@ -563,14 +776,32 @@ impl OptimizedStructuralEngine {
 
             for image in images {
                 raw_rule_matches = raw_rule_matches.saturating_add(1);
-                let grounded_bundle = instantiate_structural_template(
+
+                let instantiation_started = profile.as_ref().map(|_| Instant::now());
+                let grounded_bundle = instantiate_structural_template_internal(
                     store,
                     image.output_bundle_template,
                     &image.bindings,
+                    profile,
                 )?;
+                if let Some(profile) = profile.as_deref_mut() {
+                    if let Some(started) = instantiation_started {
+                        profile.instantiation_ns += started.elapsed().as_nanos();
+                    }
+                }
+
+                let publication_started = profile.as_ref().map(|_| Instant::now());
                 let outputs = read_exact_sequence(store, grounded_bundle)?;
+                if let Some(profile) = profile.as_deref_mut() {
+                    profile.publication_outputs += outputs.len() as u64;
+                }
                 for successor in outputs {
                     add_next(successor)?;
+                }
+                if let Some(profile) = profile.as_deref_mut() {
+                    if let Some(started) = publication_started {
+                        profile.publication_ns += started.elapsed().as_nanos();
+                    }
                 }
             }
         }
