@@ -96,6 +96,10 @@ export function proofPipelineHtml(proof) {
             <h5>Semantic roots inside the portable image</h5>
             ${semanticRootsHtml(proof.prepare.semanticRoots)}
             <details>
+              <summary>Structural rules admitted to Theory (${proof.prepare.theoryAdmissions?.length || 0})</summary>
+              <pre class="proof-aset">${escapeHtml((proof.prepare.theoryAdmissions || []).join("\n"))}</pre>
+            </details>
+            <details>
               <summary>Complete portable Aset (${proof.prepare.asetAnums.length} Anums)</summary>
               <pre class="proof-aset">${escapeHtml(asetText)}</pre>
             </details>
