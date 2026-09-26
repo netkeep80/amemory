@@ -75,51 +75,6 @@ struct Shift1Outcome {
     kind: Handle,
 }
 
-fn install_rule(
-    f: &mut FullFixture,
-    anchors: &mut AnchorGen,
-    width: usize,
-    function: Handle,
-    result_tag: Handle,
-    output_bits: &[Handle],
-    cf: Handle,
-) {
-    let k = anchors.next(&mut f.store);
-    let input_bits = anchors.roles(&mut f.store, width);
-
-    let input_word =
-        materialize_exact_sequence(&mut f.store, &input_bits).unwrap();
-    let args =
-        materialize_exact_sequence(&mut f.store, &[input_word]).unwrap();
-    let invocation = call(&mut f.store, f.apply, function, args);
-    let before = f.store.ensure_pair(k, invocation).unwrap();
-
-    // output_bits is a template assembled from the input role handles and
-    // structural constants. Instantiation performs the runtime wiring.
-    let output_word =
-        materialize_exact_sequence(&mut f.store, output_bits).unwrap();
-    let payload = materialize_exact_sequence(
-        &mut f.store,
-        &[output_word, cf, function],
-    )
-    .unwrap();
-    let envelope = f.store.ensure_pair(result_tag, payload).unwrap();
-    let after = f.store.ensure_pair(k, envelope).unwrap();
-
-    let mut roles = Vec::with_capacity(width + 1);
-    roles.push(k);
-    roles.extend_from_slice(&input_bits);
-
-    let (_, admission) = define_bundle_rule(
-        &mut f.store,
-        f.theory,
-        &roles,
-        before,
-        &[after],
-    );
-    index_rule_for(&mut f.store, &[f.o], admission);
-}
-
 impl Shift1Program {
     fn install(f: &mut FullFixture, width: usize) -> Self {
         assert!((8..=32).contains(&width));
