@@ -743,3 +743,4 @@ Result ABI:
 ```text
 WIDE64_ADD_RESULT(ExactSequence_R([Sum64,Cout]))
 ```
+\n\n## M4 — structural unsigned MUL32\n\nIssue: #109\n\nMUL32 is an unrolled 32-stage structural shift-add network.\n\nAt stage i the original multiplier bit B[i] selects one of two rules:\n\n```text\nB[i]=0 -> Acc unchanged\nB[i]=1 -> Acc = ADD64(Acc, zero_extend(A)<<i, 0)\n```\n\nThe partial product is instantiated directly from A's bound roles; no runtime\nhost shift is performed. Every set multiplier bit reuses the GREEN ADD64\ncomponent from #107/#108.\n\nRaw result:\n\n```text\nMUL32_RESULT(ExactSequence_R([Product64]))\n```\n\nExpected reaction count:\n\n```text\n33 + 1038 * popcount(B)\n```\n
