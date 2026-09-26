@@ -9,7 +9,9 @@ use super::{
     logic_n::{GateSet, LogicProgram},
 };
 use amemory_optimized_cpu_probe::{
-    structural::{materialize_exact_sequence, read_exact_sequence},
+    structural::{
+        materialize_exact_sequence, read_exact_sequence, StructuralRunProfile,
+    },
     Handle, OptimizedLinkStore, ROOT_HANDLE,
 };
 
@@ -1062,6 +1064,47 @@ fn run_shift(
     decode_effect(f, program, reactions)
 }
 
+
+fn run_shift_profiled(
+    f: &mut FullFixture,
+    program: &Shift32Program,
+    function: Handle,
+    value: u32,
+    count: u8,
+) -> (EffectOutcome, StructuralRunProfile) {
+    let word_bits = bit_handles(f, WIDTH, value);
+    let count_bits = bit_handles(f, 8, u32::from(count));
+    let word = materialize_exact_sequence(&mut f.store, &word_bits).unwrap();
+    let count_word = materialize_exact_sequence(&mut f.store, &count_bits).unwrap();
+    let args = materialize_exact_sequence(&mut f.store, &[word, count_word]).unwrap();
+    let invocation = call(&mut f.store, f.apply, function, args);
+    let initial = f.store.ensure_pair(f.k, invocation).unwrap();
+
+    f.engine.set_current(&f.store, &[initial]).unwrap();
+
+    let mut reactions = 0usize;
+    let mut profile = StructuralRunProfile::default();
+    loop {
+        let (result, step_profile) =
+            f.engine.run_profiled(&mut f.store).unwrap();
+        profile.accumulate(&step_profile);
+        if result.quiescent {
+            assert_eq!(result.raw_rule_matches, 0);
+            assert_eq!(result.handoff_count, 0);
+            break;
+        }
+
+        reactions += 1;
+        assert_eq!(result.raw_rule_matches, 1, "profiled reaction {reactions}");
+        assert_eq!(result.transitioned_members, 1, "profiled reaction {reactions}");
+        assert_eq!(result.handoff_count, 1, "profiled reaction {reactions}");
+        assert_eq!(result.next_members.len(), 1, "profiled reaction {reactions}");
+        assert!(reactions <= 90, "profiled SHIFT32 failed to quiesce");
+    }
+
+    (decode_effect(f, program, reactions), profile)
+}
+
 fn expected(
     program: &Shift32Program,
     function: Handle,
@@ -1257,6 +1300,55 @@ pub(crate) fn web_run_shift32(
     })
 }
 
+
+#[test]
+#[ignore = "informational Structural Rule profiler; no acceptance timing threshold"]
+fn m4_shift32_profile_candidate_selectivity() {
+    let mut f = FullFixture::new();
+    let program = Shift32Program::install(&mut f);
+    let value = 0x9234_5679u32;
+    let count = 31u8;
+
+    for (name, function) in [
+        ("SHL", program.shl),
+        ("SHR", program.shr),
+        ("SAR", program.sar),
+    ] {
+        let expected_value = expected(&program, function, value, count);
+        let (actual, profile) =
+            run_shift_profiled(&mut f, &program, function, value, count);
+        assert_eq!(actual, expected_value);
+
+        println!(
+            "SHIFT32_PROFILE op={} count={} reactions={} program_links={} total_ns={} discovery_ns={} role_decode_ns={} unification_ns={} instantiation_ns={} publication_ns={} trigger_candidates={} pre_unify_rejects={} role_decodes={} decoded_roles={} unify_attempts={} unify_successes={} contains_nodes={} unify_nodes={} instantiate_nodes={} constructor_attempts={} canonical_hits={} new_links={} publication_outputs={}",
+            name,
+            count,
+            actual.reactions,
+            program.links_after_build,
+            profile.total_ns,
+            profile.discovery_ns,
+            profile.role_decode_ns,
+            profile.unification_ns,
+            profile.instantiation_ns,
+            profile.publication_ns,
+            profile.trigger_incidence_candidates,
+            profile.candidates_rejected_before_unification,
+            profile.role_dictionary_decodes,
+            profile.decoded_roles,
+            profile.unification_attempts,
+            profile.unification_successes,
+            profile.contains_role_nodes_visited,
+            profile.unification_nodes_visited,
+            profile.instantiation_nodes_visited,
+            profile.instantiation_constructor_attempts,
+            profile.instantiation_canonical_hits,
+            profile.instantiation_new_links,
+            profile.publication_outputs,
+        );
+    }
+
+    println!("SHIFT32_PROFILE_NOTE=informational-only-no-performance-threshold");
+}
 
 #[test]
 #[ignore = "heavy M4 SHIFT32 effect suite; mandatory release workflow"]

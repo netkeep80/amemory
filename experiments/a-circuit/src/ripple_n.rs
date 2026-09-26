@@ -2,7 +2,9 @@ use super::full_adder::{
     call, define_bundle_rule, index_rule_for, Fixture as FullFixture,
 };
 use amemory_optimized_cpu_probe::{
-    structural::{materialize_exact_sequence, read_exact_sequence},
+    structural::{
+        materialize_exact_sequence, read_exact_sequence, StructuralRunProfile,
+    },
     Handle, OptimizedLinkStore,
 };
 
@@ -369,6 +371,72 @@ pub(crate) fn run_add(
     (sum, cout)
 }
 
+
+fn run_add_profiled(
+    f: &mut FullFixture,
+    program: &RippleProgram,
+    a: u32,
+    b: u32,
+    cin: u8,
+) -> (u32, u8, StructuralRunProfile) {
+    let m = mask(program.width);
+    assert_eq!(a & !m, 0, "A outside declared width");
+    assert_eq!(b & !m, 0, "B outside declared width");
+    assert!(cin <= 1);
+
+    let a_bits = bit_handles(f, program.width, a);
+    let b_bits = bit_handles(f, program.width, b);
+    let aword = materialize_exact_sequence(&mut f.store, &a_bits).unwrap();
+    let bword = materialize_exact_sequence(&mut f.store, &b_bits).unwrap();
+    let cin_handle = if cin == 0 { f.zero } else { f.one };
+    let args = materialize_exact_sequence(
+        &mut f.store,
+        &[aword, bword, cin_handle],
+    )
+    .unwrap();
+    let invocation = call(&mut f.store, f.apply, program.add, args);
+    let initial = f.store.ensure_pair(f.k, invocation).unwrap();
+
+    f.engine.set_current(&f.store, &[initial]).unwrap();
+
+    let mut profile = StructuralRunProfile::default();
+    for step in 0..program.active_steps {
+        let (reaction, step_profile) =
+            f.engine.run_profiled(&mut f.store).unwrap();
+        profile.accumulate(&step_profile);
+        assert!(
+            !reaction.quiescent,
+            "profiled N={} A={a} B={b} Cin={cin}: step {step}",
+            program.width,
+        );
+        assert_eq!(reaction.raw_rule_matches, 1, "profiled step {step} matches");
+        assert_eq!(reaction.transitioned_members, 1, "profiled step {step} transitioned");
+        assert_eq!(reaction.handoff_count, 1, "profiled step {step} handoff");
+    }
+
+    let (quiescent, final_profile) =
+        f.engine.run_profiled(&mut f.store).unwrap();
+    profile.accumulate(&final_profile);
+    assert!(quiescent.quiescent);
+    assert_eq!(quiescent.raw_rule_matches, 0);
+    assert_eq!(f.engine.current().len(), 1);
+
+    let final_link = f.engine.current()[0];
+    let (caller, result) = f.store.poles(final_link).unwrap();
+    assert_eq!(caller, f.k);
+    let result_values = read_exact_sequence(&f.store, result).unwrap();
+    assert_eq!(result_values.len(), 2);
+    let sum = decode_word(f, program.width, result_values[0]);
+    let cout = if result_values[1] == f.one {
+        1
+    } else {
+        assert_eq!(result_values[1], f.zero);
+        0
+    };
+
+    (sum, cout, profile)
+}
+
 fn verify_case(
     f: &mut FullFixture,
     program: &RippleProgram,
@@ -572,6 +640,11 @@ fn m3_perf_ripple_width_baseline() {
             .map(|previous| (steady_ns * 1000) / previous.max(1))
             .unwrap_or(0);
 
+        let (profile_sum, profile_cout, profile) =
+            run_add_profiled(&mut f, &program, a, b, cin);
+        assert_eq!(profile_sum, first.0);
+        assert_eq!(profile_cout, first.1);
+
         println!(
             "RIPPLE_PERF width={} build_ns={} program_links={} first_ns={} first_growth={} steady_iters={} steady_ns_per_add={} ns_per_bit={} approx_ns_per_reaction={} reactions_per_sec={} scale_x1000={}",
             width,
@@ -585,6 +658,30 @@ fn m3_perf_ripple_width_baseline() {
             approx_ns_per_reaction,
             reactions_per_second,
             scale_milli,
+        );
+
+        println!(
+            "RIPPLE_PROFILE width={} total_ns={} discovery_ns={} role_decode_ns={} unification_ns={} instantiation_ns={} publication_ns={} trigger_candidates={} pre_unify_rejects={} role_decodes={} decoded_roles={} unify_attempts={} unify_successes={} contains_nodes={} unify_nodes={} instantiate_nodes={} constructor_attempts={} canonical_hits={} new_links={} publication_outputs={}",
+            width,
+            profile.total_ns,
+            profile.discovery_ns,
+            profile.role_decode_ns,
+            profile.unification_ns,
+            profile.instantiation_ns,
+            profile.publication_ns,
+            profile.trigger_incidence_candidates,
+            profile.candidates_rejected_before_unification,
+            profile.role_dictionary_decodes,
+            profile.decoded_roles,
+            profile.unification_attempts,
+            profile.unification_successes,
+            profile.contains_role_nodes_visited,
+            profile.unification_nodes_visited,
+            profile.instantiation_nodes_visited,
+            profile.instantiation_constructor_attempts,
+            profile.instantiation_canonical_hits,
+            profile.instantiation_new_links,
+            profile.publication_outputs,
         );
 
         previous_steady_ns = Some(steady_ns);
