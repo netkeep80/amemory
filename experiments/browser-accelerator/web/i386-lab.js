@@ -306,7 +306,7 @@ function vectorExpectation(out, vector) {
   return { label: ok ? "PASS" : "FAIL", ok };
 }
 
-function vectorRowHtml(block, vector, index) {
+function vectorRowHtml(block, vector, index, custom = false) {
   const cells = block.inputs.map((def) => {
     const value = vector.inputs?.[def.key] ?? def.default;
     return \`<td>\${inputControl(def, value, true)}</td>\`;
@@ -357,7 +357,10 @@ function renderVectors(section, block, wasm) {
     }
   };
 
-  const bindRow = (row) => row.querySelector("[data-run-row]").addEventListener("click", () => runRow(row));
+  const bindRow = (row) => {
+    row.querySelector("[data-run-row]").addEventListener("click", () => runRow(row));
+    row.querySelector("[data-remove-row]")?.addEventListener("click", () => row.remove());
+  };
   [...body.querySelectorAll("[data-vector-row]")].forEach(bindRow);
 
   workspace.querySelector("#lab-run-all").addEventListener("click", () => {
@@ -367,7 +370,7 @@ function renderVectors(section, block, wasm) {
   workspace.querySelector("#lab-add-row").addEventListener("click", () => {
     const index = vectors.length + body.children.length;
     const holder = document.createElement("tbody");
-    holder.innerHTML = vectorRowHtml(block, { name: "custom", inputs: {} }, index);
+    holder.innerHTML = vectorRowHtml(block, { name: "custom", inputs: {} }, index, true);
     const row = holder.firstElementChild;
     row.removeAttribute("data-vector-row");
     body.append(row);
