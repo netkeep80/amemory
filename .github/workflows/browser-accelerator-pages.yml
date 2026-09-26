@@ -50,7 +50,7 @@ jobs:
             _site/amemory_browser_probe.wasm
           cp experiments/a-circuit/target/wasm32-unknown-unknown/release/amemory_a_circuit.wasm \
             _site/amemory_a_circuit.wasm
-          cp experiments/browser-accelerator/VERSION _site/VERSION
+          cp VERSION _site/VERSION
           touch _site/.nojekyll
 
       - name: Generate browser lab build identity
@@ -61,7 +61,7 @@ jobs:
           import json
           import os
 
-          version = Path("experiments/browser-accelerator/VERSION").read_text(encoding="utf-8").strip()
+          version = Path("VERSION").read_text(encoding="utf-8").strip()
           if not version:
               raise SystemExit("browser lab VERSION is empty")
 
