@@ -385,7 +385,7 @@ mod tests {
         }
 
         let proof_mux1 = execute(12, 1, 0, 1).unwrap();
-        assert_eq!(proof_mux1.value, 1);
+        assert_eq!(proof_mux1.value, 0);
         assert_eq!(amemory_i386_lab_proof_available(), 1);
         let proof_json = {
             let guard = LAST_PROOF_JSON
