@@ -1232,6 +1232,101 @@ mod anum_boundary_tests {
     }
 
     #[test]
+    #[ignore = "informational performance baseline; no acceptance threshold"]
+    fn reference_cpu_benchmark_baseline() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        const ITERS: u128 = 10_000;
+        const SOURCES: [&str; 6] = ["98", "68", "16898", "19868", "16816898", "19816898"];
+
+        // 1) Atomic multi-Anum load. This includes parsing, canonical lookup,
+        // overlapping-substructure convergence and one publication handoff.
+        let load_started = Instant::now();
+        let mut last_handles = [ANUM_CPU_NONE; 6];
+        for _ in 0..ITERS {
+            amemory_anum_cpu_reset_pool();
+            assert_eq!(amemory_anum_cpu_load_begin(), 1);
+            for (index, source) in SOURCES.iter().enumerate() {
+                last_handles[index] = stage_import(source);
+                assert_ne!(last_handles[index], ANUM_CPU_NONE);
+            }
+            assert_eq!(amemory_anum_cpu_load_commit(), 1);
+            black_box(last_handles);
+        }
+        let load_ns = load_started.elapsed().as_nanos() / ITERS;
+
+        // Reconstruct one stable published R1 Aset for the operation-level probes.
+        amemory_anum_cpu_reset_pool();
+        assert_eq!(amemory_anum_cpu_load_begin(), 1);
+        for (index, source) in SOURCES.iter().enumerate() {
+            last_handles[index] = stage_import(source);
+            assert_ne!(last_handles[index], ANUM_CPU_NONE);
+        }
+        assert_eq!(amemory_anum_cpu_load_commit(), 1);
+        let current = last_handles[3];
+        let relation = last_handles[4];
+        let successor = last_handles[5];
+
+        // 2) One complete bounded R1 reaction, including Scope/Theory setup,
+        // TheorySnapshot capture, successor construction and atomic Scope handoff.
+        let reaction_started = Instant::now();
+        for _ in 0..ITERS {
+            amemory_reaction_reset();
+            assert_eq!(amemory_reaction_set_current_member(0, current), 1);
+            assert_eq!(amemory_reaction_set_current_count(1), 1);
+            assert_eq!(amemory_reaction_set_theory_relation(0, relation), 1);
+            assert_eq!(amemory_reaction_set_theory_count(1), 1);
+            assert_eq!(amemory_reaction_snapshot_theory(), 1);
+            assert_eq!(amemory_reaction_run(), 1);
+            black_box(amemory_reaction_current_member(0));
+        }
+        let reaction_ns = reaction_started.elapsed().as_nanos() / ITERS;
+
+        // 3) Portable structural export of the canonical successor.
+        let export_started = Instant::now();
+        let mut last_export = String::new();
+        for _ in 0..ITERS {
+            last_export = export(successor);
+            black_box(&last_export);
+        }
+        let export_ns = export_started.elapsed().as_nanos() / ITERS;
+        assert_eq!(last_export, "19816898");
+
+        // 4) Full load -> execute -> portable export path.
+        let lifecycle_started = Instant::now();
+        for _ in 0..ITERS {
+            amemory_anum_cpu_reset_pool();
+            assert_eq!(amemory_anum_cpu_load_begin(), 1);
+            for (index, source) in SOURCES.iter().enumerate() {
+                last_handles[index] = stage_import(source);
+                assert_ne!(last_handles[index], ANUM_CPU_NONE);
+            }
+            assert_eq!(amemory_anum_cpu_load_commit(), 1);
+
+            amemory_reaction_reset();
+            assert_eq!(amemory_reaction_set_current_member(0, last_handles[3]), 1);
+            assert_eq!(amemory_reaction_set_current_count(1), 1);
+            assert_eq!(amemory_reaction_set_theory_relation(0, last_handles[4]), 1);
+            assert_eq!(amemory_reaction_set_theory_count(1), 1);
+            assert_eq!(amemory_reaction_snapshot_theory(), 1);
+            assert_eq!(amemory_reaction_run(), 1);
+            let result = amemory_reaction_current_member(0);
+            assert_eq!(export(result), "19816898");
+            black_box(result);
+        }
+        let lifecycle_ns = lifecycle_started.elapsed().as_nanos() / ITERS;
+
+        println!("REFERENCE_CPU_BASELINE_ITERS={ITERS}");
+        println!("REFERENCE_CPU_ATOMIC_LOAD_NS_PER_OP={load_ns}");
+        println!("REFERENCE_CPU_R1_REACTION_NS_PER_OP={reaction_ns}");
+        println!("REFERENCE_CPU_EXPORT_NS_PER_OP={export_ns}");
+        println!("REFERENCE_CPU_END_TO_END_NS_PER_OP={lifecycle_ns}");
+        println!("REFERENCE_CPU_BASELINE_NOTE=informational-only-no-performance-threshold");
+    }
+
+    #[test]
     fn minimal_grounded_reaction_r1() {
         let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         amemory_anum_cpu_reset_pool();
