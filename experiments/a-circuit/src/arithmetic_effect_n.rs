@@ -512,6 +512,92 @@ fn vectors(width: usize) -> Vec<(u32, u32, u8, u8)> {
     out
 }
 
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct WebArithmeticOutcome {
+    pub(crate) value: u32,
+    pub(crate) writeback: u8,
+    pub(crate) defined_mask: u32,
+    pub(crate) value_mask: u32,
+    pub(crate) undefined_mask: u32,
+    pub(crate) preserve_mask: u32,
+    pub(crate) reactions: u32,
+    pub(crate) links_after_build: u32,
+    pub(crate) links_after_first: u32,
+    pub(crate) steady_link_delta: u32,
+    pub(crate) quiescent: u8,
+}
+
+const WEB_CF: u32 = 1 << 0;
+const WEB_PF: u32 = 1 << 2;
+const WEB_AF: u32 = 1 << 4;
+const WEB_ZF: u32 = 1 << 6;
+const WEB_SF: u32 = 1 << 7;
+const WEB_OF: u32 = 1 << 11;
+const WEB_STATUS_FLAGS: u32 = WEB_CF | WEB_PF | WEB_AF | WEB_ZF | WEB_SF | WEB_OF;
+
+fn web_arithmetic_masks(out: EffectOutcome) -> (u32, u32) {
+    let mut values = 0u32;
+    for (mask, bit) in [
+        (WEB_CF, out.cf),
+        (WEB_PF, out.pf),
+        (WEB_AF, out.af),
+        (WEB_ZF, out.zf),
+        (WEB_SF, out.sf),
+        (WEB_OF, out.of),
+    ] {
+        if bit != 0 {
+            values |= mask;
+        }
+    }
+    (WEB_STATUS_FLAGS, values)
+}
+
+pub(crate) fn web_run_arithmetic(
+    op: u32,
+    a: u32,
+    b: u32,
+    input_flag: u32,
+) -> Option<WebArithmeticOutcome> {
+    if input_flag > 1 {
+        return None;
+    }
+    let mut f = FullFixture::new();
+    let program = ArithmeticEffectProgram::install(&mut f, 32);
+    let links_after_build = f.store.link_count() as u32;
+
+    let (x, mode, writeback) = match op {
+        6 => (0u8, 0u8, 1u8),                 // ADD
+        7 => (input_flag as u8, 0u8, 1u8),   // ADC
+        8 => (0u8, 1u8, 1u8),                 // SUB
+        9 => (input_flag as u8, 1u8, 1u8),   // SBB
+        10 => (0u8, 1u8, 0u8),                // CMP
+        _ => return None,
+    };
+
+    let first = run_effect(&mut f, &program, a, b, x, mode, writeback);
+    let links_after_first = f.store.link_count() as u32;
+    let second = run_effect(&mut f, &program, a, b, x, mode, writeback);
+    assert_eq!(second, first, "web arithmetic repeat changed result");
+    let links_after_second = f.store.link_count() as u32;
+    let (defined_mask, value_mask) = web_arithmetic_masks(first);
+
+    Some(WebArithmeticOutcome {
+        value: first.value,
+        writeback: first.writeback,
+        defined_mask,
+        value_mask,
+        undefined_mask: 0,
+        preserve_mask: 0,
+        reactions: program.active_steps as u32,
+        links_after_build,
+        links_after_first,
+        steady_link_delta: links_after_second - links_after_first,
+        quiescent: 1,
+    })
+}
+
+
 #[test]
 #[ignore = "heavy M4 arithmetic-effect suite; mandatory release workflow"]
 fn m4_arith_effect_8_16_32_matches_oracle() {
