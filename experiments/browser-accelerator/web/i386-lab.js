@@ -210,6 +210,7 @@ function abiArgs(block, values) {
 function collectOutcome(wasm) {
   return {
     value: wasm.amemory_i386_lab_value() >>> 0,
+    valueHi: wasm.amemory_i386_lab_value_hi() >>> 0,
     writeback: wasm.amemory_i386_lab_writeback() >>> 0,
     defined: wasm.amemory_i386_lab_defined_mask() >>> 0,
     flagValues: wasm.amemory_i386_lab_value_mask() >>> 0,
@@ -236,10 +237,41 @@ function valueDisplay(type, label, value) {
   return type === "word32" ? wordHtml(label, value) : scalarHtml(label, value);
 }
 
+function outputValue(out, def, index = 0) {
+  if (def?.slot === "valueHi") return out.valueHi >>> 0;
+  if (!def?.slot || def.slot === "value") return out.value >>> 0;
+  throw new Error(`unsupported output ABI slot ${def.slot} at index ${index}`);
+}
+
+function outputHtml(block, out) {
+  const outputs = block.outputs?.length ? block.outputs : [{ key: "Result", type: "word32", slot: "value" }];
+  const rendered = outputs.map((def, index) =>
+    valueDisplay(def.type, def.key, outputValue(out, def, index))
+  ).join("");
+
+  const lo = outputs.find((def) => def.slot === "value");
+  const hi = outputs.find((def) => def.slot === "valueHi");
+  if (lo?.type === "word32" && hi?.type === "word32") {
+    return rendered + `
+      <div class="lab-word">
+        <strong>Combined Hi:Lo</strong>
+        <code>${hex32(outputValue(out, hi))}:${hex32(outputValue(out, lo))}</code>
+        <span>two exact u32 halves; never transported through JavaScript Number as one u64</span>
+      </div>`;
+  }
+  return rendered;
+}
+
+function compactOutput(block, out) {
+  const outputs = block.outputs?.length ? block.outputs : [{ key: "Result", type: "word32", slot: "value" }];
+  return outputs.map((def, index) => {
+    const value = outputValue(out, def, index);
+    return `${def.key}=${def.type === "bit" ? value : hex32(value)}`;
+  }).join("<br>");
+}
+
 function renderEvidence(target, block, inputs, out) {
   const left = block.inputs.map((def) => valueDisplay(def.type, def.key, inputs[def.key])).join("");
-  const outputType = block.outputs?.[0]?.type || "word32";
-  const outputName = block.outputs?.[0]?.key || "Result";
   const flags = FLAGS.map(([name, mask]) =>
     \`<span class="lab-flag">\${flagState(name, mask, out.defined, out.flagValues, out.undefined, out.preserve)}</span>\`
   ).join("");
@@ -308,7 +340,12 @@ function vectorExpectation(out, vector) {
   if (!vector.expect) return { label: "OBSERVED", ok: null };
   const checks = [];
   if (vector.expect.value !== undefined) checks.push(out.value === parseWord(vector.expect.value));
+  if (vector.expect.valueHi !== undefined) checks.push(out.valueHi === parseWord(vector.expect.valueHi));
   if (vector.expect.writeback !== undefined) checks.push(out.writeback === Number(vector.expect.writeback));
+  if (vector.expect.definedMask !== undefined) checks.push(out.defined === parseWord(vector.expect.definedMask));
+  if (vector.expect.valueMask !== undefined) checks.push(out.flagValues === parseWord(vector.expect.valueMask));
+  if (vector.expect.undefinedMask !== undefined) checks.push(out.undefined === parseWord(vector.expect.undefinedMask));
+  if (vector.expect.preserveMask !== undefined) checks.push(out.preserve === parseWord(vector.expect.preserveMask));
   const ok = checks.every(Boolean);
   return { label: ok ? "PASS" : "FAIL", ok };
 }
