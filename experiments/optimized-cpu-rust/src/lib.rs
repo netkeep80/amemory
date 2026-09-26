@@ -132,14 +132,14 @@ impl OptimizedLinkStore {
         self.allocate_record(start, end)
     }
 
-    pub fn start_incidence(&self, start: Handle) -> Result<Vec<Handle>, StoreError> {
+    pub fn start_incidence(&self, start: Handle) -> Result<&[Handle], StoreError> {
         self.require_valid(start)?;
-        Ok(self.by_start.get(&start).cloned().unwrap_or_default())
+        Ok(self.by_start.get(&start).map(Vec::as_slice).unwrap_or(&[]))
     }
 
-    pub fn end_incidence(&self, end: Handle) -> Result<Vec<Handle>, StoreError> {
+    pub fn end_incidence(&self, end: Handle) -> Result<&[Handle], StoreError> {
         self.require_valid(end)?;
-        Ok(self.by_end.get(&end).cloned().unwrap_or_default())
+        Ok(self.by_end.get(&end).map(Vec::as_slice).unwrap_or(&[]))
     }
 
     fn require_valid(&self, handle: Handle) -> Result<(), StoreError> {
@@ -398,7 +398,8 @@ mod tests {
         // Index observations are still local/substrate facts. Portable
         // comparison remains canonical structural export.
         let mut outgoing = from_k
-            .into_iter()
+            .iter()
+            .copied()
             .map(|handle| store.export_anum(handle).unwrap())
             .collect::<Vec<_>>();
         outgoing.sort();
@@ -440,6 +441,53 @@ mod tests {
             store.export_anum(2),
             Err(StoreError::NonWellFounded(2 | 3))
         ));
+    }
+
+    #[test]
+    #[ignore = "informational optimized-index baseline; no performance threshold"]
+    fn optimized_hash_index_benchmark_baseline() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        const LINKS: usize = 50_000;
+        const ITERS: u128 = 1_000_000;
+
+        let mut store = OptimizedLinkStore::new();
+        let build_started = Instant::now();
+        let mut current = ROOT_HANDLE;
+        for _ in 0..LINKS {
+            current = store.ensure_pair(ROOT_HANDLE, current).unwrap();
+        }
+        let build_ns_per_link = build_started.elapsed().as_nanos() / LINKS as u128;
+        assert_eq!(store.link_count(), LINKS + 1);
+
+        let (_, target_end) = store.poles(current).unwrap();
+
+        let canonical_started = Instant::now();
+        let mut last = ROOT_HANDLE;
+        for _ in 0..ITERS {
+            last = store.ensure_pair(ROOT_HANDLE, target_end).unwrap();
+            black_box(last);
+        }
+        let canonical_ns = canonical_started.elapsed().as_nanos() / ITERS;
+        assert_eq!(last, current);
+        assert_eq!(store.link_count(), LINKS + 1);
+
+        let incidence_started = Instant::now();
+        let mut observed = 0usize;
+        for _ in 0..ITERS {
+            observed = store.start_incidence(ROOT_HANDLE).unwrap().len();
+            black_box(observed);
+        }
+        let incidence_ns = incidence_started.elapsed().as_nanos() / ITERS;
+        assert_eq!(observed, LINKS + 1); // ROOT plus all ordinary root-start pairs.
+
+        println!("OPT_CPU_P1_LINKS={LINKS}");
+        println!("OPT_CPU_P1_ITERS={ITERS}");
+        println!("OPT_CPU_P1_BUILD_NS_PER_LINK={build_ns_per_link}");
+        println!("OPT_CPU_P1_CANONICAL_HIT_NS_PER_OP={canonical_ns}");
+        println!("OPT_CPU_P1_START_INCIDENCE_LOOKUP_NS_PER_OP={incidence_ns}");
+        println!("OPT_CPU_P1_NOTE=informational-only-no-performance-threshold");
     }
 
     #[test]
