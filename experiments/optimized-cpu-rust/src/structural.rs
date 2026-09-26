@@ -980,6 +980,36 @@ mod tests {
             structural_discriminator_matches(&store, grounded, grounded, &[]).unwrap(),
             "identical grounded structure must survive discrimination"
         );
+
+        // Put the first real mismatch deeper than the bounded prefilter can
+        // inspect. The discriminator must return "possible" and delegate the
+        // final decision to the authoritative full matcher.
+        let mut deep_template = left;
+        let mut deep_claimed = other;
+        for _ in 0..(STRUCTURAL_DISCRIMINATION_BUDGET + 8) {
+            deep_template = store.ensure_pair(deep_template, right).unwrap();
+            deep_claimed = store.ensure_pair(deep_claimed, right).unwrap();
+        }
+        assert!(
+            structural_discriminator_matches(
+                &store,
+                deep_template,
+                deep_claimed,
+                &[],
+            )
+            .unwrap(),
+            "budget exhaustion must fail open to full unification"
+        );
+        assert_eq!(
+            unify_structural_rule_template(
+                &store,
+                deep_template,
+                deep_claimed,
+                &[],
+            ),
+            Err(StructuralError::TemplateMismatch),
+            "full matcher remains final authority after discriminator uncertainty"
+        );
     }
 
     #[test]
