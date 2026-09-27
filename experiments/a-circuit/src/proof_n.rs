@@ -95,7 +95,11 @@ pub(crate) struct WebProofResultStage {
     pub(crate) result_anum: String,
     pub(crate) result_sequence_anum: String,
     pub(crate) decoded_value: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) decoded_value_hi: Option<u32>,
     pub(crate) oracle_value: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) oracle_value_hi: Option<u32>,
     pub(crate) oracle_matches: bool,
     pub(crate) links_final: u32,
     pub(crate) identical_rerun_link_delta: u32,
@@ -137,7 +141,10 @@ pub(crate) fn export_scope(
 ) -> Vec<String> {
     scope
         .iter()
-        .map(|handle| store.export_anum(*handle).expect("scope export"))
+        .map(|handle| {
+            store.poles(*handle).expect("scope Link reference");
+            format!("L{handle}")
+        })
         .collect()
 }
 

@@ -8,6 +8,11 @@ use super::{
     },
     logic_n::{install_gate_basis, GateSet},
     mul32_n::Mul32Program,
+    proof_n::{
+        execute_to_quiescence, identical_rerun, load_runtime, loaded_handle,
+        prepare_stage, semantic_source, theory_admissions, visual_snapshot,
+        ProofRuntimeMemory, WebProofResultStage, WebStructuralProof,
+    },
 };
 use amemory_optimized_cpu_probe::{
     structural::{materialize_exact_sequence, read_exact_sequence},
@@ -466,6 +471,385 @@ fn web_mul_effect_flag(
         }
         FlagState::Undefined => *undefined |= mask,
     }
+}
+
+
+#[derive(Clone, Debug)]
+pub(crate) struct WebMulEffectProofExecution {
+    pub(crate) outcome: WebMulEffectOutcome,
+    pub(crate) proof: WebStructuralProof,
+}
+
+fn runtime_mul_effect_bit(
+    value: Handle,
+    zero: Handle,
+    one: Handle,
+) -> Option<u8> {
+    if value == one {
+        Some(1)
+    } else if value == zero {
+        Some(0)
+    } else {
+        None
+    }
+}
+
+fn runtime_mul_effect_word(
+    memory: &ProofRuntimeMemory,
+    word: Handle,
+    zero: Handle,
+    one: Handle,
+) -> Option<u32> {
+    let bits = read_exact_sequence(&memory.store, word).ok()?;
+    if bits.len() != WIDTH {
+        return None;
+    }
+    let mut value = 0u32;
+    for (index, bit) in bits.into_iter().enumerate() {
+        value |=
+            u32::from(runtime_mul_effect_bit(bit, zero, one)?) << index;
+    }
+    Some(value)
+}
+
+fn runtime_mul_effect_wide(
+    memory: &ProofRuntimeMemory,
+    wide: Handle,
+    zero: Handle,
+    one: Handle,
+) -> Option<u64> {
+    let halves = read_exact_sequence(&memory.store, wide).ok()?;
+    if halves.len() != 2 {
+        return None;
+    }
+    let lo = runtime_mul_effect_word(memory, halves[0], zero, one)?;
+    let hi = runtime_mul_effect_word(memory, halves[1], zero, one)?;
+    Some(u64::from(lo) | (u64::from(hi) << 32))
+}
+
+fn runtime_mul_effect_action(
+    memory: &ProofRuntimeMemory,
+    action: Handle,
+    set_tag: Handle,
+    undefined_tag: Handle,
+    expected_flag: Handle,
+    zero: Handle,
+    one: Handle,
+) -> Option<FlagState> {
+    let (tag, payload) = memory.store.poles(action).ok()?;
+    let values = read_exact_sequence(&memory.store, payload).ok()?;
+
+    if tag == set_tag {
+        if values.len() != 2 || values[0] != expected_flag {
+            return None;
+        }
+        Some(FlagState::Set(runtime_mul_effect_bit(
+            values[1], zero, one,
+        )?))
+    } else if tag == undefined_tag {
+        if values != vec![expected_flag] {
+            return None;
+        }
+        Some(FlagState::Undefined)
+    } else {
+        None
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn decode_runtime_mul_effect(
+    memory: &ProofRuntimeMemory,
+    final_link: Handle,
+    caller: Handle,
+    result_tag: Handle,
+    zero: Handle,
+    one: Handle,
+    set_tag: Handle,
+    undefined_tag: Handle,
+    cf_flag: Handle,
+    pf_flag: Handle,
+    af_flag: Handle,
+    zf_flag: Handle,
+    sf_flag: Handle,
+    of_flag: Handle,
+    reactions: usize,
+) -> Option<(Outcome, Handle)> {
+    let (final_caller, endpoint) = memory.store.poles(final_link).ok()?;
+    if final_caller != caller {
+        return None;
+    }
+    let (tag, payload) = memory.store.poles(endpoint).ok()?;
+    if tag != result_tag {
+        return None;
+    }
+
+    let values = read_exact_sequence(&memory.store, payload).ok()?;
+    if values.len() != 2 {
+        return None;
+    }
+    let product =
+        runtime_mul_effect_wide(memory, values[0], zero, one)?;
+    let patch = read_exact_sequence(&memory.store, values[1]).ok()?;
+    if patch.len() != 6 {
+        return None;
+    }
+
+    Some((
+        Outcome {
+            product,
+            cf: runtime_mul_effect_action(
+                memory, patch[0], set_tag, undefined_tag, cf_flag, zero, one,
+            )?,
+            pf: runtime_mul_effect_action(
+                memory, patch[1], set_tag, undefined_tag, pf_flag, zero, one,
+            )?,
+            af: runtime_mul_effect_action(
+                memory, patch[2], set_tag, undefined_tag, af_flag, zero, one,
+            )?,
+            zf: runtime_mul_effect_action(
+                memory, patch[3], set_tag, undefined_tag, zf_flag, zero, one,
+            )?,
+            sf: runtime_mul_effect_action(
+                memory, patch[4], set_tag, undefined_tag, sf_flag, zero, one,
+            )?,
+            of: runtime_mul_effect_action(
+                memory, patch[5], set_tag, undefined_tag, of_flag, zero, one,
+            )?,
+            reactions,
+        },
+        payload,
+    ))
+}
+
+pub(crate) fn web_prove_mul_effect(
+    a: u32,
+    b: u32,
+) -> Option<WebMulEffectProofExecution> {
+    let mut compiler = FullFixture::new();
+    let program = MulEffectProgram::install(&mut compiler);
+    let links_after_build = program.links_after_build as u32;
+
+    let aword = word_handle(&mut compiler, a);
+    let bword = word_handle(&mut compiler, b);
+    let args =
+        materialize_exact_sequence(&mut compiler.store, &[aword, bword]).ok()?;
+    let invocation =
+        call(&mut compiler.store, compiler.apply, program.effect, args);
+    let initial =
+        compiler.store.ensure_pair(compiler.k, invocation).ok()?;
+
+    let prepared_roots = vec![
+        semantic_source(
+            &compiler.store,
+            "function.effect.mul",
+            program.effect,
+        ),
+        semantic_source(
+            &compiler.store,
+            "function.dependency.mul32",
+            program.mul.mul32,
+        ),
+        semantic_source(
+            &compiler.store,
+            "function.dependency.or2",
+            program.gates.or2,
+        ),
+        semantic_source(
+            &compiler.store,
+            "result.dependency.mul32_tag",
+            program.mul.result_tag,
+        ),
+        semantic_source(&compiler.store, "data.a.word", aword),
+        semantic_source(&compiler.store, "data.b.word", bword),
+        semantic_source(&compiler.store, "data.bit.zero", compiler.zero),
+        semantic_source(&compiler.store, "data.bit.one", compiler.one),
+        semantic_source(
+            &compiler.store,
+            "execution.interpreter",
+            compiler.interpreter,
+        ),
+        semantic_source(&compiler.store, "execution.theory", compiler.theory),
+        semantic_source(&compiler.store, "execution.apply", compiler.apply),
+        semantic_source(&compiler.store, "invocation.args", args),
+        semantic_source(&compiler.store, "invocation.call", invocation),
+        semantic_source(&compiler.store, "scope.initial", initial),
+        semantic_source(&compiler.store, "context.caller", compiler.k),
+        semantic_source(&compiler.store, "result.tag", program.result_tag),
+        semantic_source(
+            &compiler.store,
+            "result.flag.set_tag",
+            program.schema.set_tag,
+        ),
+        semantic_source(
+            &compiler.store,
+            "result.flag.undefined_tag",
+            program.schema.undefined_tag,
+        ),
+        semantic_source(
+            &compiler.store,
+            "result.flag.cf",
+            program.schema.cf,
+        ),
+        semantic_source(
+            &compiler.store,
+            "result.flag.pf",
+            program.schema.pf,
+        ),
+        semantic_source(
+            &compiler.store,
+            "result.flag.af",
+            program.schema.af,
+        ),
+        semantic_source(
+            &compiler.store,
+            "result.flag.zf",
+            program.schema.zf,
+        ),
+        semantic_source(
+            &compiler.store,
+            "result.flag.sf",
+            program.schema.sf,
+        ),
+        semantic_source(
+            &compiler.store,
+            "result.flag.of",
+            program.schema.of,
+        ),
+    ];
+
+    let admissions = theory_admissions(&compiler.store, compiler.theory)?;
+    let prepare =
+        prepare_stage(&compiler.store, prepared_roots, admissions);
+    let (mut memory, load) = load_runtime(&prepare)?;
+
+    let interpreter = loaded_handle(&load, "execution.interpreter")?;
+    let initial = loaded_handle(&load, "scope.initial")?;
+    let caller = loaded_handle(&load, "context.caller")?;
+    let result_tag = loaded_handle(&load, "result.tag")?;
+    let zero = loaded_handle(&load, "data.bit.zero")?;
+    let one = loaded_handle(&load, "data.bit.one")?;
+    let set_tag = loaded_handle(&load, "result.flag.set_tag")?;
+    let undefined_tag =
+        loaded_handle(&load, "result.flag.undefined_tag")?;
+    let cf_flag = loaded_handle(&load, "result.flag.cf")?;
+    let pf_flag = loaded_handle(&load, "result.flag.pf")?;
+    let af_flag = loaded_handle(&load, "result.flag.af")?;
+    let zf_flag = loaded_handle(&load, "result.flag.zf")?;
+    let sf_flag = loaded_handle(&load, "result.flag.sf")?;
+    let of_flag = loaded_handle(&load, "result.flag.of")?;
+
+    let expected_reactions = expected_steps(b) as u32;
+    let max_steps = expected_reactions + 2;
+    let (mut engine, execute) = execute_to_quiescence(
+        &mut memory,
+        interpreter,
+        initial,
+        32,
+        max_steps,
+    )?;
+    if execute.active_reaction_count != expected_reactions
+        || engine.current().len() != 1
+    {
+        return None;
+    }
+
+    let final_link = engine.current()[0];
+    let (actual, payload) = decode_runtime_mul_effect(
+        &memory,
+        final_link,
+        caller,
+        result_tag,
+        zero,
+        one,
+        set_tag,
+        undefined_tag,
+        cf_flag,
+        pf_flag,
+        af_flag,
+        zf_flag,
+        sf_flag,
+        of_flag,
+        execute.active_reaction_count as usize,
+    )?;
+    let oracle = expected(a, b);
+
+    let result_anum = memory.store.export_anum(final_link).ok()?;
+    let result_sequence_anum = memory.store.export_anum(payload).ok()?;
+    let links_after_first = memory.store.link_count() as u32;
+    let identical_rerun_link_delta = identical_rerun(
+        &mut memory,
+        &mut engine,
+        initial,
+        &result_anum,
+        max_steps,
+    )?;
+    let visual_links = visual_snapshot(&memory, &load.semantic_roots);
+
+    let result = WebProofResultStage {
+        memory_instance_id: memory.id.clone(),
+        result_anum,
+        result_sequence_anum,
+        decoded_value: actual.product as u32,
+        decoded_value_hi: Some((actual.product >> 32) as u32),
+        oracle_value: oracle.product as u32,
+        oracle_value_hi: Some((oracle.product >> 32) as u32),
+        oracle_matches: actual == oracle,
+        links_final: memory.store.link_count() as u32,
+        identical_rerun_link_delta,
+        visual_links,
+    };
+    let proof = WebStructuralProof {
+        schema_version: 3,
+        block: "x86 MUL32 effect".to_owned(),
+        prepare,
+        load,
+        execute,
+        result,
+    };
+
+    let mut defined_mask = 0u32;
+    let mut value_mask = 0u32;
+    let mut undefined_mask = 0u32;
+    web_mul_effect_flag(
+        WEB_CF, actual.cf, &mut defined_mask, &mut value_mask,
+        &mut undefined_mask,
+    );
+    web_mul_effect_flag(
+        WEB_PF, actual.pf, &mut defined_mask, &mut value_mask,
+        &mut undefined_mask,
+    );
+    web_mul_effect_flag(
+        WEB_AF, actual.af, &mut defined_mask, &mut value_mask,
+        &mut undefined_mask,
+    );
+    web_mul_effect_flag(
+        WEB_ZF, actual.zf, &mut defined_mask, &mut value_mask,
+        &mut undefined_mask,
+    );
+    web_mul_effect_flag(
+        WEB_SF, actual.sf, &mut defined_mask, &mut value_mask,
+        &mut undefined_mask,
+    );
+    web_mul_effect_flag(
+        WEB_OF, actual.of, &mut defined_mask, &mut value_mask,
+        &mut undefined_mask,
+    );
+
+    let outcome = WebMulEffectOutcome {
+        lo: actual.product as u32,
+        hi: (actual.product >> 32) as u32,
+        defined_mask,
+        value_mask,
+        undefined_mask,
+        preserve_mask: 0,
+        reactions: expected_reactions,
+        links_after_build,
+        links_after_first,
+        steady_link_delta: proof.result.identical_rerun_link_delta,
+        quiescent: u8::from(proof.execute.final_quiescent),
+    };
+
+    Some(WebMulEffectProofExecution { outcome, proof })
 }
 
 pub(crate) fn web_run_mul_effect(

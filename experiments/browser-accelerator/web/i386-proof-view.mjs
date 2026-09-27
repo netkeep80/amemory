@@ -4,6 +4,10 @@ function code(value) {
   return `<code>${escapeHtml(value)}</code>`;
 }
 
+function hex32(value) {
+  return `0x${(value >>> 0).toString(16).padStart(8, "0")}`;
+}
+
 function semanticRootsHtml(roots, loaded = false) {
   return `<div class="proof-root-list">${roots.map((root) => `
     <div class="proof-root">
@@ -65,6 +69,15 @@ export function proofPipelineHtml(proof) {
     ...proof.execute.reactions.map((step) => step.memoryInstanceId),
   ]);
   const oneMemory = ids.size === 1;
+  const wideResult =
+    Number.isInteger(proof.result.decodedValueHi) &&
+    Number.isInteger(proof.result.oracleValueHi);
+  const decodedResult = wideResult
+    ? `${hex32(proof.result.decodedValueHi)}:${hex32(proof.result.decodedValue)}`
+    : String(proof.result.decodedValue);
+  const oracleResult = wideResult
+    ? `${hex32(proof.result.oracleValueHi)}:${hex32(proof.result.oracleValue)}`
+    : String(proof.result.oracleValue);
   const carrierText = proof.prepare.carrierDuplets
     .map((duplet, index) =>
       `${String(index + 1).padStart(6, "0")}  (${duplet.start}, ${duplet.end})`
@@ -151,8 +164,8 @@ export function proofPipelineHtml(proof) {
             <h4>RESULT + VISUALIZATION</h4>
             <p>The result is exported from the same runtime store. The host comparison below is an independent oracle only.</p>
             <div class="proof-kpis">
-              <span><small>Decoded result</small><strong>${proof.result.decodedValue}</strong></span>
-              <span><small>Host oracle</small><strong>${proof.result.oracleValue}</strong></span>
+              <span><small>Decoded ${wideResult ? "Hi:Lo" : "result"}</small><strong>${decodedResult}</strong></span>
+              <span><small>Host oracle ${wideResult ? "Hi:Lo" : ""}</small><strong>${oracleResult}</strong></span>
               <span><small>Oracle comparison</small><strong>${proof.result.oracleMatches ? "PASS" : "FAIL"}</strong></span>
               <span><small>Final Links</small><strong>${proof.result.linksFinal}</strong></span>
               <span><small>Identical rerun ΔLinks</small><strong>${proof.result.identicalRerunLinkDelta}</strong></span>

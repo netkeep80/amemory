@@ -1,8 +1,8 @@
 use crate::{
     arithmetic_effect_n::{web_prove_arithmetic, web_run_arithmetic},
     logic_effect_n::{web_prove_logic, web_run_logic},
-    mul32_n::web_run_mul32,
-    mul_effect_n::web_run_mul_effect,
+    mul32_n::web_prove_mul32,
+    mul_effect_n::web_prove_mul_effect,
     mux_n::{web_prove_mux1, web_prove_mux32},
     rotate32_n::{web_prove_rotate32, web_run_rotate32},
     rotate_carry32_n::{web_prove_rotate_carry32, web_run_rotate_carry32},
@@ -323,7 +323,10 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
     }
 
     if op == 23 {
-        let out = web_run_mul32(a, b);
+        let execution = web_prove_mul32(a, b)?;
+        let proof_json = serde_json::to_string(&execution.proof).ok()?;
+        let out = execution.outcome;
+        set_last_proof_json(proof_json);
         return Some(LabOutcome {
             value: out.lo,
             value_hi: out.hi,
@@ -341,7 +344,10 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
     }
 
     if op == 24 {
-        let out = web_run_mul_effect(a, b);
+        let execution = web_prove_mul_effect(a, b)?;
+        let proof_json = serde_json::to_string(&execution.proof).ok()?;
+        let out = execution.outcome;
+        set_last_proof_json(proof_json);
         return Some(LabOutcome {
             value: out.lo,
             value_hi: out.hi,

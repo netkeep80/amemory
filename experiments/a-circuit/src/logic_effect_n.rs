@@ -1457,7 +1457,9 @@ pub(crate) fn web_prove_logic(
         result_anum,
         result_sequence_anum,
         decoded_value: actual.value,
+        decoded_value_hi: None,
         oracle_value: oracle.value,
+        oracle_value_hi: None,
         oracle_matches: actual == oracle,
         links_final: memory.store.link_count() as u32,
         identical_rerun_link_delta,
@@ -1465,7 +1467,7 @@ pub(crate) fn web_prove_logic(
     };
 
     let proof = WebStructuralProof {
-        schema_version: 2,
+        schema_version: 3,
         block: block.to_owned(),
         prepare,
         load,
