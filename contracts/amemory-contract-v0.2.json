@@ -1,0 +1,343 @@
+{
+  "schema": "amemory-contract/v0.2",
+  "status": "candidate",
+  "accepted": false,
+  "issue": 203,
+  "purpose": "Backend-neutral observable contract for A-memory implementations and simulators that store and execute an A-network of Links against the accepted MTS v0.14 foundation while keeping the independently pinned execution profile explicit.",
+  "normativeAuthority": {
+    "repository": "netkeep80/anum_docs",
+    "mtsVersion": "mts-contract/v0.14",
+    "contractPath": "contracts/mts-contract-v0.14.json",
+    "contractBlobSha": "956fe6e79ddf7a7ba2664113e97633d6fa8a486f",
+    "conformancePath": "contracts/mts-conformance-v0.14.json",
+    "conformanceBlobSha": "eb94b41d9b9f55dbbf22549f2fc69411d0fb63b7",
+    "floatingMainIsAuthority": false,
+    "upstreamLock": "contracts/upstream/mts-v0.14.lock.json",
+    "requirementsProjection": "contracts/upstream/mts-v0.14-requirements.json",
+    "importPolicy": "independent-exact-foundation-and-execution-profile-pins-with-deterministic-generated-projection",
+    "manualMtsLawCopyIsAuthority": false,
+    "acceptedFoundationCommit": "fcbc97e2279471c2c5effed57685c5f49ec856be",
+    "executionProfile": {
+      "path": "profiles/amemory-execution-profile.json",
+      "commit": "af4e3dadbb9857fba7239a58f79ed2da59bc5c42",
+      "blobSha": "e2c614e1556f31f6230cb69d686d1f22ab2c97e8",
+      "schema": "mts-amemory-execution-profile/v0.1",
+      "id": "minimal-portable-amemory-execution",
+      "profileVersion": "0.1.0",
+      "separateFromAcceptedMtsFoundation": true,
+      "foundationMtsVersion": "v0.13",
+      "status": "current-post-v0.13-profile",
+      "relabeledAsAcceptedV014": false
+    }
+  },
+  "implementationFreedom": {
+    "physicalDoubletRequired": false,
+    "linkDbRequired": false,
+    "gpuRequired": false,
+    "mandatoryLanguage": null,
+    "backendLocalHandleIsPortableIdentity": false,
+    "internalRepresentationMayDiffer": true
+  },
+  "backendDeclaration": {
+    "requiredFields": [
+      "backendId",
+      "supportedMtsVersion",
+      "normativeContractBlobSha",
+      "normativeConformanceBlobSha",
+      "implementedProfileId",
+      "implementedProfileVersion",
+      "profilePinCommit",
+      "implementationStatus",
+      "supportLevel",
+      "declaredScope",
+      "currentScopeMechanism",
+      "oldPhysicalLinkRetentionPolicy",
+      "backendSubstrateBoundary",
+      "nonSemanticSchedulingChoices",
+      "normalizedSemanticEquivalence",
+      "differentialEvidence"
+    ],
+    "supportLevels": [
+      "partial",
+      "full"
+    ],
+    "partialMustFailClosedOutsideDeclaredScope": true,
+    "fullClaimRequiresAllMandatoryAmemoryConformance": true,
+    "implementationStatuses": [
+      "planned",
+      "prototype",
+      "production"
+    ],
+    "profileSupportRule": "A backend may declare the pinned profile while supportLevel remains partial; full profile conformance requires executable evidence for every mandatory portable execution law and may not be inferred from storage-only witnesses.",
+    "unimplementedMechanismMustBeExplicit": true,
+    "controlFlowIsSemanticAuthority": false,
+    "layoutIsSemanticAuthority": false
+  },
+  "requirements": [
+    {
+      "id": "AM-000",
+      "statement": "An A-memory implementation MUST both store an A-network of Links and execute that network according to the declared MTS semantics; storage-only or execution-only components are substrates/components, not complete A-memory implementations."
+    },
+    {
+      "id": "AM-001",
+      "statement": "Every backend MUST declare the exact accepted MTS foundation revision and exact normative contract/conformance revision, independently from the exact A-memory execution-profile pin."
+    },
+    {
+      "id": "AM-002",
+      "statement": "Portable semantic identity MUST be structural; backend-local handles, addresses, indices and allocation order MUST NOT cross implementation boundaries as semantic identity."
+    },
+    {
+      "id": "AM-003",
+      "statement": "Portable interchange and differential observations MUST use a declared structural representation appropriate to the semantic value: arbitrary recursive Link structure/wire MUST NOT be mislabeled as Anum/ExactSequence, while verified sequence values MAY use the accepted Anum representation."
+    },
+    {
+      "id": "AM-004",
+      "statement": "Observable Link behavior MUST preserve accepted structural classification and topology while semantic START_K/END_K roles are derived context-relatively from Link-native orientation; raw carrier start/end coordinates MUST NOT become semantic orientation authority."
+    },
+    {
+      "id": "AM-005",
+      "statement": "Description, transport representation, cache entry or speculative candidate MUST NOT by itself grant authority to materialize a semantic target."
+    },
+    {
+      "id": "AM-006",
+      "statement": "Within the declared execution scope, A-memory MUST reproduce accepted grounded reaction behavior including ZERO/ONE/MANY continuations."
+    },
+    {
+      "id": "AM-006A",
+      "statement": "A conformant full A-memory backend MUST expose a persistent/logically persistent A-network state across execution steps; execution MUST operate on that network rather than on a detached host-only semantic model."
+    },
+    {
+      "id": "AM-006B",
+      "statement": "Execution semantics MUST be driven by the A-network/Theory structures admitted by the declared MTS scope; backend-specific opcodes or hard-coded program meaning MUST NOT replace Link-carried semantic authority."
+    },
+    {
+      "id": "AM-007",
+      "statement": "Duplicate physical candidate production MUST converge to the same semantic Link result under canonical identity."
+    },
+    {
+      "id": "AM-008",
+      "statement": "Theory/context isolation and fail-closed boundaries MUST be preserved; unauthorized relations MUST NOT affect the reaction."
+    },
+    {
+      "id": "AM-009",
+      "statement": "Physical scheduling, storage layout and accelerator execution MAY differ but MUST NOT silently redefine observable semantics inside a claimed conformant scope."
+    },
+    {
+      "id": "AM-010",
+      "statement": "Backends conformant to the same exact MTS revision MUST agree under normalized portable observations for their shared declared scope."
+    },
+    {
+      "id": "AM-011",
+      "statement": "Performance and hardware efficiency are non-semantic properties and MUST NOT weaken conformance requirements."
+    },
+    {
+      "id": "AM-012",
+      "statement": "No A-memory backend is normative authority for MTS; semantic changes discovered during implementation MUST return to anum_docs for theory-level acceptance."
+    },
+    {
+      "id": "AM-013",
+      "statement": "Every accelerated operation in a claimed scope MUST have an executable differential witness against an independently executed reference backend or oracle."
+    },
+    {
+      "id": "AM-014",
+      "statement": "A backend mismatch MUST fail closed; a divergent accelerator result MUST NOT be reported as conformant or successful for that operation."
+    },
+    {
+      "id": "AM-015",
+      "statement": "Differential validation MUST include a negative control that deliberately perturbs a result and proves the checker detects the mismatch."
+    },
+    {
+      "id": "AM-016",
+      "statement": "The actual execution backend path MUST be observable; CPU fallback MUST NOT be reported as accelerator/GPU execution."
+    },
+    {
+      "id": "AM-017",
+      "statement": "Parallel candidate occurrences with equal pole pairs MUST converge to one canonical commit request for that pair."
+    },
+    {
+      "id": "AM-018",
+      "statement": "Physical representative selection, accelerator lane id, occurrence index and allocation order MUST NOT become portable semantic Link identity."
+    },
+    {
+      "id": "AM-019",
+      "statement": "Candidate canonicalization MUST complete before semantic materialization; candidate presence or duplicate convergence alone MUST NOT authorize semantic target creation."
+    },
+    {
+      "id": "AM-020",
+      "statement": "CPU/reference and accelerator canonicalization implementations MUST agree on normalized pair-set observations for their shared declared scope."
+    },
+    {
+      "id": "AM-021",
+      "statement": "A stateful backend MUST preserve committed A-memory storage state across declared execution/storage steps within its declared physical scope."
+    },
+    {
+      "id": "AM-022",
+      "statement": "For pre-authorized canonical pair commits, successor storage MUST contain exactly the union of prior stored pairs and authorized commits within the backend's declared physical scope."
+    },
+    {
+      "id": "AM-023",
+      "statement": "Repeated and duplicate authorized commits for the same pair MUST be idempotent in portable observation."
+    },
+    {
+      "id": "AM-024",
+      "statement": "Physical storage coordinates, matrix cells, local handles and accelerator addresses MUST NOT become portable semantic Link identity."
+    },
+    {
+      "id": "AM-025",
+      "statement": "The storage primitive MUST NOT infer MTS materialization authority; only explicitly pre-authorized requests may enter semantic storage through this boundary."
+    },
+    {
+      "id": "AM-026",
+      "statement": "Reference CPU and accelerator state transitions MUST agree after every observed step in their shared declared scope."
+    },
+    {
+      "id": "AM-027",
+      "statement": "Portable structural interchange for an arbitrary supported Link MUST use a canonical recursive Link structural representation/codec (or an explicitly equivalent declared representation) rather than backend-local handles; Anum is reserved for sequence semantics where applicable."
+    },
+    {
+      "id": "AM-028",
+      "statement": "Importing the same canonical recursive Link wire into independently allocated Memories MUST reconstruct structurally equivalent Links despite different local handles."
+    },
+    {
+      "id": "AM-029",
+      "statement": "Exporting a supported well-founded local Link through the direct structural codec MUST produce its canonical recursive Link wire; an ExactSequence/sequence value MAY additionally be represented as Anum only after the sequence boundary is verified."
+    },
+    {
+      "id": "AM-030",
+      "statement": "Malformed, truncated, trailing-garbage, unsupported or capacity-exceeding recursive-Link-wire or sequence/Anum import MUST fail closed before partial semantic publication."
+    },
+    {
+      "id": "AM-031",
+      "statement": "Local allocation order, local handle values and physical coordinates MUST NOT affect exported portable structural identity, whether observed as recursive Link wire or as a verified sequence/Anum representation."
+    },
+    {
+      "id": "AM-032",
+      "statement": "Repeated import of the same structural Link inside one Memory MUST reuse canonical local Link identity independently of which accepted portable representation produced it."
+    },
+    {
+      "id": "AM-033",
+      "statement": "Every backend MUST declare the exact implemented A-memory execution profile id, version and immutable upstream profile pin in addition to the accepted MTS foundation revision."
+    },
+    {
+      "id": "AM-034",
+      "statement": "Every backend MUST declare how the current Scope is represented and atomically published; an unimplemented current-Scope mechanism MUST be stated explicitly rather than inferred from a host cursor or storage handle."
+    },
+    {
+      "id": "AM-035",
+      "statement": "Every backend MUST declare whether prior physical Links and prior Scope structures are retained, reclaimed or compacted; this physical retention policy MUST NOT redefine current semantic membership."
+    },
+    {
+      "id": "AM-036",
+      "statement": "Every backend MUST enumerate its substrate/layout and physical scheduling choices and MUST mark local handles, allocation order, thread order, work-group order, GPU-lane order and backend API shape as non-semantic."
+    },
+    {
+      "id": "AM-037",
+      "statement": "Every backend claiming execution-profile support MUST define normalized semantic observation and executable differential evidence against an independently executed reference/backend for the shared declared scope."
+    },
+    {
+      "id": "AM-038",
+      "statement": "Storage, incidence, canonicalization, persistence or Anum round-trip evidence MAY support profile invariants but MUST NOT be reported as full reaction-profile conformance until the required A-network reaction laws are executed and differentially verified."
+    },
+    {
+      "id": "AM-039",
+      "statement": "A-memory execution semantics MUST be consumed from the pinned machine-readable execution profile and its canonical semantic owner; implementation control flow in anum_docs or amemory MUST NOT become an alternate semantic authority."
+    },
+    {
+      "id": "AM-040",
+      "statement": "The accepted MTS v0.14 foundation pin and the independently pinned post-v0.13 A-memory execution-profile 0.1.0 pin MUST remain immutable and independently upgradable under explicit governance; the execution profile MUST NOT be relabeled as v0.14."
+    },
+    {
+      "id": "AM-041",
+      "statement": "Any backend claiming an executable reaction slice MUST implement an explicit published-current-Scope substrate and an explicit reaction-start TheorySnapshot boundary for that slice; host cursors, bank numbers, local handles and storage layout remain substrate details and MUST NOT become semantic authority."
+    },
+    {
+      "id": "AM-042",
+      "statement": "Cross-backend reaction evidence MUST compare normalized portable structural observations of current/successor Scope membership, matched relations and publication handoff, and MUST include negative mismatch/no-match controls; backend-local handles MUST NOT be compared as semantic output."
+    },
+    {
+      "id": "AM-043",
+      "statement": "A backend claiming quiescence MUST expose it as an explicit result of a successful complete reaction evaluation with zero applicable admitted relations; scheduler inactivity, host timeout, empty queues, END topology, malformed state or runtime failure MUST NOT be promoted to semantic quiescence."
+    },
+    {
+      "id": "AM-044",
+      "statement": "A backend claiming ZERO or duplicate-convergence support MUST treat a structurally admitted empty image as a matched relation with zero successor contribution, MUST NOT let ZERO veto sibling non-zero outputs, and MUST converge duplicate successor Links by canonical semantic identity before publication; ZERO-only success is active (non-quiescent) and may publish an empty successor Scope."
+    },
+    {
+      "id": "AM-045",
+      "statement": "A backend claiming P14 support MUST keep live Theory admissions distinct from the reaction-start TheorySnapshot: an admission added after snapshot_t MUST NOT execute in reaction t, and MUST become executable only after an explicit new snapshot at reaction t+1; physical pre-materialization or live storage visibility alone MUST NOT grant same-reaction authority."
+    },
+    {
+      "id": "AM-046",
+      "statement": "A backend claiming P16/P17 support MUST allow bounded observation of active semantic recurrence under an unchanged TheorySnapshot without conflating recurrence with quiescence, and MUST NOT treat structural END as a global halt condition when an admitted continuation relation remains applicable; proof of nontermination MUST use a returning bounded witness rather than an intentionally non-returning runtime."
+    },
+    {
+      "id": "AM-047",
+      "statement": "A backend claiming accepted MTS v0.14 support MUST keep one abstract Link-forming semantic primitive: ROOT/START/END/PAIR recursive self-incidence forms emerge structurally and MUST NOT be implemented or exposed as four semantic opcodes."
+    },
+    {
+      "id": "AM-048",
+      "statement": "Semantic orientation MUST be context-relative and Link-native: START_K/END_K MUST derive from the oriented Context, while technical carrier pole order, host booleans and exact-sequence representations MUST NOT be orientation authority."
+    },
+    {
+      "id": "AM-049",
+      "statement": "The accepted v0.14 reaction-result basis MUST distinguish successful empty result from no admitted relation, MUST treat A->A as active period-1 recurrence rather than quiescence, and MUST preserve distinct A->A♀ and A->♂A outcomes from the same source."
+    },
+    {
+      "id": "AM-050",
+      "statement": "Semantic Links MUST be immutable; execution rewrite/currentness MUST be expressed by structural materialization plus Scope/current-state publication or replacement, never by in-place pole mutation."
+    },
+    {
+      "id": "AM-051",
+      "statement": "The recursive Link codec/wire MUST remain distinct from Anum/ExactSequence sequence representation; compatibility API names containing 'anum' MUST NOT be treated as semantic authority for this equivalence."
+    },
+    {
+      "id": "AM-052",
+      "statement": "Representation, byte/text encoding, runtime locator, packed carrier, proof transport and visualization DTO layers MUST remain non-ontological and MUST NOT create a second semantic entity above Link."
+    },
+    {
+      "id": "AM-053",
+      "statement": "Every accepted MTS v0.14 law V14-L1..V14-L14 MUST have an explicit downstream disposition identifying whether it is implemented at the A-memory boundary, inherited by generic execution-profile behavior, foundation-owned without a separate backend opcode, or explicitly deferred upstream."
+    }
+  ],
+  "acceptance": {
+    "state": "candidate",
+    "required": "Executable positive and negative witnesses for mandatory A-memory requirements, differential validation of materially different implementations, and explicit V14-L1..V14-L14 downstream disposition. Contract acceptance itself remains a separate governance decision."
+  },
+  "coreDefinition": {
+    "statement": "A-memory is a system that stores an A-network of Links and executes its dynamics according to the declared MTS version.",
+    "requiredCapabilities": [
+      "store and preserve the Link network",
+      "address/read Link structure and incidence",
+      "materialize canonical semantic Links within authorized scope",
+      "execute the A-network according to Link-carried MTS semantics",
+      "publish observable successor state/results",
+      "detect or report quiescence where the execution profile requires it"
+    ],
+    "passiveStorageAloneIsAmemory": false,
+    "executionWithoutPersistentNetworkModelIsAmemory": false
+  },
+  "executionProfileBoundary": {
+    "id": "minimal-portable-amemory-execution",
+    "profileVersion": "0.1.0",
+    "sourceProjection": "contracts/upstream/mts-v0.14-requirements.json#/executionProfile",
+    "portableLawCount": 17,
+    "semanticExtensionRequired": false,
+    "acceptedMtsFoundationMutated": false,
+    "currentImplementationClaim": "full-p01-p17-green-plus-v014-boundary-evidence-ready-candidate",
+    "fullReactionProfileConformanceClaimed": true,
+    "acceptedFoundationVersion": "v0.14",
+    "executionProfileFoundationVersion": "v0.13",
+    "executionProfileRelabeledAsAcceptedFoundation": false
+  },
+  "mtsV014Boundary": {
+    "acceptedFoundation": "mts-contract/v0.14",
+    "acceptedFoundationCommit": "fcbc97e2279471c2c5effed57685c5f49ec856be",
+    "executionProfile": "minimal-portable-amemory-execution@0.1.0",
+    "executionProfileFoundationMtsVersion": "v0.13",
+    "foundationAndProfilePinsIndependent": true,
+    "recursiveLinkWireEqualsAnum": false,
+    "rawCarrierPoleOrderIsSemanticOrientationAuthority": false,
+    "fourRecursiveFormsAreFourPrimitiveOpcodes": false,
+    "representationLayersCreateSecondOntology": false
+  }
+}
