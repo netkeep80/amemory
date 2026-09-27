@@ -742,6 +742,13 @@ jobs:
             const shl1 = verifyShiftProof(13, 0x80000001, 1, 0x00000002, "SHL32");
             verifyShiftProof(14, 0x80000001, 1, 0x40000000, "SHR32");
             verifyShiftProof(15, 0x80000001, 1, 0xc0000000, "SAR32");
+            const shl32 = verifyShiftProof(13, 0x80000001, 32, 0x80000001, "SHL32");
+            if (shl32.defined !== 0 ||
+                shl32.undefined !== 0 ||
+                shl32.preserve !== 0x000008d5 ||
+                shl32.reactions !== 1) {
+              throw new Error("masked-zero SHL32 must preserve all status flags in one structural reaction");
+            }
             const shl33 = verifyShiftProof(13, 0x80000001, 33, 0x00000002, "SHL32");
             if (shl1.countSource === shl33.countSource) {
               throw new Error("Count8 1 and 33 must be distinct structural inputs before masking");
