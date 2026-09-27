@@ -744,7 +744,7 @@ export async function gpuImportTechnicalRecursiveWiresAtomic(device, gpuPool, so
   if (!Array.isArray(sources) || sources.length === 0) return null;
 
   // The live GPU pool remains untouched until the staging pool contains the
-  // entire valid Aset. Per-member gpuImport commits only into this scratch pool.
+  // entire valid Aset. Per-member technical recursive-wire import commits only into this scratch pool.
   const staging = createGpuAnumPool(device, gpuPool.memory + ":staging");
   const handles = [];
   try {
@@ -855,7 +855,7 @@ export async function runRecursiveWireBoundaryBrowser(wasm, device) {
       cpuRefs.set(source, ref);
     }
 
-    for (const source of [...ANUM_FIXTURES].reverse()) {
+    for (const source of [...RECURSIVE_WIRE_FIXTURES].reverse()) {
       const ref = await gpuImportTechnicalRecursiveWire(device, gpuPool, source);
       must(ref, `GPU import rejected valid fixture ${source}`);
       const exported = await gpuExportTechnicalRecursiveWire(device, gpuPool, ref);

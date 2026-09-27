@@ -12,10 +12,18 @@ import {
   cpuImportRaw,
   cpuImportSemanticRecursiveWire,
   cpuImportTechnicalRecursiveWire,
+  cpuImportBatchAtomic,
+  cpuImportTechnicalRecursiveWiresAtomic,
   exportLocalTopology,
   exportTechnicalRecursiveWireFromTopology,
   formatAnum,
   formatRecursiveWire,
+  gpuExport,
+  gpuExportTechnicalRecursiveWire,
+  gpuImport,
+  gpuImportBatchAtomic,
+  gpuImportTechnicalRecursiveWire,
+  gpuImportTechnicalRecursiveWiresAtomic,
   localRef,
   normalizeAnum,
   normalizeRecursiveWire,
@@ -41,7 +49,11 @@ assert.equal(normalizeAnum, normalizeRecursiveWire);
 assert.equal(compileAnumPlan, compileRecursiveWirePlan);
 assert.equal(exportLocalTopology, exportTechnicalRecursiveWireFromTopology);
 assert.equal(cpuImportRaw, cpuImportTechnicalRecursiveWire);
+assert.equal(cpuImportBatchAtomic, cpuImportTechnicalRecursiveWiresAtomic);
 assert.equal(cpuExport, cpuExportTechnicalRecursiveWire);
+assert.equal(gpuImport, gpuImportTechnicalRecursiveWire);
+assert.equal(gpuImportBatchAtomic, gpuImportTechnicalRecursiveWiresAtomic);
+assert.equal(gpuExport, gpuExportTechnicalRecursiveWire);
 
 for (const source of ["", "5", "1", "9", "6", "11", "88", "19868x"]) {
   assert.throws(() => normalizeRecursiveWire(source), /recursive|token|truncated|trailing/);
@@ -189,7 +201,7 @@ assert.throws(
   () => cpuImportSemanticRecursiveWire(
     topologyWasm, boundCpuMirror, "1986x", cpuFixtureMemory,
   ),
-  /malformed Anum token/,
+  /malformed recursive Link wire token/,
 );
 assert.equal(fixtureImportCalls, importCallsBeforeMalformed);
 assert.throws(
