@@ -4,7 +4,7 @@ use amemory_optimized_cpu_probe::{
 };
 use serde::Serialize;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     sync::atomic::{AtomicU32, Ordering},
 };
 
@@ -27,11 +27,18 @@ pub(crate) struct WebProofLoadedRoot {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct WebProofDuplet {
+    pub(crate) start: u32,
+    pub(crate) end: u32,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct WebProofPrepareStage {
     pub(crate) compiler_label: String,
     pub(crate) runtime_memory_exists: bool,
     pub(crate) compiled_links: u32,
-    pub(crate) aset_anums: Vec<String>,
+    pub(crate) carrier_duplets: Vec<WebProofDuplet>,
     pub(crate) semantic_roots: Vec<WebProofPreparedRoot>,
     pub(crate) theory_admissions: Vec<String>,
 }
@@ -42,8 +49,8 @@ pub(crate) struct WebProofLoadStage {
     pub(crate) memory_instance_id: String,
     pub(crate) links_before_load: u32,
     pub(crate) links_after_load: u32,
-    pub(crate) imported_anums: u32,
-    pub(crate) portable_round_trip: bool,
+    pub(crate) imported_duplets: u32,
+    pub(crate) carrier_round_trip: bool,
     pub(crate) semantic_roots: Vec<WebProofLoadedRoot>,
 }
 
@@ -114,74 +121,14 @@ pub(crate) struct ProofRuntimeMemory {
     pub(crate) store: OptimizedLinkStore,
 }
 
-pub(crate) fn export_portable_aset(store: &OptimizedLinkStore) -> Vec<String> {
-    let count = store.link_count() as u32;
-    let mut referenced = HashSet::new();
-    for handle in 1..=count {
-        let (start, end) = store.poles(handle).expect("proof poles");
-        if start != handle {
-            referenced.insert(start);
-        }
-        if end != handle {
-            referenced.insert(end);
-        }
-    }
-
-    let mut sources = Vec::new();
-    let mut reconstructed = OptimizedLinkStore::new();
-
-    for handle in 1..=count {
-        if referenced.contains(&handle) {
-            continue;
-        }
-        sources.push(
-            store.export_anum(handle).expect("proof root export")
-        );
-    }
-
-    let imported_roots = reconstructed
-        .import_anums(&sources)
-        .expect("proof root batch import");
-    for (source, imported) in sources.iter().zip(imported_roots) {
-        assert_eq!(
-            reconstructed
-                .export_anum(imported)
-                .expect("proof root round-trip"),
-            *source,
-        );
-    }
-
-    if reconstructed.link_count() < count as usize {
-        for handle in 1..=count {
-            if reconstructed.link_count() == count as usize {
-                break;
-            }
-
-            let source =
-                store.export_anum(handle).expect("proof completion export");
-            let before = reconstructed.link_count();
-            let imported = reconstructed
-                .import_anum(&source)
-                .expect("proof completion import");
-            assert_eq!(
-                reconstructed
-                    .export_anum(imported)
-                    .expect("proof completion round-trip"),
-                source,
-            );
-            if reconstructed.link_count() > before {
-                sources.push(source);
-            }
-        }
-    }
-
-    assert_eq!(
-        reconstructed.link_count(),
-        count as usize,
-        "portable Aset omitted topology"
-    );
-
-    sources
+pub(crate) fn export_packed_carrier(
+    store: &OptimizedLinkStore,
+) -> Vec<WebProofDuplet> {
+    store
+        .export_packed_duplets()
+        .into_iter()
+        .map(|(start, end)| WebProofDuplet { start, end })
+        .collect()
 }
 
 pub(crate) fn export_scope(
@@ -232,11 +179,11 @@ pub(crate) fn prepare_stage(
 ) -> WebProofPrepareStage {
     WebProofPrepareStage {
         compiler_label:
-            "portable Aset compiler/preparation state (not runtime A-memory)"
+            "CPU-built packed duplet carrier (not runtime A-memory)"
                 .to_owned(),
         runtime_memory_exists: false,
         compiled_links: compiler.link_count() as u32,
-        aset_anums: export_portable_aset(compiler),
+        carrier_duplets: export_packed_carrier(compiler),
         semantic_roots,
         theory_admissions,
     }
@@ -253,7 +200,12 @@ pub(crate) fn load_runtime(
     };
 
     let links_before_load = memory.store.link_count() as u32;
-    memory.store.import_anums(&prepare.aset_anums).ok()?;
+    let carrier = prepare
+        .carrier_duplets
+        .iter()
+        .map(|duplet| (duplet.start, duplet.end))
+        .collect::<Vec<_>>();
+    memory.store.load_packed_duplets(&carrier).ok()?;
     let links_after_load = memory.store.link_count() as u32;
 
     if links_after_load != prepare.compiled_links {
@@ -273,13 +225,14 @@ pub(crate) fn load_runtime(
 
     let mut loaded_roots =
         Vec::with_capacity(prepare.semantic_roots.len());
-    let mut portable_round_trip = true;
+    let mut carrier_round_trip =
+        memory.store.export_packed_duplets() == carrier;
 
     for (root, handle) in prepare.semantic_roots.iter().zip(root_handles) {
         if memory.store.export_anum(handle).ok().as_deref()
             != Some(root.source.as_str())
         {
-            portable_round_trip = false;
+            carrier_round_trip = false;
         }
         loaded_roots.push(WebProofLoadedRoot {
             role: root.role.clone(),
@@ -292,8 +245,8 @@ pub(crate) fn load_runtime(
         memory_instance_id: memory.id.clone(),
         links_before_load,
         links_after_load,
-        imported_anums: prepare.aset_anums.len() as u32,
-        portable_round_trip,
+        imported_duplets: prepare.carrier_duplets.len() as u32,
+        carrier_round_trip,
         semantic_roots: loaded_roots,
     };
 
@@ -435,7 +388,7 @@ mod tests {
     use amemory_optimized_cpu_probe::ROOT_HANDLE;
 
     #[test]
-    fn portable_aset_reconstructs_complete_shared_topology() {
+    fn packed_carrier_reconstructs_complete_shared_topology() {
         let mut store = OptimizedLinkStore::new();
         let o = store.import_anum("98").unwrap();
         let c = store.import_anum("68").unwrap();
@@ -446,18 +399,23 @@ mod tests {
         let _top = store.ensure_pair(left, right).unwrap();
         let _second_top = store.ensure_pair(right, ROOT_HANDLE).unwrap();
 
-        let sources = export_portable_aset(&store);
-        assert!(
-            sources.len() < store.link_count(),
-            "portable Aset should carry structural roots, not one source per Link"
-        );
+        let carrier = export_packed_carrier(&store);
+        assert_eq!(carrier.len(), store.link_count());
 
+        let packed = carrier
+            .iter()
+            .map(|duplet| (duplet.start, duplet.end))
+            .collect::<Vec<_>>();
         let mut reconstructed = OptimizedLinkStore::new();
-        let handles = reconstructed.import_anums(&sources).unwrap();
-        for (source, handle) in sources.iter().zip(handles) {
-            assert_eq!(reconstructed.export_anum(handle).unwrap(), *source);
-        }
+        reconstructed.load_packed_duplets(&packed).unwrap();
 
         assert_eq!(reconstructed.link_count(), store.link_count());
+        assert_eq!(reconstructed.export_packed_duplets(), packed);
+        for handle in 1..=store.link_count() as u32 {
+            assert_eq!(
+                reconstructed.export_anum(handle).unwrap(),
+                store.export_anum(handle).unwrap()
+            );
+        }
     }
 }
