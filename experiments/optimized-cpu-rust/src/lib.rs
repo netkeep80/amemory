@@ -1053,7 +1053,11 @@ mod tests {
         }
 
         let stable = loaded.export_packed_duplets();
-        let malformed = vec![(ROOT_HANDLE, ROOT_HANDLE), (2, ROOT_HANDLE)];
+        let malformed = vec![
+            (ROOT_HANDLE, ROOT_HANDLE),
+            (ROOT_HANDLE, ROOT_HANDLE),
+            (ROOT_HANDLE, ROOT_HANDLE),
+        ];
         assert!(matches!(
             loaded.load_packed_duplets(&malformed),
             Err(StoreError::InvalidPackedCarrier { .. })
