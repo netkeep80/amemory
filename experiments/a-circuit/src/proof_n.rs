@@ -397,24 +397,25 @@ impl WebStructuralProof {
             .iter()
             .enumerate()
             .map(|(index, step)| {
+                let links_before = previous_links_after;
                 if step.memory_instance_id != memory_id
                     || step.step != index as u32
-                    || step.links_after < previous_links_after
+                    || step.links_after < links_before
                     || step.links_after > self.result.links_final
                 {
                     return None;
                 }
-                previous_links_after = step.links_after;
                 let scope_before = step
                     .scope_before
                     .iter()
-                    .map(|value| parse_local_ref(value, step.links_after))
+                    .map(|value| parse_local_ref(value, links_before))
                     .collect::<Option<Vec<_>>>()?;
                 let scope_after = step
                     .scope_after
                     .iter()
                     .map(|value| parse_local_ref(value, step.links_after))
                     .collect::<Option<Vec<_>>>()?;
+                previous_links_after = step.links_after;
                 Some(WebCompactReactionStep {
                     step: step.step,
                     scope_before,
@@ -915,6 +916,24 @@ mod tests {
         });
         proof.result.links_final = 2;
         proof.execute.reactions[0].links_after = 1;
+        assert!(proof.compact().is_none());
+    }
+
+    #[test]
+    fn compact_rejects_scope_before_link_created_by_same_reaction() {
+        let mut proof = minimal_structural_proof();
+        proof.result.visual_links.push(WebProofVisualLink {
+            key: "A-memory#test:L2".to_owned(),
+            start_key: "A-memory#test:L1".to_owned(),
+            end_key: "A-memory#test:L1".to_owned(),
+            local_handle: 2,
+            label: None,
+            tags: vec![],
+        });
+        proof.result.links_final = 2;
+        proof.execute.reactions[0].scope_before = vec!["L2".to_owned()];
+        proof.execute.reactions[0].scope_after = vec!["L2".to_owned()];
+        proof.execute.reactions[0].links_after = 2;
         assert!(proof.compact().is_none());
     }
 
