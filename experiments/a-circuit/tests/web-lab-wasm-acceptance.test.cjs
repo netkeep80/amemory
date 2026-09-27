@@ -186,6 +186,59 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
         throw new Error(registryBlock.id + " overlay handle out of range");
       }
     }
+    const deriveRecursiveSource = (rootHandle) => {
+      const output = [];
+      const active = new Set();
+      const stack = [{ kind: "visit", handle: rootHandle }];
+
+      while (stack.length !== 0) {
+        const frame = stack.pop();
+        if (frame.kind === "exit") {
+          active.delete(frame.handle);
+          continue;
+        }
+
+        const handle = frame.handle;
+        if (!Number.isInteger(handle) ||
+            handle < 1 ||
+            handle > baseCarrier.length) {
+          throw new Error(
+            registryBlock.id + " recursive witness handle out of carrier range"
+          );
+        }
+        const pair = baseCarrier[handle - 1];
+        const start = pair.start;
+        const end = pair.end;
+
+        if (start === handle && end === handle) {
+          output.push("8");
+          continue;
+        }
+        if (active.has(handle)) {
+          throw new Error(
+            registryBlock.id + " recursive witness is non-well-founded"
+          );
+        }
+
+        active.add(handle);
+        stack.push({ kind: "exit", handle });
+
+        if (start === handle) {
+          output.push("9");
+          stack.push({ kind: "visit", handle: end });
+        } else if (end === handle) {
+          output.push("6");
+          stack.push({ kind: "visit", handle: start });
+        } else {
+          output.push("1");
+          stack.push({ kind: "visit", handle: end });
+          stack.push({ kind: "visit", handle: start });
+        }
+      }
+
+      return output.join("");
+    };
+
     const preparedRoots = proof.prepare.semanticRoots;
     const loadedRoots = proof.load.semanticRoots;
     if (!Array.isArray(preparedRoots) ||
@@ -196,6 +249,8 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
     const loadedByRole = new Map(
       loadedRoots.map((root) => [root.role, root])
     );
+    let derivedRootWitnessCount = 0;
+    let derivedRootWitnessBytes = 0;
     const locatorOnlyRoots = preparedRoots.map((root) => {
       if (!Number.isInteger(root.carrierRef) ||
           root.carrierRef < 1 ||
@@ -211,6 +266,16 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
           registryBlock.id + " semantic root CarrierRef differential mismatch"
         );
       }
+
+      const derivedSource = deriveRecursiveSource(root.carrierRef);
+      if (derivedSource !== root.source) {
+        throw new Error(
+          registryBlock.id + " lazily derived recursive root witness mismatch"
+        );
+      }
+      derivedRootWitnessCount += 1;
+      derivedRootWitnessBytes += Buffer.byteLength(derivedSource, "utf8");
+
       return {
         role: root.role,
         carrierRef: root.carrierRef,
@@ -273,6 +338,8 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
         carrierDenseU32Floor: carrierDuplets.length * 2 * 4,
         semanticRootsJson: jsonBytes(preparedRoots),
         semanticRootLocatorOnlyJson: jsonBytes(locatorOnlyRoots),
+        derivedRootWitnessCount,
+        derivedRootWitnessBytes,
         semanticRootRecursiveSources: recursiveSources.reduce(
           (sum, value) => sum + Buffer.byteLength(value, "utf8"),
           0
@@ -1145,6 +1212,12 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
         totalFullRootsJsonBytes: sumBytes("semanticRootsJson"),
         totalLocatorOnlyJsonBytes: sumBytes("semanticRootLocatorOnlyJson"),
         totalRecursiveSourceBytes: sumBytes("semanticRootRecursiveSources"),
+        totalDerivedWitnesses: measuredProofs.reduce(
+          (sum, item) => sum + item.bytes.derivedRootWitnessCount,
+          0
+        ),
+        totalDerivedWitnessBytes: sumBytes("derivedRootWitnessBytes"),
+        derivationMismatchCount: 0,
       },
       topologyPrototype: (() => {
         const totalCurrentTopologyJsonBytes = measuredProofs.reduce(
