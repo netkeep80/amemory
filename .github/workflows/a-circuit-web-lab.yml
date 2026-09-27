@@ -316,6 +316,7 @@ jobs:
                 throw new Error("registry/WASM mismatch: " + block.id);
               }
             }
+            const proofCoveredOpcodes = new Set();
 
             // Real WASM execution smoke: composed structural MUX1.
             if (w.amemory_i386_lab_run(12, 1, 0, 1) !== 1) {
@@ -345,6 +346,10 @@ jobs:
               .from(w.memory.buffer, proofPtr, proofLen)
               .toString("utf8");
             const proof = JSON.parse(proofText);
+            if (proof.schemaVersion !== 3) {
+              throw new Error("MUX1 proof schema is not v3");
+            }
+            proofCoveredOpcodes.add(12);
             const memoryId = proof.load.memoryInstanceId;
             if (!memoryId || proof.execute.memoryInstanceId !== memoryId || proof.result.memoryInstanceId !== memoryId) {
               throw new Error("proof changed runtime A-memory identity");
@@ -412,6 +417,16 @@ jobs:
               const proof = JSON.parse(
                 Buffer.from(w.memory.buffer, ptr, len).toString("utf8")
               );
+              if (proof.schemaVersion !== 3) {
+                throw new Error(label + " proof schema is not v3");
+              }
+              const registryBlock = registry.blocks.find(
+                (block) => block.name === proof.block
+              );
+              if (!registryBlock) {
+                throw new Error(label + " proof block is absent from registry: " + proof.block);
+              }
+              proofCoveredOpcodes.add(registryBlock.opcode);
               if (!Array.isArray(proof.prepare?.theoryAdmissions) ||
                   proof.prepare.theoryAdmissions.length === 0 ||
                   !proof.prepare.theoryAdmissions.every(
@@ -987,6 +1002,40 @@ jobs:
             if ((w.amemory_i386_lab_preserve_mask() >>> 0) !== 0x000008d5) {
               throw new Error("MUL32 raw must preserve status flags");
             }
+            const rawMulProof = readCurrentProof("MUL32 raw Wide64");
+            if (rawMulProof.block !== "MUL32 raw Wide64" ||
+                (rawMulProof.result.decodedValue >>> 0) !== 0xfffffffe ||
+                (rawMulProof.result.decodedValueHi >>> 0) !== 1 ||
+                (rawMulProof.result.oracleValue >>> 0) !== 0xfffffffe ||
+                (rawMulProof.result.oracleValueHi >>> 0) !== 1 ||
+                !rawMulProof.result.oracleMatches ||
+                rawMulProof.result.identicalRerunLinkDelta !== 0 ||
+                !rawMulProof.execute.finalQuiescent) {
+              throw new Error("MUL32 raw Wide64 structural proof result failed");
+            }
+            const rawMulRoles = new Set(
+              rawMulProof.prepare.semanticRoots.map((root) => root.role)
+            );
+            for (const role of [
+              "function.mul32",
+              "function.dependency.add64",
+              "result.dependency.add64_tag",
+              "data.a.word",
+              "data.b.word",
+              "execution.interpreter",
+              "execution.theory",
+              "execution.apply",
+              "invocation.call",
+              "scope.initial",
+              "result.tag",
+            ]) {
+              if (!rawMulRoles.has(role)) {
+                throw new Error("MUL32 raw proof missing semantic root " + role);
+              }
+            }
+            if (rawMulProof.result.visualLinks.length !== rawMulProof.result.linksFinal) {
+              throw new Error("MUL32 raw visual snapshot is incomplete");
+            }
 
             runWide(24, 0xffffffff, 2, 0xfffffffe, 1, 97 + 1038, "x86 MUL32 effect");
             if ((w.amemory_i386_lab_defined_mask() >>> 0) !== 0x00000801) {
@@ -1001,8 +1050,64 @@ jobs:
             if ((w.amemory_i386_lab_preserve_mask() >>> 0) !== 0) {
               throw new Error("x86 MUL32 must not preserve status flags");
             }
+            const mulEffectProof = readCurrentProof("x86 MUL32 effect");
+            if (mulEffectProof.block !== "x86 MUL32 effect" ||
+                (mulEffectProof.result.decodedValue >>> 0) !== 0xfffffffe ||
+                (mulEffectProof.result.decodedValueHi >>> 0) !== 1 ||
+                (mulEffectProof.result.oracleValue >>> 0) !== 0xfffffffe ||
+                (mulEffectProof.result.oracleValueHi >>> 0) !== 1 ||
+                !mulEffectProof.result.oracleMatches ||
+                mulEffectProof.result.identicalRerunLinkDelta !== 0 ||
+                !mulEffectProof.execute.finalQuiescent) {
+              throw new Error("x86 MUL32 effect structural proof result failed");
+            }
+            const mulEffectRoles = new Set(
+              mulEffectProof.prepare.semanticRoots.map((root) => root.role)
+            );
+            for (const role of [
+              "function.effect.mul",
+              "function.dependency.mul32",
+              "function.dependency.or2",
+              "result.dependency.mul32_tag",
+              "result.flag.set_tag",
+              "result.flag.undefined_tag",
+              "result.flag.cf",
+              "result.flag.pf",
+              "result.flag.af",
+              "result.flag.zf",
+              "result.flag.sf",
+              "result.flag.of",
+              "data.a.word",
+              "data.b.word",
+              "execution.interpreter",
+              "execution.theory",
+              "execution.apply",
+              "invocation.call",
+              "scope.initial",
+              "result.tag",
+            ]) {
+              if (!mulEffectRoles.has(role)) {
+                throw new Error("x86 MUL32 effect proof missing semantic root " + role);
+              }
+            }
+            if (mulEffectProof.result.visualLinks.length !== mulEffectProof.result.linksFinal) {
+              throw new Error("x86 MUL32 effect visual snapshot is incomplete");
+            }
 
-            console.log("WASM registry + MUX1/MUX32/logic/arithmetic/shift/rotate/unary-proofs/MUL structural smoke PASS");
+            const missingProofOpcodes = registry.blocks
+              .map((block) => block.opcode)
+              .filter((opcode) => !proofCoveredOpcodes.has(opcode));
+            if (missingProofOpcodes.length !== 0) {
+              throw new Error(
+                "registry opcodes without structural proof: " +
+                missingProofOpcodes.join(",")
+              );
+            }
+            if (proofCoveredOpcodes.size !== registry.blocks.length) {
+              throw new Error("proof coverage set does not match registry cardinality");
+            }
+
+            console.log("WASM registry + one-A-memory schema-v3 proofs for all 24 opcodes PASS");
           }).catch((error) => {
             console.error(error);
             process.exit(1);

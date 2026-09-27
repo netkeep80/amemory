@@ -773,14 +773,16 @@ pub(crate) fn web_prove_mux32(
         result_anum,
         result_sequence_anum,
         decoded_value,
+        decoded_value_hi: None,
         oracle_value,
+        oracle_value_hi: None,
         oracle_matches: decoded_value == oracle_value,
         links_final: memory.store.link_count() as u32,
         identical_rerun_link_delta,
         visual_links,
     };
     let proof = WebStructuralProof {
-        schema_version: 2,
+        schema_version: 3,
         block: "MUX32".to_owned(),
         prepare,
         load,
@@ -1319,7 +1321,9 @@ pub(crate) fn web_prove_mux1(
         result_anum,
         result_sequence_anum,
         decoded_value,
+        decoded_value_hi: None,
         oracle_value,
+        oracle_value_hi: None,
         oracle_matches: decoded_value == oracle_value,
         links_final: memory.store.link_count() as u32,
         identical_rerun_link_delta,
@@ -1327,7 +1331,7 @@ pub(crate) fn web_prove_mux1(
     };
 
     Some(WebStructuralProof {
-        schema_version: 2,
+        schema_version: 3,
         block: "MUX1".to_owned(),
         prepare,
         load,

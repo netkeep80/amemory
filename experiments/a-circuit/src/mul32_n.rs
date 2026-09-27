@@ -2,6 +2,11 @@ use super::{
     full_adder::{
         call, define_bundle_rule, index_rule_for, Fixture as FullFixture,
     },
+    proof_n::{
+        execute_to_quiescence, identical_rerun, load_runtime, loaded_handle,
+        prepare_stage, semantic_source, theory_admissions, visual_snapshot,
+        ProofRuntimeMemory, WebProofResultStage, WebStructuralProof,
+    },
     wide64_n::Wide64Program,
 };
 use amemory_optimized_cpu_probe::{
@@ -81,7 +86,7 @@ fn zero_wide(f:&mut FullFixture)->Handle{
 pub(crate) struct Mul32Program{
     pub(crate) mul32:Handle,
     pub(crate) result_tag:Handle,
-    add64:Wide64Program,
+    pub(crate) add64:Wide64Program,
     pub(crate) links_after_build:usize,
 }
 
@@ -329,6 +334,214 @@ pub(crate) struct WebMul32Outcome {
     pub(crate) links_after_first: u32,
     pub(crate) steady_link_delta: u32,
     pub(crate) quiescent: u8,
+}
+
+
+#[derive(Clone, Debug)]
+pub(crate) struct WebMul32ProofExecution {
+    pub(crate) outcome: WebMul32Outcome,
+    pub(crate) proof: WebStructuralProof,
+}
+
+fn runtime_mul_bit(value: Handle, zero: Handle, one: Handle) -> Option<u8> {
+    if value == one {
+        Some(1)
+    } else if value == zero {
+        Some(0)
+    } else {
+        None
+    }
+}
+
+fn runtime_mul_word(
+    memory: &ProofRuntimeMemory,
+    word: Handle,
+    zero: Handle,
+    one: Handle,
+) -> Option<u32> {
+    let bits = read_exact_sequence(&memory.store, word).ok()?;
+    if bits.len() != WIDTH {
+        return None;
+    }
+
+    let mut value = 0u32;
+    for (index, bit) in bits.into_iter().enumerate() {
+        value |= u32::from(runtime_mul_bit(bit, zero, one)?) << index;
+    }
+    Some(value)
+}
+
+fn runtime_mul_wide(
+    memory: &ProofRuntimeMemory,
+    wide: Handle,
+    zero: Handle,
+    one: Handle,
+) -> Option<u64> {
+    let halves = read_exact_sequence(&memory.store, wide).ok()?;
+    if halves.len() != 2 {
+        return None;
+    }
+    let lo = runtime_mul_word(memory, halves[0], zero, one)?;
+    let hi = runtime_mul_word(memory, halves[1], zero, one)?;
+    Some(u64::from(lo) | (u64::from(hi) << 32))
+}
+
+fn decode_runtime_mul_result(
+    memory: &ProofRuntimeMemory,
+    final_link: Handle,
+    caller: Handle,
+    result_tag: Handle,
+    zero: Handle,
+    one: Handle,
+) -> Option<(u64, Handle)> {
+    let (final_caller, endpoint) = memory.store.poles(final_link).ok()?;
+    if final_caller != caller {
+        return None;
+    }
+
+    let (tag, payload) = memory.store.poles(endpoint).ok()?;
+    if tag != result_tag {
+        return None;
+    }
+
+    let values = read_exact_sequence(&memory.store, payload).ok()?;
+    if values.len() != 1 {
+        return None;
+    }
+
+    Some((runtime_mul_wide(memory, values[0], zero, one)?, payload))
+}
+
+pub(crate) fn web_prove_mul32(
+    a: u32,
+    b: u32,
+) -> Option<WebMul32ProofExecution> {
+    let mut compiler = FullFixture::new();
+    let program = Mul32Program::install(&mut compiler);
+    let links_after_build = program.links_after_build as u32;
+
+    let aword = word_handle(&mut compiler, a);
+    let bword = word_handle(&mut compiler, b);
+    let args =
+        materialize_exact_sequence(&mut compiler.store, &[aword, bword]).ok()?;
+    let invocation =
+        call(&mut compiler.store, compiler.apply, program.mul32, args);
+    let initial =
+        compiler.store.ensure_pair(compiler.k, invocation).ok()?;
+
+    let prepared_roots = vec![
+        semantic_source(&compiler.store, "function.mul32", program.mul32),
+        semantic_source(
+            &compiler.store,
+            "function.dependency.add64",
+            program.add64.add64,
+        ),
+        semantic_source(
+            &compiler.store,
+            "result.dependency.add64_tag",
+            program.add64.result_tag,
+        ),
+        semantic_source(&compiler.store, "data.a.word", aword),
+        semantic_source(&compiler.store, "data.b.word", bword),
+        semantic_source(&compiler.store, "data.bit.zero", compiler.zero),
+        semantic_source(&compiler.store, "data.bit.one", compiler.one),
+        semantic_source(
+            &compiler.store,
+            "execution.interpreter",
+            compiler.interpreter,
+        ),
+        semantic_source(&compiler.store, "execution.theory", compiler.theory),
+        semantic_source(&compiler.store, "execution.apply", compiler.apply),
+        semantic_source(&compiler.store, "invocation.args", args),
+        semantic_source(&compiler.store, "invocation.call", invocation),
+        semantic_source(&compiler.store, "scope.initial", initial),
+        semantic_source(&compiler.store, "context.caller", compiler.k),
+        semantic_source(&compiler.store, "result.tag", program.result_tag),
+    ];
+
+    let admissions = theory_admissions(&compiler.store, compiler.theory)?;
+    let prepare =
+        prepare_stage(&compiler.store, prepared_roots, admissions);
+    let (mut memory, load) = load_runtime(&prepare)?;
+
+    let interpreter = loaded_handle(&load, "execution.interpreter")?;
+    let initial = loaded_handle(&load, "scope.initial")?;
+    let caller = loaded_handle(&load, "context.caller")?;
+    let result_tag = loaded_handle(&load, "result.tag")?;
+    let zero = loaded_handle(&load, "data.bit.zero")?;
+    let one = loaded_handle(&load, "data.bit.one")?;
+
+    let expected_reactions = expected_steps(&program, b) as u32;
+    let max_steps = expected_reactions + 2;
+    let (mut engine, execute) = execute_to_quiescence(
+        &mut memory,
+        interpreter,
+        initial,
+        32,
+        max_steps,
+    )?;
+    if execute.active_reaction_count != expected_reactions
+        || engine.current().len() != 1
+    {
+        return None;
+    }
+
+    let final_link = engine.current()[0];
+    let (actual, payload) = decode_runtime_mul_result(
+        &memory,
+        final_link,
+        caller,
+        result_tag,
+        zero,
+        one,
+    )?;
+    let oracle = u64::from(a) * u64::from(b);
+
+    let result_anum = memory.store.export_anum(final_link).ok()?;
+    let result_sequence_anum = memory.store.export_anum(payload).ok()?;
+    let links_after_first = memory.store.link_count() as u32;
+    let identical_rerun_link_delta = identical_rerun(
+        &mut memory,
+        &mut engine,
+        initial,
+        &result_anum,
+        max_steps,
+    )?;
+    let visual_links = visual_snapshot(&memory, &load.semantic_roots);
+
+    let result = WebProofResultStage {
+        memory_instance_id: memory.id.clone(),
+        result_anum,
+        result_sequence_anum,
+        decoded_value: actual as u32,
+        decoded_value_hi: Some((actual >> 32) as u32),
+        oracle_value: oracle as u32,
+        oracle_value_hi: Some((oracle >> 32) as u32),
+        oracle_matches: actual == oracle,
+        links_final: memory.store.link_count() as u32,
+        identical_rerun_link_delta,
+        visual_links,
+    };
+    let proof = WebStructuralProof {
+        schema_version: 3,
+        block: "MUL32 raw Wide64".to_owned(),
+        prepare,
+        load,
+        execute,
+        result,
+    };
+
+    let outcome = WebMul32Outcome {
+        lo: actual as u32,
+        hi: (actual >> 32) as u32,
+        reactions: expected_reactions,
+        links_after_build,
+        links_after_first,
+        steady_link_delta: proof.result.identical_rerun_link_delta,
+        quiescent: u8::from(proof.execute.final_quiescent),
+    };
+
+    Some(WebMul32ProofExecution { outcome, proof })
 }
 
 pub(crate) fn web_run_mul32(
