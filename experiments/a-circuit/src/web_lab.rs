@@ -412,7 +412,7 @@ mod tests {
             );
             assert_eq!(proof["prepare"]["runtimeMemoryExists"], false);
             assert_eq!(proof["load"]["linksBeforeLoad"], 1);
-            assert_eq!(proof["load"]["portableRoundTrip"], true);
+            assert_eq!(proof["load"]["carrierRoundTrip"], true);
             assert_eq!(proof["execute"]["finalQuiescent"], true);
             assert_eq!(proof["result"]["oracleMatches"], true);
             assert_eq!(
