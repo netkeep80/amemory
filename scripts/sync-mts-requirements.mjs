@@ -17,7 +17,7 @@ function foundationVersionTag(acceptedMtsVersion) {
 }
 
 function expectedAcceptanceDecision(acceptedMtsVersion) {
-  return `ACCEPT_MTS_${foundationVersionTag(acceptedMtsVersion).slice(1).replace(".", "_").toUpperCase()}`;
+  return `ACCEPT_MTS_${foundationVersionTag(acceptedMtsVersion).replace(".", "_").toUpperCase()}`;
 }
 
 function requiredLawIds(lock) {
