@@ -110,8 +110,8 @@ contracts/amemory-conformance-v0.1.json#/backendMatrix
 
 | Backend | Статус | Current Scope | Физическая история | Нормализованное сравнение | Полный профиль |
 |---|---|---|---|---|---|
-| Rust reference CPU / WASM | prototype / partial | R1–R6: bounded two-bank Scope + published selector | старые Scope bank и Links сохраняются физически | normalized recursive Link wire Scope + matched/handoff | **да — P01–P17** |
-| WebGPU browser | prototype / partial | R1–R6: two-bank Scope buffer + atomic published selector | старые GPU Scope bank и Link pool сохраняются | normalized recursive Link wire Scope + matched/handoff | **да — P01–P17** |
+| Rust reference CPU / WASM | prototype / partial | R1–R7: bounded two-bank Scope + published selector | старые Scope bank и Links сохраняются физически | normalized recursive Link wire Scope + matched/handoff | **да — P01–P17** |
+| WebGPU browser | prototype / partial | R1–R7: two-bank Scope buffer + atomic published selector | старые GPU Scope bank и Link pool сохраняются | normalized recursive Link wire Scope + matched/handoff | **да — P01–P17** |
 | future accelerator family | planned | должен быть объявлен до реализации | должен быть объявлен отдельно от semantic currentness | обязательный differential против reference | **нет** |
 
 Rust native tests и WASM browser используют одну текущую reference-кодовую базу; это разные поверхности исполнения одного prototype backend, а не разные семантики.
