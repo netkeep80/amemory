@@ -717,6 +717,7 @@ mod tests {
             (13u32, 0x8000_0001u32, 1u32, 0x0000_0002u32, "SHL32"),
             (14u32, 0x8000_0001u32, 1u32, 0x4000_0000u32, "SHR32"),
             (15u32, 0x8000_0001u32, 1u32, 0xc000_0000u32, "SAR32"),
+            (13u32, 0x8000_0001u32, 32u32, 0x8000_0001u32, "SHL32"),
             (13u32, 0x8000_0001u32, 33u32, 0x0000_0002u32, "SHL32"),
         ] {
             let out = execute(op, value, count, 0).unwrap();
@@ -798,6 +799,13 @@ mod tests {
                 source_for(selected_role),
                 "{block}: selected structural function mismatch"
             );
+
+            if op == 13 && count == 32 {
+                assert_eq!(out.defined_mask, 0, "masked-zero SHL32 must define no status flags");
+                assert_eq!(out.undefined_mask, 0, "masked-zero SHL32 must undefine no status flags");
+                assert_eq!(out.preserve_mask, STATUS_FLAGS, "masked-zero SHL32 must preserve all status flags");
+                assert_eq!(out.reactions, 1, "masked-zero SHL32 must use the one-step structural rule");
+            }
 
             if op == 13 && (count == 1 || count == 33) {
                 shift_count_sources.push((
