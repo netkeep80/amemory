@@ -284,6 +284,152 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
     const recursiveSources = preparedRoots.map(
       (root) => root.source || ""
     );
+    const parseLocalRef = (value, maxHandle, label) => {
+      if (typeof value !== "string" || !/^L\d+$/.test(value)) {
+        throw new Error(registryBlock.id + " invalid " + label + " reference");
+      }
+      const handle = Number(value.slice(1));
+      if (!Number.isInteger(handle) || handle < 1 || handle > maxHandle) {
+        throw new Error(registryBlock.id + " out-of-range " + label + " reference");
+      }
+      return handle;
+    };
+
+    const compactTheoryAdmissions = proof.prepare.theoryAdmissions.map(
+      (value) => parseLocalRef(value, baseCarrier.length, "Theory")
+    );
+    if (JSON.stringify(
+      compactTheoryAdmissions.map((handle) => "L" + handle)
+    ) !== JSON.stringify(proof.prepare.theoryAdmissions)) {
+      throw new Error(registryBlock.id + " Theory compact round-trip mismatch");
+    }
+
+    const compactReactions = proof.execute.reactions.map((step) => {
+      if (step.memoryInstanceId !== memoryId) {
+        throw new Error(registryBlock.id + " reaction changed memory id");
+      }
+      return {
+        step: step.step,
+        scopeBefore: step.scopeBefore.map(
+          (value) => parseLocalRef(value, step.linksAfter, "Scope-before")
+        ),
+        rawRuleMatches: step.rawRuleMatches,
+        transitionedMembers: step.transitionedMembers,
+        handoffCount: step.handoffCount,
+        scopeAfter: step.scopeAfter.map(
+          (value) => parseLocalRef(value, step.linksAfter, "Scope-after")
+        ),
+        linksAfter: step.linksAfter,
+        quiescent: step.quiescent,
+      };
+    });
+
+    const { memoryInstanceId: resultMemoryId, ...compactResult } =
+      resultMetadata;
+    if (resultMemoryId !== memoryId ||
+        proof.load.memoryInstanceId !== memoryId ||
+        proof.execute.memoryInstanceId !== memoryId) {
+      throw new Error(registryBlock.id + " compact proof memory id mismatch");
+    }
+
+    const compactTopology = {
+      base: splitTopology.base,
+      append: splitTopology.append,
+      overlays,
+    };
+    const compactProof = {
+      schemaVersion: 1,
+      representationId: "amemory-proof-compact-json",
+      representationVersion: "0.1.0",
+      sourceProofSchemaVersion: proof.schemaVersion,
+      block: proof.block,
+      memoryInstanceId: memoryId,
+      prepare: {
+        runtimeMemoryExists: proof.prepare.runtimeMemoryExists,
+        compiledLinks: proof.prepare.compiledLinks,
+      },
+      topology: compactTopology,
+      roots: locatorOnlyRoots,
+      theoryAdmissions: compactTheoryAdmissions,
+      load: {
+        linksBeforeLoad: proof.load.linksBeforeLoad,
+        linksAfterLoad: proof.load.linksAfterLoad,
+        importedDuplets: proof.load.importedDuplets,
+        carrierRoundTrip: proof.load.carrierRoundTrip,
+      },
+      execute: {
+        activeReactionCount: proof.execute.activeReactionCount,
+        finalQuiescent: proof.execute.finalQuiescent,
+        reactions: compactReactions,
+      },
+      result: compactResult,
+    };
+
+    const decodedCompactTopology =
+      compactTopology.base.starts.map((start, index) => ({
+        start,
+        end: compactTopology.base.ends[index],
+      })).concat(
+        compactTopology.append.starts.map((start, index) => ({
+          start,
+          end: compactTopology.append.ends[index],
+        }))
+      );
+    assertCompactRoundTrip(decodedCompactTopology, "compact proof");
+
+    const overlayByHandle = new Map(
+      compactTopology.overlays.map((overlay) => [overlay.localHandle, overlay])
+    );
+    const inflatedVisualLinks = decodedCompactTopology.map((pair, index) => {
+      const handle = index + 1;
+      const overlay = overlayByHandle.get(handle);
+      return {
+        key: memoryId + ":L" + handle,
+        startKey: memoryId + ":L" + pair.start,
+        endKey: memoryId + ":L" + pair.end,
+        localHandle: handle,
+        label: overlay?.label ?? null,
+        tags: overlay?.tags ?? [],
+      };
+    });
+    if (JSON.stringify(inflatedVisualLinks) !== JSON.stringify(visualLinks)) {
+      throw new Error(registryBlock.id + " compact visual DTO mismatch");
+    }
+
+    const inflatedPreparedRoots = compactProof.roots.map((root) => ({
+      role: root.role,
+      carrierRef: root.carrierRef,
+      source: deriveRecursiveSource(root.carrierRef),
+    }));
+    if (JSON.stringify(inflatedPreparedRoots) !== JSON.stringify(preparedRoots)) {
+      throw new Error(registryBlock.id + " compact root directory mismatch");
+    }
+    const inflatedLoadedRoots = compactProof.roots.map((root) => ({
+      role: root.role,
+      carrierRef: root.carrierRef,
+      source: deriveRecursiveSource(root.carrierRef),
+      localHandle: root.carrierRef,
+    }));
+    if (JSON.stringify(inflatedLoadedRoots) !== JSON.stringify(loadedRoots)) {
+      throw new Error(registryBlock.id + " compact loaded-root mismatch");
+    }
+
+    const inflatedReactions = compactProof.execute.reactions.map((step) => ({
+      memoryInstanceId: memoryId,
+      step: step.step,
+      scopeBefore: step.scopeBefore.map((handle) => "L" + handle),
+      rawRuleMatches: step.rawRuleMatches,
+      transitionedMembers: step.transitionedMembers,
+      handoffCount: step.handoffCount,
+      scopeAfter: step.scopeAfter.map((handle) => "L" + handle),
+      linksAfter: step.linksAfter,
+      quiescent: step.quiescent,
+    }));
+    if (JSON.stringify(inflatedReactions) !==
+        JSON.stringify(proof.execute.reactions)) {
+      throw new Error(registryBlock.id + " compact reaction trace mismatch");
+    }
+
     const reactionScopes = proof.execute.reactions.map((step) => ({
       scopeBefore: step.scopeBefore,
       scopeAfter: step.scopeAfter,
@@ -312,6 +458,18 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
       traceEntries: proof.execute.reactions.length,
       finalLinks: proof.result.linksFinal,
       visualLinks: visualLinks.length,
+      compactProofPrototype: {
+        representationId: compactProof.representationId,
+        representationVersion: compactProof.representationVersion,
+        proofJsonBytes: jsonBytes(compactProof),
+        topologyJsonBytes: jsonBytes(compactProof.topology),
+        rootsJsonBytes: jsonBytes(compactProof.roots),
+        theoryAdmissionsJsonBytes: jsonBytes(compactProof.theoryAdmissions),
+        loadJsonBytes: jsonBytes(compactProof.load),
+        executionJsonBytes: jsonBytes(compactProof.execute),
+        reactionsJsonBytes: jsonBytes(compactProof.execute.reactions),
+        resultJsonBytes: jsonBytes(compactProof.result),
+      },
       topologyPrototype: {
         baseLinks: baseCarrier.length,
         appendLinks: appendDelta.length,
@@ -1208,6 +1366,41 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
       totalCarrierDenseU32FloorBytes: sumBytes("carrierDenseU32Floor"),
       totalReactionsJsonBytes: sumBytes("reactionsJson"),
       totalVisualLinksJsonBytes: sumBytes("visualLinksJson"),
+      compactProofPrototype: (() => {
+        const totalCurrentProofJsonBytes = sumBytes("proofJson");
+        const totalCompactProofJsonBytes = measuredProofs.reduce(
+          (sum, item) => sum + item.compactProofPrototype.proofJsonBytes,
+          0
+        );
+        return {
+          representationId: "amemory-proof-compact-json",
+          representationVersion: "0.1.0",
+          totalCurrentProofJsonBytes,
+          totalCompactProofJsonBytes,
+          reductionRatio:
+            totalCurrentProofJsonBytes / totalCompactProofJsonBytes,
+          totalCompactTopologyJsonBytes: measuredProofs.reduce(
+            (sum, item) => sum + item.compactProofPrototype.topologyJsonBytes,
+            0
+          ),
+          totalCompactRootsJsonBytes: measuredProofs.reduce(
+            (sum, item) => sum + item.compactProofPrototype.rootsJsonBytes,
+            0
+          ),
+          totalCompactReactionsJsonBytes: measuredProofs.reduce(
+            (sum, item) => sum + item.compactProofPrototype.reactionsJsonBytes,
+            0
+          ),
+          totalCompactResultJsonBytes: measuredProofs.reduce(
+            (sum, item) => sum + item.compactProofPrototype.resultJsonBytes,
+            0
+          ),
+          maxCompactProof: measuredProofs.reduce((best, item) =>
+            item.compactProofPrototype.proofJsonBytes >
+            best.compactProofPrototype.proofJsonBytes ? item : best
+          ),
+        };
+      })(),
       semanticRootLocatorPrototype: {
         totalFullRootsJsonBytes: sumBytes("semanticRootsJson"),
         totalLocatorOnlyJsonBytes: sumBytes("semanticRootLocatorOnlyJson"),
