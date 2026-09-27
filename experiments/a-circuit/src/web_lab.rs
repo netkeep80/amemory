@@ -1,5 +1,5 @@
 use crate::{
-    arithmetic_effect_n::web_run_arithmetic,
+    arithmetic_effect_n::{web_prove_arithmetic, web_run_arithmetic},
     logic_effect_n::{web_prove_logic, web_run_logic},
     mul32_n::web_run_mul32,
     mul_effect_n::web_run_mul_effect,
@@ -73,6 +73,27 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
     }
 
     if let Some(out) = web_run_logic(op, a, b) {
+        return Some(LabOutcome {
+            value: out.value,
+            value_hi: 0,
+            writeback: u32::from(out.writeback),
+            defined_mask: out.defined_mask,
+            value_mask: out.value_mask,
+            undefined_mask: out.undefined_mask,
+            preserve_mask: out.preserve_mask,
+            reactions: out.reactions,
+            links_after_build: out.links_after_build,
+            links_after_first: out.links_after_first,
+            steady_link_delta: out.steady_link_delta,
+            quiescent: u32::from(out.quiescent),
+        });
+    }
+
+    if (6..=10).contains(&op) {
+        let execution = web_prove_arithmetic(op, a, b, input_flag)?;
+        let proof_json = serde_json::to_string(&execution.proof).ok()?;
+        let out = execution.outcome;
+        set_last_proof_json(proof_json);
         return Some(LabOutcome {
             value: out.value,
             value_hi: 0,
@@ -473,15 +494,100 @@ mod tests {
             }
         }
 
-        let add = execute(6, u32::MAX, 1, 0).unwrap();
-        assert_eq!(add.value, 0);
-        assert_eq!(add.value_mask & FLAG_CF, FLAG_CF);
-        assert_eq!(add.value_mask & FLAG_ZF, FLAG_ZF);
-        assert_eq!(add.steady_link_delta, 0);
+        for (op, a, b, input_flag, expected, expected_writeback, block, expected_x, expected_mode) in [
+            (6u32, u32::MAX, 1u32, 0u32, 0u32, 1u32, "ADD32", 0u32, 0u32),
+            (7u32, u32::MAX, 0u32, 1u32, 0u32, 1u32, "ADC32", 1u32, 0u32),
+            (8u32, 0u32, 1u32, 0u32, u32::MAX, 1u32, "SUB32", 0u32, 1u32),
+            (9u32, 0u32, 0u32, 1u32, u32::MAX, 1u32, "SBB32", 1u32, 1u32),
+            (10u32, 7u32, 9u32, 0u32, 0xffff_fffeu32, 0u32, "CMP32", 0u32, 1u32),
+        ] {
+            let out = execute(op, a, b, input_flag).unwrap();
+            assert_eq!(out.value, expected, "{block}");
+            assert_eq!(out.writeback, expected_writeback, "{block}");
+            assert_eq!(out.steady_link_delta, 0, "{block}");
+            assert_eq!(out.quiescent, 1, "{block}");
+            assert_eq!(amemory_i386_lab_proof_available(), 1, "{block}");
 
-        let cmp = execute(10, 7, 9, 0).unwrap();
-        assert_eq!(cmp.writeback, 0);
-        assert_eq!(cmp.steady_link_delta, 0);
+            let proof_json = {
+                let guard = LAST_PROOF_JSON
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                guard.clone()
+            };
+            let proof: serde_json::Value =
+                serde_json::from_str(&proof_json).unwrap();
+            assert_eq!(proof["block"], block);
+            let memory_id =
+                proof["load"]["memoryInstanceId"].as_str().unwrap();
+            assert_eq!(
+                proof["execute"]["memoryInstanceId"].as_str().unwrap(),
+                memory_id
+            );
+            assert_eq!(
+                proof["result"]["memoryInstanceId"].as_str().unwrap(),
+                memory_id
+            );
+            assert_eq!(proof["load"]["carrierRoundTrip"], true);
+            assert_eq!(proof["execute"]["finalQuiescent"], true);
+            assert_eq!(proof["result"]["oracleMatches"], true);
+            assert_eq!(
+                proof["result"]["decodedValue"].as_u64().unwrap() as u32,
+                out.value
+            );
+            assert_eq!(proof["result"]["identicalRerunLinkDelta"], 0);
+            assert_eq!(
+                proof["result"]["visualLinks"].as_array().unwrap().len() as u64,
+                proof["result"]["linksFinal"].as_u64().unwrap()
+            );
+
+            let roots = proof["prepare"]["semanticRoots"].as_array().unwrap();
+            let source_for = |role: &str| {
+                roots
+                    .iter()
+                    .find(|root| root["role"] == role)
+                    .and_then(|root| root["source"].as_str())
+                    .unwrap()
+            };
+            for required in [
+                "function.effect.arithmetic",
+                "function.flagged_arithmetic",
+                "data.a.word",
+                "data.b.word",
+                "data.x",
+                "data.mode",
+                "data.writeback",
+                "execution.interpreter",
+                "execution.theory",
+                "execution.apply",
+                "invocation.call",
+                "scope.initial",
+                "result.tag",
+            ] {
+                assert!(
+                    roots.iter().any(|root| root["role"] == required),
+                    "{block}: missing {required}"
+                );
+            }
+
+            let bit_role = |value: u32| {
+                if value == 0 { "data.bit.zero" } else { "data.bit.one" }
+            };
+            assert_eq!(
+                source_for("data.x"),
+                source_for(bit_role(expected_x)),
+                "{block}: X selector mismatch"
+            );
+            assert_eq!(
+                source_for("data.mode"),
+                source_for(bit_role(expected_mode)),
+                "{block}: Mode selector mismatch"
+            );
+            assert_eq!(
+                source_for("data.writeback"),
+                source_for(bit_role(expected_writeback)),
+                "{block}: WriteBack selector mismatch"
+            );
+        }
 
         let mux = execute(11, 0xaaaa_aaaa, 0x5555_5555, 1).unwrap();
         assert_eq!(mux.value, 0x5555_5555);
