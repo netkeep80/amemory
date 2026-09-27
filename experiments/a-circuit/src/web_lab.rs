@@ -51,7 +51,7 @@ fn clear_last_proof_json() {
 fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
     clear_last_proof_json();
 
-    if (1..=4).contains(&op) {
+    if (1..=5).contains(&op) {
         let execution = web_prove_logic(op, a, b)?;
         let proof_json = serde_json::to_string(&execution.proof).ok()?;
         let out = execution.outcome;
@@ -380,14 +380,16 @@ mod tests {
         assert_eq!(and.steady_link_delta, 0);
         assert_eq!(and.quiescent, 1);
 
-        for (op, a, b, expected, block) in [
-            (1u32, 0xaaaa_aaaau32, 0x0f0f_0f0fu32, 0x0a0a_0a0au32, "AND32"),
-            (2u32, 0xaaaa_0000u32, 0x0000_5555u32, 0xaaaa_5555u32, "OR32"),
-            (3u32, 0xffff_0000u32, 0x0f0f_0f0fu32, 0xf0f0_0f0fu32, "XOR32"),
-            (4u32, 0x1234_5678u32, 0u32, !0x1234_5678u32, "NOT32"),
+        for (op, a, b, expected, expected_writeback, block) in [
+            (1u32, 0xaaaa_aaaau32, 0x0f0f_0f0fu32, 0x0a0a_0a0au32, 1u32, "AND32"),
+            (2u32, 0xaaaa_0000u32, 0x0000_5555u32, 0xaaaa_5555u32, 1u32, "OR32"),
+            (3u32, 0xffff_0000u32, 0x0f0f_0f0fu32, 0xf0f0_0f0fu32, 1u32, "XOR32"),
+            (4u32, 0x1234_5678u32, 0u32, !0x1234_5678u32, 1u32, "NOT32"),
+            (5u32, 0xf0f0_1234u32, 0x0ff0_ffffu32, 0x00f0_1234u32, 0u32, "TEST32"),
         ] {
             let out = execute(op, a, b, 0).unwrap();
             assert_eq!(out.value, expected, "{block}");
+            assert_eq!(out.writeback, expected_writeback, "{block}");
             assert_eq!(out.steady_link_delta, 0, "{block}");
             assert_eq!(amemory_i386_lab_proof_available(), 1, "{block}");
 
@@ -451,6 +453,23 @@ mod tests {
                 assert!(roles.contains("function.word_binary"));
                 assert!(roles.iter().any(|role| role.starts_with("function.gate.")));
                 assert!(roles.contains("data.b.word"));
+                assert!(roles.contains("data.writeback"));
+
+                let roots = proof["prepare"]["semanticRoots"].as_array().unwrap();
+                let source_for = |role: &str| {
+                    roots
+                        .iter()
+                        .find(|root| root["role"] == role)
+                        .and_then(|root| root["source"].as_str())
+                        .unwrap()
+                };
+                let expected_bit_role =
+                    if expected_writeback == 0 { "data.bit.zero" } else { "data.bit.one" };
+                assert_eq!(
+                    source_for("data.writeback"),
+                    source_for(expected_bit_role),
+                    "{block}: structural writeback bit mismatch"
+                );
             }
         }
 
