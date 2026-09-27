@@ -601,6 +601,12 @@ fn word_vectors() -> Vec<(u32, u32)> {
 }
 
 
+#[derive(Clone, Debug)]
+pub(crate) struct WebMux32ProofExecution {
+    pub(crate) outcome: WebMuxOutcome,
+    pub(crate) proof: WebStructuralProof,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct WebMuxOutcome {
     pub(crate) value: u32,
@@ -609,6 +615,188 @@ pub(crate) struct WebMuxOutcome {
     pub(crate) links_after_first: u32,
     pub(crate) steady_link_delta: u32,
     pub(crate) quiescent: u8,
+}
+
+pub(crate) fn web_prove_mux32(
+    select: u32,
+    a: u32,
+    b: u32,
+) -> Option<WebMux32ProofExecution> {
+    if select > 1 {
+        return None;
+    }
+
+    let mut compiler = FullFixture::new();
+    let program = MuxProgram::install(&mut compiler);
+    let links_after_build = program.links_after_build as u32;
+    let bits = [compiler.zero, compiler.one];
+
+    let a_bits = bit_handles(&compiler, a);
+    let b_bits = bit_handles(&compiler, b);
+    let aword =
+        materialize_exact_sequence(&mut compiler.store, &a_bits).ok()?;
+    let bword =
+        materialize_exact_sequence(&mut compiler.store, &b_bits).ok()?;
+    let select_handle = bits[select as usize];
+    let args = materialize_exact_sequence(
+        &mut compiler.store,
+        &[select_handle, aword, bword],
+    )
+    .ok()?;
+    let invocation =
+        call(&mut compiler.store, compiler.apply, program.mux32, args);
+    let initial = compiler
+        .store
+        .ensure_pair(compiler.k, invocation)
+        .ok()?;
+
+    let prepared_roots = vec![
+        semantic_source(&compiler.store, "function.mux32", program.mux32),
+        semantic_source(&compiler.store, "function.mux1", program.mux1),
+        semantic_source(
+            &compiler.store,
+            "function.gate.xor2",
+            program.gates.xor2,
+        ),
+        semantic_source(
+            &compiler.store,
+            "function.gate.and2",
+            program.gates.and2,
+        ),
+        semantic_source(&compiler.store, "data.select", select_handle),
+        semantic_source(&compiler.store, "data.a.word", aword),
+        semantic_source(&compiler.store, "data.b.word", bword),
+        semantic_source(&compiler.store, "data.bit.zero", compiler.zero),
+        semantic_source(&compiler.store, "data.bit.one", compiler.one),
+        semantic_source(
+            &compiler.store,
+            "execution.interpreter",
+            compiler.interpreter,
+        ),
+        semantic_source(
+            &compiler.store,
+            "execution.theory",
+            compiler.theory,
+        ),
+        semantic_source(
+            &compiler.store,
+            "execution.apply",
+            compiler.apply,
+        ),
+        semantic_source(&compiler.store, "invocation.args", args),
+        semantic_source(&compiler.store, "invocation.call", invocation),
+        semantic_source(&compiler.store, "scope.initial", initial),
+        semantic_source(&compiler.store, "context.caller", compiler.k),
+        semantic_source(
+            &compiler.store,
+            "result.word_tag",
+            program.word_result_tag,
+        ),
+        semantic_source(
+            &compiler.store,
+            "result.bit_tag",
+            program.bit_result_tag,
+        ),
+    ];
+
+    let admissions =
+        theory_admissions(&compiler.store, compiler.theory)?;
+    let prepare =
+        prepare_stage(&compiler.store, prepared_roots, admissions);
+    let (mut memory, load) = load_runtime(&prepare)?;
+
+    let interpreter = loaded_handle(&load, "execution.interpreter")?;
+    let initial = loaded_handle(&load, "scope.initial")?;
+    let caller = loaded_handle(&load, "context.caller")?;
+    let result_tag = loaded_handle(&load, "result.word_tag")?;
+    let zero = loaded_handle(&load, "data.bit.zero")?;
+    let one = loaded_handle(&load, "data.bit.one")?;
+
+    let (mut engine, execute) = execute_to_quiescence(
+        &mut memory,
+        interpreter,
+        initial,
+        32,
+        program.mux32_steps as u32 + 2,
+    )?;
+    if execute.active_reaction_count != program.mux32_steps as u32
+        || engine.current().len() != 1
+    {
+        return None;
+    }
+
+    let final_link = engine.current()[0];
+    let (final_caller, endpoint) = memory.store.poles(final_link).ok()?;
+    if final_caller != caller {
+        return None;
+    }
+    let (tag, payload) = memory.store.poles(endpoint).ok()?;
+    if tag != result_tag {
+        return None;
+    }
+    let values = read_exact_sequence(&memory.store, payload).ok()?;
+    if values.len() != 1 {
+        return None;
+    }
+    let word_bits = read_exact_sequence(&memory.store, values[0]).ok()?;
+    if word_bits.len() != WIDTH {
+        return None;
+    }
+    let mut decoded_value = 0u32;
+    for (index, bit) in word_bits.into_iter().enumerate() {
+        let value = if bit == one {
+            1u32
+        } else if bit == zero {
+            0u32
+        } else {
+            return None;
+        };
+        decoded_value |= value << index;
+    }
+    let oracle_value = if select == 0 { a } else { b };
+
+    let result_anum = memory.store.export_anum(final_link).ok()?;
+    let result_sequence_anum = memory.store.export_anum(payload).ok()?;
+    let links_after_first = memory.store.link_count() as u32;
+    let identical_rerun_link_delta = identical_rerun(
+        &mut memory,
+        &mut engine,
+        initial,
+        &result_anum,
+        program.mux32_steps as u32 + 2,
+    )?;
+    let visual_links =
+        visual_snapshot(&memory, &load.semantic_roots);
+
+    let result = WebProofResultStage {
+        memory_instance_id: memory.id.clone(),
+        result_anum,
+        result_sequence_anum,
+        decoded_value,
+        oracle_value,
+        oracle_matches: decoded_value == oracle_value,
+        links_final: memory.store.link_count() as u32,
+        identical_rerun_link_delta,
+        visual_links,
+    };
+    let proof = WebStructuralProof {
+        schema_version: 2,
+        block: "MUX32".to_owned(),
+        prepare,
+        load,
+        execute,
+        result,
+    };
+    let outcome = WebMuxOutcome {
+        value: decoded_value,
+        reactions: proof.execute.active_reaction_count,
+        links_after_build,
+        links_after_first,
+        steady_link_delta: proof.result.identical_rerun_link_delta,
+        quiescent: u8::from(proof.execute.final_quiescent),
+    };
+
+    Some(WebMux32ProofExecution { outcome, proof })
 }
 
 pub(crate) fn web_run_mux32(
