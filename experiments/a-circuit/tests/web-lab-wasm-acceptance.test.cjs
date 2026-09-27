@@ -30,6 +30,7 @@ Promise.all([
   }
   const proofCoveredOpcodes = new Set();
   const proofMeasurements = new Map();
+  let browserTransportNegativeChecked = false;
   const jsonBytes = (value) =>
     Buffer.byteLength(JSON.stringify(value), "utf8");
   const readCurrentCompactProof = (label) => {
@@ -394,6 +395,22 @@ Promise.all([
       );
     }
     validateCompactAgainstV3(proof, producedCompactProof);
+    if (!browserTransportNegativeChecked) {
+      const corruptedCompact = JSON.parse(JSON.stringify(producedCompactProof));
+      corruptedCompact.representationVersion = "invalid-negative-control";
+      let rejected = false;
+      try {
+        validateCompactAgainstV3(proof, corruptedCompact);
+      } catch {
+        rejected = true;
+      }
+      if (!rejected) {
+        throw new Error(
+          registryBlock.id + " browser compact transport negative control failed"
+        );
+      }
+      browserTransportNegativeChecked = true;
+    }
 
     const decodedCompactTopology =
       compactTopology.base.starts.map((start, index) => ({
@@ -1362,6 +1379,9 @@ Promise.all([
       "proof measurement coverage mismatch: " +
       proofMeasurements.size + "/" + registry.blocks.length
     );
+  }
+  if (!browserTransportNegativeChecked) {
+    throw new Error("browser compact transport negative control was not executed");
   }
   const measuredProofs = [...proofMeasurements.values()]
     .sort((left, right) => left.opcode - right.opcode);
