@@ -4,12 +4,14 @@ import {
   cpuImportBatchAtomic,
   cpuPoolCount,
   cpuResetPool,
+  createContextRelativeOrientation,
   createGpuAnumPool,
   destroyGpuAnumPool,
   gpuExport,
   gpuImport,
   gpuImportBatchAtomic,
   gpuPoolCount,
+  readCpuTopology,
   readGpuTopology,
   localRef,
   normalizeAnum,
@@ -56,7 +58,23 @@ export const R6_FIXTURE = Object.freeze({
   rootRelationC: "18998",
 });
 
+export const R7_FIXTURE = Object.freeze({
+  // V14-L4 uses the same semantic source A as R1. The bounded execution
+  // profile pre-materializes immutable result Links; reaction publication
+  // replaces Scope membership and never mutates Link poles in place.
+  secondCurrent: R1_FIXTURE.successor,
+  zeroRelationB: "1168988",
+  fixedRelation: "16868",
+  endContinuation: "668",
+  startContinuation: "968",
+  relationEndContinuation: "168668",
+  relationStartContinuation: "168968",
+  stateEndContinuation: "198668",
+  stateStartContinuation: "198968",
+});
+
 export const R5_OBSERVATION_STEPS = 4;
+export const R7_FIXED_POINT_STEPS = 2;
 
 const NONE = 0xffffffff;
 const CAP = 4;
@@ -135,6 +153,32 @@ export function assertR6Fixture() {
   return true;
 }
 
+export function assertR7Fixture() {
+  const secondCurrent = splitPairAnum(R7_FIXTURE.secondCurrent);
+  const zeroB = splitPairAnum(R7_FIXTURE.zeroRelationB);
+  const fixed = splitPairAnum(R7_FIXTURE.fixedRelation);
+  const relationEnd = splitPairAnum(R7_FIXTURE.relationEndContinuation);
+  const relationStart = splitPairAnum(R7_FIXTURE.relationStartContinuation);
+  const stateEnd = splitPairAnum(R7_FIXTURE.stateEndContinuation);
+  const stateStart = splitPairAnum(R7_FIXTURE.stateStartContinuation);
+
+  must(secondCurrent.start === R1_FIXTURE.K && secondCurrent.end === R1_FIXTURE.B, "bad R7 second current");
+  must(zeroB.start === R1_FIXTURE.B && zeroB.end === R3_FIXTURE.root, "bad R7 B->{} relation");
+  must(fixed.start === R1_FIXTURE.A && fixed.end === R1_FIXTURE.A, "bad R7 A->A relation");
+  must(parseAnum(R7_FIXTURE.endContinuation).kind === "END", "bad R7 A♀ direct-gauge fixture");
+  must(parseAnum(R7_FIXTURE.startContinuation).kind === "START", "bad R7 ♂A direct-gauge fixture");
+  must(relationEnd.start === R1_FIXTURE.A && relationEnd.end === R7_FIXTURE.endContinuation,
+    "bad R7 A->A♀ relation");
+  must(relationStart.start === R1_FIXTURE.A && relationStart.end === R7_FIXTURE.startContinuation,
+    "bad R7 A->♂A relation");
+  must(stateEnd.start === R1_FIXTURE.K && stateEnd.end === R7_FIXTURE.endContinuation,
+    "bad R7 K->A♀ state");
+  must(stateStart.start === R1_FIXTURE.K && stateStart.end === R7_FIXTURE.startContinuation,
+    "bad R7 K->♂A state");
+  must(R7_FIXTURE.endContinuation !== R7_FIXTURE.startContinuation, "R7 chiral results collapsed");
+  return true;
+}
+
 export function assertR5Fixture() {
   const stateStart = splitPairAnum(R5_FIXTURE.stateStart);
   const stateEnd = splitPairAnum(R5_FIXTURE.stateEnd);
@@ -210,7 +254,7 @@ export function perturbReactionState(anums) {
 function importCpuFixture(wasm) {
   cpuResetPool(wasm);
   const refs = {};
-  for (const [name, source] of Object.entries({ ...R1_FIXTURE, ...R3_FIXTURE, ...R4_FIXTURE, ...R5_FIXTURE, ...R6_FIXTURE })) {
+  for (const [name, source] of Object.entries({ ...R1_FIXTURE, ...R3_FIXTURE, ...R4_FIXTURE, ...R5_FIXTURE, ...R6_FIXTURE, ...R7_FIXTURE })) {
     const ref = cpuImportRaw(wasm, source);
     must(ref, "CPU rejected reaction Anum " + name + "=" + source);
     refs[name] = ref;
@@ -220,7 +264,7 @@ function importCpuFixture(wasm) {
 
 async function importGpuFixture(device, pool) {
   const refs = {};
-  for (const [name, source] of Object.entries({ ...R1_FIXTURE, ...R3_FIXTURE, ...R4_FIXTURE, ...R5_FIXTURE, ...R6_FIXTURE })) {
+  for (const [name, source] of Object.entries({ ...R1_FIXTURE, ...R3_FIXTURE, ...R4_FIXTURE, ...R5_FIXTURE, ...R6_FIXTURE, ...R7_FIXTURE })) {
     const ref = await gpuImport(device, pool, source);
     must(ref, "GPU rejected reaction Anum " + name + "=" + source);
     refs[name] = ref;
@@ -407,13 +451,29 @@ function runCpuMixedDuplicate(wasm, refs) {
 
 function runCpuBatch(wasm, currentRefs, relationRefs) {
   cpuConfigureMany(wasm, currentRefs, relationRefs);
-  must(wasm.reactionRun() === 1, "CPU R6 batch reaction failed");
+  must(wasm.reactionRun() === 1, "CPU batch reaction failed");
   return {
     state: cpuCurrent(wasm),
     matched: wasmU32(wasm.reactionMatchedRelations()),
     handoff: wasmU32(wasm.reactionHandoffCount()),
     quiescent: wasmU32(wasm.reactionQuiescent()) === 1,
   };
+}
+
+function runCpuFixedPoint(wasm, currentRef, relationRef) {
+  cpuConfigureMany(wasm, [currentRef], [relationRef]);
+  const states = [cpuCurrent(wasm)];
+  const matched = [];
+  const handoffs = [];
+  const quiescent = [];
+  for (let step = 0; step < R7_FIXED_POINT_STEPS; step += 1) {
+    must(wasm.reactionRun() === 1, "CPU R7 fixed-point reaction failed at step " + step);
+    states.push(cpuCurrent(wasm));
+    matched.push(wasmU32(wasm.reactionMatchedRelations()));
+    handoffs.push(wasmU32(wasm.reactionHandoffCount()));
+    quiescent.push(wasmU32(wasm.reactionQuiescent()) === 1);
+  }
+  return { states, matched, handoffs, quiescent };
 }
 
 function runCpuOutOfScope(wasm) {
@@ -931,13 +991,41 @@ async function runGpuBatch(device, pool, currentRefs, relationRefs) {
   try {
     await gpuRun(device, pool, state);
     const after = await gpuObserve(device, pool, state);
-    must(after.status === 1, "GPU R6 batch reaction failed: diagnostic=" + after.diagnostic);
+    must(after.status === 1, "GPU batch reaction failed: diagnostic=" + after.diagnostic);
     return {
       state: after.anums,
       matched: after.matched,
       handoff: after.handoff,
       quiescent: after.quiescent,
     };
+  } finally {
+    destroyGpuState(state);
+  }
+}
+
+async function runGpuFixedPoint(device, pool, currentRef, relationRef) {
+  const state = createGpuReactionState(
+    device,
+    requireLocalRef(currentRef, pool.memory),
+    requireLocalRef(relationRef, pool.memory),
+  );
+  try {
+    const initial = await gpuObserve(device, pool, state);
+    const states = [initial.anums];
+    const matched = [];
+    const handoffs = [];
+    const quiescent = [];
+    for (let step = 0; step < R7_FIXED_POINT_STEPS; step += 1) {
+      await gpuRun(device, pool, state);
+      const observed = await gpuObserve(device, pool, state);
+      must(observed.status === 1,
+        "GPU R7 fixed-point reaction failed at step " + step + ": diagnostic=" + observed.diagnostic);
+      states.push(observed.anums);
+      matched.push(observed.matched);
+      handoffs.push(observed.handoff);
+      quiescent.push(observed.quiescent);
+    }
+    return { states, matched, handoffs, quiescent };
   } finally {
     destroyGpuState(state);
   }
@@ -1136,6 +1224,7 @@ export async function runReactionBrowser(wasm, device) {
   assertR4Fixture();
   assertR5Fixture();
   assertR6Fixture();
+  assertR7Fixture();
   const logs = [];
   const lifecycle = await runAtomicAsetToResultBrowser(wasm, device);
   const cpuRefs = importCpuFixture(wasm);
@@ -1308,6 +1397,112 @@ export async function runReactionBrowser(wasm, device) {
       "CPU R6 out-of-scope execution did not fail closed");
     must(gpuR6OutOfScope.rejected, "GPU R6 out-of-scope execution did not fail closed");
 
+    // R7 / accepted MTS v0.14 V14-L4 reaction-result basis.
+    // These are direct witnesses over the same generalized reaction core:
+    // no new recursive-form opcode or backend kernel primitive is introduced.
+
+    // N -> {}: two distinct current truths each have an admitted empty
+    // contribution. A successful empty result must hand off an empty Scope and
+    // remain non-quiescent, unlike the no-admitted-relation path.
+    const cpuR7NEmpty = runCpuBatch(
+      wasm,
+      [cpuRefs.current, cpuRefs.secondCurrent],
+      [cpuRefs.zeroRelation, cpuRefs.zeroRelationB],
+    );
+    const gpuR7NEmpty = await runGpuBatch(
+      device,
+      gpuPool,
+      [gpuRefs.current, gpuRefs.secondCurrent],
+      [gpuRefs.zeroRelation, gpuRefs.zeroRelationB],
+    );
+    assertReactionStateExact([], cpuR7NEmpty.state, "CPU R7 N->{}");
+    assertReactionStateExact([], gpuR7NEmpty.state, "GPU R7 N->{}");
+    assertReactionStateExact(cpuR7NEmpty.state, gpuR7NEmpty.state, "CPU/GPU R7 N->{} differential");
+    must(cpuR7NEmpty.matched === 2 && gpuR7NEmpty.matched === 2, "R7 N->{} matched count mismatch");
+    must(cpuR7NEmpty.handoff === 1 && gpuR7NEmpty.handoff === 1, "R7 N->{} handoff mismatch");
+    must(!cpuR7NEmpty.quiescent && !gpuR7NEmpty.quiescent, "R7 N->{} incorrectly quiescent");
+    must(cpuNoMatch.matched === 0 && gpuNoMatch.matched === 0 &&
+      cpuNoMatch.handoff === 0 && gpuNoMatch.handoff === 0 &&
+      cpuNoMatch.quiescent && gpuNoMatch.quiescent,
+      "R7 successful empty/no-relation distinction lost");
+
+    // A -> A: period-1 recurrence is active execution, not quiescence.
+    const cpuR7Fixed = runCpuFixedPoint(wasm, cpuRefs.current, cpuRefs.fixedRelation);
+    const gpuR7Fixed = await runGpuFixedPoint(device, gpuPool, gpuRefs.current, gpuRefs.fixedRelation);
+    for (let i = 0; i <= R7_FIXED_POINT_STEPS; i += 1) {
+      assertReactionStateExact([R1_FIXTURE.current], cpuR7Fixed.states[i], "CPU R7 fixed S" + i);
+      assertReactionStateExact([R1_FIXTURE.current], gpuR7Fixed.states[i], "GPU R7 fixed S" + i);
+      assertReactionStateExact(cpuR7Fixed.states[i], gpuR7Fixed.states[i],
+        "CPU/GPU R7 fixed S" + i + " differential");
+    }
+    must(cpuR7Fixed.matched.every((v) => v === 1) && gpuR7Fixed.matched.every((v) => v === 1),
+      "R7 fixed point lost active match");
+    must(cpuR7Fixed.handoffs.every((v) => v === 1) && gpuR7Fixed.handoffs.every((v) => v === 1),
+      "R7 fixed point lost handoff");
+    must(cpuR7Fixed.quiescent.every((v) => v === false) && gpuR7Fixed.quiescent.every((v) => v === false),
+      "R7 fixed point incorrectly quiescent");
+
+    // A -> A♀ and A -> ♂A from the identical source A.
+    const cpuR7End = runCpuBatch(wasm, [cpuRefs.current], [cpuRefs.relationEndContinuation]);
+    const gpuR7End = await runGpuBatch(device, gpuPool, [gpuRefs.current], [gpuRefs.relationEndContinuation]);
+    const cpuR7Start = runCpuBatch(wasm, [cpuRefs.current], [cpuRefs.relationStartContinuation]);
+    const gpuR7Start = await runGpuBatch(device, gpuPool, [gpuRefs.current], [gpuRefs.relationStartContinuation]);
+    assertReactionStateExact([R7_FIXTURE.stateEndContinuation], cpuR7End.state, "CPU R7 A->A♀");
+    assertReactionStateExact([R7_FIXTURE.stateEndContinuation], gpuR7End.state, "GPU R7 A->A♀");
+    assertReactionStateExact([R7_FIXTURE.stateStartContinuation], cpuR7Start.state, "CPU R7 A->♂A");
+    assertReactionStateExact([R7_FIXTURE.stateStartContinuation], gpuR7Start.state, "GPU R7 A->♂A");
+    assertReactionStateExact(cpuR7End.state, gpuR7End.state, "CPU/GPU R7 A->A♀ differential");
+    assertReactionStateExact(cpuR7Start.state, gpuR7Start.state, "CPU/GPU R7 A->♂A differential");
+    must(cpuR7End.matched === 1 && gpuR7End.matched === 1 &&
+      cpuR7Start.matched === 1 && gpuR7Start.matched === 1, "R7 chiral matched count mismatch");
+    must(cpuR7End.handoff === 1 && gpuR7End.handoff === 1 &&
+      cpuR7Start.handoff === 1 && gpuR7Start.handoff === 1, "R7 chiral handoff mismatch");
+    must(!cpuR7End.quiescent && !gpuR7End.quiescent &&
+      !cpuR7Start.quiescent && !gpuR7Start.quiescent, "R7 chiral result incorrectly quiescent");
+    must(R7_FIXTURE.stateEndContinuation !== R7_FIXTURE.stateStartContinuation,
+      "R7 chiral successor states collapsed");
+
+    // START_K/END_K are observed through the Link-native Context orientation
+    // view derived from the actual K marker, never from raw carrier side names.
+    const cpuTopologyR7 = readCpuTopology(wasm);
+    const gpuTopologyR7 = await readGpuTopology(device, gpuPool);
+    const cpuK = requireLocalRef(cpuRefs.K, "cpu-A");
+    const gpuK = requireLocalRef(gpuRefs.K, gpuPool.memory);
+    const cpuA = requireLocalRef(cpuRefs.A, "cpu-A");
+    const gpuA = requireLocalRef(gpuRefs.A, gpuPool.memory);
+    const cpuQ = requireLocalRef(cpuRefs.endContinuation, "cpu-A");
+    const gpuQ = requireLocalRef(gpuRefs.endContinuation, gpuPool.memory);
+    const cpuP = requireLocalRef(cpuRefs.startContinuation, "cpu-A");
+    const gpuP = requireLocalRef(gpuRefs.startContinuation, gpuPool.memory);
+    const cpuViewR7 = createContextRelativeOrientation(cpuTopologyR7, cpuK, cpuK);
+    const gpuViewR7 = createContextRelativeOrientation(gpuTopologyR7, gpuK, gpuK);
+    const cpuQP = cpuViewR7.poles(cpuQ);
+    const gpuQP = gpuViewR7.poles(gpuQ);
+    const cpuPP = cpuViewR7.poles(cpuP);
+    const gpuPP = gpuViewR7.poles(gpuP);
+    must(cpuViewR7.transport === "ID" && gpuViewR7.transport === "ID",
+      "R7 direct Context orientation did not derive ID from real markers");
+    must(cpuQP.start === cpuA && cpuQP.end === cpuQ && gpuQP.start === gpuA && gpuQP.end === gpuQ,
+      "R7 A♀ semantic END_K topology mismatch");
+    must(cpuPP.start === cpuP && cpuPP.end === cpuA && gpuPP.start === gpuP && gpuPP.end === gpuA,
+      "R7 ♂A semantic START_K topology mismatch");
+    must(cpuViewR7.semanticRecursiveWire(cpuQ) === R7_FIXTURE.endContinuation &&
+      gpuViewR7.semanticRecursiveWire(gpuQ) === R7_FIXTURE.endContinuation,
+      "R7 A♀ CPU/GPU semantic wire mismatch");
+    must(cpuViewR7.semanticRecursiveWire(cpuP) === R7_FIXTURE.startContinuation &&
+      gpuViewR7.semanticRecursiveWire(gpuP) === R7_FIXTURE.startContinuation,
+      "R7 ♂A CPU/GPU semantic wire mismatch");
+
+    let chiralClassMismatchDetected = false;
+    try {
+      must(cpuQP.start === cpuQ && cpuQP.end === cpuA,
+        "expected START_K self-incidence but observed END_K self-incidence");
+    } catch (error) {
+      chiralClassMismatchDetected = true;
+      logs.push("reaction.r7.negative.chiral-class = " + error.message);
+    }
+    must(chiralClassMismatchDetected, "R7 chiral class negative control was not detected");
+
     let mismatchDetected = false;
     try {
       assertReactionStateExact(cpu.after, perturbReactionState(gpu.after), "deliberate mismatch");
@@ -1408,6 +1603,19 @@ export async function runReactionBrowser(wasm, device) {
     logs.push("reaction.r6.order-variation = PASS");
     logs.push("reaction.r6.out-of-scope.cpu = PASS rejected count 17 > 16");
     logs.push("reaction.r6.out-of-scope.gpu = PASS rejected count 5 > 4");
+    logs.push("reaction.r7.N-to-empty.scope = []");
+    logs.push("reaction.r7.N-to-empty.matched = CPU " + cpuR7NEmpty.matched + " / GPU " + gpuR7NEmpty.matched);
+    logs.push("reaction.r7.N-to-empty.handoff = CPU " + cpuR7NEmpty.handoff + " / GPU " + gpuR7NEmpty.handoff);
+    logs.push("reaction.r7.N-to-empty.quiescent = CPU " + cpuR7NEmpty.quiescent + " / GPU " + gpuR7NEmpty.quiescent);
+    logs.push("reaction.r7.empty-vs-no-relation = PASS");
+    logs.push("reaction.r7.fixed.states.cpu = " + JSON.stringify(cpuR7Fixed.states));
+    logs.push("reaction.r7.fixed.states.gpu = " + JSON.stringify(gpuR7Fixed.states));
+    logs.push("reaction.r7.fixed.active-not-quiescent = PASS");
+    logs.push("reaction.r7.end-continuation = " + R7_FIXTURE.stateEndContinuation);
+    logs.push("reaction.r7.start-continuation = " + R7_FIXTURE.stateStartContinuation);
+    logs.push("reaction.r7.chiral-distinct = PASS");
+    logs.push("reaction.r7.context-orientation = ID_FROM_REAL_K_MARKER");
+    logs.push("reaction.r7.chiral-topology.cpu-gpu = PASS");
     logs.push("reaction.handles.current = CPU " + cpuRefs.current.value + " != GPU " + gpuRefs.current.value);
     logs.push("reaction.handles.successor = CPU " + cpuRefs.successor.value + " != GPU " + gpuRefs.successor.value);
     logs.push("reaction.snapshot.isolation = PASS");
@@ -1520,6 +1728,19 @@ export async function runReactionBrowser(wasm, device) {
       r6CpuOutOfScopeRejected: cpuR6OutOfScope.rejected,
       r6GpuOutOfScopeRejected: gpuR6OutOfScope.rejected,
       r6NormalizedDifferential: true,
+      r7NToEmptyCpu: cpuR7NEmpty,
+      r7NToEmptyGpu: gpuR7NEmpty,
+      r7SuccessfulEmptyDistinctFromNoRelation: true,
+      r7FixedStatesCpu: cpuR7Fixed.states,
+      r7FixedStatesGpu: gpuR7Fixed.states,
+      r7FixedPointActive: true,
+      r7EndContinuationCpu: cpuR7End.state,
+      r7EndContinuationGpu: gpuR7End.state,
+      r7StartContinuationCpu: cpuR7Start.state,
+      r7StartContinuationGpu: gpuR7Start.state,
+      r7ChiralResultsDistinct: true,
+      r7ContextRelativeTopology: true,
+      r7NormalizedDifferential: true,
       negativeControls: true,
       logs,
     };
