@@ -523,7 +523,7 @@ pub(crate) fn web_prove_mul32(
         visual_links,
     };
     let proof = WebStructuralProof {
-        schema_version: 3,
+        schema_version: 4,
         block: "MUL32 raw Wide64".to_owned(),
         prepare,
         load,
