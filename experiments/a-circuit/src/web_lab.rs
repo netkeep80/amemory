@@ -7,7 +7,7 @@ use crate::{
     rotate32_n::{web_prove_rotate32, web_run_rotate32},
     rotate_carry32_n::{web_prove_rotate_carry32, web_run_rotate_carry32},
     shift32_n::{web_prove_shift32, web_run_shift32},
-    unary_arith_n::web_run_unary32,
+    unary_arith_n::{web_prove_unary32, web_run_unary32},
 };
 use std::sync::Mutex;
 
@@ -268,6 +268,27 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
     }
 
     if let Some(out) = web_run_rotate_carry32(op, a, b, input_flag) {
+        return Some(LabOutcome {
+            value: out.value,
+            value_hi: 0,
+            writeback: u32::from(out.writeback),
+            defined_mask: out.defined_mask,
+            value_mask: out.value_mask,
+            undefined_mask: out.undefined_mask,
+            preserve_mask: out.preserve_mask,
+            reactions: out.reactions,
+            links_after_build: out.links_after_build,
+            links_after_first: out.links_after_first,
+            steady_link_delta: out.steady_link_delta,
+            quiescent: u32::from(out.quiescent),
+        });
+    }
+
+    if (20..=22).contains(&op) {
+        let execution = web_prove_unary32(op, a)?;
+        let proof_json = serde_json::to_string(&execution.proof).ok()?;
+        let out = execution.outcome;
+        set_last_proof_json(proof_json);
         return Some(LabOutcome {
             value: out.value,
             value_hi: 0,
@@ -1105,13 +1126,119 @@ mod tests {
             "RCL32 count 1/33 must converge only through structural masking"
         );
 
-        let inc = execute(20, 0x7fff_ffff, 0, 0).unwrap();
-        assert_eq!(inc.value, 0x8000_0000);
-        assert_eq!(inc.preserve_mask & FLAG_CF, FLAG_CF);
+        for (op, value, expected, block, cf_defined, expected_cf_set) in [
+            (20u32, 0x7fff_ffffu32, 0x8000_0000u32, "INC32", false, false),
+            (21u32, 0x8000_0000u32, 0x7fff_ffffu32, "DEC32", false, false),
+            (22u32, 1u32, u32::MAX, "NEG32", true, true),
+            (22u32, 0u32, 0u32, "NEG32", true, false),
+        ] {
+            let out = execute(op, value, 0, 0).unwrap();
+            assert_eq!(out.value, expected, "{block}");
+            assert_eq!(out.writeback, 1, "{block}");
+            assert_eq!(out.undefined_mask, 0, "{block}");
+            assert_eq!(out.steady_link_delta, 0, "{block}");
+            assert_eq!(out.quiescent, 1, "{block}");
+            assert_eq!(amemory_i386_lab_proof_available(), 1, "{block}");
 
-        let neg = execute(22, 1, 0, 0).unwrap();
-        assert_eq!(neg.value, u32::MAX);
-        assert_eq!(neg.value_mask & FLAG_CF, FLAG_CF);
+            if cf_defined {
+                assert_eq!(out.defined_mask & FLAG_CF, FLAG_CF, "{block}");
+                assert_eq!(out.preserve_mask & FLAG_CF, 0, "{block}");
+                assert_eq!(
+                    out.value_mask & FLAG_CF,
+                    if expected_cf_set { FLAG_CF } else { 0 },
+                    "{block}"
+                );
+            } else {
+                assert_eq!(out.defined_mask & FLAG_CF, 0, "{block}");
+                assert_eq!(out.preserve_mask & FLAG_CF, FLAG_CF, "{block}");
+            }
+
+            let proof_json = {
+                let guard = LAST_PROOF_JSON
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                guard.clone()
+            };
+            let proof: serde_json::Value =
+                serde_json::from_str(&proof_json).unwrap();
+            assert_eq!(proof["block"], block);
+            let memory_id =
+                proof["load"]["memoryInstanceId"].as_str().unwrap();
+            assert_eq!(
+                proof["execute"]["memoryInstanceId"].as_str().unwrap(),
+                memory_id
+            );
+            assert_eq!(
+                proof["result"]["memoryInstanceId"].as_str().unwrap(),
+                memory_id
+            );
+            assert!(
+                proof["execute"]["reactions"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|step| step["memoryInstanceId"] == memory_id)
+            );
+            assert_eq!(proof["load"]["carrierRoundTrip"], true);
+            assert_eq!(proof["execute"]["finalQuiescent"], true);
+            assert_eq!(proof["result"]["oracleMatches"], true);
+            assert_eq!(proof["result"]["identicalRerunLinkDelta"], 0);
+            assert_eq!(
+                proof["result"]["decodedValue"].as_u64().unwrap() as u32,
+                out.value
+            );
+            assert_eq!(
+                proof["result"]["visualLinks"].as_array().unwrap().len() as u64,
+                proof["result"]["linksFinal"].as_u64().unwrap()
+            );
+
+            let roots = proof["prepare"]["semanticRoots"].as_array().unwrap();
+            let source_for = |role: &str| {
+                roots
+                    .iter()
+                    .find(|root| root["role"] == role)
+                    .and_then(|root| root["source"].as_str())
+                    .unwrap()
+            };
+            for required in [
+                "function.unary.selected",
+                "function.unary.inc",
+                "function.unary.dec",
+                "function.unary.neg",
+                "function.flagged_arithmetic",
+                "result.flagged_tag",
+                "data.value.word",
+                "execution.interpreter",
+                "execution.theory",
+                "execution.apply",
+                "invocation.call",
+                "scope.initial",
+                "result.tag",
+                "result.flag.set_tag",
+                "result.flag.cf",
+                "result.flag.pf",
+                "result.flag.af",
+                "result.flag.zf",
+                "result.flag.sf",
+                "result.flag.of",
+            ] {
+                assert!(
+                    roots.iter().any(|root| root["role"] == required),
+                    "{block}: missing {required}"
+                );
+            }
+            let selected_role = match op {
+                20 => "function.unary.inc",
+                21 => "function.unary.dec",
+                22 => "function.unary.neg",
+                _ => unreachable!(),
+            };
+            assert_eq!(
+                source_for("function.unary.selected"),
+                source_for(selected_role),
+                "{block}: selected structural function mismatch"
+            );
+        }
 
         let raw_mul = execute(23, u32::MAX, 2, 0).unwrap();
         assert_eq!(raw_mul.value, 0xffff_fffe);

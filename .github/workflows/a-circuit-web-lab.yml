@@ -897,8 +897,89 @@ jobs:
                 throw new Error("RCL32 Count8 1/33 masking mismatch: " + key);
               }
             }
-            run(20, 0x7fffffff, 0, 0, 0x80000000, "INC32");
-            run(22, 0x00000001, 0, 0, 0xffffffff, "NEG32");
+            const verifyUnaryProof = (
+              op, value, expected, block, cfDefined, cfSet
+            ) => {
+              run(op, value, 0, 0, expected, block);
+              const proof = readCurrentProof(block);
+              const memoryId = proof.load.memoryInstanceId;
+              if (proof.block !== block ||
+                  !memoryId ||
+                  proof.execute.memoryInstanceId !== memoryId ||
+                  proof.result.memoryInstanceId !== memoryId ||
+                  !proof.execute.reactions.every((step) => step.memoryInstanceId === memoryId) ||
+                  !proof.load.carrierRoundTrip ||
+                  !proof.execute.finalQuiescent ||
+                  !proof.result.oracleMatches ||
+                  proof.result.identicalRerunLinkDelta !== 0 ||
+                  (proof.result.decodedValue >>> 0) !== (expected >>> 0)) {
+                throw new Error(block + " structural unary witness failed");
+              }
+
+              const sourceByRole = new Map(
+                proof.prepare.semanticRoots.map((root) => [root.role, root.source])
+              );
+              for (const role of [
+                "function.unary.selected",
+                "function.unary.inc",
+                "function.unary.dec",
+                "function.unary.neg",
+                "function.flagged_arithmetic",
+                "result.flagged_tag",
+                "data.value.word",
+                "execution.interpreter",
+                "execution.theory",
+                "execution.apply",
+                "invocation.call",
+                "scope.initial",
+                "result.tag",
+                "result.flag.set_tag",
+                "result.flag.cf",
+                "result.flag.pf",
+                "result.flag.af",
+                "result.flag.zf",
+                "result.flag.sf",
+                "result.flag.of",
+              ]) {
+                if (!sourceByRole.has(role)) {
+                  throw new Error(block + " prepared Aset missing " + role);
+                }
+              }
+              const selectedRole = op === 20
+                ? "function.unary.inc"
+                : op === 21
+                  ? "function.unary.dec"
+                  : "function.unary.neg";
+              if (sourceByRole.get("function.unary.selected") !== sourceByRole.get(selectedRole)) {
+                throw new Error(block + " selected structural function mismatch");
+              }
+
+              const defined = w.amemory_i386_lab_defined_mask() >>> 0;
+              const values = w.amemory_i386_lab_value_mask() >>> 0;
+              const undefined = w.amemory_i386_lab_undefined_mask() >>> 0;
+              const preserve = w.amemory_i386_lab_preserve_mask() >>> 0;
+              if (undefined !== 0) {
+                throw new Error(block + " unexpectedly produced undefined status flags");
+              }
+              if (cfDefined) {
+                if ((defined & 1) !== 1 || (preserve & 1) !== 0 ||
+                    ((values & 1) !== 0) !== cfSet) {
+                  throw new Error(block + " CF must be structurally defined by the six-action patch");
+                }
+              } else {
+                if ((defined & 1) !== 0 || (preserve & 1) !== 1) {
+                  throw new Error(block + " CF must be structurally absent/preserved by the five-action patch");
+                }
+              }
+              if (proof.result.visualLinks.length !== proof.result.linksFinal) {
+                throw new Error(block + " visual snapshot is incomplete");
+              }
+            };
+
+            verifyUnaryProof(20, 0x7fffffff, 0x80000000, "INC32", false, false);
+            verifyUnaryProof(21, 0x80000000, 0x7fffffff, "DEC32", false, false);
+            verifyUnaryProof(22, 0x00000001, 0xffffffff, "NEG32", true, true);
+            verifyUnaryProof(22, 0x00000000, 0x00000000, "NEG32", true, false);
 
             runWide(23, 0xffffffff, 2, 0xfffffffe, 1, 33 + 1038, "MUL32 raw Wide64");
             if ((w.amemory_i386_lab_preserve_mask() >>> 0) !== 0x000008d5) {
@@ -919,7 +1000,7 @@ jobs:
               throw new Error("x86 MUL32 must not preserve status flags");
             }
 
-            console.log("WASM registry + MUX1/MUX32/logic/arithmetic/shift/rotate-proofs/unary/MUL structural smoke PASS");
+            console.log("WASM registry + MUX1/MUX32/logic/arithmetic/shift/rotate/unary-proofs/MUL structural smoke PASS");
           }).catch((error) => {
             console.error(error);
             process.exit(1);
