@@ -26,6 +26,72 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
     }
   }
   const proofCoveredOpcodes = new Set();
+  const proofMeasurements = new Map();
+  const jsonBytes = (value) =>
+    Buffer.byteLength(JSON.stringify(value), "utf8");
+  const proofMetrics = (proof, registryBlock) => {
+    const { visualLinks, ...resultMetadata } = proof.result;
+    const recursiveSources = proof.prepare.semanticRoots.map(
+      (root) => root.source || ""
+    );
+    const reactionScopes = proof.execute.reactions.map((step) => ({
+      scopeBefore: step.scopeBefore,
+      scopeAfter: step.scopeAfter,
+    }));
+    const carrierDuplets = proof.prepare.carrierDuplets;
+    return {
+      opcode: registryBlock.opcode,
+      id: registryBlock.id,
+      block: proof.block,
+      schemaVersion: proof.schemaVersion,
+      counts: {
+        compiledLinks: proof.prepare.compiledLinks,
+        carrierDuplets: carrierDuplets.length,
+        semanticRoots: proof.prepare.semanticRoots.length,
+        theoryAdmissions: proof.prepare.theoryAdmissions.length,
+        activeReactions: proof.execute.activeReactionCount,
+        traceEntries: proof.execute.reactions.length,
+        finalLinks: proof.result.linksFinal,
+        visualLinks: visualLinks.length,
+      },
+      serializedProofBytes: jsonBytes(proof),
+      compiledLinks: proof.prepare.compiledLinks,
+      carrierDuplets: carrierDuplets.length,
+      theoryAdmissions: proof.prepare.theoryAdmissions.length,
+      activeReactions: proof.execute.activeReactionCount,
+      traceEntries: proof.execute.reactions.length,
+      finalLinks: proof.result.linksFinal,
+      visualLinks: visualLinks.length,
+      bytes: {
+        proofJson: jsonBytes(proof),
+        prepareJson: jsonBytes(proof.prepare),
+        carrierJson: jsonBytes(carrierDuplets),
+        carrierDenseU32Floor: carrierDuplets.length * 2 * 4,
+        semanticRootsJson: jsonBytes(proof.prepare.semanticRoots),
+        semanticRootRecursiveSources: recursiveSources.reduce(
+          (sum, value) => sum + Buffer.byteLength(value, "utf8"),
+          0
+        ),
+        theoryAdmissionsJson: jsonBytes(proof.prepare.theoryAdmissions),
+        loadJson: jsonBytes(proof.load),
+        executeJson: jsonBytes(proof.execute),
+        reactionsJson: jsonBytes(proof.execute.reactions),
+        reactionScopeRefsJson: jsonBytes(reactionScopes),
+        resultJson: jsonBytes(proof.result),
+        resultMetadataJson: jsonBytes(resultMetadata),
+        visualLinksJson: jsonBytes(visualLinks),
+      },
+    };
+  };
+  const captureProofMeasurement = (proof, registryBlock) => {
+    if (!registryBlock) {
+      throw new Error("cannot measure proof without registry block");
+    }
+    proofMeasurements.set(
+      registryBlock.opcode,
+      proofMetrics(proof, registryBlock)
+    );
+  };
 
   // Real WASM execution smoke: composed structural MUX1.
   if (w.amemory_i386_lab_run(12, 1, 0, 1) !== 1) {
@@ -59,6 +125,10 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
     throw new Error("MUX1 proof schema is not v3");
   }
   proofCoveredOpcodes.add(12);
+  captureProofMeasurement(
+    proof,
+    registry.blocks.find((block) => block.opcode === 12)
+  );
   const memoryId = proof.load.memoryInstanceId;
   if (!memoryId || proof.execute.memoryInstanceId !== memoryId || proof.result.memoryInstanceId !== memoryId) {
     throw new Error("proof changed runtime A-memory identity");
@@ -136,6 +206,7 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
       throw new Error(label + " proof block is absent from registry: " + proof.block);
     }
     proofCoveredOpcodes.add(registryBlock.opcode);
+    captureProofMeasurement(proof, registryBlock);
     if (!Array.isArray(proof.prepare?.theoryAdmissions) ||
         proof.prepare.theoryAdmissions.length === 0 ||
         !proof.prepare.theoryAdmissions.every(
@@ -816,21 +887,23 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
     throw new Error("proof coverage set does not match registry cardinality");
   }
 
+  if (proofMeasurements.size !== registry.blocks.length) {
+    throw new Error(
+      "proof measurement coverage mismatch: " +
+      proofMeasurements.size + "/" + registry.blocks.length
+    );
+  }
+  const measuredProofs = [...proofMeasurements.values()]
+    .sort((left, right) => left.opcode - right.opcode);
+  const sumBytes = (field) =>
+    measuredProofs.reduce((sum, item) => sum + item.bytes[field], 0);
+  const maxBy = (field) =>
+    measuredProofs.reduce((best, item) =>
+      item.bytes[field] > best.bytes[field] ? item : best
+    );
   const reportPath =
     process.env.AMEMORY_WEB_LAB_REPORT ||
     "experiments/a-circuit/target/web-lab-acceptance-report.json";
-  const proofMetrics = (proof) => ({
-    block: proof.block,
-    schemaVersion: proof.schemaVersion,
-    compiledLinks: proof.prepare.compiledLinks,
-    carrierDuplets: proof.prepare.carrierDuplets.length,
-    theoryAdmissions: proof.prepare.theoryAdmissions.length,
-    activeReactions: proof.execute.activeReactionCount,
-    traceEntries: proof.execute.reactions.length,
-    finalLinks: proof.result.linksFinal,
-    visualLinks: proof.result.visualLinks.length,
-    serializedProofBytes: Buffer.byteLength(JSON.stringify(proof), "utf8"),
-  });
   const report = {
     schemaVersion: 1,
     kind: "amemory-web-lab-acceptance-measurements",
@@ -847,9 +920,22 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
     proofCoveredOpcodes: proofCoveredOpcodes.size,
     wasmBytes: bytes.length,
     elapsedMs: Number(process.hrtime.bigint() - acceptanceStarted) / 1e6,
+    proofMeasurements: measuredProofs,
+    proofMeasurementSummary: {
+      measuredProofs: measuredProofs.length,
+      totalProofJsonBytes: sumBytes("proofJson"),
+      totalCarrierJsonBytes: sumBytes("carrierJson"),
+      totalCarrierDenseU32FloorBytes: sumBytes("carrierDenseU32Floor"),
+      totalReactionsJsonBytes: sumBytes("reactionsJson"),
+      totalVisualLinksJsonBytes: sumBytes("visualLinksJson"),
+      maxProofJson: maxBy("proofJson"),
+      maxReactionsJson: maxBy("reactionsJson"),
+      maxVisualLinksJson: maxBy("visualLinksJson"),
+      maxRecursiveRootSources: maxBy("semanticRootRecursiveSources"),
+    },
     selectedProofs: {
-      rawMul32: proofMetrics(rawMulProof),
-      mul32Effect: proofMetrics(mulEffectProof),
+      rawMul32: proofMeasurements.get(23),
+      mul32Effect: proofMeasurements.get(24),
     },
   };
   fs.mkdirSync(path.dirname(reportPath), { recursive: true });
