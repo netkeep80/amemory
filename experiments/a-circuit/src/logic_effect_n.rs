@@ -1447,7 +1447,7 @@ pub(crate) fn web_prove_logic(
     };
 
     let proof = WebStructuralProof {
-        schema_version: 1,
+        schema_version: 2,
         block: block.to_owned(),
         prepare,
         load,
