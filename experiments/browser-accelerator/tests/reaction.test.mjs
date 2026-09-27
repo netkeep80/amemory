@@ -112,7 +112,7 @@ assert.throws(() => makePortableReactionResult([], 0, 0, 0), /quiescent/);
 
 assert.throws(
   () => splitPairAnum("98"),
-  /must be PAIR Anum/,
+  /must be PAIR recursive Link wire/,
 );
 
 assert.throws(

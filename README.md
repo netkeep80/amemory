@@ -110,8 +110,8 @@ contracts/amemory-conformance-v0.1.json#/backendMatrix
 
 | Backend | Статус | Current Scope | Физическая история | Нормализованное сравнение | Полный профиль |
 |---|---|---|---|---|---|
-| Rust reference CPU / WASM | prototype / partial | R1–R6: bounded two-bank Scope + published selector | старые Scope bank и Links сохраняются физически | canonical Anum reaction Scope + matched/handoff | **да — P01–P17** |
-| WebGPU browser | prototype / partial | R1–R6: two-bank Scope buffer + atomic published selector | старые GPU Scope bank и Link pool сохраняются | canonical Anum reaction Scope + matched/handoff | **да — P01–P17** |
+| Rust reference CPU / WASM | prototype / partial | R1–R6: bounded two-bank Scope + published selector | старые Scope bank и Links сохраняются физически | normalized recursive Link wire Scope + matched/handoff | **да — P01–P17** |
+| WebGPU browser | prototype / partial | R1–R6: two-bank Scope buffer + atomic published selector | старые GPU Scope bank и Link pool сохраняются | normalized recursive Link wire Scope + matched/handoff | **да — P01–P17** |
 | future accelerator family | planned | должен быть объявлен до реализации | должен быть объявлен отдельно от semantic currentness | обязательный differential против reference | **нет** |
 
 Rust native tests и WASM browser используют одну текущую reference-кодовую базу; это разные поверхности исполнения одного prototype backend, а не разные семантики.
@@ -125,8 +125,24 @@ Rust native tests и WASM browser используют одну текущую r
 - canonical pair convergence;
 - stateful физическое хранение между rounds;
 - независимость portable identity от local handles;
-- canonical Anum import/export в двух независимо адресованных Memories;
+- canonical direct technical recursive Link wire import/export в двух независимо адресованных Memories;
 - fail-closed malformed/foreign/capacity controls.
+
+### Терминология представлений после MTS v0.14
+
+Для текущих structural/reaction witnesses используется явное разделение:
+
+```text
+recursive Link wire
+  !=
+Anum / ExactSequence
+```
+
+`recursive Link wire` — рекурсивная запись структуры Link для тех поверхностей, где выбран этот codec. Она не объявляет произвольный rooted Link значением Anum.
+
+`Anum / ExactSequence` — отдельная sequence-specific линия представления. Поэтому `resultSequenceAnum` остаётся Anum-полем только там, где источник результата действительно прошёл через проверенную ExactSequence/sequence representation.
+
+Исторические имена `anum-boundary.mjs`, `amemory_anum_cpu_*`, `parseAnum`, `cpuImportRaw` и родственные API сохраняются как **compatibility naming** для direct technical recursive-wire materialization. Они не являются семантическим утверждением `recursive Link wire == Anum`.
 
 Но это **не равно полной реализации реакции A-сети**.
 

@@ -90,7 +90,7 @@ export function pairAnum(start, end) {
 export function splitPairAnum(source) {
   const node = parseAnum(source);
   if (node.kind !== "PAIR") {
-    throw new Error("reaction record must be PAIR Anum: " + source);
+    throw new Error("reaction record must be PAIR recursive Link wire: " + source);
   }
   return Object.freeze({
     start: formatAnum(node.start),
@@ -256,7 +256,7 @@ function importCpuFixture(wasm) {
   const refs = {};
   for (const [name, source] of Object.entries({ ...R1_FIXTURE, ...R3_FIXTURE, ...R4_FIXTURE, ...R5_FIXTURE, ...R6_FIXTURE, ...R7_FIXTURE })) {
     const ref = cpuImportRaw(wasm, source);
-    must(ref, "CPU rejected reaction Anum " + name + "=" + source);
+    must(ref, "CPU rejected reaction recursive Link wire " + name + "=" + source);
     refs[name] = ref;
   }
   return refs;
@@ -266,7 +266,7 @@ async function importGpuFixture(device, pool) {
   const refs = {};
   for (const [name, source] of Object.entries({ ...R1_FIXTURE, ...R3_FIXTURE, ...R4_FIXTURE, ...R5_FIXTURE, ...R6_FIXTURE, ...R7_FIXTURE })) {
     const ref = await gpuImport(device, pool, source);
-    must(ref, "GPU rejected reaction Anum " + name + "=" + source);
+    must(ref, "GPU rejected reaction recursive Link wire " + name + "=" + source);
     refs[name] = ref;
   }
   return refs;
