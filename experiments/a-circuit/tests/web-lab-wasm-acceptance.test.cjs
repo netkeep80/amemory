@@ -17,7 +17,10 @@ if (sourceSha !== null && !/^[0-9a-f]{40}$/.test(sourceSha)) {
 }
 const version = fs.readFileSync("VERSION", "utf8").trim();
 if (!version) throw new Error("VERSION is empty");
-WebAssembly.instantiate(bytes, {}).then(({instance}) => {
+Promise.all([
+  WebAssembly.instantiate(bytes, {}),
+  import("../../browser-accelerator/web/i386-proof-transport.mjs"),
+]).then(([{instance}, { validateCompactAgainstV3 }]) => {
   const w = instance.exports;
   if (w.amemory_i386_lab_probe() !== 0x386) throw new Error("bad lab probe");
   for (const block of registry.blocks) {
@@ -27,6 +30,7 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
   }
   const proofCoveredOpcodes = new Set();
   const proofMeasurements = new Map();
+  let browserTransportNegativeChecked = false;
   const jsonBytes = (value) =>
     Buffer.byteLength(JSON.stringify(value), "utf8");
   const readCurrentCompactProof = (label) => {
@@ -390,6 +394,23 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
         registryBlock.id + " Rust compact producer != independent JS shadow"
       );
     }
+    validateCompactAgainstV3(proof, producedCompactProof);
+    if (!browserTransportNegativeChecked) {
+      const corruptedCompact = JSON.parse(JSON.stringify(producedCompactProof));
+      corruptedCompact.representationVersion = "invalid-negative-control";
+      let rejected = false;
+      try {
+        validateCompactAgainstV3(proof, corruptedCompact);
+      } catch {
+        rejected = true;
+      }
+      if (!rejected) {
+        throw new Error(
+          registryBlock.id + " browser compact transport negative control failed"
+        );
+      }
+      browserTransportNegativeChecked = true;
+    }
 
     const decodedCompactTopology =
       compactTopology.base.starts.map((start, index) => ({
@@ -489,6 +510,7 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
         representationVersion: compactProof.representationVersion,
         proofJsonBytes: jsonBytes(compactProof),
         producerProofJsonBytes: jsonBytes(producedCompactProof),
+        browserTransportValidated: true,
         topologyJsonBytes: jsonBytes(compactProof.topology),
         rootsJsonBytes: jsonBytes(compactProof.roots),
         theoryAdmissionsJsonBytes: jsonBytes(compactProof.theoryAdmissions),
@@ -1357,6 +1379,9 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
       "proof measurement coverage mismatch: " +
       proofMeasurements.size + "/" + registry.blocks.length
     );
+  }
+  if (!browserTransportNegativeChecked) {
+    throw new Error("browser compact transport negative control was not executed");
   }
   const measuredProofs = [...proofMeasurements.values()]
     .sort((left, right) => left.opcode - right.opcode);
