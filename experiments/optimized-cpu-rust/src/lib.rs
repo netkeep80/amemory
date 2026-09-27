@@ -156,7 +156,7 @@ impl OptimizedLinkStore {
         Ok((self.starts[index], self.ends[index]))
     }
 
-    fn import_anum_in_place(
+    fn import_direct_recursive_wire_in_place(
         &mut self,
         source: &str,
     ) -> Result<Handle, StoreError> {
@@ -173,33 +173,38 @@ impl OptimizedLinkStore {
         Ok(handle)
     }
 
-    /// Historical direct-gauge recursive 8/9/6/1 compatibility import.
+    /// Transactionally import one direct-gauge technical recursive Link wire.
     ///
-    /// Accepted MTS v0.14 separates this recursive Link codec from Anum and
-    /// requires semantic orientation to come from Link-native Context markers.
-    /// New semantic consumers should use
-    /// orientation::SemanticOrientation::import_recursive_wire.
-    pub fn import_anum(&mut self, source: &str) -> Result<Handle, StoreError> {
+    /// This API names the representation it actually consumes. It is not
+    /// semantic orientation authority; accepted-v0.14 semantic consumers use
+    /// `orientation::SemanticOrientation::import_recursive_wire`.
+    pub fn import_direct_recursive_wire(
+        &mut self,
+        source: &str,
+    ) -> Result<Handle, StoreError> {
         // Whole-source import is transactional. Parsing/canonicalization happens
         // against a staging clone; only complete success replaces live state.
         let runtime_instance_id = self.instance_id;
         let mut staging = self.clone();
-        // Transactional staging is still the same logical runtime store. A
-        // normal external clone receives a fresh cache identity, but a
-        // successful import must preserve this store's identity.
         staging.instance_id = runtime_instance_id;
-        let handle = staging.import_anum_in_place(source)?;
+        let handle = staging.import_direct_recursive_wire_in_place(source)?;
         *self = staging;
         Ok(handle)
     }
 
-    /// Transactionally imports a portable Aset in source order.
+    /// Historical direct-gauge compatibility name.
+    ///
+    /// Accepted MTS v0.14 separates recursive Link wire from Anum/ExactSequence.
+    /// Keep this wrapper only for existing callers while P5d migrates them.
+    pub fn import_anum(&mut self, source: &str) -> Result<Handle, StoreError> {
+        self.import_direct_recursive_wire(source)
+    }
+
+    /// Transactionally import direct-gauge recursive Link wires in source order.
     ///
     /// The whole batch uses one staging clone and is published atomically.
-    /// This is semantically equivalent to repeated `import_anum` calls on a
-    /// successful batch, while avoiding an O(batch) sequence of growing-store
-    /// clones. Any malformed/capacity failure leaves the live store unchanged.
-    pub fn import_anums(
+    /// Any malformed/capacity failure leaves the live store unchanged.
+    pub fn import_direct_recursive_wires(
         &mut self,
         sources: &[String],
     ) -> Result<Vec<Handle>, StoreError> {
@@ -213,11 +218,19 @@ impl OptimizedLinkStore {
 
         let mut handles = Vec::with_capacity(sources.len());
         for source in sources {
-            handles.push(staging.import_anum_in_place(source)?);
+            handles.push(staging.import_direct_recursive_wire_in_place(source)?);
         }
 
         *self = staging;
         Ok(handles)
+    }
+
+    /// Historical batch compatibility name for direct recursive Link wires.
+    pub fn import_anums(
+        &mut self,
+        sources: &[String],
+    ) -> Result<Vec<Handle>, StoreError> {
+        self.import_direct_recursive_wires(sources)
     }
 
     /// Exports the executable carrier as dense Link duplets in local-handle
@@ -301,16 +314,27 @@ impl OptimizedLinkStore {
         Ok(())
     }
 
-    /// Historical direct-gauge recursive 8/9/6/1 compatibility export.
+    /// Serialize one Link as a direct-gauge technical recursive Link wire.
     ///
     /// New accepted-v0.14 semantic consumers should use
-    /// orientation::SemanticOrientation::recursive_wire so raw carrier pole
+    /// `orientation::SemanticOrientation::recursive_wire` so raw carrier pole
     /// order cannot become START_K/END_K authority.
-    pub fn export_anum(&self, handle: Handle) -> Result<String, StoreError> {
+    pub fn export_direct_recursive_wire(
+        &self,
+        handle: Handle,
+    ) -> Result<String, StoreError> {
         let mut visiting = HashSet::new();
         let mut output = String::new();
         self.write_node(handle, &mut visiting, &mut output)?;
         Ok(output)
+    }
+
+    /// Historical direct-gauge compatibility name.
+    ///
+    /// This wrapper does not assert that an arbitrary recursive Link wire is an
+    /// Anum/ExactSequence representation.
+    pub fn export_anum(&self, handle: Handle) -> Result<String, StoreError> {
+        self.export_direct_recursive_wire(handle)
     }
 
     pub fn ensure_pair(
@@ -772,7 +796,11 @@ impl OptimizedReactionEngine {
         let mut scope = self
             .current()
             .iter()
-            .map(|handle| store.export_anum(*handle).map_err(ReactionError::Store))
+            .map(|handle| {
+                store
+                    .export_direct_recursive_wire(*handle)
+                    .map_err(ReactionError::Store)
+            })
             .collect::<Result<Vec<_>, _>>()?;
         scope.sort();
         scope.dedup();
@@ -967,6 +995,35 @@ mod tests {
             .set_theory(store, &optimized_handles(map, theory))
             .unwrap();
         engine.snapshot_theory(store).unwrap();
+    }
+
+    #[test]
+    fn legacy_anum_api_is_exact_direct_recursive_wire_compatibility_facade() {
+        let mut canonical = OptimizedLinkStore::new();
+        let canonical_handle = canonical
+            .import_direct_recursive_wire("19868")
+            .unwrap();
+        assert_eq!(
+            canonical.export_direct_recursive_wire(canonical_handle).unwrap(),
+            "19868"
+        );
+
+        let legacy_handle = canonical.import_anum("19868").unwrap();
+        assert_eq!(legacy_handle, canonical_handle);
+        assert_eq!(canonical.export_anum(legacy_handle).unwrap(), "19868");
+
+        let sources = vec!["98".to_owned(), "68".to_owned(), "16898".to_owned()];
+        let mut canonical_batch = OptimizedLinkStore::new();
+        let mut legacy_batch = OptimizedLinkStore::new();
+        let canonical_handles = canonical_batch
+            .import_direct_recursive_wires(&sources)
+            .unwrap();
+        let legacy_handles = legacy_batch.import_anums(&sources).unwrap();
+        assert_eq!(canonical_handles, legacy_handles);
+        assert_eq!(
+            canonical_batch.export_packed_duplets(),
+            legacy_batch.export_packed_duplets()
+        );
     }
 
     #[test]

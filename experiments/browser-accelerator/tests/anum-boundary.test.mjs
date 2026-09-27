@@ -1,31 +1,50 @@
 import assert from "node:assert/strict";
 import {
   ANUM_FIXTURES,
+  RECURSIVE_WIRE_FIXTURES,
   bindCpuSemanticOrientation,
   compileAnumPlan,
+  compileRecursiveWirePlan,
   createContextRelativeOrientation,
+  cpuExport,
   cpuExportSemanticRecursiveWire,
+  cpuExportTechnicalRecursiveWire,
+  cpuImportRaw,
   cpuImportSemanticRecursiveWire,
+  cpuImportTechnicalRecursiveWire,
   exportLocalTopology,
+  exportTechnicalRecursiveWireFromTopology,
+  formatAnum,
+  formatRecursiveWire,
   localRef,
   normalizeAnum,
+  normalizeRecursiveWire,
+  parseAnum,
+  parseRecursiveWire,
   readCpuTopology,
   requireLocalRef,
   topologyCount,
-  cpuExport,
-  cpuImportRaw,
   wasmU32,
 } from "../web/anum-boundary.mjs";
 
-for (const source of ANUM_FIXTURES) {
-  assert.equal(normalizeAnum(source), source);
-  const plan = compileAnumPlan(source);
+for (const source of RECURSIVE_WIRE_FIXTURES) {
+  assert.equal(normalizeRecursiveWire(source), source);
+  const plan = compileRecursiveWirePlan(source);
   assert.ok(plan.nodes.length >= 1);
   assert.equal(plan.rootNode, plan.nodes.length - 1);
 }
 
+assert.equal(ANUM_FIXTURES, RECURSIVE_WIRE_FIXTURES);
+assert.equal(parseAnum, parseRecursiveWire);
+assert.equal(formatAnum, formatRecursiveWire);
+assert.equal(normalizeAnum, normalizeRecursiveWire);
+assert.equal(compileAnumPlan, compileRecursiveWirePlan);
+assert.equal(exportLocalTopology, exportTechnicalRecursiveWireFromTopology);
+assert.equal(cpuImportRaw, cpuImportTechnicalRecursiveWire);
+assert.equal(cpuExport, cpuExportTechnicalRecursiveWire);
+
 for (const source of ["", "5", "1", "9", "6", "11", "88", "19868x"]) {
-  assert.throws(() => normalizeAnum(source), /Anum|token|truncated|trailing/);
+  assert.throws(() => normalizeRecursiveWire(source), /recursive|token|truncated|trailing/);
 }
 
 assert.throws(
@@ -99,9 +118,9 @@ assert.equal(cpuMirror.technicalRecursiveWire("19868"), "19868");
 assert.equal(cpuMirror.technicalRecursiveWire("16898"), "16898");
 assert.equal(cpuDirect.technicalRecursiveWire("198698"), "198698");
 
-for (const source of ANUM_FIXTURES) {
+for (const source of RECURSIVE_WIRE_FIXTURES) {
   const technical = cpuMirror.technicalRecursiveWire(source);
-  assert.equal(normalizeAnum(technical), technical);
+  assert.equal(normalizeRecursiveWire(technical), technical);
   assert.equal(
     cpuMirror.technicalRecursiveWire(technical),
     source,
@@ -199,7 +218,8 @@ assert.throws(
 );
 
 console.log(
-  "PORTABLE_ANUM_BOUNDARY_NEGATIVE_WITNESSES=GREEN " +
+  "RECURSIVE_LINK_WIRE_BOUNDARY_NEGATIVE_WITNESSES=GREEN " +
+  "LEGACY_ANUM_COMPATIBILITY_FACADE=GREEN " +
   "MTS_V014_CONTEXT_RELATIVE_ORIENTATION=GREEN " +
   "TECHNICAL_POLES_NOT_SEMANTIC_AUTHORITY=TRUE " +
   "RECURSIVE_J_ADAPTER_INVOLUTIVE=TRUE",
@@ -216,6 +236,7 @@ const rejectingWasm = {
   anumCpuSetToken: () => 1,
   anumCpuImport: () => -1,
 };
+assert.equal(cpuImportTechnicalRecursiveWire(rejectingWasm, "5"), null);
 assert.equal(cpuImportRaw(rejectingWasm, "5"), null);
 
 const rejectingExportWasm = {

@@ -1,4 +1,4 @@
-export const ANUM_FIXTURES = Object.freeze([
+export const RECURSIVE_WIRE_FIXTURES = Object.freeze([
   "8",
   "98",
   "68",
@@ -7,6 +7,9 @@ export const ANUM_FIXTURES = Object.freeze([
   "198698",
   "119868968",
 ]);
+
+// Historical fixture name retained for compatibility with pre-v0.14 browser tests.
+export const ANUM_FIXTURES = RECURSIVE_WIRE_FIXTURES;
 
 export const LOCAL_HANDLE_NONE = 0xffffffff;
 export const LOCAL_HANDLE_MAX = 63;
@@ -21,7 +24,7 @@ const SEMANTIC_ORIENTATION_BINDINGS = new WeakMap();
 
 function parseNode(source, cursor) {
   if (cursor.index >= source.length) {
-    throw new Error("truncated Anum");
+    throw new Error("truncated recursive Link wire");
   }
   const token = source[cursor.index++];
   if (token === "8") return { kind: "ROOT" };
@@ -34,12 +37,12 @@ function parseNode(source, cursor) {
       end: parseNode(source, cursor),
     };
   }
-  throw new Error(`malformed Anum token '${token}'`);
+  throw new Error(`malformed recursive Link wire token '${token}'`);
 }
 
-export function parseAnum(source) {
+export function parseRecursiveWire(source) {
   if (typeof source !== "string" || source.length === 0) {
-    throw new Error("Anum must be a non-empty string");
+    throw new Error("recursive Link wire must be a non-empty string");
   }
   const cursor = { index: 0 };
   const root = parseNode(source, cursor);
@@ -49,20 +52,20 @@ export function parseAnum(source) {
   return root;
 }
 
-export function formatAnum(node) {
+export function formatRecursiveWire(node) {
   if (node.kind === "ROOT") return "8";
-  if (node.kind === "START") return "9" + formatAnum(node.child);
-  if (node.kind === "END") return "6" + formatAnum(node.child);
-  if (node.kind === "PAIR") return "1" + formatAnum(node.start) + formatAnum(node.end);
-  throw new Error(`unknown Anum node kind: ${node.kind}`);
+  if (node.kind === "START") return "9" + formatRecursiveWire(node.child);
+  if (node.kind === "END") return "6" + formatRecursiveWire(node.child);
+  if (node.kind === "PAIR") return "1" + formatRecursiveWire(node.start) + formatRecursiveWire(node.end);
+  throw new Error(`unknown recursive Link wire node kind: ${node.kind}`);
 }
 
-export function normalizeAnum(source) {
-  return formatAnum(parseAnum(source));
+export function normalizeRecursiveWire(source) {
+  return formatRecursiveWire(parseRecursiveWire(source));
 }
 
-export function compileAnumPlan(source) {
-  const parsed = parseAnum(source);
+export function compileRecursiveWirePlan(source) {
+  const parsed = parseRecursiveWire(source);
   const nodes = [];
 
   function emit(node) {
@@ -98,6 +101,13 @@ export function compileAnumPlan(source) {
   }
   return { source, nodes, rootNode };
 }
+
+// Historical pre-v0.14 names. These are exact aliases for the recursive Link
+// wire codec; their names do not make an arbitrary recursive wire an Anum.
+export const parseAnum = parseRecursiveWire;
+export const formatAnum = formatRecursiveWire;
+export const normalizeAnum = normalizeRecursiveWire;
+export const compileAnumPlan = compileRecursiveWirePlan;
 
 export function localRef(memory, value) {
   if (!Number.isInteger(value) || value < 1 || value > LOCAL_HANDLE_MAX) {
@@ -229,8 +239,8 @@ export function createContextRelativeOrientation(
   }
 
   function technicalRecursiveWire(semanticSource) {
-    const parsed = parseAnum(semanticSource);
-    return formatAnum(
+    const parsed = parseRecursiveWire(semanticSource);
+    return formatRecursiveWire(
       transport === "ID" ? parsed : invertRecursiveNode(parsed),
     );
   }
@@ -296,7 +306,7 @@ function requireBackendSemanticOrientation(owner, memory, topology, binding) {
   return view;
 }
 
-export function exportLocalTopology(topology, handle) {
+export function exportTechnicalRecursiveWireFromTopology(topology, handle) {
   validateTopology(topology);
   const visiting = new Uint8Array(64);
 
@@ -326,6 +336,9 @@ export function exportLocalTopology(topology, handle) {
 
   return walk(handle);
 }
+
+// Historical name retained for compatibility.
+export const exportLocalTopology = exportTechnicalRecursiveWireFromTopology;
 
 function sourceTokens(source) {
   if (typeof source !== "string") return [];
@@ -398,7 +411,7 @@ function writeCpuTokens(wasm, source) {
   return tokens.length;
 }
 
-export function cpuImportRaw(wasm, source, memory = "cpu-A") {
+export function cpuImportTechnicalRecursiveWire(wasm, source, memory = "cpu-A") {
   const tokenCount = writeCpuTokens(wasm, source);
   if (tokenCount === null) return null;
   const handle = wasmU32(wasm.anumCpuImport(tokenCount));
@@ -406,7 +419,7 @@ export function cpuImportRaw(wasm, source, memory = "cpu-A") {
   return localRef(memory, handle);
 }
 
-export function cpuImportBatchAtomic(wasm, sources, memory = "cpu-A") {
+export function cpuImportTechnicalRecursiveWiresAtomic(wasm, sources, memory = "cpu-A") {
   if (!Array.isArray(sources) || sources.length === 0) return null;
   if (typeof wasm.anumCpuLoadBegin !== "function" ||
       typeof wasm.anumCpuLoadMember !== "function" ||
@@ -443,7 +456,7 @@ export function cpuImportBatchAtomic(wasm, sources, memory = "cpu-A") {
   }
 }
 
-export function cpuExport(wasm, ref, memory = "cpu-A") {
+export function cpuExportTechnicalRecursiveWire(wasm, ref, memory = "cpu-A") {
   const handle = requireLocalRef(ref, memory);
   const length = wasmU32(wasm.anumCpuExport(handle));
   if (length === LOCAL_HANDLE_NONE) throw new Error("CPU export rejected local topology");
@@ -458,6 +471,11 @@ export function cpuExport(wasm, ref, memory = "cpu-A") {
   return result;
 }
 
+// Historical browser compatibility names for the direct technical wire path.
+export const cpuImportRaw = cpuImportTechnicalRecursiveWire;
+export const cpuImportBatchAtomic = cpuImportTechnicalRecursiveWiresAtomic;
+export const cpuExport = cpuExportTechnicalRecursiveWire;
+
 export function cpuImportSemanticRecursiveWire(
   wasm,
   orientation,
@@ -467,7 +485,7 @@ export function cpuImportSemanticRecursiveWire(
   const topology = readCpuTopology(wasm);
   const view = requireBackendSemanticOrientation(wasm, memory, topology, orientation);
   const technicalSource = view.technicalRecursiveWire(semanticSource);
-  return cpuImportRaw(wasm, technicalSource, memory);
+  return cpuImportTechnicalRecursiveWire(wasm, technicalSource, memory);
 }
 
 export function cpuExportSemanticRecursiveWire(
@@ -519,8 +537,8 @@ export async function gpuPoolCount(device, gpuPool) {
   return topologyCount(await readGpuTopology(device, gpuPool));
 }
 
-export async function gpuImport(device, gpuPool, source) {
-  const plan = compileAnumPlan(source);
+export async function gpuImportTechnicalRecursiveWire(device, gpuPool, source) {
+  const plan = compileRecursiveWirePlan(source);
   const planWords = new Uint32Array(plan.nodes.length * 4);
   plan.nodes.forEach((node, index) => {
     planWords[index * 4] = node.kind;
@@ -722,7 +740,7 @@ export async function gpuImport(device, gpuPool, source) {
   return localRef(gpuPool.memory, result[1]);
 }
 
-export async function gpuImportBatchAtomic(device, gpuPool, sources) {
+export async function gpuImportTechnicalRecursiveWiresAtomic(device, gpuPool, sources) {
   if (!Array.isArray(sources) || sources.length === 0) return null;
 
   // The live GPU pool remains untouched until the staging pool contains the
@@ -733,7 +751,7 @@ export async function gpuImportBatchAtomic(device, gpuPool, sources) {
     for (const source of sources) {
       let ref;
       try {
-        ref = await gpuImport(device, staging, source);
+        ref = await gpuImportTechnicalRecursiveWire(device, staging, source);
       } catch {
         return null;
       }
@@ -752,11 +770,16 @@ export async function gpuImportBatchAtomic(device, gpuPool, sources) {
   }
 }
 
-export async function gpuExport(device, gpuPool, ref) {
+export async function gpuExportTechnicalRecursiveWire(device, gpuPool, ref) {
   const handle = requireLocalRef(ref, gpuPool.memory);
   const topology = await readGpuTopology(device, gpuPool);
-  return exportLocalTopology(topology, handle);
+  return exportTechnicalRecursiveWireFromTopology(topology, handle);
 }
+
+// Historical browser compatibility names for the direct technical wire path.
+export const gpuImport = gpuImportTechnicalRecursiveWire;
+export const gpuImportBatchAtomic = gpuImportTechnicalRecursiveWiresAtomic;
+export const gpuExport = gpuExportTechnicalRecursiveWire;
 
 export async function bindGpuSemanticOrientation(
   device,
@@ -787,7 +810,7 @@ export async function gpuImportSemanticRecursiveWire(
     orientation,
   );
   const technicalSource = view.technicalRecursiveWire(semanticSource);
-  return gpuImport(device, gpuPool, technicalSource);
+  return gpuImportTechnicalRecursiveWire(device, gpuPool, technicalSource);
 }
 
 export async function gpuExportSemanticRecursiveWire(
@@ -815,7 +838,7 @@ function must(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-export async function runAnumBoundaryBrowser(wasm, device) {
+export async function runRecursiveWireBoundaryBrowser(wasm, device) {
   const logs = [];
   cpuResetPool(wasm);
   const gpuPool = createGpuAnumPool(device);
@@ -824,24 +847,24 @@ export async function runAnumBoundaryBrowser(wasm, device) {
     const cpuRefs = new Map();
     const gpuRefs = new Map();
 
-    for (const source of ANUM_FIXTURES) {
-      const ref = cpuImportRaw(wasm, source);
+    for (const source of RECURSIVE_WIRE_FIXTURES) {
+      const ref = cpuImportTechnicalRecursiveWire(wasm, source);
       must(ref, `CPU import rejected valid fixture ${source}`);
-      const exported = cpuExport(wasm, ref);
+      const exported = cpuExportTechnicalRecursiveWire(wasm, ref);
       must(exported === source, `CPU export mismatch ${source} != ${exported}`);
       cpuRefs.set(source, ref);
     }
 
     for (const source of [...ANUM_FIXTURES].reverse()) {
-      const ref = await gpuImport(device, gpuPool, source);
+      const ref = await gpuImportTechnicalRecursiveWire(device, gpuPool, source);
       must(ref, `GPU import rejected valid fixture ${source}`);
-      const exported = await gpuExport(device, gpuPool, ref);
+      const exported = await gpuExportTechnicalRecursiveWire(device, gpuPool, ref);
       must(exported === source, `GPU export mismatch ${source} != ${exported}`);
       gpuRefs.set(source, ref);
     }
 
-    for (const source of ANUM_FIXTURES) {
-      must(cpuExport(wasm, cpuRefs.get(source)) === await gpuExport(device, gpuPool, gpuRefs.get(source)),
+    for (const source of RECURSIVE_WIRE_FIXTURES) {
+      must(cpuExportTechnicalRecursiveWire(wasm, cpuRefs.get(source)) === await gpuExportTechnicalRecursiveWire(device, gpuPool, gpuRefs.get(source)),
         `two-memory differential mismatch for ${source}`);
     }
 
@@ -851,8 +874,8 @@ export async function runAnumBoundaryBrowser(wasm, device) {
     must(cpuSample.value !== gpuSample.value,
       `local handles unexpectedly equal for sample ${sample}: ${cpuSample.value}`);
 
-    const cpuAgain = cpuImportRaw(wasm, sample);
-    const gpuAgain = await gpuImport(device, gpuPool, sample);
+    const cpuAgain = cpuImportTechnicalRecursiveWire(wasm, sample);
+    const gpuAgain = await gpuImportTechnicalRecursiveWire(device, gpuPool, sample);
     must(cpuAgain.value === cpuSample.value, "CPU canonical local reuse failed");
     must(gpuAgain.value === gpuSample.value, "GPU canonical local reuse failed");
 
@@ -862,13 +885,13 @@ export async function runAnumBoundaryBrowser(wasm, device) {
 
     for (const source of malformed) {
       const before = cpuPoolCount(wasm);
-      must(cpuImportRaw(wasm, source) === null, `CPU accepted invalid Anum ${source}`);
+      must(cpuImportTechnicalRecursiveWire(wasm, source) === null, `CPU accepted invalid Anum ${source}`);
       must(cpuPoolCount(wasm) === before, `CPU partial publication on invalid Anum ${source}`);
 
       const gpuBefore = await gpuPoolCount(device, gpuPool);
       let rejected = false;
       try {
-        const ref = await gpuImport(device, gpuPool, source);
+        const ref = await gpuImportTechnicalRecursiveWire(device, gpuPool, source);
         rejected = ref === null;
       } catch {
         rejected = true;
@@ -880,7 +903,7 @@ export async function runAnumBoundaryBrowser(wasm, device) {
 
     let foreignRejected = false;
     try {
-      await gpuExport(device, gpuPool, cpuSample);
+      await gpuExportTechnicalRecursiveWire(device, gpuPool, cpuSample);
     } catch {
       foreignRejected = true;
     }
@@ -888,13 +911,13 @@ export async function runAnumBoundaryBrowser(wasm, device) {
 
     const capacitySource = "9".repeat(70) + "8";
     const cpuBeforeCapacity = cpuPoolCount(wasm);
-    must(cpuImportRaw(wasm, capacitySource) === null, "CPU capacity exhaustion did not fail closed");
+    must(cpuImportTechnicalRecursiveWire(wasm, capacitySource) === null, "CPU capacity exhaustion did not fail closed");
     must(cpuPoolCount(wasm) === cpuBeforeCapacity, "CPU capacity failure partially published");
 
     const gpuBeforeCapacity = await gpuPoolCount(device, gpuPool);
     let gpuCapacityRejected = false;
     try {
-      const ref = await gpuImport(device, gpuPool, capacitySource);
+      const ref = await gpuImportTechnicalRecursiveWire(device, gpuPool, capacitySource);
       gpuCapacityRejected = ref === null;
     } catch {
       gpuCapacityRejected = true;
@@ -911,12 +934,12 @@ export async function runAnumBoundaryBrowser(wasm, device) {
     // First prove a malformed middle member cannot replace the published pool.
     const cpuBeforeBatchFailure = cpuPoolCount(wasm);
     const gpuBeforeBatchFailure = await gpuPoolCount(device, gpuPool);
-    must(cpuImportBatchAtomic(wasm, ["98", "5", "68"]) === null,
+    must(cpuImportTechnicalRecursiveWiresAtomic(wasm, ["98", "5", "68"]) === null,
       "CPU accepted malformed multi-Anum Aset");
     must(cpuPoolCount(wasm) === cpuBeforeBatchFailure,
       "CPU failed batch partially published Aset");
 
-    const gpuFailedBatch = await gpuImportBatchAtomic(device, gpuPool, ["98", "5", "68"]);
+    const gpuFailedBatch = await gpuImportTechnicalRecursiveWiresAtomic(device, gpuPool, ["98", "5", "68"]);
     must(gpuFailedBatch === null, "GPU accepted malformed multi-Anum Aset");
     must(await gpuPoolCount(device, gpuPool) === gpuBeforeBatchFailure,
       "GPU failed batch partially published Aset");
@@ -924,17 +947,17 @@ export async function runAnumBoundaryBrowser(wasm, device) {
     // Successful replacement batch shares ROOT/O/C across the PAIR and must
     // canonicalize to exactly four Links in both independently allocated memories.
     const asetSources = ["98", "68", "19868"];
-    const cpuBatchRefs = cpuImportBatchAtomic(wasm, asetSources);
-    const gpuBatchRefs = await gpuImportBatchAtomic(device, gpuPool, asetSources);
+    const cpuBatchRefs = cpuImportTechnicalRecursiveWiresAtomic(wasm, asetSources);
+    const gpuBatchRefs = await gpuImportTechnicalRecursiveWiresAtomic(device, gpuPool, asetSources);
     must(cpuBatchRefs && gpuBatchRefs, "atomic multi-Anum Aset load failed");
     must(cpuPoolCount(wasm) === 4, "CPU Aset canonical Link count mismatch");
     must(await gpuPoolCount(device, gpuPool) === 4, "GPU Aset canonical Link count mismatch");
     for (let i = 0; i < asetSources.length; i += 1) {
-      must(cpuExport(wasm, cpuBatchRefs[i]) === asetSources[i],
+      must(cpuExportTechnicalRecursiveWire(wasm, cpuBatchRefs[i]) === asetSources[i],
         "CPU batch export mismatch for " + asetSources[i]);
-      must(await gpuExport(device, gpuPool, gpuBatchRefs[i]) === asetSources[i],
+      must(await gpuExportTechnicalRecursiveWire(device, gpuPool, gpuBatchRefs[i]) === asetSources[i],
         "GPU batch export mismatch for " + asetSources[i]);
-      must(cpuExport(wasm, cpuBatchRefs[i]) === await gpuExport(device, gpuPool, gpuBatchRefs[i]),
+      must(cpuExportTechnicalRecursiveWire(wasm, cpuBatchRefs[i]) === await gpuExportTechnicalRecursiveWire(device, gpuPool, gpuBatchRefs[i]),
         "atomic Aset CPU/GPU differential mismatch for " + asetSources[i]);
     }
 
@@ -963,7 +986,7 @@ export async function runAnumBoundaryBrowser(wasm, device) {
     const cpuMirrorSemanticRefs = new Map();
     const gpuDirectSemanticRefs = new Map();
     const gpuMirrorSemanticRefs = new Map();
-    for (const source of ANUM_FIXTURES) {
+    for (const source of RECURSIVE_WIRE_FIXTURES) {
       const cpuDirectRef = cpuImportSemanticRecursiveWire(
         wasm, cpuDirectOrientation, source,
       );
@@ -1007,9 +1030,9 @@ export async function runAnumBoundaryBrowser(wasm, device) {
     }
 
     const semanticO = "98";
-    must(cpuExport(wasm, cpuMirrorSemanticRefs.get(semanticO)) === "68",
+    must(cpuExportTechnicalRecursiveWire(wasm, cpuMirrorSemanticRefs.get(semanticO)) === "68",
       "CPU Mirror technical O did not swap gauge");
-    must(await gpuExport(device, gpuPool, gpuMirrorSemanticRefs.get(semanticO)) === "68",
+    must(await gpuExportTechnicalRecursiveWire(device, gpuPool, gpuMirrorSemanticRefs.get(semanticO)) === "68",
       "GPU Mirror technical O did not swap gauge");
     must(cpuExportSemanticRecursiveWire(
       wasm, cpuMirrorOrientation, cpuMirrorSemanticRefs.get(semanticO),
@@ -1067,8 +1090,8 @@ export async function runAnumBoundaryBrowser(wasm, device) {
     logs.push(`anum.sample.source = ${sample}`);
     logs.push(`anum.sample.cpu.handle = ${cpuSample.value}`);
     logs.push(`anum.sample.gpu.handle = ${gpuSample.value}`);
-    logs.push(`anum.sample.cpu.export = ${cpuExport(wasm, cpuSample)}`);
-    logs.push(`anum.sample.gpu.export = ${await gpuExport(device, gpuPool, gpuSample)}`);
+    logs.push(`anum.sample.cpu.export = ${cpuExportTechnicalRecursiveWire(wasm, cpuSample)}`);
+    logs.push(`anum.sample.gpu.export = ${await gpuExportTechnicalRecursiveWire(device, gpuPool, gpuSample)}`);
 
     return {
       cpuImport: true,
@@ -1090,8 +1113,8 @@ export async function runAnumBoundaryBrowser(wasm, device) {
         source: sample,
         cpuHandle: cpuSample.value,
         gpuHandle: gpuSample.value,
-        cpuExport: cpuExport(wasm, cpuSample),
-        gpuExport: await gpuExport(device, gpuPool, gpuSample),
+        cpuExport: cpuExportTechnicalRecursiveWire(wasm, cpuSample),
+        gpuExport: await gpuExportTechnicalRecursiveWire(device, gpuPool, gpuSample),
       },
       logs,
     };
@@ -1099,3 +1122,6 @@ export async function runAnumBoundaryBrowser(wasm, device) {
     destroyGpuAnumPool(gpuPool);
   }
 }
+
+// Historical page entry point retained while UI terminology migrates in P5d3.
+export const runAnumBoundaryBrowser = runRecursiveWireBoundaryBrowser;
