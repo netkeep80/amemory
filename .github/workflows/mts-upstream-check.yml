@@ -4,8 +4,8 @@ on:
   pull_request:
     paths:
       - "contracts/upstream/**"
-      - "contracts/amemory-contract-v0.1.json"
-      - "contracts/amemory-conformance-v0.1.json"
+      - "contracts/amemory-contract-v*.json"
+      - "contracts/amemory-conformance-v*.json"
       - "scripts/sync-mts-requirements.mjs"
       - "scripts/test-mts-upstream-import.mjs"
       - ".github/workflows/mts-upstream-check.yml"
@@ -15,8 +15,8 @@ on:
     branches: [main]
     paths:
       - "contracts/upstream/**"
-      - "contracts/amemory-contract-v0.1.json"
-      - "contracts/amemory-conformance-v0.1.json"
+      - "contracts/amemory-contract-v*.json"
+      - "contracts/amemory-conformance-v*.json"
       - "scripts/sync-mts-requirements.mjs"
       - "scripts/test-mts-upstream-import.mjs"
       - ".github/workflows/mts-upstream-check.yml"
