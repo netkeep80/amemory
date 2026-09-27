@@ -128,6 +128,124 @@ export function topologyCount(topology) {
   return count;
 }
 
+
+function readTechnicalPoles(topology, handle) {
+  if (!Number.isInteger(handle) ||
+      handle < 1 ||
+      handle > LOCAL_HANDLE_MAX ||
+      topology.used[handle] === 0) {
+    throw new Error(`unknown local handle: ${handle}`);
+  }
+  return Object.freeze({
+    start: topology.starts[handle],
+    end: topology.ends[handle],
+  });
+}
+
+function observeOneSidedMarker(topology, marker) {
+  const poles = readTechnicalPoles(topology, marker);
+  const firstSelfClosed = poles.start === marker && poles.end !== marker;
+  const secondSelfClosed = poles.end === marker && poles.start !== marker;
+  if (firstSelfClosed === secondSelfClosed) {
+    throw new Error(`orientation marker must be proper one-sided self-incidence: ${marker}`);
+  }
+  return Object.freeze({
+    marker,
+    body: firstSelfClosed ? poles.end : poles.start,
+    firstSelfClosed,
+  });
+}
+
+function invertRecursiveNode(node) {
+  if (node.kind === "ROOT") return { kind: "ROOT" };
+  if (node.kind === "START") {
+    return { kind: "END", child: invertRecursiveNode(node.child) };
+  }
+  if (node.kind === "END") {
+    return { kind: "START", child: invertRecursiveNode(node.child) };
+  }
+  if (node.kind === "PAIR") {
+    return {
+      kind: "PAIR",
+      start: invertRecursiveNode(node.end),
+      end: invertRecursiveNode(node.start),
+    };
+  }
+  throw new Error(`unknown recursive node kind: ${node.kind}`);
+}
+
+/**
+ * Accepted-MTS-v0.14 context-relative semantic orientation over one concrete
+ * local topology.
+ *
+ * ID/J is derived from two actual proper one-sided Link markers. It is not an
+ * input authority. The captured topology remains the technical carrier;
+ * semantic START_K/END_K are read through this view.
+ */
+export function createContextRelativeOrientation(
+  topology,
+  referenceMarker,
+  contextMarker,
+) {
+  validateTopology(topology);
+  const reference = observeOneSidedMarker(topology, referenceMarker);
+  const context = observeOneSidedMarker(topology, contextMarker);
+  const transport =
+    reference.firstSelfClosed === context.firstSelfClosed ? "ID" : "J";
+
+  function poles(handle) {
+    const technical = readTechnicalPoles(topology, handle);
+    return transport === "ID"
+      ? technical
+      : Object.freeze({ start: technical.end, end: technical.start });
+  }
+
+  function semanticRecursiveWire(handle) {
+    const visiting = new Uint8Array(64);
+
+    function walk(h) {
+      const semantic = poles(h);
+      if (visiting[h]) {
+        throw new Error(`non-well-founded semantic topology at handle ${h}`);
+      }
+
+      if (semantic.start === h && semantic.end === h) return "8";
+
+      visiting[h] = 1;
+      let out;
+      if (semantic.start === h) {
+        out = "9" + walk(semantic.end);
+      } else if (semantic.end === h) {
+        out = "6" + walk(semantic.start);
+      } else {
+        out = "1" + walk(semantic.start) + walk(semantic.end);
+      }
+      visiting[h] = 0;
+      return out;
+    }
+
+    return walk(handle);
+  }
+
+  function technicalRecursiveWire(semanticSource) {
+    const parsed = parseAnum(semanticSource);
+    return formatAnum(
+      transport === "ID" ? parsed : invertRecursiveNode(parsed),
+    );
+  }
+
+  return Object.freeze({
+    transport,
+    referenceMarker: reference.marker,
+    referenceBody: reference.body,
+    contextMarker: context.marker,
+    contextBody: context.body,
+    poles,
+    semanticRecursiveWire,
+    technicalRecursiveWire,
+  });
+}
+
 export function exportLocalTopology(topology, handle) {
   validateTopology(topology);
   const visiting = new Uint8Array(64);
