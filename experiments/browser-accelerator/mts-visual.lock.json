@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "repository": "netkeep80/mts_visual",
-  "commit": "d4d883a036c4f77f6b39e7c1bbac3bb915c18459",
+  "commit": "57732424778613aca6d865fbb986b64d960042e6",
   "package": "@mts/visual",
-  "packageVersion": "0.4.0",
-  "purpose": "A-memory runtime Link-store proof visualization with Octahedral Link3D live rendering"
+  "packageVersion": "0.4.1",
+  "purpose": "A-memory runtime Link-store proof visualization with accepted volumetric Octahedral Link3D live rendering"
 }

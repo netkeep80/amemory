@@ -46,7 +46,7 @@ jobs:
         run: |
           set -euo pipefail
           commit="$(jq -r '.commit' experiments/browser-accelerator/mts-visual.lock.json)"
-          test "${commit}" = "d4d883a036c4f77f6b39e7c1bbac3bb915c18459"
+          test "${commit}" = "57732424778613aca6d865fbb986b64d960042e6"
 
           git clone --quiet https://github.com/netkeep80/mts_visual.git /tmp/mts_visual
           git -C /tmp/mts_visual checkout --quiet "${commit}"
@@ -73,6 +73,7 @@ jobs:
           cp /tmp/mts-visual-core.bundle.js /tmp/mts-visual-core.bundle.mjs
           cp /tmp/mts-visual-three.bundle.js /tmp/mts-visual-three.bundle.mjs
           node --input-type=module -e 'import("file:///tmp/mts-visual-core.bundle.mjs").then(m => { if (typeof m.buildBlueprintSvgScene !== "function" || typeof m.createOctahedralLivePhysics3D !== "function" || typeof m.estimateOctahedralPerformance3D !== "function") process.exit(1); const e = m.estimateOctahedralPerformance3D(1000000, 2 * Math.SQRT2); if (e.linkCount !== 1000000 || e.pairwiseSemanticLinkEvaluations !== 0 || !Number.isFinite(e.gpuDynamicBytes)) process.exit(1); })'
+          node --input-type=module -e 'import("file:///tmp/mts-visual-core.bundle.mjs").then(m => { const network={links:Array.from({length:64},(_,i)=>({key:"L"+i,startKey:"L"+i,endKey:"L"+i}))}; const c=m.createOctahedralLivePhysics3D(network,{aspectRatio:2*Math.SQRT2,stiffness:1,simulationSpeed:1}); const t=c.template,p=c.positions; let minY=Infinity,maxY=-Infinity,minZ=Infinity,maxZ=-Infinity; for(let link=0;link<64;link++){let y=0,z=0;for(const v of t.centerTriangle){const o=(link*t.vertexCount+v)*3;y+=p[o+1];z+=p[o+2];}y/=3;z/=3;minY=Math.min(minY,y);maxY=Math.max(maxY,y);minZ=Math.min(minZ,z);maxZ=Math.max(maxZ,z);} for(const value of p){if(!Number.isFinite(value)) process.exit(1);} if(!(maxY-minY>1e-3 && maxZ-minZ>1e-3)) process.exit(1); })'
           node --input-type=module -e 'import("file:///tmp/mts-visual-three.bundle.mjs").then(m => { if (typeof m.createVisualThreeRenderer !== "function" || typeof m.createOctahedralThreeLiveRenderer !== "function" || typeof m.destroyOctahedralThreeLiveRenderer !== "function") process.exit(1); })'
 
       - name: Assemble static Pages artifact
@@ -269,6 +270,7 @@ jobs:
           cp _site/vendor/mts-visual-core.bundle.js /tmp/pages-mts-visual-core.bundle.mjs
           cp _site/vendor/mts-visual-three.bundle.js /tmp/pages-mts-visual-three.bundle.mjs
           node --input-type=module -e 'import("file:///tmp/pages-mts-visual-core.bundle.mjs").then(m => { if (typeof m.buildBlueprintSvgScene !== "function" || typeof m.createOctahedralLivePhysics3D !== "function" || typeof m.estimateOctahedralPerformance3D !== "function") process.exit(1); })'
+          node --input-type=module -e 'import("file:///tmp/pages-mts-visual-core.bundle.mjs").then(m => { const network={links:Array.from({length:64},(_,i)=>({key:"L"+i,startKey:"L"+i,endKey:"L"+i}))}; const c=m.createOctahedralLivePhysics3D(network,{aspectRatio:2*Math.SQRT2,stiffness:1,simulationSpeed:1}); const t=c.template,p=c.positions; let minY=Infinity,maxY=-Infinity,minZ=Infinity,maxZ=-Infinity; for(let link=0;link<64;link++){let y=0,z=0;for(const v of t.centerTriangle){const o=(link*t.vertexCount+v)*3;y+=p[o+1];z+=p[o+2];}y/=3;z/=3;minY=Math.min(minY,y);maxY=Math.max(maxY,y);minZ=Math.min(minZ,z);maxZ=Math.max(maxZ,z);} for(const value of p){if(!Number.isFinite(value)) process.exit(1);} if(!(maxY-minY>1e-3 && maxZ-minZ>1e-3)) process.exit(1); })'
           node --input-type=module -e 'import("file:///tmp/pages-mts-visual-three.bundle.mjs").then(m => { if (typeof m.createVisualThreeRenderer !== "function" || typeof m.createOctahedralThreeLiveRenderer !== "function" || typeof m.destroyOctahedralThreeLiveRenderer !== "function") process.exit(1); })'
           grep -F '<script type="importmap">' _site/index.html
           grep -F '"three": "./vendor/three/three.module.js"' _site/index.html
@@ -295,9 +297,9 @@ jobs:
               raise SystemExit(f"Pages SHA mismatch: {info['mainSha']} != {expected_sha}")
 
           visual_lock = json.loads(Path("_site/mts-visual-lock.json").read_text(encoding="utf-8"))
-          if visual_lock["commit"] != "d4d883a036c4f77f6b39e7c1bbac3bb915c18459":
+          if visual_lock["commit"] != "57732424778613aca6d865fbb986b64d960042e6":
               raise SystemExit("Pages artifact has wrong mts_visual commit")
-          if visual_lock["packageVersion"] != "0.4.0":
+          if visual_lock["packageVersion"] != "0.4.1":
               raise SystemExit("Pages artifact has wrong mts_visual package version")
 
           registry = json.loads(Path("_site/i386-blocks.json").read_text(encoding="utf-8"))
@@ -407,6 +409,7 @@ jobs:
           cp /tmp/pages-live-smoke/mts-visual-core.bundle.js /tmp/pages-live-smoke/mts-visual-core.bundle.mjs
           cp /tmp/pages-live-smoke/mts-visual-three.bundle.js /tmp/pages-live-smoke/mts-visual-three.bundle.mjs
           node --input-type=module -e 'import("file:///tmp/pages-live-smoke/mts-visual-core.bundle.mjs").then(m => { if (typeof m.buildBlueprintSvgScene !== "function" || typeof m.createOctahedralLivePhysics3D !== "function" || typeof m.estimateOctahedralPerformance3D !== "function") process.exit(1); })'
+          node --input-type=module -e 'import("file:///tmp/pages-live-smoke/mts-visual-core.bundle.mjs").then(m => { const network={links:Array.from({length:64},(_,i)=>({key:"L"+i,startKey:"L"+i,endKey:"L"+i}))}; const c=m.createOctahedralLivePhysics3D(network,{aspectRatio:2*Math.SQRT2,stiffness:1,simulationSpeed:1}); const t=c.template,p=c.positions; let minY=Infinity,maxY=-Infinity,minZ=Infinity,maxZ=-Infinity; for(let link=0;link<64;link++){let y=0,z=0;for(const v of t.centerTriangle){const o=(link*t.vertexCount+v)*3;y+=p[o+1];z+=p[o+2];}y/=3;z/=3;minY=Math.min(minY,y);maxY=Math.max(maxY,y);minZ=Math.min(minZ,z);maxZ=Math.max(maxZ,z);} for(const value of p){if(!Number.isFinite(value)) process.exit(1);} if(!(maxY-minY>1e-3 && maxZ-minZ>1e-3)) process.exit(1); })'
           node --input-type=module -e 'import("file:///tmp/pages-live-smoke/mts-visual-three.bundle.mjs").then(m => { if (typeof m.createVisualThreeRenderer !== "function" || typeof m.createOctahedralThreeLiveRenderer !== "function" || typeof m.destroyOctahedralThreeLiveRenderer !== "function") process.exit(1); })'
 
           echo "Live Pages proof visualization entrypoints PASS: ${base}"
