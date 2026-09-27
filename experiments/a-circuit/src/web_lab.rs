@@ -4,8 +4,8 @@ use crate::{
     mul32_n::web_run_mul32,
     mul_effect_n::web_run_mul_effect,
     mux_n::{web_prove_mux1, web_prove_mux32},
-    rotate32_n::web_run_rotate32,
-    rotate_carry32_n::web_run_rotate_carry32,
+    rotate32_n::{web_prove_rotate32, web_run_rotate32},
+    rotate_carry32_n::{web_prove_rotate_carry32, web_run_rotate_carry32},
     shift32_n::{web_prove_shift32, web_run_shift32},
     unary_arith_n::web_run_unary32,
 };
@@ -208,7 +208,49 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
         });
     }
 
+    if (16..=17).contains(&op) {
+        let execution = web_prove_rotate32(op, a, b)?;
+        let proof_json = serde_json::to_string(&execution.proof).ok()?;
+        let out = execution.outcome;
+        set_last_proof_json(proof_json);
+        return Some(LabOutcome {
+            value: out.value,
+            value_hi: 0,
+            writeback: u32::from(out.writeback),
+            defined_mask: out.defined_mask,
+            value_mask: out.value_mask,
+            undefined_mask: out.undefined_mask,
+            preserve_mask: out.preserve_mask,
+            reactions: out.reactions,
+            links_after_build: out.links_after_build,
+            links_after_first: out.links_after_first,
+            steady_link_delta: out.steady_link_delta,
+            quiescent: u32::from(out.quiescent),
+        });
+    }
+
     if let Some(out) = web_run_rotate32(op, a, b) {
+        return Some(LabOutcome {
+            value: out.value,
+            value_hi: 0,
+            writeback: u32::from(out.writeback),
+            defined_mask: out.defined_mask,
+            value_mask: out.value_mask,
+            undefined_mask: out.undefined_mask,
+            preserve_mask: out.preserve_mask,
+            reactions: out.reactions,
+            links_after_build: out.links_after_build,
+            links_after_first: out.links_after_first,
+            steady_link_delta: out.steady_link_delta,
+            quiescent: u32::from(out.quiescent),
+        });
+    }
+
+    if (18..=19).contains(&op) {
+        let execution = web_prove_rotate_carry32(op, a, b, input_flag)?;
+        let proof_json = serde_json::to_string(&execution.proof).ok()?;
+        let out = execution.outcome;
+        set_last_proof_json(proof_json);
         return Some(LabOutcome {
             value: out.value,
             value_hi: 0,
