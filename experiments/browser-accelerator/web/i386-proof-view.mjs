@@ -103,7 +103,7 @@ export function proofPipelineHtml(proof) {
           <div class="proof-stage-number">1</div>
           <div>
             <h4>PREPARE ASET</h4>
-            <p><strong>No runtime A-memory exists yet.</strong> ${escapeHtml(proof.prepare.compilerLabel)}</p>
+            <p><strong>No runtime A-memory exists yet.</strong> Packed structural Aset prepared before the runtime store is created.</p>
             <div class="proof-kpis">
               <span><small>Compiled Links</small><strong>${proof.prepare.compiledLinks}</strong></span>
               <span><small>Packed duplets</small><strong>${proof.prepare.carrierDuplets.length}</strong></span>

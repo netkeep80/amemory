@@ -194,6 +194,254 @@ export function projectV3ProofToCompact(proof) {
   };
 }
 
+
+function bool(value,label) {
+  if (typeof value !== "boolean") fail(label + " must be boolean");
+  return value;
+}
+
+function decodeCompactProof(compact) {
+  object(compact,"compact proof");
+  if (compact.schemaVersion!==COMPACT_SCHEMA) fail("unsupported compact schema " + compact.schemaVersion);
+  if (compact.representationId!==COMPACT_ID) fail("unexpected compact representation " + compact.representationId);
+  if (compact.representationVersion!==COMPACT_VERSION) fail("unsupported compact version " + compact.representationVersion);
+  if (compact.sourceProofSchemaVersion!==V3_SCHEMA) fail("unexpected compact source schema " + compact.sourceProofSchemaVersion);
+
+  const block=text(compact.block,"compact.block");
+  const memoryId=text(compact.memoryInstanceId,"compact.memoryInstanceId");
+  const prepare=object(compact.prepare,"compact.prepare");
+  const compiledLinks=uint(prepare.compiledLinks,"compact.prepare.compiledLinks",1);
+  bool(prepare.runtimeMemoryExists,"compact.prepare.runtimeMemoryExists");
+
+  const topology=object(compact.topology,"compact.topology");
+  const base=object(topology.base,"compact.topology.base");
+  const baseStarts=array(base.starts,"compact.topology.base.starts");
+  const baseEnds=array(base.ends,"compact.topology.base.ends");
+  if (baseStarts.length!==baseEnds.length) fail("compact base topology columns differ in length");
+  if (baseStarts.length!==compiledLinks) fail("compact base topology/compiledLinks mismatch");
+  const baseLen=baseStarts.length;
+
+  const append=object(topology.append,"compact.topology.append");
+  const appendStarts=array(append.starts,"compact.topology.append.starts");
+  const appendEnds=array(append.ends,"compact.topology.append.ends");
+  if (appendStarts.length!==appendEnds.length) fail("compact append topology columns differ in length");
+  const finalLinks=baseLen+appendStarts.length;
+
+  const basePairs=baseStarts.map((start,index)=>({
+    start:uint(start,"compact base L"+(index+1)+".start",1,baseLen),
+    end:uint(baseEnds[index],"compact base L"+(index+1)+".end",1,baseLen),
+  }));
+  const appendPairs=appendStarts.map((start,index)=>({
+    start:uint(start,"compact append L"+(baseLen+index+1)+".start",1,finalLinks),
+    end:uint(appendEnds[index],"compact append L"+(baseLen+index+1)+".end",1,finalLinks),
+  }));
+  const allPairs=basePairs.concat(appendPairs);
+
+  const overlayByHandle=new Map();
+  array(topology.overlays,"compact.topology.overlays").forEach((overlay,index)=>{
+    object(overlay,"compact overlay["+index+"]");
+    const handle=uint(overlay.localHandle,"compact overlay["+index+"].localHandle",1,finalLinks);
+    if (overlayByHandle.has(handle)) fail("duplicate compact overlay for L"+handle);
+    if (overlay.label!=null && typeof overlay.label!=="string") fail("compact overlay L"+handle+" label must be string/null");
+    const tags=array(overlay.tags,"compact overlay L"+handle+" tags");
+    if (!tags.every((tag)=>typeof tag==="string")) fail("compact overlay L"+handle+" tags must be strings");
+    overlayByHandle.set(handle,{localHandle:handle,label:overlay.label??null,tags:[...tags]});
+  });
+
+  const seenRoles=new Set();
+  const roots=array(compact.roots,"compact.roots").map((root,index)=>{
+    object(root,"compact root["+index+"]");
+    const role=text(root.role,"compact root["+index+"].role");
+    if (seenRoles.has(role)) fail("duplicate compact root role "+role);
+    seenRoles.add(role);
+    const carrierRef=uint(root.carrierRef,role+".carrierRef",1,baseLen);
+    deriveRecursiveSource(basePairs,carrierRef);
+    return {role,carrierRef};
+  });
+
+  const theoryAdmissions=array(compact.theoryAdmissions,"compact.theoryAdmissions")
+    .map((handle,index)=>uint(handle,"compact Theory["+index+"]",1,baseLen));
+
+  const load=object(compact.load,"compact.load");
+  const linksBeforeLoad=uint(load.linksBeforeLoad,"compact.load.linksBeforeLoad");
+  const linksAfterLoad=uint(load.linksAfterLoad,"compact.load.linksAfterLoad");
+  const importedDuplets=uint(load.importedDuplets,"compact.load.importedDuplets");
+  if (linksAfterLoad!==baseLen || importedDuplets!==baseLen || load.carrierRoundTrip!==true) {
+    fail("compact load/carrier summary mismatch");
+  }
+
+  const execute=object(compact.execute,"compact.execute");
+  const sourceReactions=array(execute.reactions,"compact.execute.reactions");
+  let previousLinks=linksAfterLoad;
+  const reactions=sourceReactions.map((step,index)=>{
+    object(step,"compact reaction["+index+"]");
+    if (step.step!==index) fail("compact reaction["+index+"] step index mismatch");
+    const linksAfter=uint(step.linksAfter,"compact reaction["+index+"].linksAfter",previousLinks,finalLinks);
+    const scopeBefore=array(step.scopeBefore,"compact reaction["+index+"].scopeBefore")
+      .map((handle,i)=>uint(handle,"compact reaction["+index+"].scopeBefore["+i+"]",1,linksAfter));
+    const scopeAfter=array(step.scopeAfter,"compact reaction["+index+"].scopeAfter")
+      .map((handle,i)=>uint(handle,"compact reaction["+index+"].scopeAfter["+i+"]",1,linksAfter));
+    const reaction={
+      step:index,
+      scopeBefore,
+      rawRuleMatches:uint(step.rawRuleMatches,"compact reaction["+index+"].rawRuleMatches"),
+      transitionedMembers:uint(step.transitionedMembers,"compact reaction["+index+"].transitionedMembers"),
+      handoffCount:uint(step.handoffCount,"compact reaction["+index+"].handoffCount"),
+      scopeAfter,
+      linksAfter,
+      quiescent:bool(step.quiescent,"compact reaction["+index+"].quiescent"),
+    };
+    previousLinks=linksAfter;
+    return reaction;
+  });
+  const activeReactionCount=uint(execute.activeReactionCount,"compact.execute.activeReactionCount");
+  const active=reactions.filter((step)=>!step.quiescent).length;
+  if (activeReactionCount!==active) fail("compact activeReactionCount/trace mismatch");
+  const finalQuiescent=bool(execute.finalQuiescent,"compact.execute.finalQuiescent");
+  const traceQuiescent=reactions.length>0 && reactions.at(-1).quiescent===true;
+  if (finalQuiescent!==traceQuiescent) fail("compact finalQuiescent/trace mismatch");
+
+  const result=object(compact.result,"compact.result");
+  if (Object.prototype.hasOwnProperty.call(result,"memoryInstanceId") ||
+      Object.prototype.hasOwnProperty.call(result,"visualLinks")) {
+    fail("compact result must not duplicate runtime identity or visual topology");
+  }
+  const resultLinksFinal=uint(result.linksFinal,"compact.result.linksFinal",baseLen);
+  if (resultLinksFinal!==finalLinks) fail("compact topology/result linksFinal mismatch");
+  const rerunDelta=uint(result.identicalRerunLinkDelta,"compact.result.identicalRerunLinkDelta");
+  if (previousLinks+rerunDelta!==finalLinks) fail("compact reaction/rerun counts do not reach linksFinal");
+
+  return {
+    compact,
+    block,
+    memoryId,
+    prepare,
+    baseLen,
+    finalLinks,
+    basePairs,
+    appendPairs,
+    allPairs,
+    overlayByHandle,
+    roots,
+    theoryAdmissions,
+    load:{linksBeforeLoad,linksAfterLoad,importedDuplets,carrierRoundTrip:true},
+    execute:{activeReactionCount,finalQuiescent,reactions},
+    result,
+  };
+}
+
+export function validateCompactProof(compact) {
+  decodeCompactProof(compact);
+  return compact;
+}
+
+export function inflateCompactProof(compact) {
+  const decoded=decodeCompactProof(compact);
+  const preparedRoots=decoded.roots.map((root)=>({
+    role:root.role,
+    carrierRef:root.carrierRef,
+    source:deriveRecursiveSource(decoded.basePairs,root.carrierRef),
+  }));
+  const loadedRoots=preparedRoots.map((root)=>({
+    ...root,
+    localHandle:root.carrierRef,
+  }));
+  const visualLinks=decoded.allPairs.map((pair,index)=>{
+    const handle=index+1;
+    const overlay=decoded.overlayByHandle.get(handle);
+    return {
+      key:decoded.memoryId+":L"+handle,
+      startKey:decoded.memoryId+":L"+pair.start,
+      endKey:decoded.memoryId+":L"+pair.end,
+      localHandle:handle,
+      label:overlay?.label??null,
+      tags:overlay?.tags??[],
+    };
+  });
+  return {
+    schemaVersion:V3_SCHEMA,
+    block:decoded.block,
+    prepare:{
+      runtimeMemoryExists:decoded.prepare.runtimeMemoryExists,
+      compiledLinks:decoded.prepare.compiledLinks,
+      carrierDuplets:decoded.basePairs.map((pair)=>({...pair})),
+      semanticRoots:preparedRoots,
+      theoryAdmissions:decoded.theoryAdmissions.map((handle)=>"L"+handle),
+    },
+    load:{
+      memoryInstanceId:decoded.memoryId,
+      ...decoded.load,
+      semanticRoots:loadedRoots,
+    },
+    execute:{
+      memoryInstanceId:decoded.memoryId,
+      activeReactionCount:decoded.execute.activeReactionCount,
+      finalQuiescent:decoded.execute.finalQuiescent,
+      reactions:decoded.execute.reactions.map((step)=>({
+        memoryInstanceId:decoded.memoryId,
+        step:step.step,
+        scopeBefore:step.scopeBefore.map((handle)=>"L"+handle),
+        rawRuleMatches:step.rawRuleMatches,
+        transitionedMembers:step.transitionedMembers,
+        handoffCount:step.handoffCount,
+        scopeAfter:step.scopeAfter.map((handle)=>"L"+handle),
+        linksAfter:step.linksAfter,
+        quiescent:step.quiescent,
+      })),
+    },
+    result:{
+      ...decoded.result,
+      memoryInstanceId:decoded.memoryId,
+      visualLinks,
+    },
+  };
+}
+
+function normalizeRendererProof(proof) {
+  const normalized=JSON.parse(JSON.stringify(proof));
+  if (normalized?.prepare) delete normalized.prepare.compilerLabel;
+  return normalized;
+}
+
+export function validateInflatedCompactAgainstV3(proof,compact) {
+  validateCompactAgainstV3(proof,compact);
+  const inflated=inflateCompactProof(compact);
+  if (stable(normalizeRendererProof(inflated))!==stable(normalizeRendererProof(proof))) {
+    fail("compact renderer projection differs from schema-v3 after presentation normalization");
+  }
+  return inflated;
+}
+
+export function selectBrowserProof({proof=null,compactProof=null}={}) {
+  if (compactProof!==null) {
+    const rendererProof=proof===null
+      ? inflateCompactProof(compactProof)
+      : validateInflatedCompactAgainstV3(proof,compactProof);
+    return {
+      proof:rendererProof,
+      compactProof,
+      v3Proof:proof,
+      transport:"compact",
+    };
+  }
+  if (proof!==null) {
+    object(proof,"schema-v3 fallback proof");
+    if (proof.schemaVersion!==V3_SCHEMA) fail("unsupported fallback schema "+proof.schemaVersion);
+    return {
+      proof,
+      compactProof:null,
+      v3Proof:proof,
+      transport:"v3-fallback",
+    };
+  }
+  return {
+    proof:null,
+    compactProof:null,
+    v3Proof:null,
+    transport:"none",
+  };
+}
+
 export function validateCompactAgainstV3(proof,compact) {
   object(compact,"compact proof");
   if (compact.schemaVersion!==COMPACT_SCHEMA) fail(`unsupported compact schema ${compact.schemaVersion}`);
@@ -231,7 +479,7 @@ function readJsonAbi(wasm,names,label) {
   catch (error) { fail(`${label} JSON parse failed: ${error.message}`); }
 }
 
-export function collectDualProofs(wasm) {
+export function collectBrowserProof(wasm) {
   const proof=readJsonAbi(wasm,{
     available:"amemory_i386_lab_proof_available",
     length:"amemory_i386_lab_proof_json_len",
@@ -244,7 +492,10 @@ export function collectDualProofs(wasm) {
     pointer:"amemory_i386_lab_compact_proof_json_ptr",
     byte:"amemory_i386_lab_compact_proof_json_byte",
   },"compact proof");
-  if ((proof===null)!==(compactProof===null)) fail("v3/compact ABI availability differs");
-  if (proof!==null) validateCompactAgainstV3(proof,compactProof);
-  return {proof,compactProof};
+  return selectBrowserProof({proof,compactProof});
+}
+
+export function collectDualProofs(wasm) {
+  const selected=collectBrowserProof(wasm);
+  return {proof:selected.v3Proof,compactProof:selected.compactProof};
 }
