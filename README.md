@@ -29,19 +29,24 @@ JSON-профиль является машинной проекцией кан�
 `amemory` фиксирует отдельно:
 
 ```text
-accepted MTS v0.13 foundation
-  commit = 440caf09558d4ff5cfda11805cb3ef97b48d1ad5
+accepted MTS v0.14 foundation
+  commit = fcbc97e2279471c2c5effed57685c5f49ec856be
 
 minimal-portable-amemory-execution v0.1.0
   commit = af4e3dadbb9857fba7239a58f79ed2da59bc5c42
   blob   = e2c614e1556f31f6230cb69d686d1f22ab2c97e8
+  foundationMtsVersion = v0.13
 ```
 
-Это принципиальная граница: обновление execution profile не должно незаметно менять принятую MTS v0.13, а обновление foundation не должно молча менять профиль исполнения.
+Это принципиальная граница: accepted foundation уже MTS v0.14, но execution profile 0.1.0 остаётся независимо pinned post-v0.13 profile. Обновление foundation не должно молча переименовывать или менять профиль исполнения.
 
 Локальные machine-readable источники:
 
 ```text
+contracts/upstream/mts-v0.14.lock.json
+contracts/upstream/mts-v0.14-requirements.json
+
+historical retained pin/projection:
 contracts/upstream/mts-v0.13.lock.json
 contracts/upstream/mts-v0.13-requirements.json
 ```
@@ -51,9 +56,10 @@ contracts/upstream/mts-v0.13-requirements.json
 ## Главный принцип
 
 ```text
-accepted MTS v0.13
+accepted MTS v0.14
         +
-minimal-portable-amemory-execution
+minimal-portable-amemory-execution@0.1.0
+(profile foundation remains v0.13)
         |
         +--> reference CPU / Rust / WASM
         +--> optimized CPU
@@ -103,7 +109,7 @@ differentialEvidence
 Машинная матрица находится в:
 
 ```text
-contracts/amemory-conformance-v0.1.json#/backendMatrix
+contracts/amemory-conformance-v0.2.json#/backendMatrix
 ```
 
 ### Текущее состояние backend
@@ -254,11 +260,11 @@ AM-C045 FULL PROFILE = GREEN
 FULL_REACTION_PROFILE_CONFORMANCE = TRUE
 ```
 
-Для двух объявленных prototype-backends — Rust/CPU/WASM и browser WebGPU — реальный browser differential chain R1–R6 напрямую покрывает весь pinned `minimal-portable-amemory-execution@0.1.0`: `P01–P17`. R6 отдельно закрывает `P06`, `P08`, `P15` и bounded-scope fail-closed.
+Для двух объявленных prototype-backends — Rust/CPU/WASM и browser WebGPU — реальный browser differential chain R1–R6 напрямую покрывает весь independently pinned `minimal-portable-amemory-execution@0.1.0`: `P01–P17`. R7 отдельно доказывает принятый v0.14 reaction-result basis (`N→{}`, активный `A→A`, `A→A♀`, `A→♂A`) без нового semantic opcode/kernel.
 
-Все mandatory conformance vectors теперь GREEN, поэтому repository-wide `acceptanceState = READY`. Сам контракт остаётся `candidate / accepted=false` до отдельного явного решения о принятии.
+Текущая downstream-линия — `amemory-contract/v0.2` + `amemory-conformance/v0.2`: все mandatory vectors GREEN, `V14-L1..V14-L14` имеют явный downstream disposition, поэтому repository-wide `acceptanceState = READY`. Сам контракт остаётся `candidate / accepted=false` до отдельного явного решения о принятии.
 
-Реализация продолжает потреблять machine profile, а не копировать смысл из control flow `anum_docs/ts/src/v013-grounded-execution.ts`.
+Реализация продолжает потреблять независимо pinned machine execution profile; accepted v0.14 foundation и profile 0.1.0 не смешиваются в одну версию.
 
 ## Conformance
 
