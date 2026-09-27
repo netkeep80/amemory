@@ -22,7 +22,7 @@ permissions:
   contents: read
 
 env:
-  MTS_ACCEPTED_V013_SHA: 3819b5fb2bae65506c2888e7c4fa0de387551846
+  MTS_PROFILE_FOUNDATION_V013_SHA: 3819b5fb2bae65506c2888e7c4fa0de387551846
 
 jobs:
   verify:
@@ -163,30 +163,30 @@ jobs:
           ! grep -q 'AND' experiments/optimized-cpu-rust/src/structural.rs
           ! grep -q 'OR' experiments/optimized-cpu-rust/src/structural.rs
 
-      - name: Checkout exact accepted MTS v0.13 once
+      - name: Checkout exact execution-profile foundation v0.13 reference once
         uses: actions/checkout@v6
         with:
           repository: netkeep80/anum_docs
-          ref: ${{ env.MTS_ACCEPTED_V013_SHA }}
+          ref: ${{ env.MTS_PROFILE_FOUNDATION_V013_SHA }}
           path: _upstream/anum_docs
 
       - name: Verify exact upstream pin
         shell: bash
         run: |
-          test "$(git -C _upstream/anum_docs rev-parse HEAD)" = "$MTS_ACCEPTED_V013_SHA"
+          test "$(git -C _upstream/anum_docs rev-parse HEAD)" = "$MTS_PROFILE_FOUNDATION_V013_SHA"
 
       - name: Set up Node 24 once
         uses: actions/setup-node@v6
         with:
           node-version: "24"
 
-      - name: Build accepted MTS TypeScript kernel once
+      - name: Build pinned v0.13 execution-profile reference kernel once
         working-directory: _upstream/anum_docs/ts
         run: |
           npm ci
           npm run build
 
-      - name: C2b accepted-MTS / optimized-Rust differential
+      - name: C2b v0.13 profile-reference / optimized-Rust differential
         shell: bash
         run: |
           node experiments/a-circuit/upstream/c2b-half-adder.mjs | tee /tmp/c2b-mts.log
@@ -200,7 +200,7 @@ jobs:
           test "$MTS" = "$RUST"
           echo "C2B_STRUCTURAL_DIFFERENTIAL=PASS"
 
-      - name: M2 accepted-MTS / A-memory Full Adder differential
+      - name: M2 v0.13 profile-reference / A-memory Full Adder differential
         shell: bash
         run: |
           node experiments/a-circuit/upstream/m2-full-adder.mjs 2>&1 | tee /tmp/full-adder-upstream.log
@@ -237,6 +237,6 @@ jobs:
       - name: Consolidation policy
         run: |
           echo "All A-Circuit structural suites share one runner, checkout and Rust toolchain."
-          echo "Accepted MTS is checked out and built once for both upstream differential witnesses."
+          echo "Pinned v0.13 execution-profile foundation reference is checked out and built once for both upstream differential witnesses."
           echo "Performance profiles remain informational; semantic failures are blocking."
           echo "Optimized CPU differential/build checks share this same runner."
