@@ -151,12 +151,13 @@ export function projectV3ProofToCompact(proof) {
     object(step,`reaction[${index}]`);
     if (step.memoryInstanceId!==memoryId) fail(`reaction[${index}] changed A-memory identity`);
     if (step.step!==index) fail(`reaction[${index}] step index mismatch`);
-    const linksAfter=uint(step.linksAfter,`reaction[${index}].linksAfter`,previousLinks,finalLinks);
+    const linksBefore=previousLinks;
+    const linksAfter=uint(step.linksAfter,`reaction[${index}].linksAfter`,linksBefore,finalLinks);
     previousLinks=linksAfter;
     return {
       step:index,
       scopeBefore:array(step.scopeBefore,`reaction[${index}].scopeBefore`)
-        .map((value,i)=>localRef(value,linksAfter,`reaction[${index}].scopeBefore[${i}]`)),
+        .map((value,i)=>localRef(value,linksBefore,`reaction[${index}].scopeBefore[${i}]`)),
       rawRuleMatches:uint(step.rawRuleMatches,`reaction[${index}].rawRuleMatches`),
       transitionedMembers:uint(step.transitionedMembers,`reaction[${index}].transitionedMembers`),
       handoffCount:uint(step.handoffCount,`reaction[${index}].handoffCount`),
@@ -276,9 +277,10 @@ function decodeCompactProof(compact) {
   const reactions=sourceReactions.map((step,index)=>{
     object(step,"compact reaction["+index+"]");
     if (step.step!==index) fail("compact reaction["+index+"] step index mismatch");
-    const linksAfter=uint(step.linksAfter,"compact reaction["+index+"].linksAfter",previousLinks,finalLinks);
+    const linksBefore=previousLinks;
+    const linksAfter=uint(step.linksAfter,"compact reaction["+index+"].linksAfter",linksBefore,finalLinks);
     const scopeBefore=array(step.scopeBefore,"compact reaction["+index+"].scopeBefore")
-      .map((handle,i)=>uint(handle,"compact reaction["+index+"].scopeBefore["+i+"]",1,linksAfter));
+      .map((handle,i)=>uint(handle,"compact reaction["+index+"].scopeBefore["+i+"]",1,linksBefore));
     const scopeAfter=array(step.scopeAfter,"compact reaction["+index+"].scopeAfter")
       .map((handle,i)=>uint(handle,"compact reaction["+index+"].scopeAfter["+i+"]",1,linksAfter));
     const reaction={

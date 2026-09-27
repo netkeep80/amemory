@@ -34,6 +34,8 @@ Promise.all([
   let browserTransportFallbackChecked = false;
   let browserTransportCompactAuthorityChecked = false;
   let browserTransportCompactOnlyChecked = false;
+  let compactMutationMatrixChecked = false;
+  let futureScopeBeforeNegativeChecked = false;
   const jsonBytes = (value) =>
     Buffer.byteLength(JSON.stringify(value), "utf8");
   const readCurrentCompactProof = (label) => {
@@ -412,21 +414,111 @@ Promise.all([
     }
     browserTransportCompactAuthorityChecked = true;
 
-    if (!browserTransportCompactOnlyChecked) {
-      const compactOnly = selectBrowserProof({
-        proof: null,
-        compactProof: producedCompactProof,
-      });
-      if (compactOnly.transport !== "compact" ||
-          compactOnly.proof === null ||
-          compactOnly.compactProof !== producedCompactProof ||
-          compactOnly.v3Proof !== null ||
-          JSON.stringify(compactOnly.proof) !== JSON.stringify(browserSelection.proof)) {
+    const compactOnly = selectBrowserProof({
+      proof: null,
+      compactProof: producedCompactProof,
+    });
+    if (compactOnly.transport !== "compact" ||
+        compactOnly.proof === null ||
+        compactOnly.compactProof !== producedCompactProof ||
+        compactOnly.v3Proof !== null ||
+        JSON.stringify(compactOnly.proof) !== JSON.stringify(browserSelection.proof)) {
+      throw new Error(
+        registryBlock.id + " compact-only browser authority failed"
+      );
+    }
+    browserTransportCompactOnlyChecked = true;
+
+    const rejectCompactMutation = (label, mutate) => {
+      const corrupted = JSON.parse(JSON.stringify(producedCompactProof));
+      mutate(corrupted);
+      let rejected = false;
+      try {
+        selectBrowserProof({ proof: null, compactProof: corrupted });
+      } catch {
+        rejected = true;
+      }
+      if (!rejected) {
         throw new Error(
-          registryBlock.id + " compact-only browser authority failed"
+          registryBlock.id + " compact-only mutation was accepted: " + label
         );
       }
-      browserTransportCompactOnlyChecked = true;
+    };
+
+    if (!compactMutationMatrixChecked) {
+      const baseLen = producedCompactProof.topology.base.starts.length;
+      const finalLinks = producedCompactProof.result.linksFinal;
+      if (baseLen < 2 || producedCompactProof.roots.length === 0 ||
+          producedCompactProof.execute.reactions.length === 0) {
+        throw new Error(
+          registryBlock.id + " cannot exercise compact mutation matrix"
+        );
+      }
+      const mutations = [
+        ["schema-version", (p) => { p.schemaVersion += 1; }],
+        ["representation-id", (p) => { p.representationId = "invalid"; }],
+        ["representation-version", (p) => { p.representationVersion = "invalid"; }],
+        ["source-schema", (p) => { p.sourceProofSchemaVersion += 1; }],
+        ["empty-memory-id", (p) => { p.memoryInstanceId = ""; }],
+        ["base-column-length", (p) => { p.topology.base.ends.pop(); }],
+        ["append-column-length", (p) => { p.topology.append.ends.push(1); }],
+        ["base-endpoint-range", (p) => { p.topology.base.starts[0] = baseLen + 1; }],
+        ["overlay-range", (p) => {
+          p.topology.overlays.push({ localHandle: finalLinks + 1, label: null, tags: [] });
+        }],
+        ["duplicate-overlay", (p) => {
+          const sample = p.topology.overlays[0] ??
+            { localHandle: 1, label: null, tags: [] };
+          p.topology.overlays.push(JSON.parse(JSON.stringify(sample)));
+          p.topology.overlays.push(JSON.parse(JSON.stringify(sample)));
+        }],
+        ["duplicate-root", (p) => {
+          p.roots.push(JSON.parse(JSON.stringify(p.roots[0])));
+        }],
+        ["root-range", (p) => { p.roots[0].carrierRef = baseLen + 1; }],
+        ["root-cycle", (p) => {
+          const root = p.roots[0].carrierRef;
+          const other = root === 1 ? 2 : 1;
+          p.topology.base.starts[root - 1] = other;
+          p.topology.base.ends[root - 1] = other;
+          p.topology.base.starts[other - 1] = root;
+          p.topology.base.ends[other - 1] = root;
+        }],
+        ["theory-range", (p) => { p.theoryAdmissions = [baseLen + 1]; }],
+        ["load-count", (p) => { p.load.importedDuplets += 1; }],
+        ["reaction-step", (p) => { p.execute.reactions[0].step += 1; }],
+        ["reaction-links-decrease", (p) => {
+          p.execute.reactions[0].linksAfter = p.load.linksAfterLoad - 1;
+        }],
+        ["scope-after-range", (p) => {
+          p.execute.reactions[0].scopeAfter = [finalLinks + 1];
+        }],
+        ["active-summary", (p) => { p.execute.activeReactionCount += 1; }],
+        ["quiescence-summary", (p) => { p.execute.finalQuiescent = !p.execute.finalQuiescent; }],
+        ["result-links-final", (p) => { p.result.linksFinal += 1; }],
+        ["rerun-delta", (p) => { p.result.identicalRerunLinkDelta += 1; }],
+        ["redundant-result-memory-id", (p) => { p.result.memoryInstanceId = p.memoryInstanceId; }],
+        ["redundant-result-visual-links", (p) => { p.result.visualLinks = []; }],
+      ];
+      for (const [label, mutate] of mutations) {
+        rejectCompactMutation(label, mutate);
+      }
+      compactMutationMatrixChecked = true;
+    }
+
+    if (!futureScopeBeforeNegativeChecked) {
+      let beforeGrowing = producedCompactProof.load.linksAfterLoad;
+      for (const step of producedCompactProof.execute.reactions) {
+        if (step.linksAfter > beforeGrowing) {
+          const growingIndex = step.step;
+          rejectCompactMutation("future-scope-before", (p) => {
+            p.execute.reactions[growingIndex].scopeBefore = [beforeGrowing + 1];
+          });
+          futureScopeBeforeNegativeChecked = true;
+          break;
+        }
+        beforeGrowing = step.linksAfter;
+      }
     }
 
     if (!browserTransportFallbackChecked) {
@@ -1431,6 +1523,12 @@ Promise.all([
   }
   if (!browserTransportCompactOnlyChecked) {
     throw new Error("compact-only browser authority witness was not executed");
+  }
+  if (!compactMutationMatrixChecked) {
+    throw new Error("compact-only mutation matrix was not executed");
+  }
+  if (!futureScopeBeforeNegativeChecked) {
+    throw new Error("future scopeBefore compact negative control was not executed");
   }
   if (!browserTransportFallbackChecked) {
     throw new Error("schema-v3 browser fallback witness was not executed");
