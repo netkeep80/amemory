@@ -1165,7 +1165,7 @@ pub(crate) fn web_prove_logic(
     a: u32,
     b: u32,
 ) -> Option<WebLogicProofExecution> {
-    if !(1..=4).contains(&op) {
+    if !(1..=5).contains(&op) {
         return None;
     }
 
@@ -1187,6 +1187,7 @@ pub(crate) fn web_prove_logic(
         gate,
         args,
         bword,
+        writeback_handle,
         oracle,
         expected_steps,
     ) = if op == 4 {
@@ -1202,6 +1203,7 @@ pub(crate) fn web_prove_logic(
             program.logic.gates.not1,
             args,
             None,
+            None,
             expected_not(a, 32),
             program.not_steps,
         )
@@ -1209,30 +1211,45 @@ pub(crate) fn web_prove_logic(
         let b_bits = bit_handles(&compiler, 32, b);
         let bword =
             materialize_exact_sequence(&mut compiler.store, &b_bits).ok()?;
-        let (block, gate_role, gate, value) = match op {
-            1 => (
-                "AND32",
-                "function.gate.and2",
-                program.logic.gates.and2,
-                a & b,
-            ),
-            2 => (
-                "OR32",
-                "function.gate.or2",
-                program.logic.gates.or2,
-                a | b,
-            ),
-            3 => (
-                "XOR32",
-                "function.gate.xor2",
-                program.logic.gates.xor2,
-                a ^ b,
-            ),
-            _ => unreachable!(),
-        };
+        let (block, gate_role, gate, value, writeback, writeback_handle) =
+            match op {
+                1 => (
+                    "AND32",
+                    "function.gate.and2",
+                    program.logic.gates.and2,
+                    a & b,
+                    1,
+                    compiler.one,
+                ),
+                2 => (
+                    "OR32",
+                    "function.gate.or2",
+                    program.logic.gates.or2,
+                    a | b,
+                    1,
+                    compiler.one,
+                ),
+                3 => (
+                    "XOR32",
+                    "function.gate.xor2",
+                    program.logic.gates.xor2,
+                    a ^ b,
+                    1,
+                    compiler.one,
+                ),
+                5 => (
+                    "TEST32",
+                    "function.gate.and2",
+                    program.logic.gates.and2,
+                    a & b,
+                    0,
+                    compiler.zero,
+                ),
+                _ => unreachable!(),
+            };
         let args = materialize_exact_sequence(
             &mut compiler.store,
-            &[gate, aword, bword, compiler.one],
+            &[gate, aword, bword, writeback_handle],
         )
         .ok()?;
         (
@@ -1245,7 +1262,8 @@ pub(crate) fn web_prove_logic(
             gate,
             args,
             Some(bword),
-            expected_logic(value, 32, 1),
+            Some(writeback_handle),
+            expected_logic(value, 32, writeback),
             program.binary_steps,
         )
     };
@@ -1351,7 +1369,7 @@ pub(crate) fn web_prove_logic(
         prepared_roots.push(semantic_source(
             &compiler.store,
             "data.writeback",
-            compiler.one,
+            writeback_handle?,
         ));
     }
 
