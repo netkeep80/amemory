@@ -709,6 +709,121 @@ Promise.all([
     );
   };
 
+  // M5a is deliberately not a new ALU opcode. It is a dedicated
+  // architectural-state witness composed from the real ADD32 structural
+  // producer and the shared ALU_EFFECT_RESULT/FlagPatch ABI.
+  if (typeof w.amemory_i386_state_probe !== "function" ||
+      w.amemory_i386_state_probe() !== 0x50a) {
+    throw new Error("M5a state WASM probe missing");
+  }
+  if (w.amemory_i386_state_run_add32() !== 1) {
+    throw new Error("M5a real ADD32 state transition rejected");
+  }
+  if ((w.amemory_i386_state_eax_before() >>> 0) !== 0xffffffff ||
+      (w.amemory_i386_state_ebx_before() >>> 0) !== 0x11223344 ||
+      (w.amemory_i386_state_eax_after() >>> 0) !== 0 ||
+      (w.amemory_i386_state_ebx_after() >>> 0) !== 0x11223344) {
+    throw new Error("M5a structural register-state transition mismatch");
+  }
+  if ((w.amemory_i386_state_flags_defined_mask() >>> 0) !== 0x000008d5 ||
+      (w.amemory_i386_state_flags_value_mask() >>> 0) !== 0x00000055 ||
+      (w.amemory_i386_state_flags_undefined_mask() >>> 0) !== 0) {
+    throw new Error("M5a structural EFLAGS successor mismatch");
+  }
+  if (w.amemory_i386_state_old_state_retained() !== 1 ||
+      w.amemory_i386_state_atomic_scope() !== 1 ||
+      w.amemory_i386_state_steady_link_delta() !== 0 ||
+      w.amemory_i386_state_quiescent() !== 1 ||
+      w.amemory_i386_state_reactions() <= 1) {
+    throw new Error("M5a atomic/currentness/rerun witness failed");
+  }
+
+  const stateProof =
+    inflateCompactProof(readCurrentCompactProof("M5A_STATE_ADD32"));
+  if (stateProof.block !== "M5A_STATE_ADD32" ||
+      stateProof.schemaVersion !== 4 ||
+      !stateProof.result.oracleMatches ||
+      (stateProof.result.decodedValue >>> 0) !== 0 ||
+      (stateProof.result.decodedValueHi >>> 0) !== 0x11223344 ||
+      stateProof.result.identicalRerunLinkDelta !== 0) {
+    throw new Error("M5a compact structural proof result mismatch");
+  }
+  const stateMemoryId = stateProof.load.memoryInstanceId;
+  if (!stateMemoryId ||
+      stateProof.execute.memoryInstanceId !== stateMemoryId ||
+      stateProof.result.memoryInstanceId !== stateMemoryId ||
+      !stateProof.execute.reactions.every(
+        (step) => step.memoryInstanceId === stateMemoryId
+      )) {
+    throw new Error("M5a state transition used more than one runtime A-memory");
+  }
+  if (stateProof.prepare.runtimeMemoryExists !== false ||
+      !stateProof.load.carrierRoundTrip ||
+      stateProof.load.linksBeforeLoad !== 1 ||
+      stateProof.load.linksAfterLoad !== stateProof.prepare.compiledLinks ||
+      stateProof.result.linksFinal <= stateProof.load.linksAfterLoad ||
+      !stateProof.execute.finalQuiescent ||
+      stateProof.execute.activeReactionCount !==
+        (w.amemory_i386_state_reactions() >>> 0)) {
+    throw new Error("M5a PREPARE/LOAD/EXECUTE pipeline mismatch");
+  }
+  const stateRoles = new Map(
+    stateProof.prepare.semanticRoots.map((root) => [root.role, root])
+  );
+  for (const role of [
+    "function.effect.arithmetic",
+    "state.schema.tag",
+    "state.apply.frame_tag",
+    "state.register.eax",
+    "state.register.ebx",
+    "state.flag.undefined",
+    "state.before",
+    "state.target",
+    "state.continuation",
+    "result.alu_effect_tag",
+    "data.bit.zero",
+    "data.bit.one",
+    "execution.interpreter",
+    "execution.theory",
+    "execution.apply",
+    "scope.initial",
+    "context.result",
+  ]) {
+    if (!stateRoles.has(role)) {
+      throw new Error("M5a prepared Aset missing semantic root " + role);
+    }
+  }
+  if (stateRoles.has("state.after")) {
+    throw new Error("M5a host/preparation injected a successor state");
+  }
+  if (stateRoles.get("state.target").carrierRef !==
+      stateRoles.get("state.register.eax").carrierRef) {
+    throw new Error("M5a state target is not structural EAX identity");
+  }
+  if (!stateProof.execute.reactions.every(
+    (step) => step.scopeBefore.length === 1 && step.scopeAfter.length === 1
+  )) {
+    throw new Error("M5a exposed a partial multi-member architectural state");
+  }
+  const stateBeforeRef = stateRoles.get("state.before").carrierRef;
+  const stateBeforeVisualKey = stateMemoryId + ":L" + stateBeforeRef;
+  if (!stateProof.result.visualLinks.some(
+    (link) => link.key === stateBeforeVisualKey
+  )) {
+    throw new Error("M5a old state was not retained physically in one A-memory");
+  }
+  const stateActive = stateProof.execute.reactions.filter(
+    (step) => !step.quiescent
+  );
+  const finalStateScope = stateActive[stateActive.length - 1]?.scopeAfter?.[0];
+  const finalStateHandle = typeof finalStateScope === "string" &&
+      /^L\d+$/.test(finalStateScope)
+    ? Number(finalStateScope.slice(1))
+    : 0;
+  if (finalStateHandle <= stateProof.load.linksAfterLoad) {
+    throw new Error("M5a successor was not structurally materialized at runtime");
+  }
+
   // Real WASM execution smoke: composed structural MUX1.
   if (w.amemory_i386_lab_run(12, 1, 0, 1) !== 1) {
     throw new Error("MUX1 WASM execution rejected");
