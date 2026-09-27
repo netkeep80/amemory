@@ -799,7 +799,7 @@ pub(crate) fn web_prove_mul_effect(
         visual_links,
     };
     let proof = WebStructuralProof {
-        schema_version: 3,
+        schema_version: 4,
         block: "x86 MUL32 effect".to_owned(),
         prepare,
         load,

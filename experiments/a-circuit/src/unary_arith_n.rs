@@ -604,7 +604,7 @@ pub(crate) fn web_prove_unary32(
         visual_links,
     };
     let proof=WebStructuralProof{
-        schema_version: 3,
+        schema_version: 4,
         block:block.to_owned(),
         prepare,
         load,

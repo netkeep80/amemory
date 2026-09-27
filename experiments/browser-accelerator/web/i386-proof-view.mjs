@@ -78,6 +78,8 @@ export function proofPipelineHtml(proof) {
   const oracleResult = wideResult
     ? `${hex32(proof.result.oracleValueHi)}:${hex32(proof.result.oracleValue)}`
     : String(proof.result.oracleValue);
+  const resultRecursiveWire =
+    proof.result.resultRecursiveWire ?? proof.result.resultAnum;
   const carrierText = proof.prepare.carrierDuplets
     .map((duplet, index) =>
       `${String(index + 1).padStart(6, "0")}  (${duplet.start}, ${duplet.end})`
@@ -171,7 +173,7 @@ export function proofPipelineHtml(proof) {
               <span><small>Identical rerun ΔLinks</small><strong>${proof.result.identicalRerunLinkDelta}</strong></span>
             </div>
             <div class="proof-result-anums">
-              <div><strong>Result Anum</strong>${code(proof.result.resultAnum)}</div>
+              <div><strong>Result Anum</strong>${code(resultRecursiveWire)}</div>
               <div><strong>Result sequence Anum</strong>${code(proof.result.resultSequenceAnum)}</div>
             </div>
             <div class="proof-visual-toolbar">

@@ -782,7 +782,7 @@ pub(crate) fn web_prove_mux32(
         visual_links,
     };
     let proof = WebStructuralProof {
-        schema_version: 3,
+        schema_version: 4,
         block: "MUX32".to_owned(),
         prepare,
         load,
@@ -1331,7 +1331,7 @@ pub(crate) fn web_prove_mux1(
     };
 
     Some(WebStructuralProof {
-        schema_version: 3,
+        schema_version: 4,
         block: "MUX1".to_owned(),
         prepare,
         load,

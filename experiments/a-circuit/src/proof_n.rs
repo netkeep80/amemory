@@ -10,11 +10,11 @@ use std::{
 
 static NEXT_PROOF_MEMORY_ID: AtomicU32 = AtomicU32::new(1);
 
-const WEB_STRUCTURAL_PROOF_SCHEMA_VERSION: u32 = 3;
-const WEB_COMPACT_PROOF_SCHEMA_VERSION: u32 = 1;
+const WEB_STRUCTURAL_PROOF_SCHEMA_VERSION: u32 = 4;
+const WEB_COMPACT_PROOF_SCHEMA_VERSION: u32 = 2;
 const WEB_COMPACT_PROOF_REPRESENTATION_ID: &str =
     "amemory-proof-compact-json";
-const WEB_COMPACT_PROOF_REPRESENTATION_VERSION: &str = "0.1.0";
+const WEB_COMPACT_PROOF_REPRESENTATION_VERSION: &str = "0.2.0";
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -100,6 +100,10 @@ pub(crate) struct WebProofExecuteStage {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct WebProofResultStage {
     pub(crate) memory_instance_id: String,
+    // Internal Rust field name is retained only as a construction-compatibility detail.
+    // All producer DTOs declare source schema v4; serialization names the arbitrary
+    // final Link explicitly as a recursive Link wire, not as an Anum sequence representation.
+    #[serde(rename = "resultRecursiveWire")]
     pub(crate) result_anum: String,
     pub(crate) result_sequence_anum: String,
     pub(crate) decoded_value: u32,
@@ -195,7 +199,7 @@ pub(crate) struct WebCompactExecute {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct WebCompactResult {
-    pub(crate) result_anum: String,
+    pub(crate) result_recursive_wire: String,
     pub(crate) result_sequence_anum: String,
     pub(crate) decoded_value: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -468,7 +472,7 @@ impl WebStructuralProof {
                 reactions,
             },
             result: WebCompactResult {
-                result_anum: self.result.result_anum.clone(),
+                result_recursive_wire: self.result.result_anum.clone(),
                 result_sequence_anum:
                     self.result.result_sequence_anum.clone(),
                 decoded_value: self.result.decoded_value,
@@ -863,9 +867,20 @@ mod tests {
             compact.representation_version,
             WEB_COMPACT_PROOF_REPRESENTATION_VERSION
         );
-        assert_eq!(compact.source_proof_schema_version, 3);
+        assert_eq!(compact.source_proof_schema_version, 4);
         assert_eq!(compact.topology.base.starts, vec![1]);
         assert_eq!(compact.topology.base.ends, vec![1]);
+
+        let compact_json = serde_json::to_value(&compact).expect("compact JSON");
+        assert_eq!(compact_json["result"]["resultRecursiveWire"], "8");
+        assert_eq!(compact_json["result"]["resultSequenceAnum"], "8");
+        assert!(compact_json["result"].get("resultAnum").is_none());
+
+        let source_json = serde_json::to_value(&proof).expect("source proof JSON");
+        assert_eq!(source_json["schemaVersion"], 4);
+        assert_eq!(source_json["result"]["resultRecursiveWire"], "8");
+        assert_eq!(source_json["result"]["resultSequenceAnum"], "8");
+        assert!(source_json["result"].get("resultAnum").is_none());
     }
 
     #[test]

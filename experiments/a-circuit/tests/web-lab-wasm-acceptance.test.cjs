@@ -41,6 +41,7 @@ Promise.all([
   const proofCoveredOpcodes = new Set();
   const proofMeasurements = new Map();
   let compactRendererProjectionChecked = false;
+  let compactLegacyV1CompatibilityChecked = false;
   let compactMutationMatrixChecked = false;
   let futureScopeBeforeNegativeChecked = false;
   const jsonBytes = (value) =>
@@ -57,16 +58,28 @@ Promise.all([
     const compact = JSON.parse(
       Buffer.from(w.memory.buffer, ptr, len).toString("utf8")
     );
-    if (compact.schemaVersion !== 1 ||
+    if (compact.schemaVersion !== 2 ||
         compact.representationId !== "amemory-proof-compact-json" ||
-        compact.representationVersion !== "0.1.0") {
+        compact.representationVersion !== "0.2.0" ||
+        compact.sourceProofSchemaVersion !== 4) {
       throw new Error(label + " compact proof representation mismatch");
+    }
+    if (typeof compact.result?.resultRecursiveWire !== "string" ||
+        Object.prototype.hasOwnProperty.call(compact.result, "resultAnum") ||
+        typeof compact.result?.resultSequenceAnum !== "string") {
+      throw new Error(label + " compact proof result representation mismatch");
     }
     return compact;
   };
   const proofMetrics = (proof, registryBlock) => {
     const { visualLinks, ...resultMetadata } = proof.result;
     const memoryId = proof.result.memoryInstanceId;
+    if (proof.schemaVersion !== 4 ||
+        typeof proof.result.resultRecursiveWire !== "string" ||
+        Object.prototype.hasOwnProperty.call(proof.result, "resultAnum") ||
+        typeof proof.result.resultSequenceAnum !== "string") {
+      throw new Error(registryBlock.id + " source proof result schema mismatch");
+    }
     const parseVisualHandle = (key) => {
       const prefix = memoryId + ":L";
       if (typeof key !== "string" || !key.startsWith(prefix)) {
@@ -373,9 +386,9 @@ Promise.all([
       overlays,
     };
     const compactProof = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       representationId: "amemory-proof-compact-json",
-      representationVersion: "0.1.0",
+      representationVersion: "0.2.0",
       sourceProofSchemaVersion: proof.schemaVersion,
       block: proof.block,
       memoryInstanceId: memoryId,
@@ -406,6 +419,32 @@ Promise.all([
         registryBlock.id + " Rust compact producer != independent JS shadow"
       );
     }
+
+    if (!compactLegacyV1CompatibilityChecked) {
+      const legacyCompactProof = JSON.parse(JSON.stringify(producedCompactProof));
+      legacyCompactProof.schemaVersion = 1;
+      legacyCompactProof.representationVersion = "0.1.0";
+      legacyCompactProof.sourceProofSchemaVersion = 3;
+      legacyCompactProof.result.resultAnum =
+        legacyCompactProof.result.resultRecursiveWire;
+      delete legacyCompactProof.result.resultRecursiveWire;
+
+      const legacyRendererProof = inflateCompactProof(legacyCompactProof);
+      if (legacyRendererProof.schemaVersion !== 3 ||
+          legacyRendererProof.result.resultAnum !==
+            producedCompactProof.result.resultRecursiveWire ||
+          legacyRendererProof.result.resultSequenceAnum !==
+            producedCompactProof.result.resultSequenceAnum ||
+          Object.prototype.hasOwnProperty.call(
+            legacyRendererProof.result, "resultRecursiveWire"
+          )) {
+        throw new Error(
+          registryBlock.id + " legacy compact v1 compatibility projection failed"
+        );
+      }
+      compactLegacyV1CompatibilityChecked = true;
+    }
+
     const rendererProof = inflateCompactProof(producedCompactProof);
     if (JSON.stringify(rendererProof) !== JSON.stringify(proof)) {
       throw new Error(
@@ -480,6 +519,10 @@ Promise.all([
         }],
         ["active-summary", (p) => { p.execute.activeReactionCount += 1; }],
         ["quiescence-summary", (p) => { p.execute.finalQuiescent = !p.execute.finalQuiescent; }],
+        ["missing-result-recursive-wire", (p) => { delete p.result.resultRecursiveWire; }],
+        ["mixed-legacy-result-anum", (p) => {
+          p.result.resultAnum = p.result.resultRecursiveWire;
+        }],
         ["result-links-final", (p) => { p.result.linksFinal += 1; }],
         ["rerun-delta", (p) => { p.result.identicalRerunLinkDelta += 1; }],
         ["redundant-result-memory-id", (p) => { p.result.memoryInstanceId = p.memoryInstanceId; }],
@@ -683,8 +726,8 @@ Promise.all([
     throw new Error("MUX1 repeated run grew Links");
   }
   const proof = inflateCompactProof(readCurrentCompactProof("MUX1"));
-  if (proof.schemaVersion !== 3) {
-    throw new Error("MUX1 reconstructed renderer proof schema is not v3");
+  if (proof.schemaVersion !== 4) {
+    throw new Error("MUX1 reconstructed renderer proof schema is not v4");
   }
   proofCoveredOpcodes.add(12);
   captureProofMeasurement(
@@ -1486,7 +1529,7 @@ Promise.all([
     proofCoveredOpcodes: proofCoveredOpcodes.size,
     browserProofTransport: {
       representationId: "amemory-proof-compact-json",
-      representationVersion: "0.1.0",
+      representationVersion: "0.2.0",
       schemaV3AbiRemoved: true,
       totalTransportJsonBytes: measuredProofs.reduce(
         (sum, item) => sum + item.compactProofPrototype.producerProofJsonBytes,
@@ -1511,7 +1554,7 @@ Promise.all([
         );
         return {
           representationId: "amemory-proof-compact-json",
-          representationVersion: "0.1.0",
+          representationVersion: "0.2.0",
           totalReconstructedRendererProofJsonBytes,
           totalCompactProofJsonBytes,
           totalProducerCompactProofJsonBytes: measuredProofs.reduce(
