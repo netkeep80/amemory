@@ -20,7 +20,7 @@ if (!version) throw new Error("VERSION is empty");
 Promise.all([
   WebAssembly.instantiate(bytes, {}),
   import("../../browser-accelerator/web/i386-proof-transport.mjs"),
-]).then(([{instance}, { validateCompactAgainstV3 }]) => {
+]).then(([{instance}, { selectBrowserProof, validateCompactAgainstV3 }]) => {
   const w = instance.exports;
   if (w.amemory_i386_lab_probe() !== 0x386) throw new Error("bad lab probe");
   for (const block of registry.blocks) {
@@ -31,6 +31,8 @@ Promise.all([
   const proofCoveredOpcodes = new Set();
   const proofMeasurements = new Map();
   let browserTransportNegativeChecked = false;
+  let browserTransportFallbackChecked = false;
+  let browserTransportCompactAuthorityChecked = false;
   const jsonBytes = (value) =>
     Buffer.byteLength(JSON.stringify(value), "utf8");
   const readCurrentCompactProof = (label) => {
@@ -395,18 +397,44 @@ Promise.all([
       );
     }
     validateCompactAgainstV3(proof, producedCompactProof);
+    const browserSelection = selectBrowserProof({
+      proof,
+      compactProof: producedCompactProof,
+    });
+    if (browserSelection.transport !== "compact" ||
+        browserSelection.proof === proof ||
+        browserSelection.compactProof !== producedCompactProof ||
+        browserSelection.v3Proof !== proof) {
+      throw new Error(
+        registryBlock.id + " compact proof did not become browser authority"
+      );
+    }
+    browserTransportCompactAuthorityChecked = true;
+
+    if (!browserTransportFallbackChecked) {
+      const fallback = selectBrowserProof({ proof, compactProof: null });
+      if (fallback.transport !== "v3-fallback" ||
+          fallback.proof !== proof ||
+          fallback.compactProof !== null) {
+        throw new Error(
+          registryBlock.id + " schema-v3 compatibility fallback failed"
+        );
+      }
+      browserTransportFallbackChecked = true;
+    }
+
     if (!browserTransportNegativeChecked) {
       const corruptedCompact = JSON.parse(JSON.stringify(producedCompactProof));
       corruptedCompact.representationVersion = "invalid-negative-control";
       let rejected = false;
       try {
-        validateCompactAgainstV3(proof, corruptedCompact);
+        selectBrowserProof({ proof, compactProof: corruptedCompact });
       } catch {
         rejected = true;
       }
       if (!rejected) {
         throw new Error(
-          registryBlock.id + " browser compact transport negative control failed"
+          registryBlock.id + " invalid compact silently fell back to schema-v3"
         );
       }
       browserTransportNegativeChecked = true;
@@ -1379,6 +1407,12 @@ Promise.all([
       "proof measurement coverage mismatch: " +
       proofMeasurements.size + "/" + registry.blocks.length
     );
+  }
+  if (!browserTransportCompactAuthorityChecked) {
+    throw new Error("compact browser authority witness was not executed");
+  }
+  if (!browserTransportFallbackChecked) {
+    throw new Error("schema-v3 browser fallback witness was not executed");
   }
   if (!browserTransportNegativeChecked) {
     throw new Error("browser compact transport negative control was not executed");
