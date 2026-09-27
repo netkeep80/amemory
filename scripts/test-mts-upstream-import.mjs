@@ -515,7 +515,7 @@ console.log("MTS_AND_AMEMORY_PROFILE_IMPORT_NEGATIVE_WITNESSES=GREEN");
   assert.equal(projection.executionProfile.profileVersion, "0.1.0");
   assert.equal(
     projection.generatedFrom.foundation.commit,
-    "440caf09558d4ff5cfda11805cb3ef97b48d1ad5",
+    "fcbc97e2279471c2c5effed57685c5f49ec856be",
   );
   assert.equal(
     projection.generatedFrom.executionProfile.commit,
