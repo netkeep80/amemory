@@ -49,6 +49,11 @@ pub enum StoreError {
     TrailingInput(usize),
     CapacityExceeded,
     UnknownHandle(Handle),
+    InvalidPackedCarrier {
+        handle: Handle,
+        start: Handle,
+        end: Handle,
+    },
     NonWellFounded(Handle),
 }
 
@@ -230,7 +235,12 @@ impl OptimizedLinkStore {
         duplets: &[(Handle, Handle)],
     ) -> Result<(), StoreError> {
         if duplets.is_empty() || duplets[0] != (ROOT_HANDLE, ROOT_HANDLE) {
-            return Err(StoreError::UnknownHandle(ROOT_HANDLE));
+            let (start, end) = duplets.first().copied().unwrap_or((0, 0));
+            return Err(StoreError::InvalidPackedCarrier {
+                handle: ROOT_HANDLE,
+                start,
+                end,
+            });
         }
 
         let runtime_instance_id = self.instance_id;
@@ -244,23 +254,39 @@ impl OptimizedLinkStore {
 
             let rebuilt = if start == handle {
                 if end >= handle {
-                    return Err(StoreError::UnknownHandle(end));
+                    return Err(StoreError::InvalidPackedCarrier {
+                        handle,
+                        start,
+                        end,
+                    });
                 }
                 staging.ensure_start_form(end)?
             } else if end == handle {
                 if start >= handle {
-                    return Err(StoreError::UnknownHandle(start));
+                    return Err(StoreError::InvalidPackedCarrier {
+                        handle,
+                        start,
+                        end,
+                    });
                 }
                 staging.ensure_end_form(start)?
             } else {
                 if start >= handle || end >= handle {
-                    return Err(StoreError::UnknownHandle(start.max(end)));
+                    return Err(StoreError::InvalidPackedCarrier {
+                        handle,
+                        start,
+                        end,
+                    });
                 }
                 staging.ensure_pair(start, end)?
             };
 
             if rebuilt != handle {
-                return Err(StoreError::UnknownHandle(handle));
+                return Err(StoreError::InvalidPackedCarrier {
+                    handle,
+                    start,
+                    end,
+                });
             }
         }
 
@@ -999,6 +1025,41 @@ mod tests {
         assert_eq!(batched.instance_id, instance_id);
         assert_eq!(batched.link_count(), before_count);
         assert_eq!(batched.export_anum(stable).unwrap(), before_stable);
+    }
+
+    #[test]
+    fn packed_duplet_carrier_rebuilds_exact_store_and_is_atomic() {
+        let mut source = OptimizedLinkStore::new();
+        let o = source.import_anum("98").unwrap();
+        let c = source.import_anum("68").unwrap();
+        let l = source.ensure_pair(o, c).unwrap();
+        let _u = source.ensure_pair(c, o).unwrap();
+        let _top = source.ensure_pair(l, ROOT_HANDLE).unwrap();
+
+        let carrier = source.export_packed_duplets();
+
+        let mut loaded = OptimizedLinkStore::new();
+        let instance_id = loaded.instance_id;
+        loaded.load_packed_duplets(&carrier).unwrap();
+
+        assert_eq!(loaded.instance_id, instance_id);
+        assert_eq!(loaded.link_count(), source.link_count());
+        assert_eq!(loaded.export_packed_duplets(), carrier);
+        for handle in 1..=source.link_count() as Handle {
+            assert_eq!(
+                loaded.export_anum(handle).unwrap(),
+                source.export_anum(handle).unwrap()
+            );
+        }
+
+        let stable = loaded.export_packed_duplets();
+        let malformed = vec![(ROOT_HANDLE, ROOT_HANDLE), (2, ROOT_HANDLE)];
+        assert!(matches!(
+            loaded.load_packed_duplets(&malformed),
+            Err(StoreError::InvalidPackedCarrier { .. })
+        ));
+        assert_eq!(loaded.instance_id, instance_id);
+        assert_eq!(loaded.export_packed_duplets(), stable);
     }
 
     #[test]
