@@ -125,7 +125,7 @@ jobs:
                 { role: "execution.interpreter", source: "68" },
                 { role: "invocation.call", source: "19868" },
               ],
-              theoryAdmissions: ["16898"],
+              theoryAdmissions: ["L8"],
             },
             load: {
               memoryInstanceId: "A-memory#7",
@@ -407,9 +407,17 @@ jobs:
               if (!len || ptr + len > w.memory.buffer.byteLength) {
                 throw new Error(label + " proof JSON pointer/length invalid");
               }
-              return JSON.parse(
+              const proof = JSON.parse(
                 Buffer.from(w.memory.buffer, ptr, len).toString("utf8")
               );
+              if (!Array.isArray(proof.prepare?.theoryAdmissions) ||
+                  proof.prepare.theoryAdmissions.length === 0 ||
+                  !proof.prepare.theoryAdmissions.every(
+                    (ref) => typeof ref === "string" && /^L\d+$/.test(ref)
+                  )) {
+                throw new Error(label + " Theory admissions are not packed-carrier Link references");
+              }
+              return proof;
             };
 
             const verifyLogicProof = (op, a, b, expected, expectedWriteback, block) => {
