@@ -512,6 +512,82 @@ jobs:
             verifyLogicProof(4, 0x12345678, 0, 0xedcba987, 1, "NOT32");
             verifyLogicProof(5, 0xf0f01234, 0x0ff0ffff, 0x00f01234, 0, "TEST32");
 
+            const verifyArithmeticProof = (
+              op, a, b, inputFlag, expected, expectedWriteback,
+              expectedX, expectedMode, block
+            ) => {
+              run(op, a, b, inputFlag, expected, block);
+              if ((w.amemory_i386_lab_writeback() >>> 0) !== (expectedWriteback >>> 0)) {
+                throw new Error(block + " WASM writeback mismatch");
+              }
+              const proof = readCurrentProof(block);
+              if (proof.block !== block) {
+                throw new Error(block + " proof block identity mismatch");
+              }
+
+              const memoryId = proof.load.memoryInstanceId;
+              if (!memoryId ||
+                  proof.execute.memoryInstanceId !== memoryId ||
+                  proof.result.memoryInstanceId !== memoryId ||
+                  !proof.execute.reactions.every((step) => step.memoryInstanceId === memoryId)) {
+                throw new Error(block + " proof changed runtime A-memory identity");
+              }
+              if (proof.prepare.runtimeMemoryExists !== false ||
+                  !proof.load.carrierRoundTrip ||
+                  proof.load.linksBeforeLoad !== 1 ||
+                  proof.load.linksAfterLoad !== proof.prepare.compiledLinks) {
+                throw new Error(block + " packed carrier witness failed");
+              }
+              if (!proof.execute.finalQuiescent ||
+                  !proof.result.oracleMatches ||
+                  proof.result.identicalRerunLinkDelta !== 0 ||
+                  (proof.result.decodedValue >>> 0) !== (expected >>> 0)) {
+                throw new Error(block + " arithmetic structural result witness failed");
+              }
+
+              const sourceByRole = new Map(
+                proof.prepare.semanticRoots.map((root) => [root.role, root.source])
+              );
+              for (const role of [
+                "function.effect.arithmetic",
+                "function.flagged_arithmetic",
+                "data.a.word",
+                "data.b.word",
+                "data.x",
+                "data.mode",
+                "data.writeback",
+                "data.bit.zero",
+                "data.bit.one",
+                "execution.interpreter",
+                "execution.theory",
+                "execution.apply",
+                "invocation.call",
+                "scope.initial",
+                "result.tag",
+              ]) {
+                if (!sourceByRole.has(role)) {
+                  throw new Error(block + " prepared Aset missing " + role);
+                }
+              }
+              const bitSource = (value) =>
+                sourceByRole.get(value === 0 ? "data.bit.zero" : "data.bit.one");
+              if (sourceByRole.get("data.x") !== bitSource(expectedX) ||
+                  sourceByRole.get("data.mode") !== bitSource(expectedMode) ||
+                  sourceByRole.get("data.writeback") !== bitSource(expectedWriteback)) {
+                throw new Error(block + " structural X/Mode/WriteBack selector mismatch");
+              }
+
+              if (proof.result.visualLinks.length !== proof.result.linksFinal) {
+                throw new Error(block + " visual snapshot does not contain every runtime Link");
+              }
+            };
+
+            verifyArithmeticProof(6, 0xffffffff, 1, 0, 0, 1, 0, 0, "ADD32");
+            verifyArithmeticProof(7, 0xffffffff, 0, 1, 0, 1, 1, 0, "ADC32");
+            verifyArithmeticProof(8, 0, 1, 0, 0xffffffff, 1, 0, 1, "SUB32");
+            verifyArithmeticProof(9, 0, 0, 1, 0xffffffff, 1, 1, 1, "SBB32");
+            verifyArithmeticProof(10, 7, 9, 0, 0xfffffffe, 0, 0, 1, "CMP32");
+
             const runWide = (op, a, b, expectedLo, expectedHi, reactions, label) => {
               if (w.amemory_i386_lab_run(op, a, b, 0) !== 1) {
                 throw new Error(label + " WASM execution rejected");
@@ -561,7 +637,7 @@ jobs:
               throw new Error("x86 MUL32 must not preserve status flags");
             }
 
-            console.log("WASM registry + MUX1/logic/shift/rotate/unary/MUL structural smoke PASS");
+            console.log("WASM registry + MUX1/logic/arithmetic/shift/rotate/unary/MUL structural smoke PASS");
           }).catch((error) => {
             console.error(error);
             process.exit(1);
