@@ -280,6 +280,35 @@ impl MulEffectProgram {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct PreparedMulEffectCall {
+    pub(crate) invocation: Handle,
+    pub(crate) function: Handle,
+    pub(crate) result_tag: Handle,
+    pub(crate) active_steps: usize,
+}
+
+pub(crate) fn prepare_mul_effect_call(
+    f: &mut FullFixture,
+    a: u32,
+    b: u32,
+) -> Option<PreparedMulEffectCall> {
+    let program = MulEffectProgram::install(f);
+    let aword = word_handle(f, a);
+    let bword = word_handle(f, b);
+    let args =
+        materialize_exact_sequence(&mut f.store, &[aword, bword]).ok()?;
+    let invocation =
+        call(&mut f.store, f.apply, program.effect, args);
+
+    Some(PreparedMulEffectCall {
+        invocation,
+        function: program.effect,
+        result_tag: program.result_tag,
+        active_steps: expected_steps(b),
+    })
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum FlagState {
     Set(u8),
