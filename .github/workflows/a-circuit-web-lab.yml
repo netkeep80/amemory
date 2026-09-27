@@ -184,7 +184,8 @@ jobs:
             "Blueprint 2D",
             "Static 3D",
             "Live physics 3D",
-            "@mts/visual 0.3.0",
+            "@mts/visual 0.4.0",
+            "Octahedral Link3D",
             "Structural rules admitted to Theory",
           ]) {
             if (!proofHtml.includes(required)) {
@@ -223,17 +224,21 @@ jobs:
           set -euo pipefail
           commit="$(jq -r '.commit' experiments/browser-accelerator/mts-visual.lock.json)"
           package_version="$(jq -r '.packageVersion' experiments/browser-accelerator/mts-visual.lock.json)"
-          test "${commit}" = "4b7c8e97fab8d84a31783a4d8e422dcb12a4e795"
-          test "${package_version}" = "0.3.0"
+          test "${commit}" = "d4d883a036c4f77f6b39e7c1bbac3bb915c18459"
+          test "${package_version}" = "0.4.0"
 
           git clone --quiet https://github.com/netkeep80/mts_visual.git /tmp/mts_visual
           git -C /tmp/mts_visual checkout --quiet "${commit}"
           test "$(git -C /tmp/mts_visual rev-parse HEAD)" = "${commit}"
           npm --prefix /tmp/mts_visual ci --silent
+          npm --prefix /tmp/mts_visual test --silent
           npm --prefix /tmp/mts_visual run build --silent
           test -s /tmp/mts_visual/dist/src/index.js
           test -s /tmp/mts_visual/dist/src/blueprint-svg.js
           test -s /tmp/mts_visual/dist/src/three/index.js
+          test -s /tmp/mts_visual/dist/src/octahedral-live3d.js
+          test -s /tmp/mts_visual/dist/src/octahedral-performance3d.js
+          test -s /tmp/mts_visual/dist/src/three/octahedral-live-renderer.js
           test "$(node -p "require('/tmp/mts_visual/node_modules/three/package.json').version")" = "0.185.1"
           test -s /tmp/mts_visual/node_modules/three/build/three.module.js
           test -s /tmp/mts_visual/node_modules/three/examples/jsm/controls/OrbitControls.js
@@ -245,11 +250,13 @@ jobs:
           test -s /tmp/mts-visual-three.bundle.js
           cp /tmp/mts-visual-core.bundle.js /tmp/mts-visual-core.bundle.mjs
           cp /tmp/mts-visual-three.bundle.js /tmp/mts-visual-three.bundle.mjs
-          node --input-type=module -e 'import("file:///tmp/mts-visual-core.bundle.mjs").then(m => { if (typeof m.buildBlueprintSvgScene !== "function") process.exit(1); })'
-          node --input-type=module -e 'import("file:///tmp/mts-visual-three.bundle.mjs").then(m => { if (typeof m.createVisualThreeRenderer !== "function" || typeof m.createVisualThreeLiveRenderer !== "function") process.exit(1); })'
+          node --input-type=module -e 'import("file:///tmp/mts-visual-core.bundle.mjs").then(m => { if (typeof m.buildBlueprintSvgScene !== "function" || typeof m.createOctahedralLivePhysics3D !== "function" || typeof m.estimateOctahedralPerformance3D !== "function") process.exit(1); const e = m.estimateOctahedralPerformance3D(1000000, 2 * Math.SQRT2); if (e.linkCount !== 1000000 || e.pairwiseSemanticLinkEvaluations !== 0 || !Number.isFinite(e.gpuDynamicBytes)) process.exit(1); })'
+          node --input-type=module -e 'import("file:///tmp/mts-visual-three.bundle.mjs").then(m => { if (typeof m.createVisualThreeRenderer !== "function" || typeof m.createOctahedralThreeLiveRenderer !== "function" || typeof m.destroyOctahedralThreeLiveRenderer !== "function") process.exit(1); })'
 
           grep -F 'import("./vendor/mts-visual-core.bundle.js")' experiments/browser-accelerator/web/i386-proof-view.mjs
           grep -F 'import("./vendor/mts-visual-three.bundle.js")' experiments/browser-accelerator/web/i386-proof-view.mjs
+          grep -F 'createOctahedralLivePhysics3D' experiments/browser-accelerator/web/i386-proof-view.mjs
+          grep -F 'createOctahedralThreeLiveRenderer' experiments/browser-accelerator/web/i386-proof-view.mjs
           if grep -Fq 'vendor/mts-visual/three/index.js' experiments/browser-accelerator/web/i386-proof-view.mjs; then
             echo "proof renderer still references the fragile unbundled 3D entrypoint" >&2
             exit 1

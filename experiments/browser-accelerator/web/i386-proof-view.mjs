@@ -173,8 +173,8 @@ export function proofPipelineHtml(proof) {
               </div>
             </div>
             <div class="proof-visual-note">
-              Exact renderer authority: <code>@mts/visual 0.3.0</code> ·
-              <code>mts_visual@4b7c8e97fab8</code>. Presentation only; semantic truth remains the runtime A-memory.
+              Exact renderer authority: <code>@mts/visual 0.4.0</code> ·
+              <code>mts_visual@d4d883a036c4</code>. Live physics uses the Octahedral Link3D persistent batched path. Presentation only; semantic truth remains the runtime A-memory.
             </div>
             <div class="proof-visual" data-proof-visual>
               <div class="notice">Loading exact-pinned mts_visual Blueprint renderer…</div>
@@ -228,14 +228,18 @@ async function renderLive3D(target, network) {
     import("./vendor/mts-visual-core.bundle.js"),
     import("./vendor/mts-visual-three.bundle.js"),
   ]);
-  const initial = mts.createInitialPhysics3DState(network);
-  const controller = mts.createLivePhysics3D(network, initial);
+  const controller = mts.createOctahedralLivePhysics3D(network, {
+    aspectRatio: 2 * Math.SQRT2,
+    stiffness: 1,
+    simulationSpeed: 1,
+  });
   target.innerHTML = "";
   target.classList.add("proof-visual-three");
-  threeVisual.createVisualThreeLiveRenderer(target, network, controller);
-  target.dataset.renderer = "@mts/visual Live physics 3D";
+  const snapshot = threeVisual.createOctahedralThreeLiveRenderer(target, controller);
+  target.dataset.renderer = "@mts/visual Octahedral Live physics 3D";
+  target.dataset.drawCallProxy = String(snapshot.drawCallProxy);
   proofVisualCleanup.set(target, () => {
-    threeVisual.destroyVisualThreeRenderer(target);
+    threeVisual.destroyOctahedralThreeLiveRenderer(target);
   });
 }
 
