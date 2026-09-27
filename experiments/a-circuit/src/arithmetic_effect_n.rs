@@ -518,6 +518,52 @@ fn vectors(width: usize) -> Vec<(u32, u32, u8, u8)> {
 }
 
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct PreparedArithmeticEffectCall {
+    pub(crate) invocation: Handle,
+    pub(crate) function: Handle,
+    pub(crate) result_tag: Handle,
+    pub(crate) active_steps: usize,
+}
+
+pub(crate) fn prepare_arithmetic_effect_call(
+    f: &mut FullFixture,
+    a: u32,
+    b: u32,
+    x: u8,
+    mode: u8,
+    writeback: u8,
+) -> Option<PreparedArithmeticEffectCall> {
+    if x > 1 || mode > 1 || writeback > 1 {
+        return None;
+    }
+
+    let program = ArithmeticEffectProgram::install(f, 32);
+    let a_bits = bit_handles(f, 32, a);
+    let b_bits = bit_handles(f, 32, b);
+    let aword =
+        materialize_exact_sequence(&mut f.store, &a_bits).ok()?;
+    let bword =
+        materialize_exact_sequence(&mut f.store, &b_bits).ok()?;
+    let xh = if x == 0 { f.zero } else { f.one };
+    let mh = if mode == 0 { f.zero } else { f.one };
+    let wbh = if writeback == 0 { f.zero } else { f.one };
+    let args = materialize_exact_sequence(
+        &mut f.store,
+        &[aword, bword, xh, mh, wbh],
+    )
+    .ok()?;
+    let invocation =
+        call(&mut f.store, f.apply, program.effect, args);
+
+    Some(PreparedArithmeticEffectCall {
+        invocation,
+        function: program.effect,
+        result_tag: program.result_tag,
+        active_steps: program.active_steps,
+    })
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct WebArithmeticProofExecution {
     pub(crate) outcome: WebArithmeticOutcome,
