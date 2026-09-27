@@ -9,6 +9,7 @@ import {
   outputValue,
 } from "./i386-lab-view.mjs";
 import { renderProofPipeline } from "./i386-proof-view.mjs";
+import { collectDualProofs } from "./i386-proof-transport.mjs";
 
 function parseWord(text) {
   const value = String(text).trim();
@@ -356,29 +357,6 @@ function collectOutcome(wasm) {
   };
 }
 
-function collectProof(wasm) {
-  if (wasm.amemory_i386_lab_proof_available?.() !== 1) return null;
-  const len = wasm.amemory_i386_lab_proof_json_len?.() >>> 0;
-  if (!len) throw new Error("proof ABI reported empty JSON");
-
-  let bytes;
-  if (wasm.memory && wasm.amemory_i386_lab_proof_json_ptr) {
-    const ptr = wasm.amemory_i386_lab_proof_json_ptr() >>> 0;
-    if (ptr + len > wasm.memory.buffer.byteLength) {
-      throw new Error("proof JSON pointer is outside WASM memory");
-    }
-    bytes = new Uint8Array(wasm.memory.buffer, ptr, len);
-  } else {
-    bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i += 1) {
-      const value = wasm.amemory_i386_lab_proof_json_byte?.(i) >>> 0;
-      if (value > 255) throw new Error(`proof ABI emitted invalid byte at ${i}`);
-      bytes[i] = value;
-    }
-  }
-  return JSON.parse(new TextDecoder().decode(bytes));
-}
-
 function runBlock(wasm, block, values) {
   if (wasm.amemory_i386_lab_supports?.(block.opcode) !== 1) {
     throw new Error(`registry block ${block.name} is not supported by A-Circuit WASM`);
@@ -386,7 +364,9 @@ function runBlock(wasm, block, values) {
   const ok = wasm.amemory_i386_lab_run(...abiArgs(block, values));
   if (ok !== 1) throw new Error(`${block.name}: A-Circuit rejected input`);
   const outcome = collectOutcome(wasm);
-  outcome.proof = collectProof(wasm);
+  const { proof, compactProof } = collectDualProofs(wasm);
+  outcome.proof = proof;
+  outcome.compactProof = compactProof;
   return outcome;
 }
 
@@ -457,7 +437,7 @@ function renderSingle(section, block, wasm) {
       } else {
         proofTarget.innerHTML = '<div class="notice">Full portable-Aset / one-memory proof is not yet enabled for this registry block. Proof coverage is being generalized across the structural block registry.</div>';
       }
-      status.textContent = `${block.name}: real structural result returned by A-Circuit WASM.`;
+      status.textContent = `${block.name}: real structural result returned by A-Circuit WASM; v3 + compact proof differential PASS.`;
       status.className = "notice lab-ok";
     } catch (error) {
       status.textContent = error.message;
