@@ -1,7 +1,10 @@
-const V3_SCHEMA = 3;
-const COMPACT_SCHEMA = 1;
+const LEGACY_SOURCE_SCHEMA = 3;
+const SOURCE_SCHEMA = 4;
+const LEGACY_COMPACT_SCHEMA = 1;
+const COMPACT_SCHEMA = 2;
 const COMPACT_ID = "amemory-proof-compact-json";
-const COMPACT_VERSION = "0.1.0";
+const LEGACY_COMPACT_VERSION = "0.1.0";
+const COMPACT_VERSION = "0.2.0";
 
 function fail(message) { throw new Error(`proof transport: ${message}`); }
 function object(value, label) {
@@ -57,10 +60,21 @@ function bool(value,label) {
 
 function decodeCompactProof(compact) {
   object(compact,"compact proof");
-  if (compact.schemaVersion!==COMPACT_SCHEMA) fail("unsupported compact schema " + compact.schemaVersion);
+  const compactSchema=compact.schemaVersion;
+  if (compactSchema!==LEGACY_COMPACT_SCHEMA && compactSchema!==COMPACT_SCHEMA) {
+    fail("unsupported compact schema " + compactSchema);
+  }
   if (compact.representationId!==COMPACT_ID) fail("unexpected compact representation " + compact.representationId);
-  if (compact.representationVersion!==COMPACT_VERSION) fail("unsupported compact version " + compact.representationVersion);
-  if (compact.sourceProofSchemaVersion!==V3_SCHEMA) fail("unexpected compact source schema " + compact.sourceProofSchemaVersion);
+
+  const legacy=compactSchema===LEGACY_COMPACT_SCHEMA;
+  const expectedVersion=legacy ? LEGACY_COMPACT_VERSION : COMPACT_VERSION;
+  const expectedSourceSchema=legacy ? LEGACY_SOURCE_SCHEMA : SOURCE_SCHEMA;
+  if (compact.representationVersion!==expectedVersion) {
+    fail("unsupported compact version " + compact.representationVersion + " for schema " + compactSchema);
+  }
+  if (compact.sourceProofSchemaVersion!==expectedSourceSchema) {
+    fail("unexpected compact source schema " + compact.sourceProofSchemaVersion + " for compact schema " + compactSchema);
+  }
 
   const block=text(compact.block,"compact.block");
   const memoryId=text(compact.memoryInstanceId,"compact.memoryInstanceId");
@@ -162,6 +176,21 @@ function decodeCompactProof(compact) {
       Object.prototype.hasOwnProperty.call(result,"visualLinks")) {
     fail("compact result must not duplicate runtime identity or visual topology");
   }
+  const hasLegacyResult=Object.prototype.hasOwnProperty.call(result,"resultAnum");
+  const hasRecursiveWire=Object.prototype.hasOwnProperty.call(result,"resultRecursiveWire");
+  let resultRecursiveWire;
+  if (legacy) {
+    if (!hasLegacyResult || hasRecursiveWire) {
+      fail("legacy compact v1 result must contain resultAnum only");
+    }
+    resultRecursiveWire=text(result.resultAnum,"compact.result.resultAnum");
+  } else {
+    if (!hasRecursiveWire || hasLegacyResult) {
+      fail("compact v2 result must contain resultRecursiveWire only");
+    }
+    resultRecursiveWire=text(result.resultRecursiveWire,"compact.result.resultRecursiveWire");
+  }
+  text(result.resultSequenceAnum,"compact.result.resultSequenceAnum");
   const resultLinksFinal=uint(result.linksFinal,"compact.result.linksFinal",baseLen);
   if (resultLinksFinal!==finalLinks) fail("compact topology/result linksFinal mismatch");
   const rerunDelta=uint(result.identicalRerunLinkDelta,"compact.result.identicalRerunLinkDelta");
@@ -169,6 +198,9 @@ function decodeCompactProof(compact) {
 
   return {
     compact,
+    compactSchema,
+    sourceProofSchemaVersion:expectedSourceSchema,
+    resultRecursiveWire,
     block,
     memoryId,
     prepare,
@@ -215,7 +247,7 @@ export function inflateCompactProof(compact) {
     };
   });
   return {
-    schemaVersion:V3_SCHEMA,
+    schemaVersion:decoded.sourceProofSchemaVersion,
     block:decoded.block,
     prepare:{
       runtimeMemoryExists:decoded.prepare.runtimeMemoryExists,
