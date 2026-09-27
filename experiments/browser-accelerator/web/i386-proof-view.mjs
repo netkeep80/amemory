@@ -173,7 +173,7 @@ export function proofPipelineHtml(proof) {
               <span><small>Identical rerun ΔLinks</small><strong>${proof.result.identicalRerunLinkDelta}</strong></span>
             </div>
             <div class="proof-result-anums">
-              <div><strong>Result Anum</strong>${code(resultRecursiveWire)}</div>
+              <div><strong>Result recursive Link wire</strong>${code(resultRecursiveWire)}</div>
               <div><strong>Result sequence Anum</strong>${code(proof.result.resultSequenceAnum)}</div>
             </div>
             <div class="proof-visual-toolbar">
