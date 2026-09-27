@@ -364,11 +364,10 @@ function runBlock(wasm, block, values) {
   const ok = wasm.amemory_i386_lab_run(...abiArgs(block, values));
   if (ok !== 1) throw new Error(`${block.name}: A-Circuit rejected input`);
   const outcome = collectOutcome(wasm);
-  const { proof, compactProof, v3Proof, transport } = collectBrowserProof(wasm);
+  const { proof, compactProof, transport } = collectBrowserProof(wasm);
   outcome.proof = proof;
   outcome.compactProof = compactProof;
   outcome.proofTransport = transport;
-  outcome.proofDifferential = compactProof !== null && v3Proof !== null;
   return outcome;
 }
 
@@ -440,12 +439,8 @@ function renderSingle(section, block, wasm) {
         proofTarget.innerHTML = '<div class="notice">Full portable-Aset / one-memory proof is not yet enabled for this registry block. Proof coverage is being generalized across the structural block registry.</div>';
       }
       status.textContent = out.proofTransport === "compact"
-        ? out.proofDifferential
-          ? `${block.name}: real structural result returned by A-Circuit WASM; compact proof is browser authority; v3 differential PASS.`
-          : `${block.name}: real structural result returned by A-Circuit WASM; compact proof is browser authority.`
-        : out.proofTransport === "v3-fallback"
-          ? `${block.name}: real structural result returned by A-Circuit WASM; schema-v3 compatibility fallback (compact unavailable).`
-          : `${block.name}: real structural result returned by A-Circuit WASM; no structural proof transport for this block.`;
+        ? `${block.name}: real structural result returned by A-Circuit WASM; compact proof is the browser transport authority.`
+        : `${block.name}: real structural result returned by A-Circuit WASM; no structural proof transport for this block.`;
       status.className = "notice lab-ok";
     } catch (error) {
       status.textContent = error.message;

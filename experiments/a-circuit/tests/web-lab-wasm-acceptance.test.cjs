@@ -20,8 +20,18 @@ if (!version) throw new Error("VERSION is empty");
 Promise.all([
   WebAssembly.instantiate(bytes, {}),
   import("../../browser-accelerator/web/i386-proof-transport.mjs"),
-]).then(([{instance}, { selectBrowserProof, validateCompactAgainstV3 }]) => {
+]).then(([{instance}, { inflateCompactProof }]) => {
   const w = instance.exports;
+  for (const retired of [
+    "amemory_i386_lab_proof_available",
+    "amemory_i386_lab_proof_json_len",
+    "amemory_i386_lab_proof_json_ptr",
+    "amemory_i386_lab_proof_json_byte",
+  ]) {
+    if (typeof w[retired] !== "undefined") {
+      throw new Error("retired schema-v3 browser ABI still exported: " + retired);
+    }
+  }
   if (w.amemory_i386_lab_probe() !== 0x386) throw new Error("bad lab probe");
   for (const block of registry.blocks) {
     if (w.amemory_i386_lab_supports(block.opcode) !== 1) {
@@ -30,10 +40,7 @@ Promise.all([
   }
   const proofCoveredOpcodes = new Set();
   const proofMeasurements = new Map();
-  let browserTransportNegativeChecked = false;
-  let browserTransportFallbackChecked = false;
-  let browserTransportCompactAuthorityChecked = false;
-  let browserTransportCompactOnlyChecked = false;
+  let compactRendererProjectionChecked = false;
   let compactMutationMatrixChecked = false;
   let futureScopeBeforeNegativeChecked = false;
   const jsonBytes = (value) =>
@@ -399,42 +406,20 @@ Promise.all([
         registryBlock.id + " Rust compact producer != independent JS shadow"
       );
     }
-    validateCompactAgainstV3(proof, producedCompactProof);
-    const browserSelection = selectBrowserProof({
-      proof,
-      compactProof: producedCompactProof,
-    });
-    if (browserSelection.transport !== "compact" ||
-        browserSelection.proof === proof ||
-        browserSelection.compactProof !== producedCompactProof ||
-        browserSelection.v3Proof !== proof) {
+    const rendererProof = inflateCompactProof(producedCompactProof);
+    if (JSON.stringify(rendererProof) !== JSON.stringify(proof)) {
       throw new Error(
-        registryBlock.id + " compact proof did not become browser authority"
+        registryBlock.id + " compact renderer projection mismatch"
       );
     }
-    browserTransportCompactAuthorityChecked = true;
-
-    const compactOnly = selectBrowserProof({
-      proof: null,
-      compactProof: producedCompactProof,
-    });
-    if (compactOnly.transport !== "compact" ||
-        compactOnly.proof === null ||
-        compactOnly.compactProof !== producedCompactProof ||
-        compactOnly.v3Proof !== null ||
-        JSON.stringify(compactOnly.proof) !== JSON.stringify(browserSelection.proof)) {
-      throw new Error(
-        registryBlock.id + " compact-only browser authority failed"
-      );
-    }
-    browserTransportCompactOnlyChecked = true;
+    compactRendererProjectionChecked = true;
 
     const rejectCompactMutation = (label, mutate) => {
       const corrupted = JSON.parse(JSON.stringify(producedCompactProof));
       mutate(corrupted);
       let rejected = false;
       try {
-        selectBrowserProof({ proof: null, compactProof: corrupted });
+        inflateCompactProof(corrupted);
       } catch {
         rejected = true;
       }
@@ -519,35 +504,6 @@ Promise.all([
         }
         beforeGrowing = step.linksAfter;
       }
-    }
-
-    if (!browserTransportFallbackChecked) {
-      const fallback = selectBrowserProof({ proof, compactProof: null });
-      if (fallback.transport !== "v3-fallback" ||
-          fallback.proof !== proof ||
-          fallback.compactProof !== null) {
-        throw new Error(
-          registryBlock.id + " schema-v3 compatibility fallback failed"
-        );
-      }
-      browserTransportFallbackChecked = true;
-    }
-
-    if (!browserTransportNegativeChecked) {
-      const corruptedCompact = JSON.parse(JSON.stringify(producedCompactProof));
-      corruptedCompact.representationVersion = "invalid-negative-control";
-      let rejected = false;
-      try {
-        selectBrowserProof({ proof, compactProof: corruptedCompact });
-      } catch {
-        rejected = true;
-      }
-      if (!rejected) {
-        throw new Error(
-          registryBlock.id + " invalid compact silently fell back to schema-v3"
-        );
-      }
-      browserTransportNegativeChecked = true;
     }
 
     const decodedCompactTopology =
@@ -635,7 +591,7 @@ Promise.all([
         finalLinks: proof.result.linksFinal,
         visualLinks: visualLinks.length,
       },
-      serializedProofBytes: jsonBytes(proof),
+      reconstructedRendererProofBytes: jsonBytes(proof),
       compiledLinks: proof.prepare.compiledLinks,
       carrierDuplets: carrierDuplets.length,
       theoryAdmissions: proof.prepare.theoryAdmissions.length,
@@ -648,7 +604,7 @@ Promise.all([
         representationVersion: compactProof.representationVersion,
         proofJsonBytes: jsonBytes(compactProof),
         producerProofJsonBytes: jsonBytes(producedCompactProof),
-        browserTransportValidated: true,
+        browserTransport: "compact-only",
         topologyJsonBytes: jsonBytes(compactProof.topology),
         rootsJsonBytes: jsonBytes(compactProof.roots),
         theoryAdmissionsJsonBytes: jsonBytes(compactProof.theoryAdmissions),
@@ -726,20 +682,9 @@ Promise.all([
   if (w.amemory_i386_lab_steady_link_delta() !== 0) {
     throw new Error("MUX1 repeated run grew Links");
   }
-  if (w.amemory_i386_lab_proof_available() !== 1) {
-    throw new Error("MUX1 structural proof JSON missing");
-  }
-  const proofLen = w.amemory_i386_lab_proof_json_len() >>> 0;
-  const proofPtr = w.amemory_i386_lab_proof_json_ptr() >>> 0;
-  if (!proofLen || proofPtr + proofLen > w.memory.buffer.byteLength) {
-    throw new Error("MUX1 proof JSON pointer/length invalid");
-  }
-  const proofText = Buffer
-    .from(w.memory.buffer, proofPtr, proofLen)
-    .toString("utf8");
-  const proof = JSON.parse(proofText);
+  const proof = inflateCompactProof(readCurrentCompactProof("MUX1"));
   if (proof.schemaVersion !== 3) {
-    throw new Error("MUX1 proof schema is not v3");
+    throw new Error("MUX1 reconstructed renderer proof schema is not v3");
   }
   proofCoveredOpcodes.add(12);
   captureProofMeasurement(
@@ -802,20 +747,7 @@ Promise.all([
 
 
   const readCurrentProof = (label) => {
-    if (w.amemory_i386_lab_proof_available() !== 1) {
-      throw new Error(label + " structural proof JSON missing");
-    }
-    const len = w.amemory_i386_lab_proof_json_len() >>> 0;
-    const ptr = w.amemory_i386_lab_proof_json_ptr() >>> 0;
-    if (!len || ptr + len > w.memory.buffer.byteLength) {
-      throw new Error(label + " proof JSON pointer/length invalid");
-    }
-    const proof = JSON.parse(
-      Buffer.from(w.memory.buffer, ptr, len).toString("utf8")
-    );
-    if (proof.schemaVersion !== 3) {
-      throw new Error(label + " proof schema is not v3");
-    }
+    const proof = inflateCompactProof(readCurrentCompactProof(label));
     const registryBlock = registry.blocks.find(
       (block) => block.name === proof.block
     );
@@ -1518,23 +1450,14 @@ Promise.all([
       proofMeasurements.size + "/" + registry.blocks.length
     );
   }
-  if (!browserTransportCompactAuthorityChecked) {
-    throw new Error("compact browser authority witness was not executed");
-  }
-  if (!browserTransportCompactOnlyChecked) {
-    throw new Error("compact-only browser authority witness was not executed");
+  if (!compactRendererProjectionChecked) {
+    throw new Error("compact renderer projection witness was not executed");
   }
   if (!compactMutationMatrixChecked) {
     throw new Error("compact-only mutation matrix was not executed");
   }
   if (!futureScopeBeforeNegativeChecked) {
     throw new Error("future scopeBefore compact negative control was not executed");
-  }
-  if (!browserTransportFallbackChecked) {
-    throw new Error("schema-v3 browser fallback witness was not executed");
-  }
-  if (!browserTransportNegativeChecked) {
-    throw new Error("browser compact transport negative control was not executed");
   }
   const measuredProofs = [...proofMeasurements.values()]
     .sort((left, right) => left.opcode - right.opcode);
@@ -1559,20 +1482,29 @@ Promise.all([
       .update(registryText, "utf8")
       .digest("hex"),
     registryBlocks: registry.blocks.length,
-    proofSchemaVersion: rawMulProof.schemaVersion,
+    rendererProofSchemaVersion: rawMulProof.schemaVersion,
     proofCoveredOpcodes: proofCoveredOpcodes.size,
+    browserProofTransport: {
+      representationId: "amemory-proof-compact-json",
+      representationVersion: "0.1.0",
+      schemaV3AbiRemoved: true,
+      totalTransportJsonBytes: measuredProofs.reduce(
+        (sum, item) => sum + item.compactProofPrototype.producerProofJsonBytes,
+        0
+      ),
+    },
     wasmBytes: bytes.length,
     elapsedMs: Number(process.hrtime.bigint() - acceptanceStarted) / 1e6,
     proofMeasurements: measuredProofs,
     proofMeasurementSummary: {
       measuredProofs: measuredProofs.length,
-      totalProofJsonBytes: sumBytes("proofJson"),
+      totalReconstructedRendererProofJsonBytes: sumBytes("proofJson"),
       totalCarrierJsonBytes: sumBytes("carrierJson"),
       totalCarrierDenseU32FloorBytes: sumBytes("carrierDenseU32Floor"),
       totalReactionsJsonBytes: sumBytes("reactionsJson"),
       totalVisualLinksJsonBytes: sumBytes("visualLinksJson"),
       compactProofPrototype: (() => {
-        const totalCurrentProofJsonBytes = sumBytes("proofJson");
+        const totalReconstructedRendererProofJsonBytes = sumBytes("proofJson");
         const totalCompactProofJsonBytes = measuredProofs.reduce(
           (sum, item) => sum + item.compactProofPrototype.proofJsonBytes,
           0
@@ -1580,15 +1512,15 @@ Promise.all([
         return {
           representationId: "amemory-proof-compact-json",
           representationVersion: "0.1.0",
-          totalCurrentProofJsonBytes,
+          totalReconstructedRendererProofJsonBytes,
           totalCompactProofJsonBytes,
           totalProducerCompactProofJsonBytes: measuredProofs.reduce(
             (sum, item) =>
               sum + item.compactProofPrototype.producerProofJsonBytes,
             0
           ),
-          reductionRatio:
-            totalCurrentProofJsonBytes / totalCompactProofJsonBytes,
+          reconstructedRendererToCompactRatio:
+            totalReconstructedRendererProofJsonBytes / totalCompactProofJsonBytes,
           totalCompactTopologyJsonBytes: measuredProofs.reduce(
             (sum, item) => sum + item.compactProofPrototype.topologyJsonBytes,
             0
@@ -1678,7 +1610,7 @@ Promise.all([
   console.log("WEB_LAB_ACCEPTANCE_REPORT=" + reportPath);
   console.log(JSON.stringify(report));
 
-  console.log("WASM registry + one-A-memory schema-v3 proofs for all 24 opcodes PASS");
+  console.log("WASM registry + compact-only one-A-memory proofs for all 24 opcodes PASS");
 }).catch((error) => {
   console.error(error);
   process.exit(1);

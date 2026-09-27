@@ -36,42 +36,51 @@ struct LabOutcome {
     quiescent: u32,
 }
 
+#[cfg(test)]
 static LAST_PROOF_JSON: Mutex<String> = Mutex::new(String::new());
 static LAST_COMPACT_PROOF_JSON: Mutex<String> = Mutex::new(String::new());
 
-fn set_last_proofs(proof: &WebStructuralProof) -> Option<()> {
+fn set_last_compact_proof(proof: &WebStructuralProof) -> Option<()> {
     let compact = proof.compact()?;
-    let proof_json = serde_json::to_string(proof).ok()?;
     let compact_json = serde_json::to_string(&compact).ok()?;
 
-    let mut proof_guard = LAST_PROOF_JSON
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    #[cfg(test)]
+    {
+        let proof_json = serde_json::to_string(proof).ok()?;
+        let mut proof_guard = LAST_PROOF_JSON
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *proof_guard = proof_json;
+    }
+
     let mut compact_guard = LAST_COMPACT_PROOF_JSON
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    *proof_guard = proof_json;
     *compact_guard = compact_json;
     Some(())
 }
 
-fn clear_last_proofs() {
-    let mut proof_guard = LAST_PROOF_JSON
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+fn clear_last_compact_proof() {
+    #[cfg(test)]
+    {
+        let mut proof_guard = LAST_PROOF_JSON
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        proof_guard.clear();
+    }
+
     let mut compact_guard = LAST_COMPACT_PROOF_JSON
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    proof_guard.clear();
     compact_guard.clear();
 }
 
 fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
-    clear_last_proofs();
+    clear_last_compact_proof();
 
     if (1..=5).contains(&op) {
         let execution = web_prove_logic(op, a, b)?;
-        set_last_proofs(&execution.proof)?;
+        set_last_compact_proof(&execution.proof)?;
         let out = execution.outcome;
         return Some(LabOutcome {
             value: out.value,
@@ -108,7 +117,7 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
 
     if (6..=10).contains(&op) {
         let execution = web_prove_arithmetic(op, a, b, input_flag)?;
-        set_last_proofs(&execution.proof)?;
+        set_last_compact_proof(&execution.proof)?;
         let out = execution.outcome;
         return Some(LabOutcome {
             value: out.value,
@@ -145,7 +154,7 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
 
     if op == 11 {
         let execution = web_prove_mux32(input_flag, a, b)?;
-        set_last_proofs(&execution.proof)?;
+        set_last_compact_proof(&execution.proof)?;
         let out = execution.outcome;
         return Some(LabOutcome {
             value: out.value,
@@ -165,7 +174,7 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
 
     if op == 12 {
         let proof = web_prove_mux1(input_flag, a, b)?;
-        set_last_proofs(&proof)?;
+        set_last_compact_proof(&proof)?;
         let out = LabOutcome {
             value: u32::from(proof.result.decoded_value),
             value_hi: 0,
@@ -186,7 +195,7 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
 
     if (13..=15).contains(&op) {
         let execution = web_prove_shift32(op, a, b)?;
-        set_last_proofs(&execution.proof)?;
+        set_last_compact_proof(&execution.proof)?;
         let out = execution.outcome;
         return Some(LabOutcome {
             value: out.value,
@@ -223,7 +232,7 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
 
     if (16..=17).contains(&op) {
         let execution = web_prove_rotate32(op, a, b)?;
-        set_last_proofs(&execution.proof)?;
+        set_last_compact_proof(&execution.proof)?;
         let out = execution.outcome;
         return Some(LabOutcome {
             value: out.value,
@@ -260,7 +269,7 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
 
     if (18..=19).contains(&op) {
         let execution = web_prove_rotate_carry32(op, a, b, input_flag)?;
-        set_last_proofs(&execution.proof)?;
+        set_last_compact_proof(&execution.proof)?;
         let out = execution.outcome;
         return Some(LabOutcome {
             value: out.value,
@@ -297,7 +306,7 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
 
     if (20..=22).contains(&op) {
         let execution = web_prove_unary32(op, a)?;
-        set_last_proofs(&execution.proof)?;
+        set_last_compact_proof(&execution.proof)?;
         let out = execution.outcome;
         return Some(LabOutcome {
             value: out.value,
@@ -334,7 +343,7 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
 
     if op == 23 {
         let execution = web_prove_mul32(a, b)?;
-        set_last_proofs(&execution.proof)?;
+        set_last_compact_proof(&execution.proof)?;
         let out = execution.outcome;
         return Some(LabOutcome {
             value: out.lo,
@@ -354,7 +363,7 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
 
     if op == 24 {
         let execution = web_prove_mul_effect(a, b)?;
-        set_last_proofs(&execution.proof)?;
+        set_last_compact_proof(&execution.proof)?;
         let out = execution.outcome;
         return Some(LabOutcome {
             value: out.lo,
@@ -452,43 +461,6 @@ pub extern "C" fn amemory_i386_lab_steady_link_delta() -> u32 { unsafe { LAST_ST
 pub extern "C" fn amemory_i386_lab_quiescent() -> u32 { unsafe { LAST_QUIESCENT } }
 
 #[no_mangle]
-pub extern "C" fn amemory_i386_lab_proof_available() -> u32 {
-    let guard = LAST_PROOF_JSON
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    u32::from(!guard.is_empty())
-}
-
-#[no_mangle]
-pub extern "C" fn amemory_i386_lab_proof_json_len() -> u32 {
-    let guard = LAST_PROOF_JSON
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    guard.len() as u32
-}
-
-#[no_mangle]
-pub extern "C" fn amemory_i386_lab_proof_json_ptr() -> u32 {
-    let guard = LAST_PROOF_JSON
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    guard.as_ptr() as usize as u32
-}
-
-#[no_mangle]
-pub extern "C" fn amemory_i386_lab_proof_json_byte(index: u32) -> u32 {
-    let guard = LAST_PROOF_JSON
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    guard
-        .as_bytes()
-        .get(index as usize)
-        .copied()
-        .map(u32::from)
-        .unwrap_or(u32::MAX)
-}
-
-#[no_mangle]
 pub extern "C" fn amemory_i386_lab_compact_proof_available() -> u32 {
     let guard = LAST_COMPACT_PROOF_JSON
         .lock()
@@ -528,6 +500,14 @@ pub extern "C" fn amemory_i386_lab_compact_proof_json_byte(
 }
 
 #[cfg(test)]
+fn test_last_proof_available() -> u32 {
+    let guard = LAST_PROOF_JSON
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    u32::from(!guard.is_empty())
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -552,7 +532,7 @@ mod tests {
             assert_eq!(out.value, expected, "{block}");
             assert_eq!(out.writeback, expected_writeback, "{block}");
             assert_eq!(out.steady_link_delta, 0, "{block}");
-            assert_eq!(amemory_i386_lab_proof_available(), 1, "{block}");
+            assert_eq!(test_last_proof_available(), 1, "{block}");
 
             let proof_json = {
                 let guard = LAST_PROOF_JSON
@@ -646,7 +626,7 @@ mod tests {
             assert_eq!(out.writeback, expected_writeback, "{block}");
             assert_eq!(out.steady_link_delta, 0, "{block}");
             assert_eq!(out.quiescent, 1, "{block}");
-            assert_eq!(amemory_i386_lab_proof_available(), 1, "{block}");
+            assert_eq!(test_last_proof_available(), 1, "{block}");
 
             let proof_json = {
                 let guard = LAST_PROOF_JSON
@@ -734,7 +714,7 @@ mod tests {
         assert_eq!(mux.preserve_mask, STATUS_FLAGS);
         assert_eq!(mux.reactions, 257);
         assert_eq!(mux.steady_link_delta, 0);
-        assert_eq!(amemory_i386_lab_proof_available(), 1);
+        assert_eq!(test_last_proof_available(), 1);
 
         let mux32_proof_json = {
             let guard = LAST_PROOF_JSON
@@ -813,7 +793,7 @@ mod tests {
 
         let proof_mux1 = execute(12, 1, 0, 1).unwrap();
         assert_eq!(proof_mux1.value, 0);
-        assert_eq!(amemory_i386_lab_proof_available(), 1);
+        assert_eq!(test_last_proof_available(), 1);
         let proof_json = {
             let guard = LAST_PROOF_JSON
                 .lock()
@@ -841,7 +821,7 @@ mod tests {
             assert_eq!(out.writeback, 1, "{block}");
             assert_eq!(out.steady_link_delta, 0, "{block}");
             assert_eq!(out.quiescent, 1, "{block}");
-            assert_eq!(amemory_i386_lab_proof_available(), 1, "{block}");
+            assert_eq!(test_last_proof_available(), 1, "{block}");
 
             let proof_json = {
                 let guard = LAST_PROOF_JSON
@@ -966,7 +946,7 @@ mod tests {
             assert_eq!(out.writeback, 1, "{block}");
             assert_eq!(out.steady_link_delta, 0, "{block}");
             assert_eq!(out.quiescent, 1, "{block}");
-            assert_eq!(amemory_i386_lab_proof_available(), 1, "{block}");
+            assert_eq!(test_last_proof_available(), 1, "{block}");
 
             let proof_json = {
                 let guard = LAST_PROOF_JSON
@@ -1083,7 +1063,7 @@ mod tests {
             assert_eq!(out.writeback, 1, "{block}");
             assert_eq!(out.steady_link_delta, 0, "{block}");
             assert_eq!(out.quiescent, 1, "{block}");
-            assert_eq!(amemory_i386_lab_proof_available(), 1, "{block}");
+            assert_eq!(test_last_proof_available(), 1, "{block}");
 
             let proof_json = {
                 let guard = LAST_PROOF_JSON
@@ -1191,7 +1171,7 @@ mod tests {
             assert_eq!(out.undefined_mask, 0, "{block}");
             assert_eq!(out.steady_link_delta, 0, "{block}");
             assert_eq!(out.quiescent, 1, "{block}");
-            assert_eq!(amemory_i386_lab_proof_available(), 1, "{block}");
+            assert_eq!(test_last_proof_available(), 1, "{block}");
 
             if cf_defined {
                 assert_eq!(out.defined_mask & FLAG_CF, FLAG_CF, "{block}");
