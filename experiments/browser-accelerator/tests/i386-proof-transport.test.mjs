@@ -68,6 +68,20 @@ function wasmFor(proof,compact) {
   };
 }
 
+function wasmForBytes(proof,compact) {
+  const encoder=new TextEncoder();
+  const p=encoder.encode(JSON.stringify(proof));
+  const c=encoder.encode(JSON.stringify(compact));
+  return {
+    amemory_i386_lab_proof_available:()=>1,
+    amemory_i386_lab_proof_json_len:()=>p.length,
+    amemory_i386_lab_proof_json_byte:(i)=>p[i],
+    amemory_i386_lab_compact_proof_available:()=>1,
+    amemory_i386_lab_compact_proof_json_len:()=>c.length,
+    amemory_i386_lab_compact_proof_json_byte:(i)=>c[i],
+  };
+}
+
 {
   const proof=fixture();
   assert.equal(deriveRecursiveSource(proof.prepare.carrierDuplets,1),"8");
@@ -79,6 +93,13 @@ function wasmFor(proof,compact) {
   assert.deepEqual(compact.roots,[{role:"root",carrierRef:1},{role:"start",carrierRef:2}]);
   assert.equal(validateCompactAgainstV3(proof,compact),compact);
   const pair=collectDualProofs(wasmFor(proof,compact));
+  assert.deepEqual(pair.proof,proof);
+  assert.deepEqual(pair.compactProof,compact);
+}
+{
+  const proof=fixture();
+  const compact=projectV3ProofToCompact(proof);
+  const pair=collectDualProofs(wasmForBytes(proof,compact));
   assert.deepEqual(pair.proof,proof);
   assert.deepEqual(pair.compactProof,compact);
 }
