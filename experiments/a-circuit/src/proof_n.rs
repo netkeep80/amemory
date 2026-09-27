@@ -100,9 +100,9 @@ pub(crate) struct WebProofExecuteStage {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct WebProofResultStage {
     pub(crate) memory_instance_id: String,
-    // Internal Rust name retained temporarily to avoid a broad producer churn.
-    // Source-proof schema v4 serializes the arbitrary final Link explicitly as
-    // a recursive Link wire, not as an Anum sequence representation.
+    // Internal Rust field name is retained only as a construction-compatibility detail.
+    // All producer DTOs declare source schema v4; serialization names the arbitrary
+    // final Link explicitly as a recursive Link wire, not as an Anum sequence representation.
     #[serde(rename = "resultRecursiveWire")]
     pub(crate) result_anum: String,
     pub(crate) result_sequence_anum: String,
