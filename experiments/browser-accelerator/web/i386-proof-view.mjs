@@ -65,16 +65,18 @@ export function proofPipelineHtml(proof) {
     ...proof.execute.reactions.map((step) => step.memoryInstanceId),
   ]);
   const oneMemory = ids.size === 1;
-  const asetText = proof.prepare.asetAnums
-    .map((source, index) => `${String(index + 1).padStart(4, "0")}  ${source}`)
+  const carrierText = proof.prepare.carrierDuplets
+    .map((duplet, index) =>
+      `${String(index + 1).padStart(6, "0")}  (${duplet.start}, ${duplet.end})`
+    )
     .join("\n");
 
   return `
     <section class="proof-pipeline" data-memory-instance="${escapeHtml(id)}">
       <div class="proof-title">
         <div>
-          <h3>Structural proof: portable Aset → one A-memory → result</h3>
-          <p>This evidence comes from the same WASM execution that produced the visible MUX1 result.</p>
+          <h3>Structural proof: packed duplet Aset → one A-memory → result</h3>
+          <p>This evidence comes from the same WASM execution that produced the visible block result.</p>
         </div>
         <div class="proof-memory ${oneMemory ? "proof-pass" : "proof-fail"}">
           <small>ONE RUNTIME A-MEMORY</small>
@@ -91,23 +93,23 @@ export function proofPipelineHtml(proof) {
             <p><strong>No runtime A-memory exists yet.</strong> ${escapeHtml(proof.prepare.compilerLabel)}</p>
             <div class="proof-kpis">
               <span><small>Compiled Links</small><strong>${proof.prepare.compiledLinks}</strong></span>
-              <span><small>Portable transport Anums</small><strong>${proof.prepare.asetAnums.length}</strong></span>
+              <span><small>Packed duplets</small><strong>${proof.prepare.carrierDuplets.length}</strong></span>
               <span><small>Runtime memory</small><strong>${proof.prepare.runtimeMemoryExists ? "CREATED" : "NOT CREATED"}</strong></span>
             </div>
-            <h5>Semantic roots inside the portable image</h5>
+            <h5>Semantic roots inside the packed image</h5>
             ${semanticRootsHtml(proof.prepare.semanticRoots)}
             <details>
               <summary>Structural rules admitted to Theory (${proof.prepare.theoryAdmissions?.length || 0})</summary>
               <pre class="proof-aset">${escapeHtml((proof.prepare.theoryAdmissions || []).join("\n"))}</pre>
             </details>
             <details>
-              <summary>Complete portable Aset (${proof.prepare.asetAnums.length} Anums)</summary>
-              <pre class="proof-aset">${escapeHtml(asetText)}</pre>
+              <summary>Complete packed Aset (${proof.prepare.carrierDuplets.length} duplets)</summary>
+              <pre class="proof-aset">${escapeHtml(carrierText)}</pre>
             </details>
           </div>
         </article>
 
-        <div class="proof-arrow">↓ portable Anums only</div>
+        <div class="proof-arrow">↓ packed (startIndex, endIndex) carrier</div>
 
         <article class="proof-stage proof-load">
           <div class="proof-stage-number">2</div>
@@ -118,8 +120,8 @@ export function proofPipelineHtml(proof) {
               <span><small>Links before load</small><strong>${proof.load.linksBeforeLoad}</strong></span>
               <span><small>Links after load</small><strong>${proof.load.linksAfterLoad}</strong></span>
               <span><small>Complete image</small><strong>${proof.load.linksAfterLoad === proof.prepare.compiledLinks ? "PASS" : "FAIL"}</strong></span>
-              <span><small>Imported transport Anums</small><strong>${proof.load.importedAnums}</strong></span>
-              <span><small>Portable round-trip</small><strong>${proof.load.portableRoundTrip ? "PASS" : "FAIL"}</strong></span>
+              <span><small>Imported duplets</small><strong>${proof.load.importedDuplets}</strong></span>
+              <span><small>Carrier round-trip</small><strong>${proof.load.carrierRoundTrip ? "PASS" : "FAIL"}</strong></span>
             </div>
             <h5>Roots resolved in this same memory</h5>
             ${semanticRootsHtml(proof.load.semanticRoots, true)}
