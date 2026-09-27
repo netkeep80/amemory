@@ -110,6 +110,20 @@ fn state_link(
     store.ensure_pair(schema.state_tag, payload).unwrap()
 }
 
+fn state_apply_frame(
+    store: &mut OptimizedLinkStore,
+    schema: ArchitecturalStateSchema,
+    state: Handle,
+    target: Handle,
+) -> Handle {
+    let payload =
+        materialize_exact_sequence(store, &[state, target]).unwrap();
+    let descriptor = store
+        .ensure_pair(schema.apply_state, payload)
+        .unwrap();
+    store.ensure_start_self_closed(descriptor).unwrap()
+}
+
 fn set_action_template(
     store: &mut OptimizedLinkStore,
     schema: FlagPatchSchema,
@@ -185,7 +199,6 @@ fn install_case(
     writeback: Handle,
     shape: PatchShape,
 ) {
-    let k = anchors.next(&mut f.store);
     let old_eax = anchors.next(&mut f.store);
     let old_ebx = anchors.next(&mut f.store);
     let old_cf = anchors.next(&mut f.store);
@@ -228,18 +241,14 @@ fn install_case(
         new_of,
         f.zero,
     );
-    let args = materialize_exact_sequence(
-        &mut f.store,
-        &[before_state, target, before_effect],
-    )
-    .unwrap();
-    let invocation = call(
-        &mut f.store,
-        f.apply,
-        schema.apply_state,
-        args,
-    );
-    let before = f.store.ensure_pair(k, invocation).unwrap();
+    // The state/target continuation frame is the caller propagated through
+    // the existing ALU pipeline. A completed ALU effect therefore arrives as
+    // exactly the same shape whether it was produced by a real ALU execution
+    // or supplied directly by an isolated applier witness.
+    let before_frame =
+        state_apply_frame(&mut f.store, schema, before_state, target);
+    let before =
+        f.store.ensure_pair(before_frame, before_effect).unwrap();
 
     let write = writeback == f.one;
     let next_eax = if write && target == schema.eax {
@@ -280,10 +289,10 @@ fn install_case(
         next_sf,
         next_of,
     );
-    let after = f.store.ensure_pair(k, after_state).unwrap();
+    let after = f.store.ensure_pair(f.k, after_state).unwrap();
 
     let mut roles = vec![
-        k, old_eax, old_ebx, old_cf, old_pf, old_af, old_zf, old_sf,
+        old_eax, old_ebx, old_cf, old_pf, old_af, old_zf, old_sf,
         old_of, word,
     ];
     match shape {
@@ -310,7 +319,11 @@ fn install_case(
         before,
         &[after],
     );
-    index_rule_for(&mut f.store, &[f.apply], admission);
+    index_rule_for(
+        &mut f.store,
+        &[schema.effect_result_tag],
+        admission,
+    );
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -649,12 +662,9 @@ mod tests {
         target: Handle,
         effect: Handle,
     ) -> Option<Handle> {
-        let args =
-            materialize_exact_sequence(&mut f.store, &[state, target, effect])
-                .unwrap();
-        let invocation =
-            call(&mut f.store, f.apply, p.schema.apply_state, args);
-        let initial = f.store.ensure_pair(f.k, invocation).unwrap();
+        let frame =
+            state_apply_frame(&mut f.store, p.schema, state, target);
+        let initial = f.store.ensure_pair(frame, effect).unwrap();
         f.engine.set_current(&f.store, &[initial]).unwrap();
 
         let before_links = f.store.link_count();
