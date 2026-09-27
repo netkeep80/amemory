@@ -6,6 +6,11 @@ use super::{
     full_adder::{
         call, define_bundle_rule, index_rule_for, Fixture as FullFixture,
     },
+    proof_n::{
+        execute_to_quiescence, identical_rerun, load_runtime, loaded_handle,
+        prepare_stage, semantic_source, theory_admissions, visual_snapshot,
+        ProofRuntimeMemory, WebProofResultStage, WebStructuralProof,
+    },
 };
 use amemory_optimized_cpu_probe::{
     structural::{materialize_exact_sequence, read_exact_sequence},
@@ -355,6 +360,12 @@ fn vectors(width:usize)->Vec<u32>{
 }
 
 
+#[derive(Clone,Debug)]
+pub(crate) struct WebUnaryProofExecution{
+    pub(crate) outcome:WebUnaryOutcome,
+    pub(crate) proof:WebStructuralProof,
+}
+
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
 pub(crate) struct WebUnaryOutcome{
     pub(crate) value:u32,
@@ -376,6 +387,264 @@ const WEB_AF:u32=1<<4;
 const WEB_ZF:u32=1<<6;
 const WEB_SF:u32=1<<7;
 const WEB_OF:u32=1<<11;
+
+fn runtime_unary_bit(
+    memory:&ProofRuntimeMemory,
+    value:Handle,
+    zero:Handle,
+    one:Handle,
+)->Option<u8>{
+    let _=memory;
+    if value==one{Some(1)}else if value==zero{Some(0)}else{None}
+}
+
+fn runtime_unary_word(
+    memory:&ProofRuntimeMemory,
+    word:Handle,
+    zero:Handle,
+    one:Handle,
+)->Option<u32>{
+    let bits=read_exact_sequence(&memory.store,word).ok()?;
+    if bits.len()!=32{return None;}
+    let mut value=0u32;
+    for (index,bit) in bits.into_iter().enumerate(){
+        value|=u32::from(runtime_unary_bit(memory,bit,zero,one)?)<<index;
+    }
+    Some(value)
+}
+
+fn runtime_unary_set(
+    memory:&ProofRuntimeMemory,
+    action:Handle,
+    set_tag:Handle,
+    expected_flag:Handle,
+    zero:Handle,
+    one:Handle,
+)->Option<u8>{
+    let (tag,payload)=memory.store.poles(action).ok()?;
+    if tag!=set_tag{return None;}
+    let values=read_exact_sequence(&memory.store,payload).ok()?;
+    if values.len()!=2||values[0]!=expected_flag{return None;}
+    runtime_unary_bit(memory,values[1],zero,one)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn decode_runtime_unary_effect(
+    memory:&ProofRuntimeMemory,
+    final_link:Handle,
+    caller:Handle,
+    result_tag:Handle,
+    zero:Handle,
+    one:Handle,
+    set_tag:Handle,
+    cf_flag:Handle,
+    pf_flag:Handle,
+    af_flag:Handle,
+    zf_flag:Handle,
+    sf_flag:Handle,
+    of_flag:Handle,
+)->Option<(Outcome,Handle)>{
+    let (final_caller,endpoint)=memory.store.poles(final_link).ok()?;
+    if final_caller!=caller{return None;}
+    let (tag,payload)=memory.store.poles(endpoint).ok()?;
+    if tag!=result_tag{return None;}
+    let values=read_exact_sequence(&memory.store,payload).ok()?;
+    if values.len()!=3{return None;}
+    if runtime_unary_bit(memory,values[0],zero,one)?!=1{return None;}
+
+    let value=runtime_unary_word(memory,values[1],zero,one)?;
+    let patch=read_exact_sequence(&memory.store,values[2]).ok()?;
+
+    let outcome=if patch.len()==5{
+        Outcome{
+            value,
+            cf:None,
+            pf:runtime_unary_set(memory,patch[0],set_tag,pf_flag,zero,one)?,
+            af:runtime_unary_set(memory,patch[1],set_tag,af_flag,zero,one)?,
+            zf:runtime_unary_set(memory,patch[2],set_tag,zf_flag,zero,one)?,
+            sf:runtime_unary_set(memory,patch[3],set_tag,sf_flag,zero,one)?,
+            of:runtime_unary_set(memory,patch[4],set_tag,of_flag,zero,one)?,
+            patch_len:5,
+        }
+    }else{
+        if patch.len()!=6{return None;}
+        Outcome{
+            value,
+            cf:Some(runtime_unary_set(
+                memory,patch[0],set_tag,cf_flag,zero,one,
+            )?),
+            pf:runtime_unary_set(memory,patch[1],set_tag,pf_flag,zero,one)?,
+            af:runtime_unary_set(memory,patch[2],set_tag,af_flag,zero,one)?,
+            zf:runtime_unary_set(memory,patch[3],set_tag,zf_flag,zero,one)?,
+            sf:runtime_unary_set(memory,patch[4],set_tag,sf_flag,zero,one)?,
+            of:runtime_unary_set(memory,patch[5],set_tag,of_flag,zero,one)?,
+            patch_len:6,
+        }
+    };
+
+    Some((outcome,payload))
+}
+
+pub(crate) fn web_prove_unary32(
+    op:u32,
+    value:u32,
+)->Option<WebUnaryProofExecution>{
+    let mut compiler=FullFixture::new();
+    let program=Program::install(&mut compiler,32);
+    let (block,kind,function)=match op{
+        20=>("INC32",UnaryKind::Inc,program.inc),
+        21=>("DEC32",UnaryKind::Dec,program.dec),
+        22=>("NEG32",UnaryKind::Neg,program.neg),
+        _=>return None,
+    };
+    let links_after_build=program.links_after_build as u32;
+
+    let bits=bit_handles(&compiler,32,value);
+    let word=materialize_exact_sequence(&mut compiler.store,&bits).ok()?;
+    let args=materialize_exact_sequence(&mut compiler.store,&[word]).ok()?;
+    let invocation=call(&mut compiler.store,compiler.apply,function,args);
+    let initial=compiler.store.ensure_pair(compiler.k,invocation).ok()?;
+
+    let prepared_roots=vec![
+        semantic_source(&compiler.store,"function.unary.selected",function),
+        semantic_source(&compiler.store,"function.unary.inc",program.inc),
+        semantic_source(&compiler.store,"function.unary.dec",program.dec),
+        semantic_source(&compiler.store,"function.unary.neg",program.neg),
+        semantic_source(
+            &compiler.store,"function.flagged_arithmetic",program.flagged.flagged,
+        ),
+        semantic_source(
+            &compiler.store,"result.flagged_tag",program.flagged.result_tag,
+        ),
+        semantic_source(&compiler.store,"data.value.word",word),
+        semantic_source(&compiler.store,"data.bit.zero",compiler.zero),
+        semantic_source(&compiler.store,"data.bit.one",compiler.one),
+        semantic_source(&compiler.store,"execution.interpreter",compiler.interpreter),
+        semantic_source(&compiler.store,"execution.theory",compiler.theory),
+        semantic_source(&compiler.store,"execution.apply",compiler.apply),
+        semantic_source(&compiler.store,"invocation.args",args),
+        semantic_source(&compiler.store,"invocation.call",invocation),
+        semantic_source(&compiler.store,"scope.initial",initial),
+        semantic_source(&compiler.store,"context.caller",compiler.k),
+        semantic_source(&compiler.store,"result.tag",program.result_tag),
+        semantic_source(&compiler.store,"result.flag.set_tag",program.schema.set_tag),
+        semantic_source(&compiler.store,"result.flag.cf",program.schema.cf),
+        semantic_source(&compiler.store,"result.flag.pf",program.schema.pf),
+        semantic_source(&compiler.store,"result.flag.af",program.schema.af),
+        semantic_source(&compiler.store,"result.flag.zf",program.schema.zf),
+        semantic_source(&compiler.store,"result.flag.sf",program.schema.sf),
+        semantic_source(&compiler.store,"result.flag.of",program.schema.of),
+    ];
+
+    let admissions=theory_admissions(&compiler.store,compiler.theory)?;
+    let prepare=prepare_stage(&compiler.store,prepared_roots,admissions);
+    let (mut memory,load)=load_runtime(&prepare)?;
+
+    let interpreter=loaded_handle(&load,"execution.interpreter")?;
+    let initial=loaded_handle(&load,"scope.initial")?;
+    let caller=loaded_handle(&load,"context.caller")?;
+    let result_tag=loaded_handle(&load,"result.tag")?;
+    let zero=loaded_handle(&load,"data.bit.zero")?;
+    let one=loaded_handle(&load,"data.bit.one")?;
+    let set_tag=loaded_handle(&load,"result.flag.set_tag")?;
+    let cf_flag=loaded_handle(&load,"result.flag.cf")?;
+    let pf_flag=loaded_handle(&load,"result.flag.pf")?;
+    let af_flag=loaded_handle(&load,"result.flag.af")?;
+    let zf_flag=loaded_handle(&load,"result.flag.zf")?;
+    let sf_flag=loaded_handle(&load,"result.flag.sf")?;
+    let of_flag=loaded_handle(&load,"result.flag.of")?;
+
+    let max_steps=program.active_steps as u32+2;
+    let (mut engine,execute)=execute_to_quiescence(
+        &mut memory,interpreter,initial,32,max_steps,
+    )?;
+    if execute.active_reaction_count!=program.active_steps as u32
+        ||engine.current().len()!=1
+    {
+        return None;
+    }
+
+    let final_link=engine.current()[0];
+    let (actual,payload)=decode_runtime_unary_effect(
+        &memory,
+        final_link,
+        caller,
+        result_tag,
+        zero,
+        one,
+        set_tag,
+        cf_flag,
+        pf_flag,
+        af_flag,
+        zf_flag,
+        sf_flag,
+        of_flag,
+    )?;
+    let oracle=expected(32,kind,value);
+
+    let result_anum=memory.store.export_anum(final_link).ok()?;
+    let result_sequence_anum=memory.store.export_anum(payload).ok()?;
+    let links_after_first=memory.store.link_count() as u32;
+    let identical_rerun_link_delta=identical_rerun(
+        &mut memory,&mut engine,initial,&result_anum,max_steps,
+    )?;
+    let visual_links=visual_snapshot(&memory,&load.semantic_roots);
+
+    let result=WebProofResultStage{
+        memory_instance_id:memory.id.clone(),
+        result_anum,
+        result_sequence_anum,
+        decoded_value:actual.value,
+        oracle_value:oracle.value,
+        oracle_matches:actual==oracle,
+        links_final:memory.store.link_count() as u32,
+        identical_rerun_link_delta,
+        visual_links,
+    };
+    let proof=WebStructuralProof{
+        schema_version:2,
+        block:block.to_owned(),
+        prepare,
+        load,
+        execute,
+        result,
+    };
+
+    let mut defined_mask=WEB_PF|WEB_AF|WEB_ZF|WEB_SF|WEB_OF;
+    let mut value_mask=0u32;
+    for (flag_mask,bit) in [
+        (WEB_PF,actual.pf),
+        (WEB_AF,actual.af),
+        (WEB_ZF,actual.zf),
+        (WEB_SF,actual.sf),
+        (WEB_OF,actual.of),
+    ]{
+        if bit!=0{value_mask|=flag_mask;}
+    }
+    let preserve_mask=if let Some(cf)=actual.cf{
+        defined_mask|=WEB_CF;
+        if cf!=0{value_mask|=WEB_CF;}
+        0
+    }else{
+        WEB_CF
+    };
+
+    let outcome=WebUnaryOutcome{
+        value:actual.value,
+        writeback:1,
+        defined_mask,
+        value_mask,
+        undefined_mask:0,
+        preserve_mask,
+        reactions:program.active_steps as u32,
+        links_after_build,
+        links_after_first,
+        steady_link_delta:proof.result.identical_rerun_link_delta,
+        quiescent:u8::from(proof.execute.final_quiescent),
+    };
+
+    Some(WebUnaryProofExecution{outcome,proof})
+}
 
 pub(crate) fn web_run_unary32(op:u32,value:u32)->Option<WebUnaryOutcome>{
     let mut f=FullFixture::new();
