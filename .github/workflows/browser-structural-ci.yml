@@ -70,6 +70,14 @@ jobs:
       - name: Native Rust oracle witnesses
         run: cargo +1.98.1 test --manifest-path experiments/browser-accelerator/rust/Cargo.toml
 
+      - name: Reference CPU informational baseline
+        run: |
+          cargo +1.98.1 test \
+            --release \
+            --manifest-path experiments/browser-accelerator/rust/Cargo.toml \
+            reference_cpu_benchmark_baseline \
+            -- --ignored --nocapture --test-threads=1
+
       - name: Compile Rust/WASM oracle once
         run: |
           cargo +1.98.1 build \
@@ -81,3 +89,4 @@ jobs:
         run: |
           echo "Anum, state-store, canonicalization, differential and reaction checks share one runner."
           echo "Node, Rust and the WASM build are each initialized once."
+          echo "The reference CPU benchmark is informational and shares this runner."
