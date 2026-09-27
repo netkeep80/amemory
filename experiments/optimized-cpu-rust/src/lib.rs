@@ -1,3 +1,4 @@
+pub mod orientation;
 pub mod structural;
 
 use std::{
@@ -317,10 +318,11 @@ impl OptimizedLinkStore {
         self.allocate_record(start, end)
     }
 
-    /// Canonical START-self-closed Link constructor.
+    /// Canonical first-pole self-closed Link constructor in technical carrier coordinates.
     ///
-    /// This is a semantic structural constructor, not an optimized-backend
-    /// identity primitive: portable identity remains the resulting topology.
+    /// This historical direct-gauge helper remains for compatibility. Under
+    /// accepted MTS v0.14 it is not semantic START_K authority by itself;
+    /// semantic START_K/END_K construction goes through orientation::SemanticOrientation.
     pub fn ensure_start_self_closed(
         &mut self,
         child: Handle,
@@ -328,7 +330,10 @@ impl OptimizedLinkStore {
         self.ensure_start_form(child)
     }
 
-    /// Canonical END-self-closed Link constructor.
+    /// Canonical second-pole self-closed Link constructor in technical carrier coordinates.
+    ///
+    /// This historical direct-gauge helper is substrate-facing under MTS v0.14;
+    /// semantic END_K is derived by orientation::SemanticOrientation.
     pub fn ensure_end_self_closed(
         &mut self,
         child: Handle,
