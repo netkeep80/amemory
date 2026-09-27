@@ -9,6 +9,20 @@ const wasmPath =
   "experiments/a-circuit/target/wasm32-unknown-unknown/release/amemory_a_circuit.wasm";
 const registryText = fs.readFileSync(registryPath, "utf8");
 const registry = JSON.parse(registryText);
+const labPageSource = fs.readFileSync(
+  "experiments/browser-accelerator/web/i386-lab.js",
+  "utf8"
+);
+for (const required of [
+  "M5 architectural state witness",
+  "setupArchitecturalStateWitness",
+  "amemory_i386_state_run_add32",
+  "Stateₜ₊₁",
+]) {
+  if (!labPageSource.includes(required)) {
+    throw new Error("M5a Pages witness wiring missing: " + required);
+  }
+}
 const bytes = fs.readFileSync(wasmPath);
 const sourceSha =
   process.env.AMEMORY_SOURCE_SHA || process.env.GITHUB_SHA || null;
