@@ -1,14 +1,22 @@
 "use strict";
 
+const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const acceptanceStarted = process.hrtime.bigint();
-const registry = JSON.parse(
-  fs.readFileSync("experiments/browser-accelerator/web/i386-blocks.json", "utf8")
-);
-const bytes = fs.readFileSync(
-  "experiments/a-circuit/target/wasm32-unknown-unknown/release/amemory_a_circuit.wasm"
-);
+const registryPath = "experiments/browser-accelerator/web/i386-blocks.json";
+const wasmPath =
+  "experiments/a-circuit/target/wasm32-unknown-unknown/release/amemory_a_circuit.wasm";
+const registryText = fs.readFileSync(registryPath, "utf8");
+const registry = JSON.parse(registryText);
+const bytes = fs.readFileSync(wasmPath);
+const sourceSha =
+  process.env.AMEMORY_SOURCE_SHA || process.env.GITHUB_SHA || null;
+if (sourceSha !== null && !/^[0-9a-f]{40}$/.test(sourceSha)) {
+  throw new Error("invalid source SHA for acceptance report");
+}
+const version = fs.readFileSync("VERSION", "utf8").trim();
+if (!version) throw new Error("VERSION is empty");
 WebAssembly.instantiate(bytes, {}).then(({instance}) => {
   const w = instance.exports;
   if (w.amemory_i386_lab_probe() !== 0x386) throw new Error("bad lab probe");
@@ -827,6 +835,13 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
     schemaVersion: 1,
     kind: "amemory-web-lab-acceptance-measurements",
     informationalOnly: true,
+    sourceSha,
+    version,
+    wasmSha256: crypto.createHash("sha256").update(bytes).digest("hex"),
+    registrySha256: crypto
+      .createHash("sha256")
+      .update(registryText, "utf8")
+      .digest("hex"),
     registryBlocks: registry.blocks.length,
     proofSchemaVersion: rawMulProof.schemaVersion,
     proofCoveredOpcodes: proofCoveredOpcodes.size,

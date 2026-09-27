@@ -85,13 +85,13 @@
   section.setAttribute("aria-label", "Repository CI workflow matrix");
 
   const title = document.createElement("h2");
-  title.textContent = "Repository test matrix";
+  title.textContent = "Repository workflow health (informational)";
   section.append(title);
 
   const intro = document.createElement("p");
   intro.textContent =
-    "Automatically generated from every active GitHub Actions workflow. " +
-    "Each suite shows its latest main run when available, otherwise its latest run on any branch. " +
+    "Latest workflow status is shown for repository health only. " +
+    "A prior-revision success is not treated as exact evidence for the deployed artifact. " +
     "The Pages deployment workflow itself is excluded.";
   section.append(intro);
 
@@ -100,7 +100,17 @@
   status.textContent = "Loading repository workflow evidence…";
   section.append(status);
 
-  root.append(section);
+  const exactSection = document.createElement("section");
+  exactSection.className = "ci-matrix";
+  exactSection.setAttribute("aria-label", "Exact deployed artifact evidence");
+  const exactTitle = document.createElement("h2");
+  exactTitle.textContent = "Exact deployed artifact evidence";
+  const exactStatus = document.createElement("div");
+  exactStatus.className = "notice";
+  exactStatus.textContent = "Loading exact acceptance evidence…";
+  exactSection.append(exactTitle, exactStatus);
+
+  root.append(exactSection, section);
 
   const shortSha = (value) =>
     typeof value === "string" && value.length >= 8 ? value.slice(0, 12) : "unknown";
@@ -113,7 +123,10 @@
     }
     const conclusion = run.conclusion || "unknown";
     if (["success", "neutral", "skipped"].includes(conclusion)) {
-      return { label: conclusion, className: "ci-good" };
+      if (run.exactSource === true) {
+        return { label: conclusion + " · exact source", className: "ci-good" };
+      }
+      return { label: conclusion + " · other revision", className: "ci-pending" };
     }
     return { label: conclusion, className: "ci-bad" };
   };
@@ -134,6 +147,47 @@
   const safeGithubUrl = (value) =>
     typeof value === "string" && /^https:\/\/github\.com\//.test(value) ? value : null;
 
+  fetch("./exact-evidence.json", { cache: "no-store" })
+    .then((response) => {
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response.json();
+    })
+    .then((evidence) => {
+      if (evidence.kind !== "amemory-web-lab-acceptance-measurements") {
+        throw new Error("unexpected exact evidence kind");
+      }
+      exactStatus.remove();
+      const summary = document.createElement("div");
+      summary.className = "ci-summary";
+      summary.append(
+        card("Version", evidence.version || "unknown"),
+        card("Source", shortSha(evidence.sourceSha)),
+        card(
+          "Proof coverage",
+          `${evidence.proofCoveredOpcodes ?? "?"}/${evidence.registryBlocks ?? "?"}`
+        ),
+        card("A-Circuit WASM", shortSha(evidence.wasmSha256)),
+      );
+      exactSection.append(summary);
+
+      const metrics = document.createElement("p");
+      metrics.className = "ci-meta";
+      const raw = evidence.selectedProofs?.rawMul32;
+      const effect = evidence.selectedProofs?.mul32Effect;
+      const mb = (value) =>
+        Number.isFinite(value) ? (value / 1024 / 1024).toFixed(2) + " MiB" : "?";
+      metrics.textContent =
+        `Schema v${evidence.proofSchemaVersion ?? "?"} · ` +
+        `acceptance ${Number(evidence.elapsedMs || 0).toFixed(1)} ms · ` +
+        `raw MUL proof ${mb(raw?.serializedProofBytes)} · ` +
+        `MUL effect proof ${mb(effect?.serializedProofBytes)}`;
+      exactSection.append(metrics);
+    })
+    .catch((error) => {
+      exactStatus.textContent = `Exact evidence unavailable: ${error.message}`;
+      exactStatus.classList.add("fail");
+    });
+
   fetch("./ci-results.json", { cache: "no-store" })
     .then((response) => {
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -149,8 +203,18 @@
       const passing = completed.filter((workflow) =>
         ["success", "neutral", "skipped"].includes(workflow.run?.conclusion)
       ).length;
-      const failing = completed.length - passing;
-      const pending = workflows.length - completed.length;
+      const exactPassing = completed.filter((workflow) =>
+        workflow.run?.exactSource === true &&
+        ["success", "neutral", "skipped"].includes(workflow.run?.conclusion)
+      ).length;
+      const problems = workflows.filter((workflow) =>
+        !workflow.run ||
+        workflow.run.status !== "completed" ||
+        !["success", "neutral", "skipped"].includes(workflow.run?.conclusion)
+      ).length;
+      const otherRevision = workflows.filter(
+        (workflow) => workflow.run && workflow.run.exactSource !== true
+      ).length;
 
       status.remove();
 
@@ -158,16 +222,16 @@
       summary.className = "ci-summary";
       summary.append(
         card("Suites", String(workflows.length)),
-        card("Passing", String(passing)),
-        card("Failing", String(failing)),
-        card("Pending / never", String(pending)),
+        card("Exact-current pass", String(exactPassing)),
+        card("Latest passing", String(passing)),
+        card("Other revision / problems", String(otherRevision + problems)),
       );
       section.append(summary);
 
       const source = document.createElement("p");
       source.className = "ci-meta";
-      const sourceKind = data.source?.kind === "merged_pr_head"
-        ? `deployment from merged PR #${data.source.prNumber ?? "?"} head`
+      const sourceKind = data.source?.kind === "merged_pr_main"
+        ? `deployment from merged PR #${data.source.prNumber ?? "?"} main revision`
         : "deployment from main revision";
       source.textContent =
         `${sourceKind} ${shortSha(data.sourceSha)} · main ${shortSha(data.mainSha)} · generated ${data.generatedAt || "unknown"}`;
