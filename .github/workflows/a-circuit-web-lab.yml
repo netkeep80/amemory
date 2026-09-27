@@ -588,6 +588,66 @@ jobs:
             verifyArithmeticProof(9, 0, 0, 1, 0xffffffff, 1, 1, 1, "SBB32");
             verifyArithmeticProof(10, 7, 9, 0, 0xfffffffe, 0, 0, 1, "CMP32");
 
+            const verifyMux32Proof = (select, a, b, expected) => {
+              run(11, a, b, select, expected, "MUX32");
+              const proof = readCurrentProof("MUX32");
+              if (proof.block !== "MUX32") {
+                throw new Error("MUX32 proof block identity mismatch");
+              }
+              const memoryId = proof.load.memoryInstanceId;
+              if (!memoryId ||
+                  proof.execute.memoryInstanceId !== memoryId ||
+                  proof.result.memoryInstanceId !== memoryId ||
+                  !proof.execute.reactions.every((step) => step.memoryInstanceId === memoryId)) {
+                throw new Error("MUX32 proof changed runtime A-memory identity");
+              }
+              if (!proof.load.carrierRoundTrip ||
+                  proof.load.linksBeforeLoad !== 1 ||
+                  proof.load.linksAfterLoad !== proof.prepare.compiledLinks ||
+                  proof.execute.activeReactionCount !== 257 ||
+                  !proof.execute.finalQuiescent ||
+                  !proof.result.oracleMatches ||
+                  proof.result.identicalRerunLinkDelta !== 0 ||
+                  (proof.result.decodedValue >>> 0) !== (expected >>> 0)) {
+                throw new Error("MUX32 structural proof witness failed");
+              }
+
+              const sourceByRole = new Map(
+                proof.prepare.semanticRoots.map((root) => [root.role, root.source])
+              );
+              for (const role of [
+                "function.mux32",
+                "function.mux1",
+                "function.gate.xor2",
+                "function.gate.and2",
+                "data.select",
+                "data.a.word",
+                "data.b.word",
+                "data.bit.zero",
+                "data.bit.one",
+                "execution.interpreter",
+                "execution.theory",
+                "execution.apply",
+                "invocation.call",
+                "scope.initial",
+                "result.word_tag",
+              ]) {
+                if (!sourceByRole.has(role)) {
+                  throw new Error("MUX32 prepared Aset missing " + role);
+                }
+              }
+              const selectBit =
+                sourceByRole.get(select === 0 ? "data.bit.zero" : "data.bit.one");
+              if (sourceByRole.get("data.select") !== selectBit) {
+                throw new Error("MUX32 structural select mismatch");
+              }
+              if (proof.result.visualLinks.length !== proof.result.linksFinal) {
+                throw new Error("MUX32 visual snapshot is incomplete");
+              }
+            };
+
+            verifyMux32Proof(1, 0xaaaaaaaa, 0x55555555, 0x55555555);
+
             const runWide = (op, a, b, expectedLo, expectedHi, reactions, label) => {
               if (w.amemory_i386_lab_run(op, a, b, 0) !== 1) {
                 throw new Error(label + " WASM execution rejected");
@@ -637,7 +697,7 @@ jobs:
               throw new Error("x86 MUL32 must not preserve status flags");
             }
 
-            console.log("WASM registry + MUX1/logic/arithmetic/shift/rotate/unary/MUL structural smoke PASS");
+            console.log("WASM registry + MUX1/MUX32/logic/arithmetic/shift/rotate/unary/MUL structural smoke PASS");
           }).catch((error) => {
             console.error(error);
             process.exit(1);
