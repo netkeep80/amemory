@@ -132,7 +132,7 @@ jobs:
               linksBeforeLoad: 1,
               linksAfterLoad: 12,
               importedAnums: 2,
-              portableRoundTrip: true,
+              carrierRoundTrip: true,
               semanticRoots: [
                 { role: "function.mux1", source: "98", localHandle: 2 },
               ],
@@ -200,7 +200,7 @@ jobs:
           cargo +1.98.1 test \
             --release \
             --manifest-path experiments/a-circuit/Cargo.toml \
-            portable_aset_reconstructs_complete_shared_topology \
+            packed_carrier_reconstructs_complete_shared_topology \
             -- --nocapture --test-threads=1
           cargo +1.98.1 test \
             --release \
@@ -349,8 +349,8 @@ jobs:
             if (!Array.isArray(proof.prepare.theoryAdmissions) || proof.prepare.theoryAdmissions.length === 0) {
               throw new Error("prepared Aset did not expose admitted Structural Rules");
             }
-            if (!proof.load.portableRoundTrip || proof.load.linksBeforeLoad !== 1 || proof.load.linksAfterLoad <= 1) {
-              throw new Error("portable load witness failed");
+            if (!proof.load.carrierRoundTrip || proof.load.linksBeforeLoad !== 1 || proof.load.linksAfterLoad <= 1) {
+              throw new Error("packed carrier load witness failed");
             }
             if (proof.load.linksAfterLoad !== proof.prepare.compiledLinks) {
               throw new Error("runtime A-memory does not contain the complete compiled Aset");
@@ -424,10 +424,10 @@ jobs:
                   proof.prepare.theoryAdmissions.length === 0) {
                 throw new Error(block + " proof did not expose Theory admissions");
               }
-              if (!proof.load.portableRoundTrip ||
+              if (!proof.load.carrierRoundTrip ||
                   proof.load.linksBeforeLoad !== 1 ||
                   proof.load.linksAfterLoad !== proof.prepare.compiledLinks) {
-                throw new Error(block + " portable Aset load witness failed");
+                throw new Error(block + " packed carrier load witness failed");
               }
               if (!proof.execute.finalQuiescent ||
                   !proof.execute.reactions.every((step) => step.memoryInstanceId === memoryId)) {
