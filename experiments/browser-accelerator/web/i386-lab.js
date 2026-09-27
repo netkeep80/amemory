@@ -437,7 +437,9 @@ function renderSingle(section, block, wasm) {
       } else {
         proofTarget.innerHTML = '<div class="notice">Full portable-Aset / one-memory proof is not yet enabled for this registry block. Proof coverage is being generalized across the structural block registry.</div>';
       }
-      status.textContent = `${block.name}: real structural result returned by A-Circuit WASM; v3 + compact proof differential PASS.`;
+      status.textContent = out.compactProof
+        ? `${block.name}: real structural result returned by A-Circuit WASM; v3 + compact proof differential PASS.`
+        : `${block.name}: real structural result returned by A-Circuit WASM; no structural proof transport for this block.`;
       status.className = "notice lab-ok";
     } catch (error) {
       status.textContent = error.message;
