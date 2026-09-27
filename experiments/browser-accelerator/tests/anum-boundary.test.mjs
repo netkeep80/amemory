@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   ANUM_FIXTURES,
   compileAnumPlan,
+  createContextRelativeOrientation,
   exportLocalTopology,
   localRef,
   normalizeAnum,
@@ -53,6 +54,66 @@ assert.equal(exportLocalTopology(gpu, 60), "19868");
 assert.equal(topologyCount(cpu), 4);
 assert.equal(topologyCount(gpu), 4);
 
+const cpuDirect = createContextRelativeOrientation(cpu, 2, 2);
+const cpuMirror = createContextRelativeOrientation(cpu, 2, 3);
+const gpuDirect = createContextRelativeOrientation(gpu, 62, 62);
+const gpuMirror = createContextRelativeOrientation(gpu, 62, 61);
+
+assert.equal(cpuDirect.transport, "ID");
+assert.equal(cpuMirror.transport, "J");
+assert.equal(gpuDirect.transport, "ID");
+assert.equal(gpuMirror.transport, "J");
+
+assert.equal(cpuDirect.referenceBody, 1);
+assert.equal(cpuMirror.contextBody, 1);
+assert.equal(gpuDirect.referenceBody, 63);
+assert.equal(gpuMirror.contextBody, 63);
+
+// Same semantic foundation wires survive opposite technical gauges and
+// radically different local-handle allocation directions.
+assert.equal(cpuDirect.semanticRecursiveWire(1), "8");
+assert.equal(cpuDirect.semanticRecursiveWire(2), "98");
+assert.equal(cpuDirect.semanticRecursiveWire(3), "68");
+assert.equal(cpuDirect.semanticRecursiveWire(4), "19868");
+assert.equal(cpuMirror.semanticRecursiveWire(1), "8");
+assert.equal(cpuMirror.semanticRecursiveWire(3), "98");
+assert.equal(cpuMirror.semanticRecursiveWire(2), "68");
+assert.equal(cpuMirror.semanticRecursiveWire(4), "19868");
+assert.equal(gpuDirect.semanticRecursiveWire(60), "19868");
+assert.equal(gpuMirror.semanticRecursiveWire(60), "19868");
+
+// Raw carrier coordinates deliberately disagree with mirror semantic names.
+assert.equal(exportLocalTopology(cpu, 3), "68");
+assert.equal(cpuMirror.semanticRecursiveWire(3), "98");
+assert.equal(exportLocalTopology(gpu, 61), "68");
+assert.equal(gpuMirror.semanticRecursiveWire(61), "98");
+
+// J adapts semantic recursive source to the technical carrier representation.
+assert.equal(cpuMirror.technicalRecursiveWire("98"), "68");
+assert.equal(cpuMirror.technicalRecursiveWire("68"), "98");
+assert.equal(cpuMirror.technicalRecursiveWire("19868"), "19868");
+assert.equal(cpuMirror.technicalRecursiveWire("16898"), "16898");
+assert.equal(cpuDirect.technicalRecursiveWire("198698"), "198698");
+
+for (const source of ANUM_FIXTURES) {
+  const technical = cpuMirror.technicalRecursiveWire(source);
+  assert.equal(normalizeAnum(technical), technical);
+  assert.equal(
+    cpuMirror.technicalRecursiveWire(technical),
+    source,
+    `J must be involutive for ${source}`,
+  );
+}
+
+assert.throws(
+  () => createContextRelativeOrientation(cpu, 2, 1),
+  /proper one-sided/,
+);
+assert.throws(
+  () => createContextRelativeOrientation(cpu, 2, 4),
+  /proper one-sided/,
+);
+
 const cpuRef = localRef("cpu-A", 4);
 const gpuRef = localRef("gpu-B", 60);
 assert.equal(requireLocalRef(cpuRef, "cpu-A"), 4);
@@ -72,8 +133,18 @@ cycle.used[6] = 1;
 cycle.starts[6] = 6;
 cycle.ends[6] = 5;
 assert.throws(() => exportLocalTopology(cycle, 5), /non-well-founded/);
+const cycleOrientation = createContextRelativeOrientation(cycle, 2, 2);
+assert.throws(
+  () => cycleOrientation.semanticRecursiveWire(5),
+  /non-well-founded semantic topology/,
+);
 
-console.log("PORTABLE_ANUM_BOUNDARY_NEGATIVE_WITNESSES=GREEN");
+console.log(
+  "PORTABLE_ANUM_BOUNDARY_NEGATIVE_WITNESSES=GREEN " +
+  "MTS_V014_CONTEXT_RELATIVE_ORIENTATION=GREEN " +
+  "TECHNICAL_POLES_NOT_SEMANTIC_AUTHORITY=TRUE " +
+  "RECURSIVE_J_ADAPTER_INVOLUTIVE=TRUE",
+);
 
 
 // WebAssembly JS exposes i32 results as signed Numbers. Rust u32::MAX therefore
