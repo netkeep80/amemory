@@ -31,6 +31,74 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
     Buffer.byteLength(JSON.stringify(value), "utf8");
   const proofMetrics = (proof, registryBlock) => {
     const { visualLinks, ...resultMetadata } = proof.result;
+    const memoryId = proof.result.memoryInstanceId;
+    const parseVisualHandle = (key) => {
+      const prefix = memoryId + ":L";
+      if (typeof key !== "string" || !key.startsWith(prefix)) {
+        throw new Error(
+          registryBlock.id + " visual topology contains a foreign memory key"
+        );
+      }
+      const handle = Number(key.slice(prefix.length));
+      if (!Number.isInteger(handle) || handle < 1) {
+        throw new Error(registryBlock.id + " visual topology has invalid handle");
+      }
+      return handle;
+    };
+    if (visualLinks.length !== proof.result.linksFinal) {
+      throw new Error(registryBlock.id + " visual topology count mismatch");
+    }
+
+    const baseCarrier = proof.prepare.carrierDuplets;
+    if (baseCarrier.length !== proof.prepare.compiledLinks) {
+      throw new Error(registryBlock.id + " prepared carrier count mismatch");
+    }
+    const appendDelta = [];
+    const overlays = [];
+    for (let index = 0; index < visualLinks.length; index += 1) {
+      const handle = index + 1;
+      const visual = visualLinks[index];
+      if (visual.localHandle !== handle ||
+          parseVisualHandle(visual.key) !== handle) {
+        throw new Error(registryBlock.id + " visual topology is not dense");
+      }
+      const start = parseVisualHandle(visual.startKey);
+      const end = parseVisualHandle(visual.endKey);
+      if (start > visualLinks.length || end > visualLinks.length) {
+        throw new Error(registryBlock.id + " visual pole is out of range");
+      }
+
+      if (handle <= baseCarrier.length) {
+        const prepared = baseCarrier[index];
+        if (prepared.start !== start || prepared.end !== end) {
+          throw new Error(
+            registryBlock.id + " prepared carrier/runtime prefix mismatch"
+          );
+        }
+      } else {
+        appendDelta.push({ start, end });
+      }
+
+      if (visual.label || (Array.isArray(visual.tags) && visual.tags.length)) {
+        overlays.push({
+          localHandle: handle,
+          label: visual.label,
+          tags: visual.tags,
+        });
+      }
+    }
+
+    const reconstructed = baseCarrier.concat(appendDelta);
+    if (reconstructed.length !== proof.result.linksFinal) {
+      throw new Error(registryBlock.id + " reconstructed topology count mismatch");
+    }
+    for (let index = 0; index < reconstructed.length; index += 1) {
+      const visual = visualLinks[index];
+      if (reconstructed[index].start !== parseVisualHandle(visual.startKey) ||
+          reconstructed[index].end !== parseVisualHandle(visual.endKey)) {
+        throw new Error(registryBlock.id + " reconstructed topology mismatch");
+      }
+    }
     const recursiveSources = proof.prepare.semanticRoots.map(
       (root) => root.source || ""
     );
@@ -62,6 +130,20 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
       traceEntries: proof.execute.reactions.length,
       finalLinks: proof.result.linksFinal,
       visualLinks: visualLinks.length,
+      topologyPrototype: {
+        baseLinks: baseCarrier.length,
+        appendLinks: appendDelta.length,
+        overlayEntries: overlays.length,
+        overlayJsonBytes: jsonBytes(overlays),
+        currentTopologyJsonBytes:
+          jsonBytes(baseCarrier) + jsonBytes(visualLinks),
+        denseBaseU32FloorBytes: baseCarrier.length * 2 * 4,
+        denseAppendU32FloorBytes: appendDelta.length * 2 * 4,
+        compactTopologyFloorBytes:
+          baseCarrier.length * 2 * 4 +
+          appendDelta.length * 2 * 4 +
+          jsonBytes(overlays),
+      },
       bytes: {
         proofJson: jsonBytes(proof),
         prepareJson: jsonBytes(proof.prepare),
@@ -928,6 +1010,24 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
       totalCarrierDenseU32FloorBytes: sumBytes("carrierDenseU32Floor"),
       totalReactionsJsonBytes: sumBytes("reactionsJson"),
       totalVisualLinksJsonBytes: sumBytes("visualLinksJson"),
+      topologyPrototype: {
+        totalCurrentTopologyJsonBytes: measuredProofs.reduce(
+          (sum, item) => sum + item.topologyPrototype.currentTopologyJsonBytes,
+          0
+        ),
+        totalCompactTopologyFloorBytes: measuredProofs.reduce(
+          (sum, item) => sum + item.topologyPrototype.compactTopologyFloorBytes,
+          0
+        ),
+        totalAppendLinks: measuredProofs.reduce(
+          (sum, item) => sum + item.topologyPrototype.appendLinks,
+          0
+        ),
+        totalOverlayEntries: measuredProofs.reduce(
+          (sum, item) => sum + item.topologyPrototype.overlayEntries,
+          0
+        ),
+      },
       maxProofJson: maxBy("proofJson"),
       maxReactionsJson: maxBy("reactionsJson"),
       maxVisualLinksJson: maxBy("visualLinksJson"),
