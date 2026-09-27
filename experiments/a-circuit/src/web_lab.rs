@@ -3,7 +3,7 @@ use crate::{
     logic_effect_n::{web_prove_logic, web_run_logic},
     mul32_n::web_run_mul32,
     mul_effect_n::web_run_mul_effect,
-    mux_n::{web_prove_mux1, web_run_mux32},
+    mux_n::{web_prove_mux1, web_prove_mux32},
     rotate32_n::web_run_rotate32,
     rotate_carry32_n::web_run_rotate_carry32,
     shift32_n::web_run_shift32,
@@ -128,7 +128,10 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
     }
 
     if op == 11 {
-        let out = web_run_mux32(input_flag, a, b)?;
+        let execution = web_prove_mux32(input_flag, a, b)?;
+        let proof_json = serde_json::to_string(&execution.proof).ok()?;
+        let out = execution.outcome;
+        set_last_proof_json(proof_json);
         return Some(LabOutcome {
             value: out.value,
             value_hi: 0,
@@ -592,7 +595,73 @@ mod tests {
         let mux = execute(11, 0xaaaa_aaaa, 0x5555_5555, 1).unwrap();
         assert_eq!(mux.value, 0x5555_5555);
         assert_eq!(mux.preserve_mask, STATUS_FLAGS);
+        assert_eq!(mux.reactions, 257);
         assert_eq!(mux.steady_link_delta, 0);
+        assert_eq!(amemory_i386_lab_proof_available(), 1);
+
+        let mux32_proof_json = {
+            let guard = LAST_PROOF_JSON
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            guard.clone()
+        };
+        let mux32_proof: serde_json::Value =
+            serde_json::from_str(&mux32_proof_json).unwrap();
+        assert_eq!(mux32_proof["block"], "MUX32");
+        let mux32_memory_id =
+            mux32_proof["load"]["memoryInstanceId"].as_str().unwrap();
+        assert_eq!(
+            mux32_proof["execute"]["memoryInstanceId"].as_str().unwrap(),
+            mux32_memory_id
+        );
+        assert_eq!(
+            mux32_proof["result"]["memoryInstanceId"].as_str().unwrap(),
+            mux32_memory_id
+        );
+        assert_eq!(mux32_proof["load"]["carrierRoundTrip"], true);
+        assert_eq!(mux32_proof["execute"]["activeReactionCount"], 257);
+        assert_eq!(mux32_proof["execute"]["finalQuiescent"], true);
+        assert_eq!(mux32_proof["result"]["oracleMatches"], true);
+        assert_eq!(mux32_proof["result"]["identicalRerunLinkDelta"], 0);
+        assert_eq!(
+            mux32_proof["result"]["visualLinks"].as_array().unwrap().len() as u64,
+            mux32_proof["result"]["linksFinal"].as_u64().unwrap()
+        );
+
+        let mux32_roots = mux32_proof["prepare"]["semanticRoots"]
+            .as_array()
+            .unwrap();
+        let mux32_source_for = |role: &str| {
+            mux32_roots
+                .iter()
+                .find(|root| root["role"] == role)
+                .and_then(|root| root["source"].as_str())
+                .unwrap()
+        };
+        for required in [
+            "function.mux32",
+            "function.mux1",
+            "function.gate.xor2",
+            "function.gate.and2",
+            "data.select",
+            "data.a.word",
+            "data.b.word",
+            "execution.interpreter",
+            "execution.theory",
+            "execution.apply",
+            "invocation.call",
+            "scope.initial",
+            "result.word_tag",
+        ] {
+            assert!(
+                mux32_roots.iter().any(|root| root["role"] == required),
+                "MUX32 missing {required}"
+            );
+        }
+        assert_eq!(
+            mux32_source_for("data.select"),
+            mux32_source_for("data.bit.one")
+        );
 
         for select in 0u32..=1 {
             for a in 0u32..=1 {
