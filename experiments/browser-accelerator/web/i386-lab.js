@@ -1,8 +1,10 @@
 import {
+  FLAGS,
   blockDefinitionHtml,
   catalogCardHtml,
   escapeHtml,
   evidenceHtml,
+  flagState,
   hex32,
   inputPreviewHtml,
   outputHtml,
@@ -69,6 +71,16 @@ function styleLab() {
     .i386-lab { margin: 34px 0 44px; }
     .i386-lab > h2 { margin-bottom: 6px; }
     .i386-lab > p { max-width: 920px; margin-top: 0; }
+    .lab-state-shell { margin:16px 0; padding:16px 18px; background:var(--surface); border:2px solid var(--line); border-radius:16px; box-shadow:var(--shadow); }
+    .lab-state-head { display:flex; justify-content:space-between; gap:18px; align-items:flex-start; }
+    .lab-state-head h3 { margin:0 0 5px; }
+    .lab-state-head p { margin:0; color:var(--muted); max-width:920px; }
+    .lab-state-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:12px; }
+    .lab-state-snapshot { border:1px solid var(--line); border-radius:12px; background:var(--surface-2); padding:12px; }
+    .lab-state-snapshot h4 { margin:0 0 8px; }
+    .lab-state-registers { display:grid; gap:5px; }
+    .lab-state-registers code { overflow-wrap:anywhere; }
+    .lab-state-note { margin-top:10px; color:var(--muted); font-size:.82rem; }
     .lab-layout { display:grid; grid-template-columns:minmax(250px,300px) minmax(0,1fr); gap:16px; align-items:start; }
     .lab-catalog-shell,.lab-shell { background:var(--surface); border:1px solid var(--line); border-radius:16px; box-shadow:var(--shadow); }
     .lab-catalog-shell { padding:14px; position:sticky; top:12px; max-height:calc(100vh - 24px); overflow:auto; }
@@ -188,7 +200,7 @@ function styleLab() {
     .proof-visual-three canvas { display:block; width:100% !important; height:100% !important; }
     .lab-hidden { display:none !important; }
     @media(max-width:1050px){ .lab-layout{grid-template-columns:1fr;} .lab-catalog-shell{position:static;max-height:none;} .lab-catalog{grid-template-columns:repeat(3,minmax(0,1fr));} }
-    @media(max-width:820px){ .lab-catalog{grid-template-columns:repeat(2,minmax(0,1fr));} .lab-constructor{grid-template-columns:1fr;} .lab-chip::before,.lab-chip::after,.lab-input-port::after,.lab-output-port::before{display:none;} .lab-evidence-io,.lab-spec-grid,.lab-metrics{grid-template-columns:1fr 1fr;} .proof-title{flex-direction:column;} .proof-memory{min-width:0;width:100%;box-sizing:border-box;} .proof-root{grid-template-columns:1fr;} .proof-root code{grid-column:1;} }
+    @media(max-width:820px){ .lab-state-head{flex-direction:column;} .lab-state-grid{grid-template-columns:1fr;} .lab-catalog{grid-template-columns:repeat(2,minmax(0,1fr));} .lab-constructor{grid-template-columns:1fr;} .lab-chip::before,.lab-chip::after,.lab-input-port::after,.lab-output-port::before{display:none;} .lab-evidence-io,.lab-spec-grid,.lab-metrics{grid-template-columns:1fr 1fr;} .proof-title{flex-direction:column;} .proof-memory{min-width:0;width:100%;box-sizing:border-box;} .proof-root{grid-template-columns:1fr;} .proof-root code{grid-column:1;} }
     @media(max-width:560px){ .lab-catalog{grid-template-columns:1fr;} .lab-evidence-io,.lab-spec-grid,.lab-metrics{grid-template-columns:1fr;} .lab-modebar{align-items:flex-start;flex-direction:column;} }
   `;
   document.head.append(style);
@@ -248,6 +260,18 @@ function buildLab(registry) {
   section.innerHTML = `
     <h2>80386 A-memory logic-block constructor</h2>
     <p>Select a real block, edit its input ports and execute the structural A-Circuit implementation compiled to WASM. The constructor shows the block ABI, outputs, x86 flag patch and structural execution evidence; JavaScript only drives UI and formatting.</p>
+    <div class="lab-state-shell" id="lab-state-witness">
+      <div class="lab-state-head">
+        <div>
+          <h3>M5 architectural state witness</h3>
+          <p>This is not another opcode. A real structural ADD32 runs first, returns the shared ALU effect, then the same A-memory atomically publishes a successor EAX/EBX/EFLAGS state.</p>
+        </div>
+        <button class="lab-run" id="lab-run-state" type="button">Run state transition</button>
+      </div>
+      <div class="notice" id="lab-state-status">M5a WASM witness ready check pending…</div>
+      <div id="lab-state-result"></div>
+      <div id="lab-state-proof"></div>
+    </div>
     <div class="lab-layout">
       <aside class="lab-catalog-shell">
         <div class="lab-catalog-head"><h3>Block catalog</h3><small id="lab-count">${registry.blocks.length} blocks</small></div>
@@ -270,6 +294,117 @@ function buildLab(registry) {
   if (overviewNotice) overviewNotice.after(section);
   else main.prepend(section);
   return section;
+}
+
+function setupArchitecturalStateWitness(section, wasm) {
+  const shell = section.querySelector("#lab-state-witness");
+  const status = section.querySelector("#lab-state-status");
+  const result = section.querySelector("#lab-state-result");
+  const proofTarget = section.querySelector("#lab-state-proof");
+  const run = section.querySelector("#lab-run-state");
+
+  if (!shell || !status || !result || !proofTarget || !run) return;
+  if (wasm.amemory_i386_state_probe?.() !== 0x50a ||
+      typeof wasm.amemory_i386_state_run_add32 !== "function") {
+    status.textContent = "M5a architectural-state ABI is missing; refusing to fake a UI result.";
+    status.className = "notice lab-error";
+    run.disabled = true;
+    return;
+  }
+
+  status.textContent = "M5a ready: structural ADD32 → shared ALU effect → atomic State′ publication.";
+  status.className = "notice";
+
+  run.addEventListener("click", async () => {
+    try {
+      status.textContent = "Executing one-memory architectural state transition…";
+      status.className = "notice";
+      result.innerHTML = "";
+      proofTarget.innerHTML = "";
+
+      if (wasm.amemory_i386_state_run_add32() !== 1) {
+        throw new Error("M5a A-Circuit WASM rejected the state witness");
+      }
+
+      const before = {
+        eax: wasm.amemory_i386_state_eax_before() >>> 0,
+        ebx: wasm.amemory_i386_state_ebx_before() >>> 0,
+      };
+      const after = {
+        eax: wasm.amemory_i386_state_eax_after() >>> 0,
+        ebx: wasm.amemory_i386_state_ebx_after() >>> 0,
+      };
+      const flags = {
+        defined: wasm.amemory_i386_state_flags_defined_mask() >>> 0,
+        flagValues: wasm.amemory_i386_state_flags_value_mask() >>> 0,
+        undefined: wasm.amemory_i386_state_flags_undefined_mask() >>> 0,
+        preserve: 0,
+      };
+      const reactions = wasm.amemory_i386_state_reactions() >>> 0;
+      const oldStateRetained =
+        wasm.amemory_i386_state_old_state_retained() >>> 0;
+      const atomicScope = wasm.amemory_i386_state_atomic_scope() >>> 0;
+      const steadyDelta =
+        wasm.amemory_i386_state_steady_link_delta() >>> 0;
+      const quiescent = wasm.amemory_i386_state_quiescent() >>> 0;
+
+      if (before.eax !== 0xffff_ffff ||
+          before.ebx !== 0x1122_3344 ||
+          after.eax !== 0 ||
+          after.ebx !== before.ebx ||
+          flags.defined !== 0x0000_08d5 ||
+          flags.flagValues !== 0x0000_0055 ||
+          flags.undefined !== 0 ||
+          oldStateRetained !== 1 ||
+          atomicScope !== 1 ||
+          steadyDelta !== 0 ||
+          quiescent !== 1) {
+        throw new Error("M5a state witness failed its browser-side independent checks");
+      }
+
+      const flagHtml = FLAGS.map(([name, mask]) =>
+        `<span class="lab-flag">${escapeHtml(flagState(name, mask, flags))}</span>`
+      ).join("");
+      result.innerHTML = `
+        <div class="lab-state-grid">
+          <div class="lab-state-snapshot">
+            <h4>Stateₜ · before</h4>
+            <div class="lab-state-registers">
+              <code>EAX = ${hex32(before.eax)}</code>
+              <code>EBX = ${hex32(before.ebx)}</code>
+            </div>
+            <p class="lab-state-note">This old State Link remains physically present after execution; it simply stops being the published current result.</p>
+          </div>
+          <div class="lab-state-snapshot">
+            <h4>Stateₜ₊₁ · atomically published</h4>
+            <div class="lab-state-registers">
+              <code>EAX = ${hex32(after.eax)}</code>
+              <code>EBX = ${hex32(after.ebx)} · preserved</code>
+            </div>
+            <div class="lab-flags">${flagHtml}</div>
+          </div>
+        </div>
+        <div class="lab-metrics">
+          <div class="lab-metric"><small>Structural reactions</small><strong>${reactions}</strong></div>
+          <div class="lab-metric"><small>One-member Scope throughout</small><strong>${atomicScope ? "YES" : "NO"}</strong></div>
+          <div class="lab-metric"><small>Old state retained</small><strong>${oldStateRetained ? "YES" : "NO"}</strong></div>
+          <div class="lab-metric"><small>Final quiescence</small><strong>${quiescent ? "YES" : "NO"}</strong></div>
+          <div class="lab-metric"><small>Identical rerun Link growth</small><strong>${steadyDelta}</strong></div>
+        </div>`;
+
+      const { proof, transport } = collectBrowserProof(wasm);
+      if (!proof || proof.block !== "M5A_STATE_ADD32") {
+        throw new Error("M5a compact proof did not reconstruct the architectural-state witness");
+      }
+      await renderProofPipeline(proofTarget, proof);
+      status.textContent =
+        `M5a PASS: real ADD32 effect applied to architectural state in one A-memory; ${transport} proof rendered below.`;
+      status.className = "notice lab-ok";
+    } catch (error) {
+      status.textContent = error.message;
+      status.className = "notice lab-error";
+    }
+  });
 }
 
 function setupCatalog(section, registry, selectBlock) {
@@ -636,6 +771,7 @@ async function bootLab() {
 
   const section = buildLab(registry);
   if (!section) return;
+  setupArchitecturalStateWitness(section, wasm);
   const byId = new Map(registry.blocks.map((block) => [block.id, block]));
   const selectBlock = (id) => {
     const block = byId.get(id);
