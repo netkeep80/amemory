@@ -158,18 +158,22 @@ pub(crate) fn theory_admissions(
     store: &OptimizedLinkStore,
     theory: Handle,
 ) -> Option<Vec<String>> {
-    let admissions = store
+    let mut admissions = store
         .start_incidence(theory)
         .ok()?
         .filter_map(|handle| {
             let (start, _end) = store.poles(handle).ok()?;
-            (start == theory)
-                .then(|| store.export_anum(handle).ok())
-                .flatten()
+            (start == theory).then_some(handle)
         })
         .collect::<Vec<_>>();
 
-    (!admissions.is_empty()).then_some(admissions)
+    admissions.sort_unstable();
+    (!admissions.is_empty()).then(|| {
+        admissions
+            .into_iter()
+            .map(|handle| format!("L{handle}"))
+            .collect()
+    })
 }
 
 pub(crate) fn prepare_stage(
@@ -239,6 +243,21 @@ pub(crate) fn load_runtime(
             source: root.source.clone(),
             local_handle: handle,
         });
+    }
+
+    let theory_handle = loaded_roots
+        .iter()
+        .find(|root| root.role == "execution.theory")
+        .map(|root| root.local_handle)?;
+    for admission in &prepare.theory_admissions {
+        let handle = admission
+            .strip_prefix('L')?
+            .parse::<Handle>()
+            .ok()?;
+        let (start, _end) = memory.store.poles(handle).ok()?;
+        if start != theory_handle {
+            return None;
+        }
     }
 
     let load = WebProofLoadStage {
