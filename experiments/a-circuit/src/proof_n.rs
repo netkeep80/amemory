@@ -14,6 +14,7 @@ static NEXT_PROOF_MEMORY_ID: AtomicU32 = AtomicU32::new(1);
 #[serde(rename_all = "camelCase")]
 pub(crate) struct WebProofPreparedRoot {
     pub(crate) role: String,
+    pub(crate) carrier_ref: u32,
     pub(crate) source: String,
 }
 
@@ -21,6 +22,7 @@ pub(crate) struct WebProofPreparedRoot {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct WebProofLoadedRoot {
     pub(crate) role: String,
+    pub(crate) carrier_ref: u32,
     pub(crate) source: String,
     pub(crate) local_handle: u32,
 }
@@ -155,6 +157,7 @@ pub(crate) fn semantic_source(
 ) -> WebProofPreparedRoot {
     WebProofPreparedRoot {
         role: role.to_owned(),
+        carrier_ref: handle,
         source: store
             .export_anum(handle)
             .expect("semantic root export"),
@@ -223,23 +226,18 @@ pub(crate) fn load_runtime(
         return None;
     }
 
-    let root_sources = prepare
-        .semantic_roots
-        .iter()
-        .map(|root| root.source.clone())
-        .collect::<Vec<_>>();
     let before_roots = memory.store.link_count();
-    let root_handles = memory.store.import_anums(&root_sources).ok()?;
-    if memory.store.link_count() != before_roots {
-        return None;
-    }
-
     let mut loaded_roots =
         Vec::with_capacity(prepare.semantic_roots.len());
     let mut carrier_round_trip =
         memory.store.export_packed_duplets() == carrier;
 
-    for (root, handle) in prepare.semantic_roots.iter().zip(root_handles) {
+    for root in &prepare.semantic_roots {
+        let handle = root.carrier_ref;
+        if handle == 0 || handle > links_after_load {
+            return None;
+        }
+        memory.store.poles(handle).ok()?;
         if memory.store.export_anum(handle).ok().as_deref()
             != Some(root.source.as_str())
         {
@@ -247,9 +245,13 @@ pub(crate) fn load_runtime(
         }
         loaded_roots.push(WebProofLoadedRoot {
             role: root.role.clone(),
+            carrier_ref: root.carrier_ref,
             source: root.source.clone(),
             local_handle: handle,
         });
+    }
+    if memory.store.link_count() != before_roots {
+        return None;
     }
 
     let theory_handle = loaded_roots

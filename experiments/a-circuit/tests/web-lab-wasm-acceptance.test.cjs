@@ -186,7 +186,37 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
         throw new Error(registryBlock.id + " overlay handle out of range");
       }
     }
-    const recursiveSources = proof.prepare.semanticRoots.map(
+    const preparedRoots = proof.prepare.semanticRoots;
+    const loadedRoots = proof.load.semanticRoots;
+    if (!Array.isArray(preparedRoots) ||
+        !Array.isArray(loadedRoots) ||
+        preparedRoots.length !== loadedRoots.length) {
+      throw new Error(registryBlock.id + " semantic root stage mismatch");
+    }
+    const loadedByRole = new Map(
+      loadedRoots.map((root) => [root.role, root])
+    );
+    const locatorOnlyRoots = preparedRoots.map((root) => {
+      if (!Number.isInteger(root.carrierRef) ||
+          root.carrierRef < 1 ||
+          root.carrierRef > proof.prepare.compiledLinks) {
+        throw new Error(registryBlock.id + " invalid semantic root CarrierRef");
+      }
+      const loaded = loadedByRole.get(root.role);
+      if (!loaded ||
+          loaded.carrierRef !== root.carrierRef ||
+          loaded.localHandle !== root.carrierRef ||
+          loaded.source !== root.source) {
+        throw new Error(
+          registryBlock.id + " semantic root CarrierRef differential mismatch"
+        );
+      }
+      return {
+        role: root.role,
+        carrierRef: root.carrierRef,
+      };
+    });
+    const recursiveSources = preparedRoots.map(
       (root) => root.source || ""
     );
     const reactionScopes = proof.execute.reactions.map((step) => ({
@@ -241,7 +271,8 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
         prepareJson: jsonBytes(proof.prepare),
         carrierJson: jsonBytes(carrierDuplets),
         carrierDenseU32Floor: carrierDuplets.length * 2 * 4,
-        semanticRootsJson: jsonBytes(proof.prepare.semanticRoots),
+        semanticRootsJson: jsonBytes(preparedRoots),
+        semanticRootLocatorOnlyJson: jsonBytes(locatorOnlyRoots),
         semanticRootRecursiveSources: recursiveSources.reduce(
           (sum, value) => sum + Buffer.byteLength(value, "utf8"),
           0
@@ -1102,6 +1133,11 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
       totalCarrierDenseU32FloorBytes: sumBytes("carrierDenseU32Floor"),
       totalReactionsJsonBytes: sumBytes("reactionsJson"),
       totalVisualLinksJsonBytes: sumBytes("visualLinksJson"),
+      semanticRootLocatorPrototype: {
+        totalFullRootsJsonBytes: sumBytes("semanticRootsJson"),
+        totalLocatorOnlyJsonBytes: sumBytes("semanticRootLocatorOnlyJson"),
+        totalRecursiveSourceBytes: sumBytes("semanticRootRecursiveSources"),
+      },
       topologyPrototype: (() => {
         const totalCurrentTopologyJsonBytes = measuredProofs.reduce(
           (sum, item) => sum + item.topologyPrototype.currentTopologyJsonBytes,
