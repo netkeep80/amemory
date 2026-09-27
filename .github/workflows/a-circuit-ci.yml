@@ -1,0 +1,212 @@
+name: A-Circuit consolidated CI
+
+on:
+  pull_request:
+    paths:
+      - "experiments/a-circuit/**"
+      - "experiments/optimized-cpu-rust/**"
+      - ".github/workflows/a-circuit-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "experiments/a-circuit/**"
+      - "experiments/optimized-cpu-rust/**"
+      - ".github/workflows/a-circuit-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  MTS_ACCEPTED_V013_SHA: 3819b5fb2bae65506c2888e7c4fa0de387551846
+
+jobs:
+  verify:
+    name: A-Circuit complete structural suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout A-memory
+        uses: actions/checkout@v6
+
+      - name: Install pinned Rust toolchain once
+        run: rustup toolchain install 1.98.1 --profile minimal
+
+      - name: C0-C1 semantic witnesses
+        run: |
+          cargo +1.98.1 test \
+            --manifest-path experiments/a-circuit/Cargo.toml \
+            -- --test-threads=1
+          cargo +1.98.1 build \
+            --release \
+            --manifest-path experiments/a-circuit/Cargo.toml
+
+      - name: M1 structural MUX
+        run: |
+          cargo +1.98.1 test \
+            --release \
+            --manifest-path experiments/a-circuit/Cargo.toml \
+            m1_mux1_ \
+            -- --nocapture --test-threads=1
+          cargo +1.98.1 test \
+            --release \
+            --manifest-path experiments/a-circuit/Cargo.toml \
+            m1_mux32_ \
+            -- --ignored --nocapture --test-threads=1
+
+      - name: M3 SUB1 shared-adder witness
+        run: |
+          cargo +1.98.1 test \
+            --release \
+            --manifest-path experiments/a-circuit/Cargo.toml \
+            m3_sub1_ \
+            -- --nocapture --test-threads=1
+
+      - name: M3 generated ripple suites
+        run: |
+          cargo +1.98.1 test --release --manifest-path experiments/a-circuit/Cargo.toml m3_scale_ -- --ignored --nocapture --test-threads=1
+          cargo +1.98.1 test --release --manifest-path experiments/a-circuit/Cargo.toml m3_sub_scale_ -- --ignored --nocapture --test-threads=1
+          cargo +1.98.1 test --release --manifest-path experiments/a-circuit/Cargo.toml m3_arith_shared_ -- --ignored --nocapture --test-threads=1
+          cargo +1.98.1 test --release --manifest-path experiments/a-circuit/Cargo.toml m3_eflags_ -- --ignored --nocapture --test-threads=1
+
+      - name: M4 logic and arithmetic effects
+        run: |
+          cargo +1.98.1 test --release --manifest-path experiments/a-circuit/Cargo.toml m4_logic_ -- --ignored --nocapture --test-threads=1
+          cargo +1.98.1 test --release --manifest-path experiments/a-circuit/Cargo.toml m4_logic_effects_ -- --ignored --nocapture --test-threads=1
+          cargo +1.98.1 test --release --manifest-path experiments/a-circuit/Cargo.toml m4_arith_effect_ -- --ignored --nocapture --test-threads=1
+
+      - name: M4 shifts and rotates
+        run: |
+          cargo +1.98.1 test --release --manifest-path experiments/a-circuit/Cargo.toml m4_shift1_ -- --ignored --nocapture --test-threads=1
+          cargo +1.98.1 test --release --manifest-path experiments/a-circuit/Cargo.toml m4_shift32_ -- --ignored --nocapture --test-threads=1
+          cargo +1.98.1 test --release --manifest-path experiments/a-circuit/Cargo.toml m4_rotate32_ -- --ignored --nocapture --test-threads=1
+          cargo +1.98.1 test --release --manifest-path experiments/a-circuit/Cargo.toml m4_rotate_carry32_ -- --ignored --nocapture --test-threads=1
+
+      - name: M4 unary and Wide64
+        run: |
+          cargo +1.98.1 test --release --manifest-path experiments/a-circuit/Cargo.toml m4_unary_arith_ -- --ignored --nocapture --test-threads=1
+          cargo +1.98.1 test --release --manifest-path experiments/a-circuit/Cargo.toml m4_wide64_add64_ -- --ignored --nocapture --test-threads=1
+
+      - name: M4 structural multiplication
+        run: |
+          cargo +1.98.1 test --release --manifest-path experiments/a-circuit/Cargo.toml m4_mul32_ -- --ignored --nocapture --test-threads=1
+          cargo +1.98.1 test --release --manifest-path experiments/a-circuit/Cargo.toml m4_mul_effect_ -- --ignored --nocapture --test-threads=1
+
+      - name: Informational performance profiles
+        run: |
+          cargo +1.98.1 test \
+            --release \
+            --manifest-path experiments/a-circuit/Cargo.toml \
+            m3_perf_ripple_width_baseline \
+            -- --ignored --nocapture --test-threads=1 2>&1 | tee /tmp/ripple-perf.log
+          grep -q "RIPPLE_PERF width=4 " /tmp/ripple-perf.log
+          grep -q "RIPPLE_PERF width=8 " /tmp/ripple-perf.log
+          grep -q "RIPPLE_PERF width=16 " /tmp/ripple-perf.log
+          grep -q "RIPPLE_PERF width=32 " /tmp/ripple-perf.log
+          grep -q "RIPPLE_PERF_NOTE=informational-only-no-performance-threshold" /tmp/ripple-perf.log
+          grep -q "RIPPLE_PROFILE width=4 " /tmp/ripple-perf.log
+          grep -q "RIPPLE_PROFILE width=8 " /tmp/ripple-perf.log
+          grep -q "RIPPLE_PROFILE width=16 " /tmp/ripple-perf.log
+          grep -q "RIPPLE_PROFILE width=32 " /tmp/ripple-perf.log
+
+          cargo +1.98.1 test \
+            --release \
+            --manifest-path experiments/a-circuit/Cargo.toml \
+            m4_shift32_profile_candidate_selectivity \
+            -- --ignored --nocapture --test-threads=1 2>&1 | tee /tmp/shift32-profile.log
+          grep -q "SHIFT32_PROFILE op=SHL " /tmp/shift32-profile.log
+          grep -q "SHIFT32_PROFILE op=SHR " /tmp/shift32-profile.log
+          grep -q "SHIFT32_PROFILE op=SAR " /tmp/shift32-profile.log
+          grep -q "SHIFT32_PROFILE_NOTE=informational-only-no-performance-threshold" /tmp/shift32-profile.log
+
+      - name: Optimized Rust C3 Full Adder
+        run: |
+          cargo +1.98.1 run \
+            --quiet \
+            --release \
+            --manifest-path experiments/optimized-cpu-rust/Cargo.toml \
+            --example c3_full_adder | tee /tmp/c3.log
+          grep '^C3_RESULT_JSON=' /tmp/c3.log
+          grep '^A_CIRCUIT_C3=GREEN' /tmp/c3.log
+          test "$(grep -c 'define_binary_gate_rows' experiments/optimized-cpu-rust/examples/c3_full_adder.rs)" -ge 4
+          ! grep -q 'FULL_GLOBAL_TRUTH_TABLE' experiments/optimized-cpu-rust/src/structural.rs
+          ! grep -q 'XOR' experiments/optimized-cpu-rust/src/structural.rs
+          ! grep -q 'AND' experiments/optimized-cpu-rust/src/structural.rs
+          ! grep -q 'OR' experiments/optimized-cpu-rust/src/structural.rs
+
+      - name: Checkout exact accepted MTS v0.13 once
+        uses: actions/checkout@v6
+        with:
+          repository: netkeep80/anum_docs
+          ref: ${{ env.MTS_ACCEPTED_V013_SHA }}
+          path: _upstream/anum_docs
+
+      - name: Verify exact upstream pin
+        shell: bash
+        run: |
+          test "$(git -C _upstream/anum_docs rev-parse HEAD)" = "$MTS_ACCEPTED_V013_SHA"
+
+      - name: Set up Node 24 once
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Build accepted MTS TypeScript kernel once
+        working-directory: _upstream/anum_docs/ts
+        run: |
+          npm ci
+          npm run build
+
+      - name: C2b accepted-MTS / optimized-Rust differential
+        shell: bash
+        run: |
+          node experiments/a-circuit/upstream/c2b-half-adder.mjs | tee /tmp/c2b-mts.log
+          cargo +1.98.1 run \
+            --quiet \
+            --release \
+            --manifest-path experiments/optimized-cpu-rust/Cargo.toml \
+            --example c2b_half_adder | tee /tmp/c2b-rust.log
+          MTS="$(grep '^C2B_RESULT_JSON=' /tmp/c2b-mts.log)"
+          RUST="$(grep '^C2B_RESULT_JSON=' /tmp/c2b-rust.log)"
+          test "$MTS" = "$RUST"
+          echo "C2B_STRUCTURAL_DIFFERENTIAL=PASS"
+
+      - name: M2 accepted-MTS / A-memory Full Adder differential
+        shell: bash
+        run: |
+          node experiments/a-circuit/upstream/m2-full-adder.mjs 2>&1 | tee /tmp/full-adder-upstream.log
+          grep -q "A_CIRCUIT_M2_FULL_ADDER=GREEN" /tmp/full-adder-upstream.log
+
+          cargo +1.98.1 test \
+            --manifest-path experiments/a-circuit/Cargo.toml \
+            m2_gate_composed_full_adder_all_eight_rows \
+            -- --nocapture --test-threads=1 2>&1 | tee /tmp/full-adder-rust.log
+
+          sed -n 's/.*FULL_ADDER_TRACE input=\([01][01][01]\) sum=\([01]\) cout=\([01]\).*/\1:\2\3/p' \
+            /tmp/full-adder-upstream.log | sort -u > /tmp/upstream.rows
+          sed -n 's/.*FULL_ADDER_TRACE input=\([01][01][01]\) sum=\([01]\) cout=\([01]\).*/\1:\2\3/p' \
+            /tmp/full-adder-rust.log | sort -u > /tmp/rust.rows
+
+          test "$(wc -l < /tmp/upstream.rows)" -eq 8
+          test "$(wc -l < /tmp/rust.rows)" -eq 8
+          diff -u /tmp/upstream.rows /tmp/rust.rows
+
+          cat > /tmp/expected.rows <<'EOF'
+          000:00
+          001:10
+          010:10
+          011:01
+          100:10
+          101:01
+          110:01
+          111:11
+          EOF
+          sed -i 's/^          //' /tmp/expected.rows
+          diff -u /tmp/expected.rows /tmp/rust.rows
+          echo "FULL_ADDER_DIFFERENTIAL=PASS"
+
+      - name: Consolidation policy
+        run: |
+          echo "All A-Circuit structural suites share one runner, checkout and Rust toolchain."
+          echo "Accepted MTS is checked out and built once for both upstream differential witnesses."
+          echo "Performance profiles remain informational; semantic failures are blocking."
