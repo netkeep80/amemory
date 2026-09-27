@@ -7,7 +7,6 @@ on:
     paths:
       - "experiments/a-circuit/**"
       - "experiments/browser-accelerator/web/**"
-      - "VERSION"
       - ".github/workflows/a-circuit-web-lab.yml"
       - ".github/workflows/browser-accelerator-pages.yml"
   push:
@@ -15,10 +14,13 @@ on:
     paths:
       - "experiments/a-circuit/**"
       - "experiments/browser-accelerator/web/**"
-      - "VERSION"
       - ".github/workflows/a-circuit-web-lab.yml"
       - ".github/workflows/browser-accelerator-pages.yml"
   workflow_dispatch:
+
+concurrency:
+  group: a-circuit-web-lab-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read

@@ -14,6 +14,10 @@ on:
       - ".github/workflows/a-circuit-ci.yml"
   workflow_dispatch:
 
+concurrency:
+  group: a-circuit-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -119,6 +123,31 @@ jobs:
           grep -q "SHIFT32_PROFILE op=SAR " /tmp/shift32-profile.log
           grep -q "SHIFT32_PROFILE_NOTE=informational-only-no-performance-threshold" /tmp/shift32-profile.log
 
+      - name: Optimized CPU differential witnesses
+        run: |
+          cargo +1.98.1 test \
+            --manifest-path experiments/optimized-cpu-rust/Cargo.toml \
+            -- --test-threads=1
+
+      - name: Optimized CPU informational baselines
+        run: |
+          cargo +1.98.1 test \
+            --release \
+            --manifest-path experiments/optimized-cpu-rust/Cargo.toml \
+            optimized_hash_index_benchmark_baseline \
+            -- --ignored --nocapture --test-threads=1
+          cargo +1.98.1 test \
+            --release \
+            --manifest-path experiments/optimized-cpu-rust/Cargo.toml \
+            optimized_reaction_benchmark_baseline \
+            -- --ignored --nocapture --test-threads=1
+
+      - name: Optimized CPU release compile
+        run: |
+          cargo +1.98.1 build \
+            --release \
+            --manifest-path experiments/optimized-cpu-rust/Cargo.toml
+
       - name: Optimized Rust C3 Full Adder
         run: |
           cargo +1.98.1 run \
@@ -210,3 +239,4 @@ jobs:
           echo "All A-Circuit structural suites share one runner, checkout and Rust toolchain."
           echo "Accepted MTS is checked out and built once for both upstream differential witnesses."
           echo "Performance profiles remain informational; semantic failures are blocking."
+          echo "Optimized CPU differential/build checks share this same runner."
