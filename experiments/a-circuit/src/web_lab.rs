@@ -4,8 +4,8 @@ use crate::{
     mul32_n::web_run_mul32,
     mul_effect_n::web_run_mul_effect,
     mux_n::{web_prove_mux1, web_prove_mux32},
-    rotate32_n::web_run_rotate32,
-    rotate_carry32_n::web_run_rotate_carry32,
+    rotate32_n::{web_prove_rotate32, web_run_rotate32},
+    rotate_carry32_n::{web_prove_rotate_carry32, web_run_rotate_carry32},
     shift32_n::{web_prove_shift32, web_run_shift32},
     unary_arith_n::web_run_unary32,
 };
@@ -208,7 +208,49 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
         });
     }
 
+    if (16..=17).contains(&op) {
+        let execution = web_prove_rotate32(op, a, b)?;
+        let proof_json = serde_json::to_string(&execution.proof).ok()?;
+        let out = execution.outcome;
+        set_last_proof_json(proof_json);
+        return Some(LabOutcome {
+            value: out.value,
+            value_hi: 0,
+            writeback: u32::from(out.writeback),
+            defined_mask: out.defined_mask,
+            value_mask: out.value_mask,
+            undefined_mask: out.undefined_mask,
+            preserve_mask: out.preserve_mask,
+            reactions: out.reactions,
+            links_after_build: out.links_after_build,
+            links_after_first: out.links_after_first,
+            steady_link_delta: out.steady_link_delta,
+            quiescent: u32::from(out.quiescent),
+        });
+    }
+
     if let Some(out) = web_run_rotate32(op, a, b) {
+        return Some(LabOutcome {
+            value: out.value,
+            value_hi: 0,
+            writeback: u32::from(out.writeback),
+            defined_mask: out.defined_mask,
+            value_mask: out.value_mask,
+            undefined_mask: out.undefined_mask,
+            preserve_mask: out.preserve_mask,
+            reactions: out.reactions,
+            links_after_build: out.links_after_build,
+            links_after_first: out.links_after_first,
+            steady_link_delta: out.steady_link_delta,
+            quiescent: u32::from(out.quiescent),
+        });
+    }
+
+    if (18..=19).contains(&op) {
+        let execution = web_prove_rotate_carry32(op, a, b, input_flag)?;
+        let proof_json = serde_json::to_string(&execution.proof).ok()?;
+        let out = execution.outcome;
+        set_last_proof_json(proof_json);
         return Some(LabOutcome {
             value: out.value,
             value_hi: 0,
@@ -837,13 +879,231 @@ mod tests {
             "count 1 and 33 must converge only through structural Count8 masking"
         );
 
-        let ror = execute(17, 1, 1, 0).unwrap();
-        assert_eq!(ror.value, 0x8000_0000);
-        assert_eq!(ror.steady_link_delta, 0);
+        let mut rotate_aliases = Vec::new();
+        for (op, value, count, expected, block) in [
+            (16u32, 0x8000_0001u32, 1u32, 0x0000_0003u32, "ROL32"),
+            (17u32, 0x0000_0001u32, 1u32, 0x8000_0000u32, "ROR32"),
+            (16u32, 0x8000_0001u32, 2u32, 0x0000_0006u32, "ROL32"),
+            (16u32, 0x8000_0001u32, 32u32, 0x8000_0001u32, "ROL32"),
+            (16u32, 0x8000_0001u32, 33u32, 0x0000_0003u32, "ROL32"),
+        ] {
+            let out = execute(op, value, count, 0).unwrap();
+            assert_eq!(out.value, expected, "{block} count={count}");
+            assert_eq!(out.writeback, 1, "{block}");
+            assert_eq!(out.steady_link_delta, 0, "{block}");
+            assert_eq!(out.quiescent, 1, "{block}");
+            assert_eq!(amemory_i386_lab_proof_available(), 1, "{block}");
 
-        let rcl = execute(18, 0x8000_0000, 1, 0).unwrap();
-        assert_eq!(rcl.quiescent, 1);
-        assert_eq!(rcl.steady_link_delta, 0);
+            let proof_json = {
+                let guard = LAST_PROOF_JSON
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                guard.clone()
+            };
+            let proof: serde_json::Value =
+                serde_json::from_str(&proof_json).unwrap();
+            assert_eq!(proof["block"], block);
+            let memory_id =
+                proof["load"]["memoryInstanceId"].as_str().unwrap();
+            assert_eq!(
+                proof["execute"]["memoryInstanceId"].as_str().unwrap(),
+                memory_id
+            );
+            assert_eq!(
+                proof["result"]["memoryInstanceId"].as_str().unwrap(),
+                memory_id
+            );
+            assert_eq!(proof["load"]["carrierRoundTrip"], true);
+            assert_eq!(proof["execute"]["finalQuiescent"], true);
+            assert_eq!(proof["result"]["oracleMatches"], true);
+            assert_eq!(proof["result"]["identicalRerunLinkDelta"], 0);
+            assert_eq!(
+                proof["result"]["decodedValue"].as_u64().unwrap() as u32,
+                out.value
+            );
+
+            let roots = proof["prepare"]["semanticRoots"].as_array().unwrap();
+            let source_for = |role: &str| {
+                roots
+                    .iter()
+                    .find(|root| root["role"] == role)
+                    .and_then(|root| root["source"].as_str())
+                    .unwrap()
+            };
+            for required in [
+                "function.rotate.selected",
+                "function.rotate.rol",
+                "function.rotate.ror",
+                "function.gate.xor2",
+                "data.value.word",
+                "data.count.word",
+                "execution.interpreter",
+                "execution.theory",
+                "execution.apply",
+                "invocation.call",
+                "scope.initial",
+                "result.tag",
+                "result.flag.set_tag",
+                "result.flag.undefined_tag",
+            ] {
+                assert!(
+                    roots.iter().any(|root| root["role"] == required),
+                    "{block}: missing {required}"
+                );
+            }
+            let selected_role =
+                if op == 16 { "function.rotate.rol" } else { "function.rotate.ror" };
+            assert_eq!(
+                source_for("function.rotate.selected"),
+                source_for(selected_role),
+                "{block}: selected structural function mismatch"
+            );
+
+            if count == 1 {
+                assert_eq!(out.defined_mask, FLAG_CF | FLAG_OF, "{block}");
+                assert_eq!(out.undefined_mask, 0, "{block}");
+            } else if count == 2 {
+                assert_eq!(out.defined_mask, FLAG_CF, "{block}");
+                assert_eq!(out.undefined_mask, FLAG_OF, "{block}");
+            } else if count == 32 {
+                assert_eq!(out.defined_mask, 0, "{block}");
+                assert_eq!(out.undefined_mask, 0, "{block}");
+                assert_eq!(out.preserve_mask, STATUS_FLAGS, "{block}");
+                assert_eq!(out.reactions, 1, "{block}");
+            }
+
+            if op == 16 && (count == 1 || count == 33) {
+                rotate_aliases.push((
+                    count,
+                    source_for("data.count.word").to_owned(),
+                    out.value,
+                    out.defined_mask,
+                    out.value_mask,
+                    out.undefined_mask,
+                    out.preserve_mask,
+                    out.reactions,
+                ));
+            }
+        }
+        rotate_aliases.sort_by_key(|entry| entry.0);
+        assert_eq!(rotate_aliases.len(), 2);
+        assert_ne!(rotate_aliases[0].1, rotate_aliases[1].1);
+        assert_eq!(
+            (&rotate_aliases[0].2, &rotate_aliases[0].3, &rotate_aliases[0].4,
+             &rotate_aliases[0].5, &rotate_aliases[0].6, &rotate_aliases[0].7),
+            (&rotate_aliases[1].2, &rotate_aliases[1].3, &rotate_aliases[1].4,
+             &rotate_aliases[1].5, &rotate_aliases[1].6, &rotate_aliases[1].7),
+            "ROL32 count 1/33 must converge only through structural masking"
+        );
+
+        let mut carry_aliases = Vec::new();
+        for (op, value, count, cf_in, expected, block) in [
+            (18u32, 0x8000_0000u32, 1u32, 1u32, 0x0000_0001u32, "RCL32"),
+            (19u32, 0x0000_0001u32, 1u32, 0u32, 0x0000_0000u32, "RCR32"),
+            (18u32, 0x8000_0000u32, 2u32, 1u32, 0x0000_0003u32, "RCL32"),
+            (18u32, 0x8000_0000u32, 32u32, 1u32, 0x8000_0000u32, "RCL32"),
+            (18u32, 0x8000_0000u32, 33u32, 1u32, 0x0000_0001u32, "RCL32"),
+        ] {
+            let out = execute(op, value, count, cf_in).unwrap();
+            assert_eq!(out.value, expected, "{block} count={count}");
+            assert_eq!(out.writeback, 1, "{block}");
+            assert_eq!(out.steady_link_delta, 0, "{block}");
+            assert_eq!(out.quiescent, 1, "{block}");
+            assert_eq!(amemory_i386_lab_proof_available(), 1, "{block}");
+
+            let proof_json = {
+                let guard = LAST_PROOF_JSON
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                guard.clone()
+            };
+            let proof: serde_json::Value =
+                serde_json::from_str(&proof_json).unwrap();
+            assert_eq!(proof["block"], block);
+            assert_eq!(proof["load"]["carrierRoundTrip"], true);
+            assert_eq!(proof["execute"]["finalQuiescent"], true);
+            assert_eq!(proof["result"]["oracleMatches"], true);
+            assert_eq!(proof["result"]["identicalRerunLinkDelta"], 0);
+
+            let roots = proof["prepare"]["semanticRoots"].as_array().unwrap();
+            let source_for = |role: &str| {
+                roots
+                    .iter()
+                    .find(|root| root["role"] == role)
+                    .and_then(|root| root["source"].as_str())
+                    .unwrap()
+            };
+            for required in [
+                "function.rotate_carry.selected",
+                "function.rotate_carry.rcl",
+                "function.rotate_carry.rcr",
+                "function.gate.xor2",
+                "data.value.word",
+                "data.count.word",
+                "data.cf_in",
+                "data.bit.zero",
+                "data.bit.one",
+                "execution.interpreter",
+                "execution.theory",
+                "execution.apply",
+                "invocation.call",
+                "scope.initial",
+                "result.tag",
+            ] {
+                assert!(
+                    roots.iter().any(|root| root["role"] == required),
+                    "{block}: missing {required}"
+                );
+            }
+            let selected_role =
+                if op == 18 { "function.rotate_carry.rcl" } else { "function.rotate_carry.rcr" };
+            assert_eq!(
+                source_for("function.rotate_carry.selected"),
+                source_for(selected_role),
+                "{block}: selected structural function mismatch"
+            );
+            assert_eq!(
+                source_for("data.cf_in"),
+                source_for(if cf_in == 0 { "data.bit.zero" } else { "data.bit.one" }),
+                "{block}: CF-in is not the structural input bit"
+            );
+
+            if count == 1 {
+                assert_eq!(out.defined_mask, FLAG_CF | FLAG_OF, "{block}");
+                assert_eq!(out.undefined_mask, 0, "{block}");
+            } else if count == 2 {
+                assert_eq!(out.defined_mask, FLAG_CF, "{block}");
+                assert_eq!(out.undefined_mask, FLAG_OF, "{block}");
+            } else if count == 32 {
+                assert_eq!(out.defined_mask, 0, "{block}");
+                assert_eq!(out.undefined_mask, 0, "{block}");
+                assert_eq!(out.preserve_mask, STATUS_FLAGS, "{block}");
+                assert_eq!(out.reactions, 1, "{block}");
+            }
+
+            if op == 18 && cf_in == 1 && (count == 1 || count == 33) {
+                carry_aliases.push((
+                    count,
+                    source_for("data.count.word").to_owned(),
+                    out.value,
+                    out.defined_mask,
+                    out.value_mask,
+                    out.undefined_mask,
+                    out.preserve_mask,
+                    out.reactions,
+                ));
+            }
+        }
+        carry_aliases.sort_by_key(|entry| entry.0);
+        assert_eq!(carry_aliases.len(), 2);
+        assert_ne!(carry_aliases[0].1, carry_aliases[1].1);
+        assert_eq!(
+            (&carry_aliases[0].2, &carry_aliases[0].3, &carry_aliases[0].4,
+             &carry_aliases[0].5, &carry_aliases[0].6, &carry_aliases[0].7),
+            (&carry_aliases[1].2, &carry_aliases[1].3, &carry_aliases[1].4,
+             &carry_aliases[1].5, &carry_aliases[1].6, &carry_aliases[1].7),
+            "RCL32 count 1/33 must converge only through structural masking"
+        );
 
         let inc = execute(20, 0x7fff_ffff, 0, 0).unwrap();
         assert_eq!(inc.value, 0x8000_0000);

@@ -766,8 +766,137 @@ jobs:
                 throw new Error("Count8 1 and 33 failed structural masking equivalence: " + key);
               }
             }
-            run(17, 0x00000001, 1, 0, 0x80000000, "ROR32");
-            run(18, 0x00000000, 1, 1, 0x00000001, "RCL32 CF-in");
+            const verifyRotateProof = (
+              op, value, count, cfIn, expected, block, carry
+            ) => {
+              run(op, value, count, cfIn, expected, block + " count=" + count);
+              const proof = readCurrentProof(block);
+              const memoryId = proof.load.memoryInstanceId;
+              if (proof.block !== block ||
+                  !memoryId ||
+                  proof.execute.memoryInstanceId !== memoryId ||
+                  proof.result.memoryInstanceId !== memoryId ||
+                  !proof.execute.reactions.every((step) => step.memoryInstanceId === memoryId) ||
+                  !proof.load.carrierRoundTrip ||
+                  !proof.execute.finalQuiescent ||
+                  !proof.result.oracleMatches ||
+                  proof.result.identicalRerunLinkDelta !== 0 ||
+                  (proof.result.decodedValue >>> 0) !== (expected >>> 0)) {
+                throw new Error(block + " structural rotate witness failed");
+              }
+
+              const sourceByRole = new Map(
+                proof.prepare.semanticRoots.map((root) => [root.role, root.source])
+              );
+              const required = carry
+                ? [
+                    "function.rotate_carry.selected",
+                    "function.rotate_carry.rcl",
+                    "function.rotate_carry.rcr",
+                    "function.gate.xor2",
+                    "data.value.word",
+                    "data.count.word",
+                    "data.cf_in",
+                    "data.bit.zero",
+                    "data.bit.one",
+                    "execution.interpreter",
+                    "execution.theory",
+                    "execution.apply",
+                    "invocation.call",
+                    "scope.initial",
+                    "result.tag",
+                    "result.flag.set_tag",
+                    "result.flag.undefined_tag",
+                  ]
+                : [
+                    "function.rotate.selected",
+                    "function.rotate.rol",
+                    "function.rotate.ror",
+                    "function.gate.xor2",
+                    "data.value.word",
+                    "data.count.word",
+                    "execution.interpreter",
+                    "execution.theory",
+                    "execution.apply",
+                    "invocation.call",
+                    "scope.initial",
+                    "result.tag",
+                    "result.flag.set_tag",
+                    "result.flag.undefined_tag",
+                  ];
+              for (const role of required) {
+                if (!sourceByRole.has(role)) {
+                  throw new Error(block + " prepared Aset missing " + role);
+                }
+              }
+
+              const selectedRole = carry
+                ? (op === 18 ? "function.rotate_carry.rcl" : "function.rotate_carry.rcr")
+                : (op === 16 ? "function.rotate.rol" : "function.rotate.ror");
+              const selectedKey = carry
+                ? "function.rotate_carry.selected"
+                : "function.rotate.selected";
+              if (sourceByRole.get(selectedKey) !== sourceByRole.get(selectedRole)) {
+                throw new Error(block + " selected structural function mismatch");
+              }
+              if (carry) {
+                const cfSource = sourceByRole.get(
+                  cfIn === 0 ? "data.bit.zero" : "data.bit.one"
+                );
+                if (sourceByRole.get("data.cf_in") !== cfSource) {
+                  throw new Error(block + " CF-in is not a structural bit input");
+                }
+              }
+              if (proof.result.visualLinks.length !== proof.result.linksFinal) {
+                throw new Error(block + " visual snapshot is incomplete");
+              }
+
+              return {
+                countSource: sourceByRole.get("data.count.word"),
+                value: w.amemory_i386_lab_value() >>> 0,
+                defined: w.amemory_i386_lab_defined_mask() >>> 0,
+                values: w.amemory_i386_lab_value_mask() >>> 0,
+                undefined: w.amemory_i386_lab_undefined_mask() >>> 0,
+                preserve: w.amemory_i386_lab_preserve_mask() >>> 0,
+                reactions: w.amemory_i386_lab_reactions() >>> 0,
+              };
+            };
+
+            const rol1 = verifyRotateProof(16, 0x80000001, 1, 0, 0x00000003, "ROL32", false);
+            verifyRotateProof(17, 0x00000001, 1, 0, 0x80000000, "ROR32", false);
+            const rol2 = verifyRotateProof(16, 0x80000001, 2, 0, 0x00000006, "ROL32", false);
+            const rol32 = verifyRotateProof(16, 0x80000001, 32, 0, 0x80000001, "ROL32", false);
+            const rol33 = verifyRotateProof(16, 0x80000001, 33, 0, 0x00000003, "ROL32", false);
+            if (rol1.defined !== 0x00000801 || rol1.undefined !== 0 ||
+                rol2.defined !== 0x00000001 || rol2.undefined !== 0x00000800 ||
+                rol32.defined !== 0 || rol32.undefined !== 0 ||
+                rol32.preserve !== 0x000008d5 || rol32.reactions !== 1 ||
+                rol1.countSource === rol33.countSource) {
+              throw new Error("ROL32 flag/masking proof failed");
+            }
+            for (const key of ["value", "defined", "values", "undefined", "preserve", "reactions"]) {
+              if (rol1[key] !== rol33[key]) {
+                throw new Error("ROL32 Count8 1/33 masking mismatch: " + key);
+              }
+            }
+
+            const rcl1 = verifyRotateProof(18, 0x80000000, 1, 1, 0x00000001, "RCL32", true);
+            verifyRotateProof(19, 0x00000001, 1, 0, 0x00000000, "RCR32", true);
+            const rcl2 = verifyRotateProof(18, 0x80000000, 2, 1, 0x00000003, "RCL32", true);
+            const rcl32 = verifyRotateProof(18, 0x80000000, 32, 1, 0x80000000, "RCL32", true);
+            const rcl33 = verifyRotateProof(18, 0x80000000, 33, 1, 0x00000001, "RCL32", true);
+            if (rcl1.defined !== 0x00000801 || rcl1.undefined !== 0 ||
+                rcl2.defined !== 0x00000001 || rcl2.undefined !== 0x00000800 ||
+                rcl32.defined !== 0 || rcl32.undefined !== 0 ||
+                rcl32.preserve !== 0x000008d5 || rcl32.reactions !== 1 ||
+                rcl1.countSource === rcl33.countSource) {
+              throw new Error("RCL32 flag/masking proof failed");
+            }
+            for (const key of ["value", "defined", "values", "undefined", "preserve", "reactions"]) {
+              if (rcl1[key] !== rcl33[key]) {
+                throw new Error("RCL32 Count8 1/33 masking mismatch: " + key);
+              }
+            }
             run(20, 0x7fffffff, 0, 0, 0x80000000, "INC32");
             run(22, 0x00000001, 0, 0, 0xffffffff, "NEG32");
 
@@ -790,7 +919,7 @@ jobs:
               throw new Error("x86 MUL32 must not preserve status flags");
             }
 
-            console.log("WASM registry + MUX1/MUX32/logic/arithmetic/shift-proofs/rotate/unary/MUL structural smoke PASS");
+            console.log("WASM registry + MUX1/MUX32/logic/arithmetic/shift/rotate-proofs/unary/MUL structural smoke PASS");
           }).catch((error) => {
             console.error(error);
             process.exit(1);
