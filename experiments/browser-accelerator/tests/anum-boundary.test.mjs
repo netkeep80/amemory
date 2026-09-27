@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
 import {
   ANUM_FIXTURES,
+  bindCpuSemanticOrientation,
   compileAnumPlan,
   createContextRelativeOrientation,
+  cpuExportSemanticRecursiveWire,
+  cpuImportSemanticRecursiveWire,
   exportLocalTopology,
   localRef,
   normalizeAnum,
+  readCpuTopology,
   requireLocalRef,
   topologyCount,
   cpuExport,
@@ -120,6 +124,61 @@ assert.equal(requireLocalRef(cpuRef, "cpu-A"), 4);
 assert.equal(requireLocalRef(gpuRef, "gpu-B"), 60);
 assert.throws(() => requireLocalRef(cpuRef, "gpu-B"), /foreign local handle/);
 assert.throws(() => requireLocalRef(gpuRef, "cpu-A"), /foreign local handle/);
+
+const cpuFixtureMemory = "cpu-fixture";
+let fixtureTokens = [];
+let fixtureImportCalls = 0;
+const topologyWasm = {
+  anumCpuUsed: (handle) => cpu.used[handle] ?? -1,
+  anumCpuStart: (handle) => cpu.used[handle] ? cpu.starts[handle] : -1,
+  anumCpuEnd: (handle) => cpu.used[handle] ? cpu.ends[handle] : -1,
+  anumCpuSetToken: (index, token) => { fixtureTokens[index] = token; return 1; },
+  anumCpuImport: (count) => {
+    fixtureImportCalls += 1;
+    const source = fixtureTokens.slice(0, count).join("");
+    if (source === "68") return 3;
+    if (source === "98") return 2;
+    return -1;
+  },
+};
+
+const observedCpu = readCpuTopology(topologyWasm);
+assert.equal(exportLocalTopology(observedCpu, 4), "19868");
+const boundCpuMirror = bindCpuSemanticOrientation(
+  topologyWasm,
+  localRef(cpuFixtureMemory, 2),
+  localRef(cpuFixtureMemory, 3),
+  cpuFixtureMemory,
+);
+assert.equal(boundCpuMirror.transport, "J");
+
+fixtureTokens = [];
+const importedSemanticO = cpuImportSemanticRecursiveWire(
+  topologyWasm, boundCpuMirror, "98", cpuFixtureMemory,
+);
+assert.equal(importedSemanticO.value, 3);
+assert.equal(fixtureTokens.join(""), "68");
+assert.equal(
+  cpuExportSemanticRecursiveWire(
+    topologyWasm, boundCpuMirror, importedSemanticO, cpuFixtureMemory,
+  ),
+  "98",
+);
+
+const importCallsBeforeMalformed = fixtureImportCalls;
+assert.throws(
+  () => cpuImportSemanticRecursiveWire(
+    topologyWasm, boundCpuMirror, "1986x", cpuFixtureMemory,
+  ),
+  /malformed Anum token/,
+);
+assert.equal(fixtureImportCalls, importCallsBeforeMalformed);
+assert.throws(
+  () => cpuImportSemanticRecursiveWire(
+    topologyWasm, boundCpuMirror, "98", "other-memory",
+  ),
+  /foreign semantic orientation/,
+);
 
 const cycle = {
   starts: new Uint32Array(cpu.starts),

@@ -163,6 +163,9 @@ async function loadWasm() {
   const anumCpuExport = instance.exports.amemory_anum_cpu_export;
   const anumCpuOutputGet = instance.exports.amemory_anum_cpu_output_get;
   const anumCpuPoolCount = instance.exports.amemory_anum_cpu_pool_count;
+  const anumCpuUsed = instance.exports.amemory_anum_cpu_used;
+  const anumCpuStart = instance.exports.amemory_anum_cpu_start;
+  const anumCpuEnd = instance.exports.amemory_anum_cpu_end;
   const reactionReset = instance.exports.amemory_reaction_reset;
   const reactionSetCurrentMember = instance.exports.amemory_reaction_set_current_member;
   const reactionSetCurrentCount = instance.exports.amemory_reaction_set_current_count;
@@ -188,6 +191,7 @@ async function loadWasm() {
     anumCpuResetPool, anumCpuSetToken, anumCpuImport,
     anumCpuLoadBegin, anumCpuLoadMember, anumCpuLoadCommit, anumCpuLoadAbort, anumCpuLoadActive,
     anumCpuExport, anumCpuOutputGet, anumCpuPoolCount,
+    anumCpuUsed, anumCpuStart, anumCpuEnd,
     reactionReset, reactionSetCurrentMember, reactionSetCurrentCount,
     reactionSetTheoryRelation, reactionSetTheoryCount, reactionSnapshotTheory,
     reactionRun, reactionCurrentBank, reactionCurrentCount, reactionCurrentMember,
@@ -232,6 +236,9 @@ async function loadWasm() {
     anumCpuExport,
     anumCpuOutputGet,
     anumCpuPoolCount,
+    anumCpuUsed,
+    anumCpuStart,
+    anumCpuEnd,
     reactionReset,
     reactionSetCurrentMember,
     reactionSetCurrentCount,

@@ -17,6 +17,7 @@ export function wasmU32(value) {
 export const GPU_ROOT_HANDLE = 63;
 const GPU_BUFFER_WORDS = 64 * 3;
 const GPU_BUFFER_BYTES = GPU_BUFFER_WORDS * Uint32Array.BYTES_PER_ELEMENT;
+const SEMANTIC_ORIENTATION_BINDINGS = new WeakMap();
 
 function parseNode(source, cursor) {
   if (cursor.index >= source.length) {
@@ -246,6 +247,55 @@ export function createContextRelativeOrientation(
   });
 }
 
+function createBackendSemanticOrientation(
+  owner,
+  memory,
+  topology,
+  referenceRef,
+  contextRef,
+) {
+  if ((typeof owner !== "object" && typeof owner !== "function") || owner === null) {
+    throw new Error("semantic orientation requires a concrete backend memory owner");
+  }
+  const referenceMarker = requireLocalRef(referenceRef, memory);
+  const contextMarker = requireLocalRef(contextRef, memory);
+  const view = createContextRelativeOrientation(topology, referenceMarker, contextMarker);
+  const binding = Object.freeze({
+    memory,
+    referenceMarker,
+    contextMarker,
+    transport: view.transport,
+  });
+  SEMANTIC_ORIENTATION_BINDINGS.set(binding, Object.freeze({
+    owner,
+    memory,
+    referenceMarker,
+    contextMarker,
+    referenceBody: view.referenceBody,
+    contextBody: view.contextBody,
+    transport: view.transport,
+  }));
+  return binding;
+}
+
+function requireBackendSemanticOrientation(owner, memory, topology, binding) {
+  const authority = SEMANTIC_ORIENTATION_BINDINGS.get(binding);
+  if (!authority || authority.owner !== owner || authority.memory !== memory) {
+    throw new Error(`foreign semantic orientation rejected by ${memory}`);
+  }
+  const view = createContextRelativeOrientation(
+    topology,
+    authority.referenceMarker,
+    authority.contextMarker,
+  );
+  if (view.transport !== authority.transport ||
+      view.referenceBody !== authority.referenceBody ||
+      view.contextBody !== authority.contextBody) {
+    throw new Error("semantic orientation marker authority changed");
+  }
+  return view;
+}
+
 export function exportLocalTopology(topology, handle) {
   validateTopology(topology);
   const visiting = new Uint8Array(64);
@@ -283,6 +333,52 @@ function sourceTokens(source) {
     const code = ch.charCodeAt(0) - 48;
     return code >= 0 && code <= 9 ? code : 255;
   });
+}
+
+export function readCpuTopology(wasm) {
+  if (typeof wasm.anumCpuUsed !== "function" ||
+      typeof wasm.anumCpuStart !== "function" ||
+      typeof wasm.anumCpuEnd !== "function") {
+    throw new Error("CPU technical topology exports are missing");
+  }
+
+  const starts = new Uint32Array(64);
+  const ends = new Uint32Array(64);
+  const used = new Uint32Array(64);
+  for (let handle = 1; handle <= LOCAL_HANDLE_MAX; handle += 1) {
+    const occupied = wasmU32(wasm.anumCpuUsed(handle));
+    if (occupied === LOCAL_HANDLE_NONE) {
+      throw new Error(`CPU topology rejected handle ${handle}`);
+    }
+    if (occupied === 0) continue;
+    if (occupied !== 1) {
+      throw new Error(`CPU topology emitted invalid used flag ${occupied}`);
+    }
+    const start = wasmU32(wasm.anumCpuStart(handle));
+    const end = wasmU32(wasm.anumCpuEnd(handle));
+    if (start === LOCAL_HANDLE_NONE || end === LOCAL_HANDLE_NONE) {
+      throw new Error(`CPU topology omitted technical poles for ${handle}`);
+    }
+    used[handle] = 1;
+    starts[handle] = start;
+    ends[handle] = end;
+  }
+  return { starts, ends, used };
+}
+
+export function bindCpuSemanticOrientation(
+  wasm,
+  referenceRef,
+  contextRef,
+  memory = "cpu-A",
+) {
+  return createBackendSemanticOrientation(
+    wasm,
+    memory,
+    readCpuTopology(wasm),
+    referenceRef,
+    contextRef,
+  );
 }
 
 export function cpuResetPool(wasm) {
@@ -360,6 +456,30 @@ export function cpuExport(wasm, ref, memory = "cpu-A") {
     result += String(token);
   }
   return result;
+}
+
+export function cpuImportSemanticRecursiveWire(
+  wasm,
+  orientation,
+  semanticSource,
+  memory = "cpu-A",
+) {
+  const topology = readCpuTopology(wasm);
+  const view = requireBackendSemanticOrientation(wasm, memory, topology, orientation);
+  const technicalSource = view.technicalRecursiveWire(semanticSource);
+  return cpuImportRaw(wasm, technicalSource, memory);
+}
+
+export function cpuExportSemanticRecursiveWire(
+  wasm,
+  orientation,
+  ref,
+  memory = "cpu-A",
+) {
+  const handle = requireLocalRef(ref, memory);
+  const topology = readCpuTopology(wasm);
+  const view = requireBackendSemanticOrientation(wasm, memory, topology, orientation);
+  return view.semanticRecursiveWire(handle);
 }
 
 export function createGpuAnumPool(device, memory = "gpu-B") {
@@ -638,6 +758,55 @@ export async function gpuExport(device, gpuPool, ref) {
   return exportLocalTopology(topology, handle);
 }
 
+export async function bindGpuSemanticOrientation(
+  device,
+  gpuPool,
+  referenceRef,
+  contextRef,
+) {
+  return createBackendSemanticOrientation(
+    gpuPool,
+    gpuPool.memory,
+    await readGpuTopology(device, gpuPool),
+    referenceRef,
+    contextRef,
+  );
+}
+
+export async function gpuImportSemanticRecursiveWire(
+  device,
+  gpuPool,
+  orientation,
+  semanticSource,
+) {
+  const topology = await readGpuTopology(device, gpuPool);
+  const view = requireBackendSemanticOrientation(
+    gpuPool,
+    gpuPool.memory,
+    topology,
+    orientation,
+  );
+  const technicalSource = view.technicalRecursiveWire(semanticSource);
+  return gpuImport(device, gpuPool, technicalSource);
+}
+
+export async function gpuExportSemanticRecursiveWire(
+  device,
+  gpuPool,
+  orientation,
+  ref,
+) {
+  const handle = requireLocalRef(ref, gpuPool.memory);
+  const topology = await readGpuTopology(device, gpuPool);
+  const view = requireBackendSemanticOrientation(
+    gpuPool,
+    gpuPool.memory,
+    topology,
+    orientation,
+  );
+  return view.semanticRecursiveWire(handle);
+}
+
 export function destroyGpuAnumPool(gpuPool) {
   gpuPool.buffer.destroy();
 }
@@ -769,10 +938,131 @@ export async function runAnumBoundaryBrowser(wasm, device) {
         "atomic Aset CPU/GPU differential mismatch for " + asetSources[i]);
     }
 
+    // Accepted-v0.14 semantic transport over the real CPU/WASM and WebGPU
+    // materializers. The 98/68 fixtures below are technical marker Links only;
+    // relative ID/J is derived from their actual one-sided topology.
+    const cpuDirectOrientation = bindCpuSemanticOrientation(
+      wasm, cpuBatchRefs[0], cpuBatchRefs[0],
+    );
+    const cpuMirrorOrientation = bindCpuSemanticOrientation(
+      wasm, cpuBatchRefs[0], cpuBatchRefs[1],
+    );
+    const gpuDirectOrientation = await bindGpuSemanticOrientation(
+      device, gpuPool, gpuBatchRefs[0], gpuBatchRefs[0],
+    );
+    const gpuMirrorOrientation = await bindGpuSemanticOrientation(
+      device, gpuPool, gpuBatchRefs[0], gpuBatchRefs[1],
+    );
+
+    must(cpuDirectOrientation.transport === "ID", "CPU Direct orientation mismatch");
+    must(cpuMirrorOrientation.transport === "J", "CPU Mirror orientation mismatch");
+    must(gpuDirectOrientation.transport === "ID", "GPU Direct orientation mismatch");
+    must(gpuMirrorOrientation.transport === "J", "GPU Mirror orientation mismatch");
+
+    const cpuDirectSemanticRefs = new Map();
+    const cpuMirrorSemanticRefs = new Map();
+    const gpuDirectSemanticRefs = new Map();
+    const gpuMirrorSemanticRefs = new Map();
+    for (const source of ANUM_FIXTURES) {
+      const cpuDirectRef = cpuImportSemanticRecursiveWire(
+        wasm, cpuDirectOrientation, source,
+      );
+      const cpuMirrorRef = cpuImportSemanticRecursiveWire(
+        wasm, cpuMirrorOrientation, source,
+      );
+      const gpuDirectRef = await gpuImportSemanticRecursiveWire(
+        device, gpuPool, gpuDirectOrientation, source,
+      );
+      const gpuMirrorRef = await gpuImportSemanticRecursiveWire(
+        device, gpuPool, gpuMirrorOrientation, source,
+      );
+      must(cpuDirectRef && cpuMirrorRef && gpuDirectRef && gpuMirrorRef,
+        `semantic import rejected fixture ${source}`);
+
+      cpuDirectSemanticRefs.set(source, cpuDirectRef);
+      cpuMirrorSemanticRefs.set(source, cpuMirrorRef);
+      gpuDirectSemanticRefs.set(source, gpuDirectRef);
+      gpuMirrorSemanticRefs.set(source, gpuMirrorRef);
+
+      const cpuDirectWire = cpuExportSemanticRecursiveWire(
+        wasm, cpuDirectOrientation, cpuDirectRef,
+      );
+      const cpuMirrorWire = cpuExportSemanticRecursiveWire(
+        wasm, cpuMirrorOrientation, cpuMirrorRef,
+      );
+      const gpuDirectWire = await gpuExportSemanticRecursiveWire(
+        device, gpuPool, gpuDirectOrientation, gpuDirectRef,
+      );
+      const gpuMirrorWire = await gpuExportSemanticRecursiveWire(
+        device, gpuPool, gpuMirrorOrientation, gpuMirrorRef,
+      );
+      must(cpuDirectWire === source, `CPU Direct semantic mismatch ${source}`);
+      must(cpuMirrorWire === source, `CPU Mirror semantic mismatch ${source}`);
+      must(gpuDirectWire === source, `GPU Direct semantic mismatch ${source}`);
+      must(gpuMirrorWire === source, `GPU Mirror semantic mismatch ${source}`);
+      must(cpuDirectWire === gpuMirrorWire,
+        `cross-gauge CPU/GPU semantic differential mismatch ${source}`);
+      must(cpuMirrorWire === gpuDirectWire,
+        `opposite cross-gauge CPU/GPU semantic differential mismatch ${source}`);
+    }
+
+    const semanticO = "98";
+    must(cpuExport(wasm, cpuMirrorSemanticRefs.get(semanticO)) === "68",
+      "CPU Mirror technical O did not swap gauge");
+    must(await gpuExport(device, gpuPool, gpuMirrorSemanticRefs.get(semanticO)) === "68",
+      "GPU Mirror technical O did not swap gauge");
+    must(cpuExportSemanticRecursiveWire(
+      wasm, cpuMirrorOrientation, cpuMirrorSemanticRefs.get(semanticO),
+    ) === semanticO, "CPU Mirror semantic O changed");
+    must(await gpuExportSemanticRecursiveWire(
+      device, gpuPool, gpuMirrorOrientation, gpuMirrorSemanticRefs.get(semanticO),
+    ) === semanticO, "GPU Mirror semantic O changed");
+
+    const cpuBeforeSemanticMalformed = cpuPoolCount(wasm);
+    let cpuSemanticMalformedRejected = false;
+    try {
+      cpuImportSemanticRecursiveWire(wasm, cpuMirrorOrientation, "1986x");
+    } catch {
+      cpuSemanticMalformedRejected = true;
+    }
+    must(cpuSemanticMalformedRejected, "CPU semantic malformed source accepted");
+    must(cpuPoolCount(wasm) === cpuBeforeSemanticMalformed,
+      "CPU semantic malformed source partially published");
+
+    const gpuBeforeSemanticMalformed = await gpuPoolCount(device, gpuPool);
+    let gpuSemanticMalformedRejected = false;
+    try {
+      await gpuImportSemanticRecursiveWire(
+        device, gpuPool, gpuMirrorOrientation, "1986x",
+      );
+    } catch {
+      gpuSemanticMalformedRejected = true;
+    }
+    must(gpuSemanticMalformedRejected, "GPU semantic malformed source accepted");
+    must(await gpuPoolCount(device, gpuPool) === gpuBeforeSemanticMalformed,
+      "GPU semantic malformed source partially published");
+
+    const gpuBeforeForeignOrientation = await gpuPoolCount(device, gpuPool);
+    let foreignOrientationRejected = false;
+    try {
+      await gpuImportSemanticRecursiveWire(
+        device, gpuPool, cpuMirrorOrientation, semanticO,
+      );
+    } catch {
+      foreignOrientationRejected = true;
+    }
+    must(foreignOrientationRejected, "foreign CPU orientation accepted by GPU memory");
+    must(await gpuPoolCount(device, gpuPool) === gpuBeforeForeignOrientation,
+      "foreign semantic orientation changed GPU memory");
+
     logs.push(`aset.atomic.sources = [${asetSources.join(", ")}]`);
     logs.push(`aset.atomic.cpu.links = ${cpuPoolCount(wasm)}`);
     logs.push(`aset.atomic.gpu.links = ${await gpuPoolCount(device, gpuPool)}`);
     logs.push("aset.atomic.failed-middle = NO_PARTIAL_PUBLICATION");
+    logs.push("semantic.orientation.cpu = ID/J_FROM_REAL_MARKERS");
+    logs.push("semantic.orientation.gpu = ID/J_FROM_REAL_MARKERS");
+    logs.push("semantic.transport.cpu-gpu = GAUGE_INVARIANT");
+    logs.push("semantic.transport.fail-closed = TRUE");
 
     logs.push(`anum.sample.source = ${sample}`);
     logs.push(`anum.sample.cpu.handle = ${cpuSample.value}`);
@@ -792,6 +1082,10 @@ export async function runAnumBoundaryBrowser(wasm, device) {
       atomicAsetLoad: true,
       atomicAsetDifferential: true,
       atomicAsetLinkCount: 4,
+      semanticTransport: true,
+      semanticDirectMirror: true,
+      semanticCrossBackendDifferential: true,
+      semanticFailClosed: true,
       sample: {
         source: sample,
         cpuHandle: cpuSample.value,

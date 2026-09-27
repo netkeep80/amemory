@@ -628,6 +628,46 @@ pub extern "C" fn amemory_anum_cpu_pool_count() -> u32 {
     count
 }
 
+/// Read-only technical carrier occupancy. This is substrate observation only;
+/// it does not assign semantic START/END meaning to either stored coordinate.
+#[no_mangle]
+pub extern "C" fn amemory_anum_cpu_used(handle: u32) -> u32 {
+    if handle == 0 || handle > ANUM_CPU_MAX_HANDLE {
+        return ANUM_CPU_NONE;
+    }
+    unsafe { ANUM_CPU_USED[handle as usize] }
+}
+
+/// Read-only first technical carrier coordinate for one published Link.
+#[no_mangle]
+pub extern "C" fn amemory_anum_cpu_start(handle: u32) -> u32 {
+    if handle == 0 || handle > ANUM_CPU_MAX_HANDLE {
+        return ANUM_CPU_NONE;
+    }
+    unsafe {
+        if ANUM_CPU_USED[handle as usize] == 0 {
+            ANUM_CPU_NONE
+        } else {
+            ANUM_CPU_START[handle as usize]
+        }
+    }
+}
+
+/// Read-only second technical carrier coordinate for one published Link.
+#[no_mangle]
+pub extern "C" fn amemory_anum_cpu_end(handle: u32) -> u32 {
+    if handle == 0 || handle > ANUM_CPU_MAX_HANDLE {
+        return ANUM_CPU_NONE;
+    }
+    unsafe {
+        if ANUM_CPU_USED[handle as usize] == 0 {
+            ANUM_CPU_NONE
+        } else {
+            ANUM_CPU_END[handle as usize]
+        }
+    }
+}
+
 
 const REACTION_SCOPE_CAP: usize = 16;
 const REACTION_NONE: u32 = u32::MAX;
@@ -1129,6 +1169,34 @@ mod anum_boundary_tests {
         let capacity = format!("{}8", "9".repeat(70));
         assert_eq!(import(&capacity), ANUM_CPU_NONE);
         assert_eq!(amemory_anum_cpu_pool_count(), stable_count);
+    }
+
+    #[test]
+    fn cpu_topology_getters_are_read_only_technical_coordinates() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        amemory_anum_cpu_reset_pool();
+
+        let start_marker = import("98");
+        let end_marker = import("68");
+        assert_ne!(start_marker, ANUM_CPU_NONE);
+        assert_ne!(end_marker, ANUM_CPU_NONE);
+
+        assert_eq!(amemory_anum_cpu_used(ANUM_CPU_ROOT), 1);
+        assert_eq!(amemory_anum_cpu_start(ANUM_CPU_ROOT), ANUM_CPU_ROOT);
+        assert_eq!(amemory_anum_cpu_end(ANUM_CPU_ROOT), ANUM_CPU_ROOT);
+
+        assert_eq!(amemory_anum_cpu_used(start_marker), 1);
+        assert_eq!(amemory_anum_cpu_start(start_marker), start_marker);
+        assert_eq!(amemory_anum_cpu_end(start_marker), ANUM_CPU_ROOT);
+
+        assert_eq!(amemory_anum_cpu_used(end_marker), 1);
+        assert_eq!(amemory_anum_cpu_start(end_marker), ANUM_CPU_ROOT);
+        assert_eq!(amemory_anum_cpu_end(end_marker), end_marker);
+
+        assert_eq!(amemory_anum_cpu_used(63), 0);
+        assert_eq!(amemory_anum_cpu_start(63), ANUM_CPU_NONE);
+        assert_eq!(amemory_anum_cpu_end(63), ANUM_CPU_NONE);
+        assert_eq!(amemory_anum_cpu_used(64), ANUM_CPU_NONE);
     }
 
     #[test]
