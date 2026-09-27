@@ -1166,6 +1166,307 @@ pub(crate) fn web_prove_architectural_state_add(
     })
 }
 
+
+/// Real one-memory M5b integration witness:
+///
+/// State(EAX=0xffff_ffff, EDX=old, EBX=preserved)
+///   -> actual structural MUL effect (*2)
+///   -> atomic successor State(EAX=0xffff_fffe, EDX=1, EBX preserved)
+///
+/// Operand fetch is intentionally outside M5b; this slice proves that the
+/// existing wide ALU effect composes into one indivisible architectural-state
+/// publication without host construction of the successor.
+pub(crate) fn web_prove_architectural_state_mul(
+) -> Option<WebArchitecturalStateExecution> {
+    let mut compiler = FullFixture::new();
+
+    let alu = prepare_mul_effect_call(
+        &mut compiler,
+        0xffff_ffff,
+        2,
+    )?;
+    let program = ArchitecturalStateProgram::install(&mut compiler);
+    if alu.result_tag != program.schema.wide_effect_result_tag {
+        return None;
+    }
+
+    let before_value = StateValue {
+        eax: 0xffff_ffff,
+        ebx: 0x1122_3344,
+        edx: 0xa5a5_5a5a,
+        cf: Some(0),
+        pf: Some(0),
+        af: Some(1),
+        zf: Some(1),
+        sf: Some(1),
+        of: Some(0),
+    };
+    let expected = StateValue {
+        eax: 0xffff_fffe,
+        ebx: before_value.ebx,
+        edx: 0x0000_0001,
+        cf: Some(1),
+        pf: None,
+        af: None,
+        zf: None,
+        sf: None,
+        of: Some(1),
+    };
+
+    let before_state =
+        state_from_value(&mut compiler, program.schema, before_value)?;
+    let frame = state_apply_wide_frame(
+        &mut compiler.store,
+        program.schema,
+        before_state,
+        program.schema.eax,
+        program.schema.edx,
+    );
+    let initial = compiler
+        .store
+        .ensure_pair(frame, alu.invocation)
+        .ok()?;
+
+    let prepared_roots = vec![
+        semantic_source(
+            &compiler.store,
+            "function.effect.mul",
+            alu.function,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.schema.tag",
+            program.schema.state_tag,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.apply.wide_frame_tag",
+            program.schema.apply_wide_state,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.register.eax",
+            program.schema.eax,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.register.ebx",
+            program.schema.ebx,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.register.edx",
+            program.schema.edx,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.flag.undefined",
+            program.schema.undefined,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.before",
+            before_state,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.low_target",
+            program.schema.eax,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.high_target",
+            program.schema.edx,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.continuation",
+            frame,
+        ),
+        semantic_source(
+            &compiler.store,
+            "result.wide_alu_effect_tag",
+            program.schema.wide_effect_result_tag,
+        ),
+        semantic_source(
+            &compiler.store,
+            "data.bit.zero",
+            compiler.zero,
+        ),
+        semantic_source(
+            &compiler.store,
+            "data.bit.one",
+            compiler.one,
+        ),
+        semantic_source(
+            &compiler.store,
+            "execution.interpreter",
+            compiler.interpreter,
+        ),
+        semantic_source(
+            &compiler.store,
+            "execution.theory",
+            compiler.theory,
+        ),
+        semantic_source(
+            &compiler.store,
+            "execution.apply",
+            compiler.apply,
+        ),
+        semantic_source(
+            &compiler.store,
+            "scope.initial",
+            initial,
+        ),
+        semantic_source(
+            &compiler.store,
+            "context.result",
+            compiler.k,
+        ),
+    ];
+
+    let admissions =
+        theory_admissions(&compiler.store, compiler.theory)?;
+    let prepare =
+        prepare_stage(&compiler.store, prepared_roots, admissions);
+    let (mut memory, load) = load_runtime(&prepare)?;
+
+    let interpreter =
+        loaded_handle(&load, "execution.interpreter")?;
+    let initial = loaded_handle(&load, "scope.initial")?;
+    let before_state =
+        loaded_handle(&load, "state.before")?;
+    let result_context =
+        loaded_handle(&load, "context.result")?;
+    let zero = loaded_handle(&load, "data.bit.zero")?;
+    let one = loaded_handle(&load, "data.bit.one")?;
+
+    let loaded = |handle: Handle| -> Option<Handle> {
+        (handle >= 1 && handle <= load.links_after_load)
+            .then_some(handle)
+    };
+    let runtime_schema = ArchitecturalStateSchema {
+        state_tag: loaded(program.schema.state_tag)?,
+        apply_state: loaded(program.schema.apply_state)?,
+        apply_wide_state: loaded(program.schema.apply_wide_state)?,
+        eax: loaded(program.schema.eax)?,
+        ebx: loaded(program.schema.ebx)?,
+        edx: loaded(program.schema.edx)?,
+        undefined: loaded(program.schema.undefined)?,
+        flags: FlagPatchSchema {
+            set_tag: loaded(program.schema.flags.set_tag)?,
+            undefined_tag: loaded(program.schema.flags.undefined_tag)?,
+            cf: loaded(program.schema.flags.cf)?,
+            pf: loaded(program.schema.flags.pf)?,
+            af: loaded(program.schema.flags.af)?,
+            zf: loaded(program.schema.flags.zf)?,
+            sf: loaded(program.schema.flags.sf)?,
+            of: loaded(program.schema.flags.of)?,
+        },
+        effect_result_tag: loaded(program.schema.effect_result_tag)?,
+        wide_effect_result_tag:
+            loaded(program.schema.wide_effect_result_tag)?,
+    };
+
+    let max_steps = alu.active_steps as u32 + 3;
+    let (mut engine, execute) = execute_to_quiescence(
+        &mut memory,
+        interpreter,
+        initial,
+        32,
+        max_steps,
+    )?;
+    if execute.active_reaction_count != alu.active_steps as u32 + 1
+        || engine.current().len() != 1
+    {
+        return None;
+    }
+
+    let atomic_scope = execute.reactions.iter().all(|step| {
+        step.scope_before.len() == 1 && step.scope_after.len() == 1
+    });
+    if !atomic_scope {
+        return None;
+    }
+
+    let final_link = engine.current()[0];
+    let (caller, successor) = memory.store.poles(final_link).ok()?;
+    if caller != result_context {
+        return None;
+    }
+    let actual = decode_state_in_store(
+        &memory.store,
+        runtime_schema,
+        successor,
+        zero,
+        one,
+    )?;
+    if actual != expected || !memory.store.is_valid(before_state) {
+        return None;
+    }
+
+    let (state_tag_check, result_sequence) =
+        memory.store.poles(successor).ok()?;
+    if state_tag_check != runtime_schema.state_tag {
+        return None;
+    }
+    let result_recursive_wire =
+        memory.store.export_anum(final_link).ok()?;
+    let result_sequence_anum =
+        memory.store.export_anum(result_sequence).ok()?;
+    let identical_rerun_link_delta = identical_rerun(
+        &mut memory,
+        &mut engine,
+        initial,
+        &result_recursive_wire,
+        max_steps,
+    )?;
+    let visual_links = visual_snapshot(&memory, &load.semantic_roots);
+
+    let result = WebProofResultStage {
+        memory_instance_id: memory.id.clone(),
+        result_anum: result_recursive_wire,
+        result_sequence_anum,
+        decoded_value: actual.eax,
+        decoded_value_hi: Some(actual.edx),
+        oracle_value: expected.eax,
+        oracle_value_hi: Some(expected.edx),
+        oracle_matches: actual == expected,
+        links_final: memory.store.link_count() as u32,
+        identical_rerun_link_delta,
+        visual_links,
+    };
+    let proof = WebStructuralProof {
+        schema_version: 4,
+        block: "M5B_STATE_MUL32".to_owned(),
+        prepare,
+        load,
+        execute,
+        result,
+    };
+
+    let (defined, values, undefined_mask) = flags_to_masks(actual);
+    Some(WebArchitecturalStateExecution {
+        outcome: WebArchitecturalStateOutcome {
+            eax_before: before_value.eax,
+            ebx_before: before_value.ebx,
+            edx_before: before_value.edx,
+            eax_after: actual.eax,
+            ebx_after: actual.ebx,
+            edx_after: actual.edx,
+            flags_defined_mask: defined,
+            flags_value_mask: values,
+            flags_undefined_mask: undefined_mask,
+            reactions: proof.execute.active_reaction_count,
+            old_state_retained: 1,
+            atomic_scope: 1,
+            steady_link_delta: proof.result.identical_rerun_link_delta,
+            quiescent: u8::from(proof.execute.final_quiescent),
+        },
+        proof,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1363,6 +1664,30 @@ mod tests {
             sf: Some(1),
             of: Some(0),
         }
+    }
+
+    #[test]
+    fn m5b_real_mul_pipeline_updates_edx_eax_and_flags_atomically() {
+        let execution = web_prove_architectural_state_mul().unwrap();
+        assert_eq!(execution.outcome.eax_before, 0xffff_ffff);
+        assert_eq!(execution.outcome.edx_before, 0xa5a5_5a5a);
+        assert_eq!(execution.outcome.ebx_before, 0x1122_3344);
+        assert_eq!(execution.outcome.eax_after, 0xffff_fffe);
+        assert_eq!(execution.outcome.edx_after, 0x0000_0001);
+        assert_eq!(execution.outcome.ebx_after, 0x1122_3344);
+        assert_eq!(execution.outcome.flags_defined_mask, 0x0000_0801);
+        assert_eq!(execution.outcome.flags_value_mask, 0x0000_0801);
+        assert_eq!(execution.outcome.flags_undefined_mask, 0x0000_00d4);
+        assert_eq!(execution.outcome.old_state_retained, 1);
+        assert_eq!(execution.outcome.atomic_scope, 1);
+        assert_eq!(execution.outcome.steady_link_delta, 0);
+        assert_eq!(execution.outcome.quiescent, 1);
+        assert_eq!(execution.proof.block, "M5B_STATE_MUL32");
+        assert!(execution.proof.result.oracle_matches);
+        assert!(execution.proof.execute.active_reaction_count > 2);
+        assert!(execution.proof.execute.reactions.iter().all(|step| {
+            step.scope_before.len() == 1 && step.scope_after.len() == 1
+        }));
     }
 
     #[test]
