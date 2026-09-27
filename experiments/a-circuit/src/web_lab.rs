@@ -8,6 +8,7 @@ use crate::{
     rotate_carry32_n::{web_prove_rotate_carry32, web_run_rotate_carry32},
     shift32_n::{web_prove_shift32, web_run_shift32},
     unary_arith_n::{web_prove_unary32, web_run_unary32},
+    proof_n::WebStructuralProof,
 };
 use std::sync::Mutex;
 
@@ -36,26 +37,42 @@ struct LabOutcome {
 }
 
 static LAST_PROOF_JSON: Mutex<String> = Mutex::new(String::new());
+static LAST_COMPACT_PROOF_JSON: Mutex<String> = Mutex::new(String::new());
 
-fn set_last_proof_json(value: String) {
-    let mut guard = LAST_PROOF_JSON
+fn set_last_proofs(proof: &WebStructuralProof) -> Option<()> {
+    let compact = proof.compact()?;
+    let proof_json = serde_json::to_string(proof).ok()?;
+    let compact_json = serde_json::to_string(&compact).ok()?;
+
+    let mut proof_guard = LAST_PROOF_JSON
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    *guard = value;
+    let mut compact_guard = LAST_COMPACT_PROOF_JSON
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *proof_guard = proof_json;
+    *compact_guard = compact_json;
+    Some(())
 }
 
-fn clear_last_proof_json() {
-    set_last_proof_json(String::new());
+fn clear_last_proofs() {
+    let mut proof_guard = LAST_PROOF_JSON
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut compact_guard = LAST_COMPACT_PROOF_JSON
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    proof_guard.clear();
+    compact_guard.clear();
 }
 
 fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
-    clear_last_proof_json();
+    clear_last_proofs();
 
     if (1..=5).contains(&op) {
         let execution = web_prove_logic(op, a, b)?;
-        let proof_json = serde_json::to_string(&execution.proof).ok()?;
+        set_last_proofs(&execution.proof)?;
         let out = execution.outcome;
-        set_last_proof_json(proof_json);
         return Some(LabOutcome {
             value: out.value,
             value_hi: 0,
@@ -91,9 +108,8 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
 
     if (6..=10).contains(&op) {
         let execution = web_prove_arithmetic(op, a, b, input_flag)?;
-        let proof_json = serde_json::to_string(&execution.proof).ok()?;
+        set_last_proofs(&execution.proof)?;
         let out = execution.outcome;
-        set_last_proof_json(proof_json);
         return Some(LabOutcome {
             value: out.value,
             value_hi: 0,
@@ -129,9 +145,8 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
 
     if op == 11 {
         let execution = web_prove_mux32(input_flag, a, b)?;
-        let proof_json = serde_json::to_string(&execution.proof).ok()?;
+        set_last_proofs(&execution.proof)?;
         let out = execution.outcome;
-        set_last_proof_json(proof_json);
         return Some(LabOutcome {
             value: out.value,
             value_hi: 0,
@@ -150,7 +165,7 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
 
     if op == 12 {
         let proof = web_prove_mux1(input_flag, a, b)?;
-        let proof_json = serde_json::to_string(&proof).ok()?;
+        set_last_proofs(&proof)?;
         let out = LabOutcome {
             value: u32::from(proof.result.decoded_value),
             value_hi: 0,
@@ -165,16 +180,14 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
             steady_link_delta: proof.result.identical_rerun_link_delta,
             quiescent: u32::from(proof.execute.final_quiescent),
         };
-        set_last_proof_json(proof_json);
         return Some(out);
     }
 
 
     if (13..=15).contains(&op) {
         let execution = web_prove_shift32(op, a, b)?;
-        let proof_json = serde_json::to_string(&execution.proof).ok()?;
+        set_last_proofs(&execution.proof)?;
         let out = execution.outcome;
-        set_last_proof_json(proof_json);
         return Some(LabOutcome {
             value: out.value,
             value_hi: 0,
@@ -210,9 +223,8 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
 
     if (16..=17).contains(&op) {
         let execution = web_prove_rotate32(op, a, b)?;
-        let proof_json = serde_json::to_string(&execution.proof).ok()?;
+        set_last_proofs(&execution.proof)?;
         let out = execution.outcome;
-        set_last_proof_json(proof_json);
         return Some(LabOutcome {
             value: out.value,
             value_hi: 0,
@@ -248,9 +260,8 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
 
     if (18..=19).contains(&op) {
         let execution = web_prove_rotate_carry32(op, a, b, input_flag)?;
-        let proof_json = serde_json::to_string(&execution.proof).ok()?;
+        set_last_proofs(&execution.proof)?;
         let out = execution.outcome;
-        set_last_proof_json(proof_json);
         return Some(LabOutcome {
             value: out.value,
             value_hi: 0,
@@ -286,9 +297,8 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
 
     if (20..=22).contains(&op) {
         let execution = web_prove_unary32(op, a)?;
-        let proof_json = serde_json::to_string(&execution.proof).ok()?;
+        set_last_proofs(&execution.proof)?;
         let out = execution.outcome;
-        set_last_proof_json(proof_json);
         return Some(LabOutcome {
             value: out.value,
             value_hi: 0,
@@ -324,9 +334,8 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
 
     if op == 23 {
         let execution = web_prove_mul32(a, b)?;
-        let proof_json = serde_json::to_string(&execution.proof).ok()?;
+        set_last_proofs(&execution.proof)?;
         let out = execution.outcome;
-        set_last_proof_json(proof_json);
         return Some(LabOutcome {
             value: out.lo,
             value_hi: out.hi,
@@ -345,9 +354,8 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
 
     if op == 24 {
         let execution = web_prove_mul_effect(a, b)?;
-        let proof_json = serde_json::to_string(&execution.proof).ok()?;
+        set_last_proofs(&execution.proof)?;
         let out = execution.outcome;
-        set_last_proof_json(proof_json);
         return Some(LabOutcome {
             value: out.lo,
             value_hi: out.hi,
@@ -470,6 +478,45 @@ pub extern "C" fn amemory_i386_lab_proof_json_ptr() -> u32 {
 #[no_mangle]
 pub extern "C" fn amemory_i386_lab_proof_json_byte(index: u32) -> u32 {
     let guard = LAST_PROOF_JSON
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    guard
+        .as_bytes()
+        .get(index as usize)
+        .copied()
+        .map(u32::from)
+        .unwrap_or(u32::MAX)
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_lab_compact_proof_available() -> u32 {
+    let guard = LAST_COMPACT_PROOF_JSON
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    u32::from(!guard.is_empty())
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_lab_compact_proof_json_len() -> u32 {
+    let guard = LAST_COMPACT_PROOF_JSON
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    guard.len() as u32
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_lab_compact_proof_json_ptr() -> u32 {
+    let guard = LAST_COMPACT_PROOF_JSON
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    guard.as_ptr() as usize as u32
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_lab_compact_proof_json_byte(
+    index: u32,
+) -> u32 {
+    let guard = LAST_COMPACT_PROOF_JSON
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     guard

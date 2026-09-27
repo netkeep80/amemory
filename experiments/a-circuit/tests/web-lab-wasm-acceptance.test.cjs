@@ -29,6 +29,25 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
   const proofMeasurements = new Map();
   const jsonBytes = (value) =>
     Buffer.byteLength(JSON.stringify(value), "utf8");
+  const readCurrentCompactProof = (label) => {
+    if (w.amemory_i386_lab_compact_proof_available() !== 1) {
+      throw new Error(label + " compact structural proof JSON missing");
+    }
+    const len = w.amemory_i386_lab_compact_proof_json_len() >>> 0;
+    const ptr = w.amemory_i386_lab_compact_proof_json_ptr() >>> 0;
+    if (!len || ptr + len > w.memory.buffer.byteLength) {
+      throw new Error(label + " compact proof JSON pointer/length invalid");
+    }
+    const compact = JSON.parse(
+      Buffer.from(w.memory.buffer, ptr, len).toString("utf8")
+    );
+    if (compact.schemaVersion !== 1 ||
+        compact.representationId !== "amemory-proof-compact-json" ||
+        compact.representationVersion !== "0.1.0") {
+      throw new Error(label + " compact proof representation mismatch");
+    }
+    return compact;
+  };
   const proofMetrics = (proof, registryBlock) => {
     const { visualLinks, ...resultMetadata } = proof.result;
     const memoryId = proof.result.memoryInstanceId;
@@ -365,6 +384,13 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
       result: compactResult,
     };
 
+    const producedCompactProof = readCurrentCompactProof(registryBlock.id);
+    if (JSON.stringify(producedCompactProof) !== JSON.stringify(compactProof)) {
+      throw new Error(
+        registryBlock.id + " Rust compact producer != independent JS shadow"
+      );
+    }
+
     const decodedCompactTopology =
       compactTopology.base.starts.map((start, index) => ({
         start,
@@ -462,6 +488,7 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
         representationId: compactProof.representationId,
         representationVersion: compactProof.representationVersion,
         proofJsonBytes: jsonBytes(compactProof),
+        producerProofJsonBytes: jsonBytes(producedCompactProof),
         topologyJsonBytes: jsonBytes(compactProof.topology),
         rootsJsonBytes: jsonBytes(compactProof.roots),
         theoryAdmissionsJsonBytes: jsonBytes(compactProof.theoryAdmissions),
@@ -1377,6 +1404,11 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
           representationVersion: "0.1.0",
           totalCurrentProofJsonBytes,
           totalCompactProofJsonBytes,
+          totalProducerCompactProofJsonBytes: measuredProofs.reduce(
+            (sum, item) =>
+              sum + item.compactProofPrototype.producerProofJsonBytes,
+            0
+          ),
           reductionRatio:
             totalCurrentProofJsonBytes / totalCompactProofJsonBytes,
           totalCompactTopologyJsonBytes: measuredProofs.reduce(
