@@ -208,6 +208,66 @@ impl OptimizedLinkStore {
         Ok(handles)
     }
 
+    /// Exports the executable carrier as dense Link duplets in local-handle
+    /// order. Entry `i - 1` is Link handle `i`.
+    pub fn export_packed_duplets(&self) -> Vec<(Handle, Handle)> {
+        (1..=self.link_count() as Handle)
+            .map(|handle| {
+                self.poles(handle)
+                    .expect("dense packed carrier must contain every Link")
+            })
+            .collect()
+    }
+
+    /// Atomically replaces this store with a preassembled dense duplet carrier.
+    ///
+    /// The packed image is expected to be canonical and constructor ordered:
+    /// each non-self pole must already refer to an earlier Link. This matches
+    /// the runtime allocation invariant and permits direct CPU -> GPU style
+    /// carrier transport without recursive Anum reconstruction.
+    pub fn load_packed_duplets(
+        &mut self,
+        duplets: &[(Handle, Handle)],
+    ) -> Result<(), StoreError> {
+        if duplets.is_empty() || duplets[0] != (ROOT_HANDLE, ROOT_HANDLE) {
+            return Err(StoreError::UnknownHandle(ROOT_HANDLE));
+        }
+
+        let runtime_instance_id = self.instance_id;
+        let max_links = self.max_links;
+        let mut staging = Self::with_optional_limit(max_links);
+        staging.instance_id = runtime_instance_id;
+
+        for (offset, &(start, end)) in duplets.iter().enumerate().skip(1) {
+            let handle = Handle::try_from(offset + 1)
+                .map_err(|_| StoreError::CapacityExceeded)?;
+
+            let rebuilt = if start == handle {
+                if end >= handle {
+                    return Err(StoreError::UnknownHandle(end));
+                }
+                staging.ensure_start_form(end)?
+            } else if end == handle {
+                if start >= handle {
+                    return Err(StoreError::UnknownHandle(start));
+                }
+                staging.ensure_end_form(start)?
+            } else {
+                if start >= handle || end >= handle {
+                    return Err(StoreError::UnknownHandle(start.max(end)));
+                }
+                staging.ensure_pair(start, end)?
+            };
+
+            if rebuilt != handle {
+                return Err(StoreError::UnknownHandle(handle));
+            }
+        }
+
+        *self = staging;
+        Ok(())
+    }
+
     pub fn export_anum(&self, handle: Handle) -> Result<String, StoreError> {
         let mut visiting = HashSet::new();
         let mut output = String::new();
