@@ -1196,6 +1196,28 @@ mod tests {
     }
 
     #[test]
+    fn m5a_real_add_pipeline_composes_into_atomic_state() {
+        let execution = web_prove_architectural_state_add().unwrap();
+        assert_eq!(execution.outcome.eax_before, 0xffff_ffff);
+        assert_eq!(execution.outcome.eax_after, 0);
+        assert_eq!(execution.outcome.ebx_before, 0x1122_3344);
+        assert_eq!(execution.outcome.ebx_after, 0x1122_3344);
+        assert_eq!(execution.outcome.flags_defined_mask, 0x0000_08d5);
+        assert_eq!(execution.outcome.flags_value_mask, 0x0000_0055);
+        assert_eq!(execution.outcome.flags_undefined_mask, 0);
+        assert_eq!(execution.outcome.old_state_retained, 1);
+        assert_eq!(execution.outcome.atomic_scope, 1);
+        assert_eq!(execution.outcome.steady_link_delta, 0);
+        assert_eq!(execution.outcome.quiescent, 1);
+        assert_eq!(execution.proof.block, "M5A_STATE_ADD32");
+        assert!(execution.proof.result.oracle_matches);
+        assert!(execution.proof.execute.active_reaction_count > 1);
+        assert!(execution.proof.execute.reactions.iter().all(|step| {
+            step.scope_before.len() == 1 && step.scope_after.len() == 1
+        }));
+    }
+
+    #[test]
     fn m5a_add_like_writeback_updates_eax_and_flags_atomically() {
         let mut f = FullFixture::new();
         let p = ArchitecturalStateProgram::install(&mut f);
