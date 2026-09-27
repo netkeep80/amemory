@@ -49,6 +49,11 @@ pub enum StoreError {
     TrailingInput(usize),
     CapacityExceeded,
     UnknownHandle(Handle),
+    InvalidPackedCarrier {
+        handle: Handle,
+        start: Handle,
+        end: Handle,
+    },
     NonWellFounded(Handle),
 }
 
@@ -150,11 +155,24 @@ impl OptimizedLinkStore {
         Ok((self.starts[index], self.ends[index]))
     }
 
-    pub fn import_anum(&mut self, source: &str) -> Result<Handle, StoreError> {
+    fn import_anum_in_place(
+        &mut self,
+        source: &str,
+    ) -> Result<Handle, StoreError> {
         if source.is_empty() {
             return Err(StoreError::EmptyAnum);
         }
 
+        let bytes = source.as_bytes();
+        let mut cursor = 0usize;
+        let handle = self.parse_node(bytes, &mut cursor)?;
+        if cursor != bytes.len() {
+            return Err(StoreError::TrailingInput(cursor));
+        }
+        Ok(handle)
+    }
+
+    pub fn import_anum(&mut self, source: &str) -> Result<Handle, StoreError> {
         // Whole-Anum import is transactional. Parsing/canonicalization happens
         // against a staging clone; only complete success replaces live state.
         let runtime_instance_id = self.instance_id;
@@ -163,19 +181,124 @@ impl OptimizedLinkStore {
         // normal external clone receives a fresh cache identity, but a
         // successful import must preserve this store's identity.
         staging.instance_id = runtime_instance_id;
-        let bytes = source.as_bytes();
-        let mut cursor = 0usize;
-        let handle = staging.parse_node(bytes, &mut cursor)?;
-        if cursor != bytes.len() {
-            return Err(StoreError::TrailingInput(cursor));
-        }
+        let handle = staging.import_anum_in_place(source)?;
         *self = staging;
         Ok(handle)
     }
 
+    /// Transactionally imports a portable Aset in source order.
+    ///
+    /// The whole batch uses one staging clone and is published atomically.
+    /// This is semantically equivalent to repeated `import_anum` calls on a
+    /// successful batch, while avoiding an O(batch) sequence of growing-store
+    /// clones. Any malformed/capacity failure leaves the live store unchanged.
+    pub fn import_anums(
+        &mut self,
+        sources: &[String],
+    ) -> Result<Vec<Handle>, StoreError> {
+        if sources.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let runtime_instance_id = self.instance_id;
+        let mut staging = self.clone();
+        staging.instance_id = runtime_instance_id;
+
+        let mut handles = Vec::with_capacity(sources.len());
+        for source in sources {
+            handles.push(staging.import_anum_in_place(source)?);
+        }
+
+        *self = staging;
+        Ok(handles)
+    }
+
+    /// Exports the executable carrier as dense Link duplets in local-handle
+    /// order. Entry `i - 1` is Link handle `i`.
+    pub fn export_packed_duplets(&self) -> Vec<(Handle, Handle)> {
+        (1..=self.link_count() as Handle)
+            .map(|handle| {
+                self.poles(handle)
+                    .expect("dense packed carrier must contain every Link")
+            })
+            .collect()
+    }
+
+    /// Atomically replaces this store with a preassembled dense duplet carrier.
+    ///
+    /// The packed image is expected to be canonical and constructor ordered:
+    /// each non-self pole must already refer to an earlier Link. This matches
+    /// the runtime allocation invariant and permits direct CPU -> GPU style
+    /// carrier transport without recursive Anum reconstruction.
+    pub fn load_packed_duplets(
+        &mut self,
+        duplets: &[(Handle, Handle)],
+    ) -> Result<(), StoreError> {
+        if duplets.is_empty() || duplets[0] != (ROOT_HANDLE, ROOT_HANDLE) {
+            let (start, end) = duplets.first().copied().unwrap_or((0, 0));
+            return Err(StoreError::InvalidPackedCarrier {
+                handle: ROOT_HANDLE,
+                start,
+                end,
+            });
+        }
+
+        let runtime_instance_id = self.instance_id;
+        let max_links = self.max_links;
+        let mut staging = Self::with_optional_limit(max_links);
+        staging.instance_id = runtime_instance_id;
+
+        for (offset, &(start, end)) in duplets.iter().enumerate().skip(1) {
+            let handle = Handle::try_from(offset + 1)
+                .map_err(|_| StoreError::CapacityExceeded)?;
+
+            let rebuilt = if start == handle {
+                if end >= handle {
+                    return Err(StoreError::InvalidPackedCarrier {
+                        handle,
+                        start,
+                        end,
+                    });
+                }
+                staging.ensure_start_form(end)?
+            } else if end == handle {
+                if start >= handle {
+                    return Err(StoreError::InvalidPackedCarrier {
+                        handle,
+                        start,
+                        end,
+                    });
+                }
+                staging.ensure_end_form(start)?
+            } else {
+                if start >= handle || end >= handle {
+                    return Err(StoreError::InvalidPackedCarrier {
+                        handle,
+                        start,
+                        end,
+                    });
+                }
+                staging.ensure_pair(start, end)?
+            };
+
+            if rebuilt != handle {
+                return Err(StoreError::InvalidPackedCarrier {
+                    handle,
+                    start,
+                    end,
+                });
+            }
+        }
+
+        *self = staging;
+        Ok(())
+    }
+
     pub fn export_anum(&self, handle: Handle) -> Result<String, StoreError> {
         let mut visiting = HashSet::new();
-        self.export_node(handle, &mut visiting)
+        let mut output = String::new();
+        self.write_node(handle, &mut visiting, &mut output)?;
+        Ok(output)
     }
 
     pub fn ensure_pair(
@@ -356,35 +479,37 @@ impl OptimizedLinkStore {
         }
     }
 
-    fn export_node(
+    fn write_node(
         &self,
         handle: Handle,
         visiting: &mut HashSet<Handle>,
-    ) -> Result<String, StoreError> {
+        output: &mut String,
+    ) -> Result<(), StoreError> {
         let (start, end) = self.poles(handle)?;
 
         if start == handle && end == handle {
-            return Ok("8".to_owned());
+            output.push('8');
+            return Ok(());
         }
 
         if !visiting.insert(handle) {
             return Err(StoreError::NonWellFounded(handle));
         }
 
-        let result = if start == handle {
-            format!("9{}", self.export_node(end, visiting)?)
+        if start == handle {
+            output.push('9');
+            self.write_node(end, visiting, output)?;
         } else if end == handle {
-            format!("6{}", self.export_node(start, visiting)?)
+            output.push('6');
+            self.write_node(start, visiting, output)?;
         } else {
-            format!(
-                "1{}{}",
-                self.export_node(start, visiting)?,
-                self.export_node(end, visiting)?
-            )
-        };
+            output.push('1');
+            self.write_node(start, visiting, output)?;
+            self.write_node(end, visiting, output)?;
+        }
 
         visiting.remove(&handle);
-        Ok(result)
+        Ok(())
     }
 }
 
@@ -863,6 +988,82 @@ mod tests {
         let first = optimized.import_anum("19868").unwrap();
         let second = optimized.import_anum("19868").unwrap();
         assert_eq!(first, second);
+    }
+
+    #[test]
+    fn batch_import_matches_sequential_import_and_is_atomic() {
+        let sources = vec![
+            "98".to_owned(),
+            "68".to_owned(),
+            "16898".to_owned(),
+            "19868".to_owned(),
+            "16816898".to_owned(),
+        ];
+
+        let mut sequential = OptimizedLinkStore::new();
+        let sequential_handles = sources
+            .iter()
+            .map(|source| sequential.import_anum(source).unwrap())
+            .collect::<Vec<_>>();
+
+        let mut batched = OptimizedLinkStore::new();
+        let instance_id = batched.instance_id;
+        let batch_handles = batched.import_anums(&sources).unwrap();
+
+        assert_eq!(batch_handles, sequential_handles);
+        assert_eq!(batched.instance_id, instance_id);
+        assert_eq!(batched.link_count(), sequential.link_count());
+        for (source, handle) in sources.iter().zip(batch_handles.iter()) {
+            assert_eq!(batched.export_anum(*handle).unwrap(), *source);
+        }
+
+        let stable = batched.import_anum("198698").unwrap();
+        let before_count = batched.link_count();
+        let before_stable = batched.export_anum(stable).unwrap();
+        let failed = vec!["116898998".to_owned(), "19868x".to_owned()];
+        assert!(batched.import_anums(&failed).is_err());
+        assert_eq!(batched.instance_id, instance_id);
+        assert_eq!(batched.link_count(), before_count);
+        assert_eq!(batched.export_anum(stable).unwrap(), before_stable);
+    }
+
+    #[test]
+    fn packed_duplet_carrier_rebuilds_exact_store_and_is_atomic() {
+        let mut source = OptimizedLinkStore::new();
+        let o = source.import_anum("98").unwrap();
+        let c = source.import_anum("68").unwrap();
+        let l = source.ensure_pair(o, c).unwrap();
+        let _u = source.ensure_pair(c, o).unwrap();
+        let _top = source.ensure_pair(l, ROOT_HANDLE).unwrap();
+
+        let carrier = source.export_packed_duplets();
+
+        let mut loaded = OptimizedLinkStore::new();
+        let instance_id = loaded.instance_id;
+        loaded.load_packed_duplets(&carrier).unwrap();
+
+        assert_eq!(loaded.instance_id, instance_id);
+        assert_eq!(loaded.link_count(), source.link_count());
+        assert_eq!(loaded.export_packed_duplets(), carrier);
+        for handle in 1..=source.link_count() as Handle {
+            assert_eq!(
+                loaded.export_anum(handle).unwrap(),
+                source.export_anum(handle).unwrap()
+            );
+        }
+
+        let stable = loaded.export_packed_duplets();
+        let malformed = vec![
+            (ROOT_HANDLE, ROOT_HANDLE),
+            (ROOT_HANDLE, ROOT_HANDLE),
+            (ROOT_HANDLE, ROOT_HANDLE),
+        ];
+        assert!(matches!(
+            loaded.load_packed_duplets(&malformed),
+            Err(StoreError::InvalidPackedCarrier { .. })
+        ));
+        assert_eq!(loaded.instance_id, instance_id);
+        assert_eq!(loaded.export_packed_duplets(), stable);
     }
 
     #[test]
