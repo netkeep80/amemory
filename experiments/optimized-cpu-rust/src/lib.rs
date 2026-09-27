@@ -210,7 +210,9 @@ impl OptimizedLinkStore {
 
     pub fn export_anum(&self, handle: Handle) -> Result<String, StoreError> {
         let mut visiting = HashSet::new();
-        self.export_node(handle, &mut visiting)
+        let mut output = String::new();
+        self.write_node(handle, &mut visiting, &mut output)?;
+        Ok(output)
     }
 
     pub fn ensure_pair(
@@ -391,35 +393,37 @@ impl OptimizedLinkStore {
         }
     }
 
-    fn export_node(
+    fn write_node(
         &self,
         handle: Handle,
         visiting: &mut HashSet<Handle>,
-    ) -> Result<String, StoreError> {
+        output: &mut String,
+    ) -> Result<(), StoreError> {
         let (start, end) = self.poles(handle)?;
 
         if start == handle && end == handle {
-            return Ok("8".to_owned());
+            output.push('8');
+            return Ok(());
         }
 
         if !visiting.insert(handle) {
             return Err(StoreError::NonWellFounded(handle));
         }
 
-        let result = if start == handle {
-            format!("9{}", self.export_node(end, visiting)?)
+        if start == handle {
+            output.push('9');
+            self.write_node(end, visiting, output)?;
         } else if end == handle {
-            format!("6{}", self.export_node(start, visiting)?)
+            output.push('6');
+            self.write_node(start, visiting, output)?;
         } else {
-            format!(
-                "1{}{}",
-                self.export_node(start, visiting)?,
-                self.export_node(end, visiting)?
-            )
-        };
+            output.push('1');
+            self.write_node(start, visiting, output)?;
+            self.write_node(end, visiting, output)?;
+        }
 
         visiting.remove(&handle);
-        Ok(result)
+        Ok(())
     }
 }
 
