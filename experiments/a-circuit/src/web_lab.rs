@@ -6,7 +6,7 @@ use crate::{
     mux_n::{web_prove_mux1, web_prove_mux32},
     rotate32_n::web_run_rotate32,
     rotate_carry32_n::web_run_rotate_carry32,
-    shift32_n::web_run_shift32,
+    shift32_n::{web_prove_shift32, web_run_shift32},
     unary_arith_n::web_run_unary32,
 };
 use std::sync::Mutex;
@@ -169,6 +169,27 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
         return Some(out);
     }
 
+
+    if (13..=15).contains(&op) {
+        let execution = web_prove_shift32(op, a, b)?;
+        let proof_json = serde_json::to_string(&execution.proof).ok()?;
+        let out = execution.outcome;
+        set_last_proof_json(proof_json);
+        return Some(LabOutcome {
+            value: out.value,
+            value_hi: 0,
+            writeback: u32::from(out.writeback),
+            defined_mask: out.defined_mask,
+            value_mask: out.value_mask,
+            undefined_mask: out.undefined_mask,
+            preserve_mask: out.preserve_mask,
+            reactions: out.reactions,
+            links_after_build: out.links_after_build,
+            links_after_first: out.links_after_first,
+            steady_link_delta: out.steady_link_delta,
+            quiescent: u32::from(out.quiescent),
+        });
+    }
 
     if let Some(out) = web_run_shift32(op, a, b) {
         return Some(LabOutcome {
@@ -691,14 +712,130 @@ mod tests {
         assert_eq!(proof["result"]["oracleMatches"], true);
         assert_eq!(proof["result"]["identicalRerunLinkDelta"], 0);
 
-        let shl = execute(13, 0x8000_0001, 1, 0).unwrap();
-        assert_eq!(shl.value, 2);
-        assert_eq!(shl.value_mask & FLAG_CF, FLAG_CF);
-        assert_eq!(shl.steady_link_delta, 0);
+        let mut shift_count_sources = Vec::new();
+        for (op, value, count, expected, block) in [
+            (13u32, 0x8000_0001u32, 1u32, 0x0000_0002u32, "SHL32"),
+            (14u32, 0x8000_0001u32, 1u32, 0x4000_0000u32, "SHR32"),
+            (15u32, 0x8000_0001u32, 1u32, 0xc000_0000u32, "SAR32"),
+            (13u32, 0x8000_0001u32, 32u32, 0x8000_0001u32, "SHL32"),
+            (13u32, 0x8000_0001u32, 33u32, 0x0000_0002u32, "SHL32"),
+        ] {
+            let out = execute(op, value, count, 0).unwrap();
+            assert_eq!(out.value, expected, "{block} count={count}");
+            assert_eq!(out.writeback, 1, "{block}");
+            assert_eq!(out.steady_link_delta, 0, "{block}");
+            assert_eq!(out.quiescent, 1, "{block}");
+            assert_eq!(amemory_i386_lab_proof_available(), 1, "{block}");
 
-        let shl_alias = execute(13, 0x8000_0001, 33, 0).unwrap();
-        assert_eq!(shl_alias.value, shl.value);
-        assert_eq!(shl_alias.value_mask, shl.value_mask);
+            let proof_json = {
+                let guard = LAST_PROOF_JSON
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                guard.clone()
+            };
+            let proof: serde_json::Value =
+                serde_json::from_str(&proof_json).unwrap();
+            assert_eq!(proof["block"], block);
+            let memory_id =
+                proof["load"]["memoryInstanceId"].as_str().unwrap();
+            assert_eq!(
+                proof["execute"]["memoryInstanceId"].as_str().unwrap(),
+                memory_id
+            );
+            assert_eq!(
+                proof["result"]["memoryInstanceId"].as_str().unwrap(),
+                memory_id
+            );
+            assert_eq!(proof["load"]["carrierRoundTrip"], true);
+            assert_eq!(proof["execute"]["finalQuiescent"], true);
+            assert_eq!(proof["result"]["oracleMatches"], true);
+            assert_eq!(proof["result"]["identicalRerunLinkDelta"], 0);
+            assert_eq!(
+                proof["result"]["decodedValue"].as_u64().unwrap() as u32,
+                out.value
+            );
+            assert_eq!(
+                proof["result"]["visualLinks"].as_array().unwrap().len() as u64,
+                proof["result"]["linksFinal"].as_u64().unwrap()
+            );
+
+            let roots = proof["prepare"]["semanticRoots"].as_array().unwrap();
+            let source_for = |role: &str| {
+                roots
+                    .iter()
+                    .find(|root| root["role"] == role)
+                    .and_then(|root| root["source"].as_str())
+                    .unwrap()
+            };
+            for required in [
+                "function.shift.selected",
+                "function.shift.shl",
+                "function.shift.shr",
+                "function.shift.sar",
+                "data.value.word",
+                "data.count.word",
+                "execution.interpreter",
+                "execution.theory",
+                "execution.apply",
+                "invocation.call",
+                "scope.initial",
+                "result.tag",
+                "result.flag.set_tag",
+                "result.flag.undefined_tag",
+            ] {
+                assert!(
+                    roots.iter().any(|root| root["role"] == required),
+                    "{block}: missing {required}"
+                );
+            }
+            let selected_role = match op {
+                13 => "function.shift.shl",
+                14 => "function.shift.shr",
+                15 => "function.shift.sar",
+                _ => unreachable!(),
+            };
+            assert_eq!(
+                source_for("function.shift.selected"),
+                source_for(selected_role),
+                "{block}: selected structural function mismatch"
+            );
+
+            if op == 13 && count == 32 {
+                assert_eq!(out.defined_mask, 0, "masked-zero SHL32 must define no status flags");
+                assert_eq!(out.undefined_mask, 0, "masked-zero SHL32 must undefine no status flags");
+                assert_eq!(out.preserve_mask, STATUS_FLAGS, "masked-zero SHL32 must preserve all status flags");
+                assert_eq!(out.reactions, 1, "masked-zero SHL32 must use the one-step structural rule");
+            }
+
+            if op == 13 && (count == 1 || count == 33) {
+                shift_count_sources.push((
+                    count,
+                    source_for("data.count.word").to_owned(),
+                    out.value,
+                    out.defined_mask,
+                    out.value_mask,
+                    out.undefined_mask,
+                    out.preserve_mask,
+                    out.reactions,
+                ));
+            }
+        }
+
+        assert_eq!(shift_count_sources.len(), 2);
+        shift_count_sources.sort_by_key(|entry| entry.0);
+        let count1 = &shift_count_sources[0];
+        let count33 = &shift_count_sources[1];
+        assert_eq!(count1.0, 1);
+        assert_eq!(count33.0, 33);
+        assert_ne!(
+            count1.1, count33.1,
+            "Count8 Anums must differ before structural masking"
+        );
+        assert_eq!(
+            (&count1.2, &count1.3, &count1.4, &count1.5, &count1.6, &count1.7),
+            (&count33.2, &count33.3, &count33.4, &count33.5, &count33.6, &count33.7),
+            "count 1 and 33 must converge only through structural Count8 masking"
+        );
 
         let ror = execute(17, 1, 1, 0).unwrap();
         assert_eq!(ror.value, 0x8000_0000);

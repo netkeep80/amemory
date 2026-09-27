@@ -125,7 +125,7 @@ jobs:
                 { role: "execution.interpreter", source: "68" },
                 { role: "invocation.call", source: "19868" },
               ],
-              theoryAdmissions: ["16898"],
+              theoryAdmissions: ["L8"],
             },
             load: {
               memoryInstanceId: "A-memory#7",
@@ -407,9 +407,17 @@ jobs:
               if (!len || ptr + len > w.memory.buffer.byteLength) {
                 throw new Error(label + " proof JSON pointer/length invalid");
               }
-              return JSON.parse(
+              const proof = JSON.parse(
                 Buffer.from(w.memory.buffer, ptr, len).toString("utf8")
               );
+              if (!Array.isArray(proof.prepare?.theoryAdmissions) ||
+                  proof.prepare.theoryAdmissions.length === 0 ||
+                  !proof.prepare.theoryAdmissions.every(
+                    (ref) => typeof ref === "string" && /^L\d+$/.test(ref)
+                  )) {
+                throw new Error(label + " Theory admissions are not packed-carrier Link references");
+              }
+              return proof;
             };
 
             const verifyLogicProof = (op, a, b, expected, expectedWriteback, block) => {
@@ -670,9 +678,93 @@ jobs:
               }
             };
 
-            run(13, 0x80000001, 33, 0, 0x00000002, "SHL32 count-mask");
-            if (w.amemory_i386_lab_proof_available() !== 0) {
-              throw new Error("non-proof shift run leaked stale proof JSON");
+            const verifyShiftProof = (op, value, count, expected, block) => {
+              run(op, value, count, 0, expected, block + " count=" + count);
+              const proof = readCurrentProof(block);
+              if (proof.block !== block) {
+                throw new Error(block + " proof block identity mismatch");
+              }
+              const memoryId = proof.load.memoryInstanceId;
+              if (!memoryId ||
+                  proof.execute.memoryInstanceId !== memoryId ||
+                  proof.result.memoryInstanceId !== memoryId ||
+                  !proof.execute.reactions.every((step) => step.memoryInstanceId === memoryId)) {
+                throw new Error(block + " proof changed runtime A-memory identity");
+              }
+              if (proof.prepare.runtimeMemoryExists !== false ||
+                  !proof.load.carrierRoundTrip ||
+                  proof.load.linksBeforeLoad !== 1 ||
+                  proof.load.linksAfterLoad !== proof.prepare.compiledLinks ||
+                  !proof.execute.finalQuiescent ||
+                  !proof.result.oracleMatches ||
+                  proof.result.identicalRerunLinkDelta !== 0 ||
+                  (proof.result.decodedValue >>> 0) !== (expected >>> 0)) {
+                throw new Error(block + " structural shift witness failed");
+              }
+
+              const sourceByRole = new Map(
+                proof.prepare.semanticRoots.map((root) => [root.role, root.source])
+              );
+              for (const role of [
+                "function.shift.selected",
+                "function.shift.shl",
+                "function.shift.shr",
+                "function.shift.sar",
+                "data.value.word",
+                "data.count.word",
+                "execution.interpreter",
+                "execution.theory",
+                "execution.apply",
+                "invocation.call",
+                "scope.initial",
+                "result.tag",
+                "result.flag.set_tag",
+                "result.flag.undefined_tag",
+              ]) {
+                if (!sourceByRole.has(role)) {
+                  throw new Error(block + " prepared Aset missing " + role);
+                }
+              }
+              const selectedRole = op === 13
+                ? "function.shift.shl"
+                : op === 14
+                  ? "function.shift.shr"
+                  : "function.shift.sar";
+              if (sourceByRole.get("function.shift.selected") !== sourceByRole.get(selectedRole)) {
+                throw new Error(block + " selected structural function mismatch");
+              }
+              if (proof.result.visualLinks.length !== proof.result.linksFinal) {
+                throw new Error(block + " visual snapshot is incomplete");
+              }
+              return {
+                countSource: sourceByRole.get("data.count.word"),
+                value: w.amemory_i386_lab_value() >>> 0,
+                defined: w.amemory_i386_lab_defined_mask() >>> 0,
+                values: w.amemory_i386_lab_value_mask() >>> 0,
+                undefined: w.amemory_i386_lab_undefined_mask() >>> 0,
+                preserve: w.amemory_i386_lab_preserve_mask() >>> 0,
+                reactions: w.amemory_i386_lab_reactions() >>> 0,
+              };
+            };
+
+            const shl1 = verifyShiftProof(13, 0x80000001, 1, 0x00000002, "SHL32");
+            verifyShiftProof(14, 0x80000001, 1, 0x40000000, "SHR32");
+            verifyShiftProof(15, 0x80000001, 1, 0xc0000000, "SAR32");
+            const shl32 = verifyShiftProof(13, 0x80000001, 32, 0x80000001, "SHL32");
+            if (shl32.defined !== 0 ||
+                shl32.undefined !== 0 ||
+                shl32.preserve !== 0x000008d5 ||
+                shl32.reactions !== 1) {
+              throw new Error("masked-zero SHL32 must preserve all status flags in one structural reaction");
+            }
+            const shl33 = verifyShiftProof(13, 0x80000001, 33, 0x00000002, "SHL32");
+            if (shl1.countSource === shl33.countSource) {
+              throw new Error("Count8 1 and 33 must be distinct structural inputs before masking");
+            }
+            for (const key of ["value", "defined", "values", "undefined", "preserve", "reactions"]) {
+              if (shl1[key] !== shl33[key]) {
+                throw new Error("Count8 1 and 33 failed structural masking equivalence: " + key);
+              }
             }
             run(17, 0x00000001, 1, 0, 0x80000000, "ROR32");
             run(18, 0x00000000, 1, 1, 0x00000001, "RCL32 CF-in");
@@ -698,7 +790,7 @@ jobs:
               throw new Error("x86 MUL32 must not preserve status flags");
             }
 
-            console.log("WASM registry + MUX1/MUX32/logic/arithmetic/shift/rotate/unary/MUL structural smoke PASS");
+            console.log("WASM registry + MUX1/MUX32/logic/arithmetic/shift-proofs/rotate/unary/MUL structural smoke PASS");
           }).catch((error) => {
             console.error(error);
             process.exit(1);

@@ -7,6 +7,11 @@ use super::{
         call, define_bundle_rule, index_rule_for, Fixture as FullFixture,
     },
     logic_n::{GateSet, LogicProgram},
+    proof_n::{
+        execute_to_quiescence, identical_rerun, load_runtime, loaded_handle,
+        prepare_stage, semantic_source, theory_admissions, visual_snapshot,
+        ProofRuntimeMemory, WebProofResultStage, WebStructuralProof,
+    },
 };
 use amemory_optimized_cpu_probe::{
     structural::{
@@ -1210,6 +1215,12 @@ fn values() -> Vec<u32> {
 }
 
 
+#[derive(Clone, Debug)]
+pub(crate) struct WebShiftProofExecution {
+    pub(crate) outcome: WebShiftOutcome,
+    pub(crate) proof: WebStructuralProof,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct WebShiftOutcome {
     pub(crate) value: u32,
@@ -1248,6 +1259,344 @@ fn web_flag_masks(states: [(u32, FlagState); 6]) -> (u32, u32, u32, u32) {
         }
     }
     (defined, values, undefined, preserve)
+}
+
+fn runtime_shift_bit(
+    memory: &ProofRuntimeMemory,
+    value: Handle,
+    zero: Handle,
+    one: Handle,
+) -> Option<u8> {
+    if value == one {
+        Some(1)
+    } else if value == zero {
+        Some(0)
+    } else {
+        let _ = memory;
+        None
+    }
+}
+
+fn runtime_shift_word(
+    memory: &ProofRuntimeMemory,
+    word: Handle,
+    zero: Handle,
+    one: Handle,
+) -> Option<u32> {
+    let bits = read_exact_sequence(&memory.store, word).ok()?;
+    if bits.len() != WIDTH {
+        return None;
+    }
+    let mut value = 0u32;
+    for (index, bit) in bits.into_iter().enumerate() {
+        value |= u32::from(runtime_shift_bit(memory, bit, zero, one)?) << index;
+    }
+    Some(value)
+}
+
+fn runtime_shift_action(
+    memory: &ProofRuntimeMemory,
+    action: Handle,
+    set_tag: Handle,
+    undefined_tag: Handle,
+    expected_flag: Handle,
+    zero: Handle,
+    one: Handle,
+) -> Option<FlagState> {
+    let (tag, payload) = memory.store.poles(action).ok()?;
+    let values = read_exact_sequence(&memory.store, payload).ok()?;
+
+    if tag == set_tag {
+        if values.len() != 2 || values[0] != expected_flag {
+            return None;
+        }
+        Some(FlagState::Set(runtime_shift_bit(
+            memory, values[1], zero, one,
+        )?))
+    } else if tag == undefined_tag {
+        if values != vec![expected_flag] {
+            return None;
+        }
+        Some(FlagState::Undefined)
+    } else {
+        None
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn decode_runtime_shift_effect(
+    memory: &ProofRuntimeMemory,
+    final_link: Handle,
+    caller: Handle,
+    result_tag: Handle,
+    zero: Handle,
+    one: Handle,
+    set_tag: Handle,
+    undefined_tag: Handle,
+    cf_flag: Handle,
+    pf_flag: Handle,
+    af_flag: Handle,
+    zf_flag: Handle,
+    sf_flag: Handle,
+    of_flag: Handle,
+    reactions: usize,
+) -> Option<(EffectOutcome, Handle)> {
+    let (final_caller, endpoint) = memory.store.poles(final_link).ok()?;
+    if final_caller != caller {
+        return None;
+    }
+    let (tag, payload) = memory.store.poles(endpoint).ok()?;
+    if tag != result_tag {
+        return None;
+    }
+    let values = read_exact_sequence(&memory.store, payload).ok()?;
+    if values.len() != 3 {
+        return None;
+    }
+
+    let writeback = runtime_shift_bit(memory, values[0], zero, one)?;
+    let value = runtime_shift_word(memory, values[1], zero, one)?;
+    let patch = read_exact_sequence(&memory.store, values[2]).ok()?;
+
+    let (cf, pf, af, zf, sf, of) = if patch.is_empty() {
+        (
+            FlagState::Preserve,
+            FlagState::Preserve,
+            FlagState::Preserve,
+            FlagState::Preserve,
+            FlagState::Preserve,
+            FlagState::Preserve,
+        )
+    } else {
+        if patch.len() != 6 {
+            return None;
+        }
+        (
+            runtime_shift_action(
+                memory, patch[0], set_tag, undefined_tag, cf_flag, zero, one,
+            )?,
+            runtime_shift_action(
+                memory, patch[1], set_tag, undefined_tag, pf_flag, zero, one,
+            )?,
+            runtime_shift_action(
+                memory, patch[2], set_tag, undefined_tag, af_flag, zero, one,
+            )?,
+            runtime_shift_action(
+                memory, patch[3], set_tag, undefined_tag, zf_flag, zero, one,
+            )?,
+            runtime_shift_action(
+                memory, patch[4], set_tag, undefined_tag, sf_flag, zero, one,
+            )?,
+            runtime_shift_action(
+                memory, patch[5], set_tag, undefined_tag, of_flag, zero, one,
+            )?,
+        )
+    };
+
+    Some((
+        EffectOutcome {
+            writeback,
+            value,
+            cf,
+            pf,
+            af,
+            zf,
+            sf,
+            of,
+            reactions,
+        },
+        payload,
+    ))
+}
+
+pub(crate) fn web_prove_shift32(
+    op: u32,
+    value: u32,
+    count: u32,
+) -> Option<WebShiftProofExecution> {
+    if count > u8::MAX as u32 {
+        return None;
+    }
+
+    let mut compiler = FullFixture::new();
+    let program = Shift32Program::install(&mut compiler);
+    let (block, function) = match op {
+        13 => ("SHL32", program.shl),
+        14 => ("SHR32", program.shr),
+        15 => ("SAR32", program.sar),
+        _ => return None,
+    };
+    let links_after_build = program.links_after_build as u32;
+
+    let value_bits = bit_handles(&compiler, WIDTH, value);
+    let count_bits = bit_handles(&compiler, 8, count);
+    let value_word =
+        materialize_exact_sequence(&mut compiler.store, &value_bits).ok()?;
+    let count_word =
+        materialize_exact_sequence(&mut compiler.store, &count_bits).ok()?;
+    let args = materialize_exact_sequence(
+        &mut compiler.store,
+        &[value_word, count_word],
+    )
+    .ok()?;
+    let invocation =
+        call(&mut compiler.store, compiler.apply, function, args);
+    let initial = compiler
+        .store
+        .ensure_pair(compiler.k, invocation)
+        .ok()?;
+
+    let prepared_roots = vec![
+        semantic_source(&compiler.store, "function.shift.selected", function),
+        semantic_source(&compiler.store, "function.shift.shl", program.shl),
+        semantic_source(&compiler.store, "function.shift.shr", program.shr),
+        semantic_source(&compiler.store, "function.shift.sar", program.sar),
+        semantic_source(&compiler.store, "data.value.word", value_word),
+        semantic_source(&compiler.store, "data.count.word", count_word),
+        semantic_source(&compiler.store, "data.bit.zero", compiler.zero),
+        semantic_source(&compiler.store, "data.bit.one", compiler.one),
+        semantic_source(
+            &compiler.store,
+            "execution.interpreter",
+            compiler.interpreter,
+        ),
+        semantic_source(&compiler.store, "execution.theory", compiler.theory),
+        semantic_source(&compiler.store, "execution.apply", compiler.apply),
+        semantic_source(&compiler.store, "invocation.args", args),
+        semantic_source(&compiler.store, "invocation.call", invocation),
+        semantic_source(&compiler.store, "scope.initial", initial),
+        semantic_source(&compiler.store, "context.caller", compiler.k),
+        semantic_source(&compiler.store, "result.tag", program.result_tag),
+        semantic_source(
+            &compiler.store,
+            "result.flag.set_tag",
+            program.schema.set_tag,
+        ),
+        semantic_source(
+            &compiler.store,
+            "result.flag.undefined_tag",
+            program.schema.undefined_tag,
+        ),
+        semantic_source(&compiler.store, "result.flag.cf", program.schema.cf),
+        semantic_source(&compiler.store, "result.flag.pf", program.schema.pf),
+        semantic_source(&compiler.store, "result.flag.af", program.schema.af),
+        semantic_source(&compiler.store, "result.flag.zf", program.schema.zf),
+        semantic_source(&compiler.store, "result.flag.sf", program.schema.sf),
+        semantic_source(&compiler.store, "result.flag.of", program.schema.of),
+    ];
+
+    let admissions =
+        theory_admissions(&compiler.store, compiler.theory)?;
+    let prepare =
+        prepare_stage(&compiler.store, prepared_roots, admissions);
+    let (mut memory, load) = load_runtime(&prepare)?;
+
+    let interpreter = loaded_handle(&load, "execution.interpreter")?;
+    let initial = loaded_handle(&load, "scope.initial")?;
+    let caller = loaded_handle(&load, "context.caller")?;
+    let result_tag = loaded_handle(&load, "result.tag")?;
+    let zero = loaded_handle(&load, "data.bit.zero")?;
+    let one = loaded_handle(&load, "data.bit.one")?;
+    let set_tag = loaded_handle(&load, "result.flag.set_tag")?;
+    let undefined_tag =
+        loaded_handle(&load, "result.flag.undefined_tag")?;
+    let cf_flag = loaded_handle(&load, "result.flag.cf")?;
+    let pf_flag = loaded_handle(&load, "result.flag.pf")?;
+    let af_flag = loaded_handle(&load, "result.flag.af")?;
+    let zf_flag = loaded_handle(&load, "result.flag.zf")?;
+    let sf_flag = loaded_handle(&load, "result.flag.sf")?;
+    let of_flag = loaded_handle(&load, "result.flag.of")?;
+
+    let (mut engine, execute) = execute_to_quiescence(
+        &mut memory,
+        interpreter,
+        initial,
+        32,
+        92,
+    )?;
+    if engine.current().len() != 1 {
+        return None;
+    }
+
+    let final_link = engine.current()[0];
+    let (actual, payload) = decode_runtime_shift_effect(
+        &memory,
+        final_link,
+        caller,
+        result_tag,
+        zero,
+        one,
+        set_tag,
+        undefined_tag,
+        cf_flag,
+        pf_flag,
+        af_flag,
+        zf_flag,
+        sf_flag,
+        of_flag,
+        execute.active_reaction_count as usize,
+    )?;
+    let oracle = expected(&program, function, value, count as u8);
+    if execute.active_reaction_count != actual.reactions as u32 {
+        return None;
+    }
+
+    let result_anum = memory.store.export_anum(final_link).ok()?;
+    let result_sequence_anum = memory.store.export_anum(payload).ok()?;
+    let links_after_first = memory.store.link_count() as u32;
+    let identical_rerun_link_delta = identical_rerun(
+        &mut memory,
+        &mut engine,
+        initial,
+        &result_anum,
+        92,
+    )?;
+    let visual_links = visual_snapshot(&memory, &load.semantic_roots);
+
+    let result = WebProofResultStage {
+        memory_instance_id: memory.id.clone(),
+        result_anum,
+        result_sequence_anum,
+        decoded_value: actual.value,
+        oracle_value: oracle.value,
+        oracle_matches: actual == oracle,
+        links_final: memory.store.link_count() as u32,
+        identical_rerun_link_delta,
+        visual_links,
+    };
+    let proof = WebStructuralProof {
+        schema_version: 2,
+        block: block.to_owned(),
+        prepare,
+        load,
+        execute,
+        result,
+    };
+
+    let (defined_mask, value_mask, undefined_mask, preserve_mask) =
+        web_flag_masks([
+            (WEB_CF, actual.cf),
+            (WEB_PF, actual.pf),
+            (WEB_AF, actual.af),
+            (WEB_ZF, actual.zf),
+            (WEB_SF, actual.sf),
+            (WEB_OF, actual.of),
+        ]);
+    let outcome = WebShiftOutcome {
+        value: actual.value,
+        writeback: actual.writeback,
+        defined_mask,
+        value_mask,
+        undefined_mask,
+        preserve_mask,
+        reactions: actual.reactions as u32,
+        links_after_build,
+        links_after_first,
+        steady_link_delta: proof.result.identical_rerun_link_delta,
+        quiescent: u8::from(proof.execute.final_quiescent),
+    };
+
+    Some(WebShiftProofExecution { outcome, proof })
 }
 
 pub(crate) fn web_run_shift32(
