@@ -492,12 +492,12 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
           ![...roles].some((role) => role.startsWith("function.gate."))) {
         throw new Error(block + " prepared Aset missing binary logic structure");
       }
-      const sourceByRole = new Map(
-        proof.prepare.semanticRoots.map((root) => [root.role, root.source])
+      const refByRole = new Map(
+        proof.prepare.semanticRoots.map((root) => [root.role, root.carrierRef])
       );
       const expectedBitRole =
         expectedWriteback === 0 ? "data.bit.zero" : "data.bit.one";
-      if (sourceByRole.get("data.writeback") !== sourceByRole.get(expectedBitRole)) {
+      if (refByRole.get("data.writeback") !== refByRole.get(expectedBitRole)) {
         throw new Error(block + " structural writeback bit mismatch");
       }
     }
@@ -556,8 +556,8 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
       throw new Error(block + " arithmetic structural result witness failed");
     }
 
-    const sourceByRole = new Map(
-      proof.prepare.semanticRoots.map((root) => [root.role, root.source])
+    const refByRole = new Map(
+      proof.prepare.semanticRoots.map((root) => [root.role, root.carrierRef])
     );
     for (const role of [
       "function.effect.arithmetic",
@@ -576,15 +576,15 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
       "scope.initial",
       "result.tag",
     ]) {
-      if (!sourceByRole.has(role)) {
+      if (!refByRole.has(role)) {
         throw new Error(block + " prepared Aset missing " + role);
       }
     }
-    const bitSource = (value) =>
-      sourceByRole.get(value === 0 ? "data.bit.zero" : "data.bit.one");
-    if (sourceByRole.get("data.x") !== bitSource(expectedX) ||
-        sourceByRole.get("data.mode") !== bitSource(expectedMode) ||
-        sourceByRole.get("data.writeback") !== bitSource(expectedWriteback)) {
+    const bitRef = (value) =>
+      refByRole.get(value === 0 ? "data.bit.zero" : "data.bit.one");
+    if (refByRole.get("data.x") !== bitRef(expectedX) ||
+        refByRole.get("data.mode") !== bitRef(expectedMode) ||
+        refByRole.get("data.writeback") !== bitRef(expectedWriteback)) {
       throw new Error(block + " structural X/Mode/WriteBack selector mismatch");
     }
 
@@ -623,8 +623,8 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
       throw new Error("MUX32 structural proof witness failed");
     }
 
-    const sourceByRole = new Map(
-      proof.prepare.semanticRoots.map((root) => [root.role, root.source])
+    const refByRole = new Map(
+      proof.prepare.semanticRoots.map((root) => [root.role, root.carrierRef])
     );
     for (const role of [
       "function.mux32",
@@ -643,13 +643,13 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
       "scope.initial",
       "result.word_tag",
     ]) {
-      if (!sourceByRole.has(role)) {
+      if (!refByRole.has(role)) {
         throw new Error("MUX32 prepared Aset missing " + role);
       }
     }
     const selectBit =
-      sourceByRole.get(select === 0 ? "data.bit.zero" : "data.bit.one");
-    if (sourceByRole.get("data.select") !== selectBit) {
+      refByRole.get(select === 0 ? "data.bit.zero" : "data.bit.one");
+    if (refByRole.get("data.select") !== selectBit) {
       throw new Error("MUX32 structural select mismatch");
     }
     if (proof.result.visualLinks.length !== proof.result.linksFinal) {
@@ -704,7 +704,10 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
       throw new Error(block + " structural shift witness failed");
     }
 
-    const sourceByRole = new Map(
+    const refByRole = new Map(
+      proof.prepare.semanticRoots.map((root) => [root.role, root.carrierRef])
+    );
+    const witnessByRole = new Map(
       proof.prepare.semanticRoots.map((root) => [root.role, root.source])
     );
     for (const role of [
@@ -723,7 +726,7 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
       "result.flag.set_tag",
       "result.flag.undefined_tag",
     ]) {
-      if (!sourceByRole.has(role)) {
+      if (!refByRole.has(role)) {
         throw new Error(block + " prepared Aset missing " + role);
       }
     }
@@ -732,14 +735,15 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
       : op === 14
         ? "function.shift.shr"
         : "function.shift.sar";
-    if (sourceByRole.get("function.shift.selected") !== sourceByRole.get(selectedRole)) {
+    if (refByRole.get("function.shift.selected") !== refByRole.get(selectedRole)) {
       throw new Error(block + " selected structural function mismatch");
     }
     if (proof.result.visualLinks.length !== proof.result.linksFinal) {
       throw new Error(block + " visual snapshot is incomplete");
     }
     return {
-      countSource: sourceByRole.get("data.count.word"),
+      countRef: refByRole.get("data.count.word"),
+      countWitness: witnessByRole.get("data.count.word"),
       value: w.amemory_i386_lab_value() >>> 0,
       defined: w.amemory_i386_lab_defined_mask() >>> 0,
       values: w.amemory_i386_lab_value_mask() >>> 0,
@@ -760,8 +764,8 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
     throw new Error("masked-zero SHL32 must preserve all status flags in one structural reaction");
   }
   const shl33 = verifyShiftProof(13, 0x80000001, 33, 0x00000002, "SHL32");
-  if (shl1.countSource === shl33.countSource) {
-    throw new Error("Count8 1 and 33 must be distinct structural inputs before masking");
+  if (shl1.countWitness === shl33.countWitness) {
+    throw new Error("Count8 1 and 33 must be distinct portable structural inputs before masking");
   }
   for (const key of ["value", "defined", "values", "undefined", "preserve", "reactions"]) {
     if (shl1[key] !== shl33[key]) {
@@ -787,7 +791,10 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
       throw new Error(block + " structural rotate witness failed");
     }
 
-    const sourceByRole = new Map(
+    const refByRole = new Map(
+      proof.prepare.semanticRoots.map((root) => [root.role, root.carrierRef])
+    );
+    const witnessByRole = new Map(
       proof.prepare.semanticRoots.map((root) => [root.role, root.source])
     );
     const required = carry
@@ -827,7 +834,7 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
           "result.flag.undefined_tag",
         ];
     for (const role of required) {
-      if (!sourceByRole.has(role)) {
+      if (!refByRole.has(role)) {
         throw new Error(block + " prepared Aset missing " + role);
       }
     }
@@ -838,14 +845,14 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
     const selectedKey = carry
       ? "function.rotate_carry.selected"
       : "function.rotate.selected";
-    if (sourceByRole.get(selectedKey) !== sourceByRole.get(selectedRole)) {
+    if (refByRole.get(selectedKey) !== refByRole.get(selectedRole)) {
       throw new Error(block + " selected structural function mismatch");
     }
     if (carry) {
-      const cfSource = sourceByRole.get(
+      const cfSource = refByRole.get(
         cfIn === 0 ? "data.bit.zero" : "data.bit.one"
       );
-      if (sourceByRole.get("data.cf_in") !== cfSource) {
+      if (refByRole.get("data.cf_in") !== cfSource) {
         throw new Error(block + " CF-in is not a structural bit input");
       }
     }
@@ -854,7 +861,8 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
     }
 
     return {
-      countSource: sourceByRole.get("data.count.word"),
+      countRef: refByRole.get("data.count.word"),
+      countWitness: witnessByRole.get("data.count.word"),
       value: w.amemory_i386_lab_value() >>> 0,
       defined: w.amemory_i386_lab_defined_mask() >>> 0,
       values: w.amemory_i386_lab_value_mask() >>> 0,
@@ -873,7 +881,7 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
       rol2.defined !== 0x00000001 || rol2.undefined !== 0x00000800 ||
       rol32.defined !== 0 || rol32.undefined !== 0 ||
       rol32.preserve !== 0x000008d5 || rol32.reactions !== 1 ||
-      rol1.countSource === rol33.countSource) {
+      rol1.countWitness === rol33.countWitness) {
     throw new Error("ROL32 flag/masking proof failed");
   }
   for (const key of ["value", "defined", "values", "undefined", "preserve", "reactions"]) {
@@ -891,7 +899,7 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
       rcl2.defined !== 0x00000001 || rcl2.undefined !== 0x00000800 ||
       rcl32.defined !== 0 || rcl32.undefined !== 0 ||
       rcl32.preserve !== 0x000008d5 || rcl32.reactions !== 1 ||
-      rcl1.countSource === rcl33.countSource) {
+      rcl1.countWitness === rcl33.countWitness) {
     throw new Error("RCL32 flag/masking proof failed");
   }
   for (const key of ["value", "defined", "values", "undefined", "preserve", "reactions"]) {
@@ -918,8 +926,8 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
       throw new Error(block + " structural unary witness failed");
     }
 
-    const sourceByRole = new Map(
-      proof.prepare.semanticRoots.map((root) => [root.role, root.source])
+    const refByRole = new Map(
+      proof.prepare.semanticRoots.map((root) => [root.role, root.carrierRef])
     );
     for (const role of [
       "function.unary.selected",
@@ -943,7 +951,7 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
       "result.flag.sf",
       "result.flag.of",
     ]) {
-      if (!sourceByRole.has(role)) {
+      if (!refByRole.has(role)) {
         throw new Error(block + " prepared Aset missing " + role);
       }
     }
@@ -952,7 +960,7 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
       : op === 21
         ? "function.unary.dec"
         : "function.unary.neg";
-    if (sourceByRole.get("function.unary.selected") !== sourceByRole.get(selectedRole)) {
+    if (refByRole.get("function.unary.selected") !== refByRole.get(selectedRole)) {
       throw new Error(block + " selected structural function mismatch");
     }
 
