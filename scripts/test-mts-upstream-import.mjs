@@ -447,13 +447,13 @@ console.log("MTS_AND_AMEMORY_PROFILE_IMPORT_NEGATIVE_WITNESSES=GREEN");
 // D7 repository-level convergence guards.
 {
   const contract = JSON.parse(
-    readFileSync("contracts/amemory-contract-v0.1.json", "utf8"),
+    readFileSync("contracts/amemory-contract-v0.2.json", "utf8"),
   );
   const conformance = JSON.parse(
-    readFileSync("contracts/amemory-conformance-v0.1.json", "utf8"),
+    readFileSync("contracts/amemory-conformance-v0.2.json", "utf8"),
   );
   const projection = JSON.parse(
-    readFileSync("contracts/upstream/mts-v0.13-requirements.json", "utf8"),
+    readFileSync("contracts/upstream/mts-v0.14-requirements.json", "utf8"),
   );
   const v014Projection = JSON.parse(
     readFileSync("contracts/upstream/mts-v0.14-requirements.json", "utf8"),
@@ -462,7 +462,7 @@ console.log("MTS_AND_AMEMORY_PROFILE_IMPORT_NEGATIVE_WITNESSES=GREEN");
 
   assert.equal(
     contract.normativeAuthority.acceptedFoundationCommit,
-    "440caf09558d4ff5cfda11805cb3ef97b48d1ad5",
+    "fcbc97e2279471c2c5effed57685c5f49ec856be",
   );
   assert.equal(
     contract.normativeAuthority.executionProfile.id,
@@ -476,6 +476,15 @@ console.log("MTS_AND_AMEMORY_PROFILE_IMPORT_NEGATIVE_WITNESSES=GREEN");
     contract.normativeAuthority.executionProfile.commit,
     "af4e3dadbb9857fba7239a58f79ed2da59bc5c42",
   );
+  assert.equal(contract.schema, "amemory-contract/v0.2");
+  assert.equal(conformance.schema, "amemory-conformance/v0.2");
+  assert.equal(conformance.contract, "amemory-contract/v0.2");
+  assert.equal(conformance.normativeMts.version, "mts-contract/v0.14");
+  assert.equal(contract.normativeAuthority.mtsVersion, "mts-contract/v0.14");
+  assert.equal(contract.normativeAuthority.executionProfile.foundationMtsVersion, "v0.13");
+  assert.equal(contract.normativeAuthority.executionProfile.relabeledAsAcceptedV014, false);
+  assert.equal(contract.mtsV014Boundary.recursiveLinkWireEqualsAnum, false);
+  assert.equal(contract.mtsV014Boundary.rawCarrierPoleOrderIsSemanticOrientationAuthority, false);
   assert.equal(
     contract.executionProfileBoundary.fullReactionProfileConformanceClaimed,
     true,
@@ -537,6 +546,23 @@ console.log("MTS_AND_AMEMORY_PROFILE_IMPORT_NEGATIVE_WITNESSES=GREEN");
   );
   assert.equal(conformance.normativeExecutionProfile.profileVersion, "0.1.0");
   assert.equal(conformance.normativeExecutionProfile.portableLawCount, 17);
+  assert.equal(conformance.normativeExecutionProfile.foundationMtsVersion, "v0.13");
+  assert.equal(conformance.normativeExecutionProfile.relabeledAsAcceptedV014, false);
+  assert.equal(Object.keys(conformance.v014LawDisposition).length, 14);
+  assert.equal(conformance.foundationIntegrationState.allV014LawsDisposed, true);
+  assert.equal(conformance.foundationIntegrationState.authorityPinsIndependent, true);
+  assert.equal(conformance.v014LawDisposition["V14-L10"].classification, "DEFERRED_UPSTREAM_SCOPE");
+  for (const id of ["V14-L1","V14-L4","V14-L5","V14-L12","V14-L13","V14-L14"]) {
+    assert.equal(
+      conformance.v014LawDisposition[id].classification,
+      "IMPLEMENTED_BY_AMEMORY_BOUNDARY",
+      `${id} must be explicit A-memory boundary evidence`,
+    );
+  }
+  assert.equal(
+    conformance.v014LawDisposition["V14-L11"].classification,
+    "INHERITED_BY_GENERIC_EXECUTION_PROFILE",
+  );
 
   const backends = new Map(
     conformance.backendMatrix.map((backend) => [backend.backendId, backend]),
@@ -564,7 +590,7 @@ console.log("MTS_AND_AMEMORY_PROFILE_IMPORT_NEGATIVE_WITNESSES=GREEN");
       "af4e3dadbb9857fba7239a58f79ed2da59bc5c42",
     );
     assert.equal(backend.fullProfileConformance, true);
-    assert.match(backend.currentScopeMechanism, /^R1-R6 EVIDENCED:/);
+    assert.match(backend.currentScopeMechanism, /^R1-R7 EVIDENCED:/);
     assert(backend.backendSubstrateBoundary.length > 0);
     assert(backend.nonSemanticSchedulingChoices.length > 0);
     assert(backend.normalizedSemanticEquivalence.length > 0);
@@ -754,6 +780,26 @@ console.log("MTS_AND_AMEMORY_PROFILE_IMPORT_NEGATIVE_WITNESSES=GREEN");
   assert.equal(c052?.evidence?.observed?.reactionOrderVariation, "PASS (reversed current + Theory order)");
   assert.match(c052?.evidence?.observed?.boundedScopeFailClosed?.cpu ?? "", /17 > 16/);
   assert.match(c052?.evidence?.observed?.boundedScopeFailClosed?.gpu ?? "", /5 > 4/);
+  const c053 = conformance.mandatoryVectors.find((vector) => vector.id === "AM-C053-v014-authority-split-and-repin");
+  assert.equal(c053?.status, "green");
+  assert.equal(c053?.evidence?.acceptedFoundation, "mts-contract/v0.14");
+  assert.equal(c053?.evidence?.executionProfileFoundationMtsVersion, "v0.13");
+  assert.equal(c053?.evidence?.relabeledAsAcceptedV014, false);
+
+  const c054 = conformance.mandatoryVectors.find((vector) => vector.id === "AM-C054-v014-context-orientation-and-one-link-primitive");
+  assert.equal(c054?.status, "green");
+  assert.deepEqual(c054?.evidence?.prs, [188,190,192,194]);
+
+  const c055 = conformance.mandatoryVectors.find((vector) => vector.id === "AM-C055-v014-reaction-result-basis-and-immutable-rewrite");
+  assert.equal(c055?.status, "green");
+  assert.equal(c055?.evidence?.observed?.successfulEmptyDistinctFromNoRelation, "PASS");
+  assert.equal(c055?.evidence?.observed?.fixedPointAtoAActiveNotQuiescent, "PASS");
+  assert.equal(c055?.evidence?.newSemanticOpcodeOrKernel, false);
+
+  const c056 = conformance.mandatoryVectors.find((vector) => vector.id === "AM-C056-v014-representation-boundary");
+  assert.equal(c056?.status, "green");
+  assert.deepEqual(c056?.evidence?.prs, [198,200,202]);
+  assert.equal(c056?.evidence?.compatibilityPreserved, true);
 
   const greenRequirementCoverage = new Set(
     conformance.mandatoryVectors
@@ -771,7 +817,7 @@ console.log("MTS_AND_AMEMORY_PROFILE_IMPORT_NEGATIVE_WITNESSES=GREEN");
   assert.equal(contract.accepted, false);
   assert.equal(contract.status, "candidate");
   assert.equal(contract.executionProfileBoundary.fullReactionProfileConformanceClaimed, true);
-  assert.match(contract.executionProfileBoundary.currentImplementationClaim, /full-p01-p17-green-ready-candidate/);
+  assert.match(contract.executionProfileBoundary.currentImplementationClaim, /full-p01-p17-green-plus-v014-boundary-evidence-ready-candidate/);
 
   assert.match(readme, /minimal-portable-amemory-execution/);
   assert.match(readme, /FULL_REACTION_PROFILE_CONFORMANCE = TRUE/);
