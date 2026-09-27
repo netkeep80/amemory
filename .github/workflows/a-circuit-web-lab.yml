@@ -411,8 +411,11 @@ jobs:
               );
             };
 
-            const verifyLogicProof = (op, a, b, expected, block) => {
+            const verifyLogicProof = (op, a, b, expected, expectedWriteback, block) => {
               run(op, a, b, 0, expected, block);
+              if ((w.amemory_i386_lab_writeback() >>> 0) !== (expectedWriteback >>> 0)) {
+                throw new Error(block + " WASM writeback mismatch");
+              }
               const proof = readCurrentProof(block);
               if (proof.block !== block) {
                 throw new Error(block + " proof block identity mismatch");
@@ -474,8 +477,17 @@ jobs:
                 if (!roles.has("function.effect.binary") ||
                     !roles.has("function.word_binary") ||
                     !roles.has("data.b.word") ||
+                    !roles.has("data.writeback") ||
                     ![...roles].some((role) => role.startsWith("function.gate."))) {
                   throw new Error(block + " prepared Aset missing binary logic structure");
+                }
+                const sourceByRole = new Map(
+                  proof.prepare.semanticRoots.map((root) => [root.role, root.source])
+                );
+                const expectedBitRole =
+                  expectedWriteback === 0 ? "data.bit.zero" : "data.bit.one";
+                if (sourceByRole.get("data.writeback") !== sourceByRole.get(expectedBitRole)) {
+                  throw new Error(block + " structural writeback bit mismatch");
                 }
               }
 
@@ -494,10 +506,11 @@ jobs:
               }
             };
 
-            verifyLogicProof(1, 0xaaaaaaaa, 0x0f0f0f0f, 0x0a0a0a0a, "AND32");
-            verifyLogicProof(2, 0xaaaa0000, 0x00005555, 0xaaaa5555, "OR32");
-            verifyLogicProof(3, 0xffff0000, 0x0f0f0f0f, 0xf0f00f0f, "XOR32");
-            verifyLogicProof(4, 0x12345678, 0, 0xedcba987, "NOT32");
+            verifyLogicProof(1, 0xaaaaaaaa, 0x0f0f0f0f, 0x0a0a0a0a, 1, "AND32");
+            verifyLogicProof(2, 0xaaaa0000, 0x00005555, 0xaaaa5555, 1, "OR32");
+            verifyLogicProof(3, 0xffff0000, 0x0f0f0f0f, 0xf0f00f0f, 1, "XOR32");
+            verifyLogicProof(4, 0x12345678, 0, 0xedcba987, 1, "NOT32");
+            verifyLogicProof(5, 0xf0f01234, 0x0ff0ffff, 0x00f01234, 0, "TEST32");
 
             const runWide = (op, a, b, expectedLo, expectedHi, reactions, label) => {
               if (w.amemory_i386_lab_run(op, a, b, 0) !== 1) {
