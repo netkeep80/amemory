@@ -4,16 +4,16 @@ on:
   pull_request:
     paths:
       - "experiments/browser-accelerator/**"
-      - "contracts/amemory-contract-v0.1.json"
-      - "contracts/amemory-conformance-v0.1.json"
+      - "contracts/amemory-contract-v*.json"
+      - "contracts/amemory-conformance-v*.json"
       - "repo-policy.json"
       - ".github/workflows/browser-structural-ci.yml"
   push:
     branches: [main]
     paths:
       - "experiments/browser-accelerator/**"
-      - "contracts/amemory-contract-v0.1.json"
-      - "contracts/amemory-conformance-v0.1.json"
+      - "contracts/amemory-contract-v*.json"
+      - "contracts/amemory-conformance-v*.json"
       - "repo-policy.json"
       - ".github/workflows/browser-structural-ci.yml"
   workflow_dispatch:
@@ -47,7 +47,7 @@ jobs:
           node --check experiments/browser-accelerator/web/differential.mjs
           node --check experiments/browser-accelerator/web/reaction.mjs
 
-      - name: Portable Anum witnesses
+      - name: Recursive Link wire + semantic orientation witnesses
         run: node experiments/browser-accelerator/tests/anum-boundary.test.mjs
 
       - name: Stateful store witnesses
@@ -59,7 +59,7 @@ jobs:
       - name: CPU/GPU differential witnesses
         run: node experiments/browser-accelerator/tests/differential.test.mjs
 
-      - name: Reaction R1-R6 witnesses
+      - name: Reaction R1-R7 witnesses
         run: node experiments/browser-accelerator/tests/reaction.test.mjs
 
       - name: Install Rust + wasm32 once
@@ -87,6 +87,6 @@ jobs:
 
       - name: Consolidation policy
         run: |
-          echo "Anum, state-store, canonicalization, differential and reaction checks share one runner."
+          echo "Recursive-wire/orientation, state-store, canonicalization, differential and reaction checks share one runner."
           echo "Node, Rust and the WASM build are each initialized once."
           echo "The reference CPU benchmark is informational and shares this runner."
