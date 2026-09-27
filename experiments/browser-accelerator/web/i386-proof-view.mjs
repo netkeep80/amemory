@@ -174,7 +174,7 @@ export function proofPipelineHtml(proof) {
             </div>
             <div class="proof-visual-note">
               Exact renderer authority: <code>@mts/visual 0.4.0</code> ·
-              <code>mts_visual@d4d883a036c4</code>. Presentation only; semantic truth remains the runtime A-memory.
+              <code>mts_visual@d4d883a036c4</code>. Live physics uses the Octahedral Link3D persistent batched path. Presentation only; semantic truth remains the runtime A-memory.
             </div>
             <div class="proof-visual" data-proof-visual>
               <div class="notice">Loading exact-pinned mts_visual Blueprint renderer…</div>
