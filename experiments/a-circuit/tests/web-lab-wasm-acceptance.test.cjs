@@ -99,6 +99,93 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
         throw new Error(registryBlock.id + " reconstructed topology mismatch");
       }
     }
+
+    const splitPairs = (pairs) => ({
+      starts: pairs.map((pair) => pair.start),
+      ends: pairs.map((pair) => pair.end),
+    });
+    const flattenPairs = (pairs) =>
+      pairs.flatMap((pair) => [pair.start, pair.end]);
+
+    const splitTopology = {
+      schemaVersion: 1,
+      representationId: "amemory-runtime-topology-json",
+      representationVersion: "0.1.0",
+      memoryInstanceId: memoryId,
+      base: splitPairs(baseCarrier),
+      append: splitPairs(appendDelta),
+      overlays,
+    };
+    const flatTopology = {
+      schemaVersion: 1,
+      representationId: "amemory-runtime-topology-flat-json",
+      representationVersion: "0.1.0",
+      memoryInstanceId: memoryId,
+      base: flattenPairs(baseCarrier),
+      append: flattenPairs(appendDelta),
+      overlays,
+    };
+
+    const reconstructSplitTopology = (transport) => {
+      if (transport.memoryInstanceId !== memoryId) {
+        throw new Error(registryBlock.id + " split topology changed memory id");
+      }
+      const decode = (part) => {
+        if (!Array.isArray(part.starts) || !Array.isArray(part.ends) ||
+            part.starts.length !== part.ends.length) {
+          throw new Error(registryBlock.id + " invalid split topology arrays");
+        }
+        return part.starts.map((start, index) => ({
+          start,
+          end: part.ends[index],
+        }));
+      };
+      return decode(transport.base).concat(decode(transport.append));
+    };
+    const reconstructFlatTopology = (transport) => {
+      if (transport.memoryInstanceId !== memoryId) {
+        throw new Error(registryBlock.id + " flat topology changed memory id");
+      }
+      const decode = (part) => {
+        if (!Array.isArray(part) || part.length % 2 !== 0) {
+          throw new Error(registryBlock.id + " invalid flat topology array");
+        }
+        const out = [];
+        for (let index = 0; index < part.length; index += 2) {
+          out.push({ start: part[index], end: part[index + 1] });
+        }
+        return out;
+      };
+      return decode(transport.base).concat(decode(transport.append));
+    };
+    const assertCompactRoundTrip = (candidate, label) => {
+      if (candidate.length !== reconstructed.length) {
+        throw new Error(registryBlock.id + " " + label + " count mismatch");
+      }
+      for (let index = 0; index < candidate.length; index += 1) {
+        if (candidate[index].start !== reconstructed[index].start ||
+            candidate[index].end !== reconstructed[index].end) {
+          throw new Error(
+            registryBlock.id + " " + label + " topology mismatch"
+          );
+        }
+      }
+    };
+    assertCompactRoundTrip(
+      reconstructSplitTopology(splitTopology),
+      "split compact"
+    );
+    assertCompactRoundTrip(
+      reconstructFlatTopology(flatTopology),
+      "flat compact"
+    );
+    for (const overlay of overlays) {
+      if (!Number.isInteger(overlay.localHandle) ||
+          overlay.localHandle < 1 ||
+          overlay.localHandle > reconstructed.length) {
+        throw new Error(registryBlock.id + " overlay handle out of range");
+      }
+    }
     const recursiveSources = proof.prepare.semanticRoots.map(
       (root) => root.source || ""
     );
@@ -137,6 +224,11 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
         overlayJsonBytes: jsonBytes(overlays),
         currentTopologyJsonBytes:
           jsonBytes(baseCarrier) + jsonBytes(visualLinks),
+        splitTopologyJsonBytes: jsonBytes(splitTopology),
+        flatTopologyJsonBytes: jsonBytes(flatTopology),
+        splitRepresentationId: splitTopology.representationId,
+        flatRepresentationId: flatTopology.representationId,
+        representationVersion: "0.1.0",
         denseBaseU32FloorBytes: baseCarrier.length * 2 * 4,
         denseAppendU32FloorBytes: appendDelta.length * 2 * 4,
         compactTopologyFloorBytes:
@@ -1010,24 +1102,47 @@ WebAssembly.instantiate(bytes, {}).then(({instance}) => {
       totalCarrierDenseU32FloorBytes: sumBytes("carrierDenseU32Floor"),
       totalReactionsJsonBytes: sumBytes("reactionsJson"),
       totalVisualLinksJsonBytes: sumBytes("visualLinksJson"),
-      topologyPrototype: {
-        totalCurrentTopologyJsonBytes: measuredProofs.reduce(
+      topologyPrototype: (() => {
+        const totalCurrentTopologyJsonBytes = measuredProofs.reduce(
           (sum, item) => sum + item.topologyPrototype.currentTopologyJsonBytes,
           0
-        ),
-        totalCompactTopologyFloorBytes: measuredProofs.reduce(
+        );
+        const totalSplitTopologyJsonBytes = measuredProofs.reduce(
+          (sum, item) => sum + item.topologyPrototype.splitTopologyJsonBytes,
+          0
+        );
+        const totalFlatTopologyJsonBytes = measuredProofs.reduce(
+          (sum, item) => sum + item.topologyPrototype.flatTopologyJsonBytes,
+          0
+        );
+        const totalCompactTopologyFloorBytes = measuredProofs.reduce(
           (sum, item) => sum + item.topologyPrototype.compactTopologyFloorBytes,
           0
-        ),
-        totalAppendLinks: measuredProofs.reduce(
-          (sum, item) => sum + item.topologyPrototype.appendLinks,
-          0
-        ),
-        totalOverlayEntries: measuredProofs.reduce(
-          (sum, item) => sum + item.topologyPrototype.overlayEntries,
-          0
-        ),
-      },
+        );
+        return {
+          representationVersion: "0.1.0",
+          totalCurrentTopologyJsonBytes,
+          totalSplitTopologyJsonBytes,
+          totalFlatTopologyJsonBytes,
+          totalCompactTopologyFloorBytes,
+          currentToSplitRatio:
+            totalCurrentTopologyJsonBytes / totalSplitTopologyJsonBytes,
+          currentToFlatRatio:
+            totalCurrentTopologyJsonBytes / totalFlatTopologyJsonBytes,
+          preferredJsonCandidate:
+            totalFlatTopologyJsonBytes <= totalSplitTopologyJsonBytes
+              ? "amemory-runtime-topology-flat-json"
+              : "amemory-runtime-topology-json",
+          totalAppendLinks: measuredProofs.reduce(
+            (sum, item) => sum + item.topologyPrototype.appendLinks,
+            0
+          ),
+          totalOverlayEntries: measuredProofs.reduce(
+            (sum, item) => sum + item.topologyPrototype.overlayEntries,
+            0
+          ),
+        };
+      })(),
       maxProofJson: maxBy("proofJson"),
       maxReactionsJson: maxBy("reactionsJson"),
       maxVisualLinksJson: maxBy("visualLinksJson"),
