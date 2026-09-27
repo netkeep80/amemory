@@ -360,6 +360,107 @@ fn install_case(
     );
 }
 
+fn install_wide_mul_case(
+    f: &mut FullFixture,
+    anchors: &mut AnchorGen,
+    schema: ArchitecturalStateSchema,
+) {
+    let old_eax = anchors.next(&mut f.store);
+    let old_ebx = anchors.next(&mut f.store);
+    let old_edx = anchors.next(&mut f.store);
+    let old_cf = anchors.next(&mut f.store);
+    let old_pf = anchors.next(&mut f.store);
+    let old_af = anchors.next(&mut f.store);
+    let old_zf = anchors.next(&mut f.store);
+    let old_sf = anchors.next(&mut f.store);
+    let old_of = anchors.next(&mut f.store);
+    let lo = anchors.next(&mut f.store);
+    let hi = anchors.next(&mut f.store);
+    let new_cf = anchors.next(&mut f.store);
+    let new_of = anchors.next(&mut f.store);
+
+    let before_state = state_link(
+        &mut f.store,
+        schema,
+        old_eax,
+        old_ebx,
+        old_edx,
+        old_cf,
+        old_pf,
+        old_af,
+        old_zf,
+        old_sf,
+        old_of,
+    );
+    let wide =
+        materialize_exact_sequence(&mut f.store, &[lo, hi]).unwrap();
+
+    let set_cf =
+        set_flag_action(&mut f.store, schema.flags, schema.flags.cf, new_cf);
+    let undef_pf =
+        undefined_flag_action(&mut f.store, schema.flags, schema.flags.pf);
+    let undef_af =
+        undefined_flag_action(&mut f.store, schema.flags, schema.flags.af);
+    let undef_zf =
+        undefined_flag_action(&mut f.store, schema.flags, schema.flags.zf);
+    let undef_sf =
+        undefined_flag_action(&mut f.store, schema.flags, schema.flags.sf);
+    let set_of =
+        set_flag_action(&mut f.store, schema.flags, schema.flags.of, new_of);
+    let patch = materialize_exact_sequence(
+        &mut f.store,
+        &[set_cf, undef_pf, undef_af, undef_zf, undef_sf, set_of],
+    )
+    .unwrap();
+    let payload =
+        materialize_exact_sequence(&mut f.store, &[wide, patch]).unwrap();
+    let effect = f
+        .store
+        .ensure_pair(schema.wide_effect_result_tag, payload)
+        .unwrap();
+
+    let frame = state_apply_wide_frame(
+        &mut f.store,
+        schema,
+        before_state,
+        schema.eax,
+        schema.edx,
+    );
+    let before = f.store.ensure_pair(frame, effect).unwrap();
+
+    let after_state = state_link(
+        &mut f.store,
+        schema,
+        lo,
+        old_ebx,
+        hi,
+        new_cf,
+        schema.undefined,
+        schema.undefined,
+        schema.undefined,
+        schema.undefined,
+        new_of,
+    );
+    let after = f.store.ensure_pair(f.k, after_state).unwrap();
+
+    let roles = [
+        old_eax, old_ebx, old_edx, old_cf, old_pf, old_af, old_zf,
+        old_sf, old_of, lo, hi, new_cf, new_of,
+    ];
+    let (_, admission) = define_bundle_rule(
+        &mut f.store,
+        f.theory,
+        &roles,
+        before,
+        &[after],
+    );
+    index_rule_for(
+        &mut f.store,
+        &[schema.wide_effect_result_tag],
+        admission,
+    );
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ArchitecturalStateProgram {
     pub(crate) schema: ArchitecturalStateSchema,
@@ -375,14 +476,13 @@ impl ArchitecturalStateProgram {
         let wide_effect_result_tag =
             install_wide_alu_effect_result_tag(&mut f.store, shared, f.o, f.c);
 
+        let result_tags = f
+            .store
+            .ensure_pair(effect_result_tag, wide_effect_result_tag)
+            .unwrap();
         let seed = f
             .store
-            .ensure_pair(
-                f.interpreter,
-                f.store
-                    .ensure_pair(effect_result_tag, wide_effect_result_tag)
-                    .unwrap(),
-            )
+            .ensure_pair(f.interpreter, result_tags)
             .unwrap();
         let mut anchors = AnchorGen::new(&mut f.store, seed, f.o, f.c);
         let state_tag = anchors.next(&mut f.store);
@@ -425,6 +525,7 @@ impl ArchitecturalStateProgram {
                 }
             }
         }
+        install_wide_mul_case(f, &mut anchors, schema);
 
         Self { schema }
     }
@@ -925,8 +1026,6 @@ pub(crate) fn web_prove_architectural_state_add(
         loaded_handle(&load, "state.flag.undefined")?;
     let effect_result_tag =
         loaded_handle(&load, "result.alu_effect_tag")?;
-    let wide_effect_result_tag =
-        loaded(program.schema.wide_effect_result_tag)?;
     let zero = loaded_handle(&load, "data.bit.zero")?;
     let one = loaded_handle(&load, "data.bit.one")?;
     let result_context =
@@ -938,6 +1037,8 @@ pub(crate) fn web_prove_architectural_state_add(
         (handle >= 1 && handle <= load.links_after_load)
             .then_some(handle)
     };
+    let wide_effect_result_tag =
+        loaded(program.schema.wide_effect_result_tag)?;
     let runtime_schema = ArchitecturalStateSchema {
         state_tag,
         apply_state,
