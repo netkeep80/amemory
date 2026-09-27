@@ -11,11 +11,6 @@ on:
       - ".github/workflows/browser-accelerator-pages.yml"
   push:
     branches: [main]
-    paths:
-      - "experiments/a-circuit/**"
-      - "experiments/browser-accelerator/web/**"
-      - ".github/workflows/a-circuit-web-lab.yml"
-      - ".github/workflows/browser-accelerator-pages.yml"
   workflow_dispatch:
 
 concurrency:
@@ -276,6 +271,57 @@ jobs:
         run: node experiments/a-circuit/tests/web-lab-registry.test.cjs
 
       - name: Instantiate WASM and verify every registry opcode
+        env:
+          AMEMORY_SOURCE_SHA: ${{ github.sha }}
         run: |
           node experiments/a-circuit/tests/web-lab-wasm-acceptance.test.cjs
           cat experiments/a-circuit/target/web-lab-acceptance-report.json
+
+      - name: Build browser accelerator WASM for accepted Pages payload
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          cargo +1.98.1 build \
+            --manifest-path experiments/browser-accelerator/rust/Cargo.toml \
+            --target wasm32-unknown-unknown \
+            --release
+
+      - name: Stage exact accepted browser payload
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          set -euo pipefail
+          payload="/tmp/accepted-browser-payload"
+          rm -rf "${payload}"
+          mkdir -p "${payload}/vendor/mts-visual" "${payload}/vendor/three/addons"
+
+          cp experiments/a-circuit/target/wasm32-unknown-unknown/release/amemory_a_circuit.wasm \
+            "${payload}/amemory_a_circuit.wasm"
+          cp experiments/browser-accelerator/rust/target/wasm32-unknown-unknown/release/amemory_browser_probe.wasm \
+            "${payload}/amemory_browser_probe.wasm"
+          cp experiments/a-circuit/target/web-lab-acceptance-report.json \
+            "${payload}/web-lab-acceptance-report.json"
+          cp VERSION "${payload}/VERSION"
+          cp experiments/browser-accelerator/mts-visual.lock.json "${payload}/mts-visual-lock.json"
+
+          cp -R /tmp/mts_visual/dist/src/. "${payload}/vendor/mts-visual/"
+          cp /tmp/mts_visual/node_modules/three/build/three.module.js \
+            "${payload}/vendor/three/three.module.js"
+          cp -R /tmp/mts_visual/node_modules/three/examples/jsm/. \
+            "${payload}/vendor/three/addons/"
+          cp /tmp/mts-visual-core.bundle.js "${payload}/vendor/mts-visual-core.bundle.js"
+          cp /tmp/mts-visual-three.bundle.js "${payload}/vendor/mts-visual-three.bundle.js"
+
+          jq -e --arg sha "${GITHUB_SHA}" --arg version "$(cat VERSION)" '
+            .sourceSha == $sha
+            and .version == $version
+            and .proofCoveredOpcodes == .registryBlocks
+            and .proofCoveredOpcodes >= 24
+          ' "${payload}/web-lab-acceptance-report.json" >/dev/null
+
+      - name: Upload exact accepted browser payload
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: accepted-browser-lab-payload
+          path: /tmp/accepted-browser-payload
+          retention-days: 14
+          if-no-files-found: error
