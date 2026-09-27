@@ -1139,7 +1139,7 @@ pub(crate) fn web_prove_mux1(
     };
 
     Some(WebStructuralProof {
-        schema_version: 1,
+        schema_version: 2,
         block: "MUX1".to_owned(),
         prepare,
         load,
@@ -1155,7 +1155,7 @@ fn web_mux1_proof_uses_one_runtime_memory_for_all_eight_cases() {
             for b in 0..=1 {
                 let proof = web_prove_mux1(select, a, b).expect("MUX1 proof");
                 assert!(!proof.prepare.runtime_memory_exists);
-                assert!(proof.load.portable_round_trip);
+                assert!(proof.load.carrier_round_trip);
                 assert!(!proof.prepare.theory_admissions.is_empty());
                 assert_eq!(proof.load.links_before_load, 1);
                 assert_eq!(proof.load.links_after_load, proof.prepare.compiled_links);
