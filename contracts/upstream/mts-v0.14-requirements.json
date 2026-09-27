@@ -1,0 +1,768 @@
+{
+  "schema": "amemory-mts-requirements-projection/v0.3",
+  "generated": true,
+  "generatedFrom": {
+    "foundation": {
+      "repository": "netkeep80/anum_docs",
+      "commit": "fcbc97e2279471c2c5effed57685c5f49ec856be",
+      "mtsVersion": "mts-contract/v0.14",
+      "artifacts": {
+        "contract": {
+          "path": "contracts/mts-contract-v0.14.json",
+          "blobSha": "956fe6e79ddf7a7ba2664113e97633d6fa8a486f"
+        },
+        "conformance": {
+          "path": "contracts/mts-conformance-v0.14.json",
+          "blobSha": "eb94b41d9b9f55dbbf22549f2fc69411d0fb63b7"
+        },
+        "traceability": {
+          "path": "traceability/mts-v0.14.json",
+          "blobSha": "fc486e2356fcc4495a74a893edbfd11eb90c4c2c"
+        },
+        "acceptance": {
+          "path": "cutover/typescript-c1-acceptance-v0.7.json",
+          "blobSha": "818ef74396d3d8d804aa3ddb4704bcde732d8b92"
+        }
+      }
+    },
+    "executionProfile": {
+      "repository": "netkeep80/anum_docs",
+      "commit": "af4e3dadbb9857fba7239a58f79ed2da59bc5c42",
+      "path": "profiles/amemory-execution-profile.json",
+      "blobSha": "e2c614e1556f31f6230cb69d686d1f22ab2c97e8"
+    }
+  },
+  "acceptance": {
+    "decision": "ACCEPT_MTS_V0_14",
+    "acceptedVersion": "mts-contract/v0.14",
+    "previousAcceptedVersion": "mts-contract/v0.13",
+    "current": {
+      "contract": "contracts/mts-contract-v0.14.json",
+      "conformance": "contracts/mts-conformance-v0.14.json",
+      "publicFacade": "ts/src/public.ts",
+      "packageManifest": "ts/package.json"
+    },
+    "contractAccepted": true,
+    "conformanceAccepted": true,
+    "conformanceCoverageState": "complete",
+    "downstreamRepinAllowed": true,
+    "singleLiveSemanticRuntime": true
+  },
+  "authoritySplit": {
+    "acceptedFoundation": {
+      "version": "v0.14",
+      "contract": "mts-contract/v0.14",
+      "commit": "fcbc97e2279471c2c5effed57685c5f49ec856be"
+    },
+    "executionProfile": {
+      "id": "minimal-portable-amemory-execution",
+      "profileVersion": "0.1.0",
+      "status": "current-post-v0.13-profile",
+      "foundationMtsVersion": "v0.13",
+      "commit": "af4e3dadbb9857fba7239a58f79ed2da59bc5c42"
+    },
+    "sameFoundationVersion": false,
+    "executionProfileMayBeRelabeledAsAcceptedFoundation": false,
+    "classification": "INDEPENDENT_EXECUTION_PROFILE_PRE_DATES_ACCEPTED_FOUNDATION"
+  },
+  "foundation": {
+    "inheritedFoundation": {
+      "ontology": "Link",
+      "rootBasis": "R/O/C/L/U",
+      "structuralLinkIdentity": "ordered local pole positions in accepted v0.13 implementation coordinates",
+      "acceptedV013Immutable": true,
+      "generalizedReactionInherited": true
+    },
+    "foundationOrientation": {
+      "literalLocallyUnorderedPoles": "FALSIFIED",
+      "unorderedPoleQuotientUsed": false,
+      "preOrientationPoleModel": "OBJECTIVE_GLOBAL_Z2_TORSOR",
+      "objectiveChiralityExistsBeforeObserver": true,
+      "observerCreatesChirality": false,
+      "absolutePoleNamesBeforeContext": false,
+      "technicalCarrierCoordinatesAreSemanticAuthority": false,
+      "globalDuality": "J",
+      "chiralOrbit": [
+        "W",
+        "J(W)"
+      ],
+      "witnessDefinedBeforeStartEnd": true,
+      "globalSelectedWitnessRequired": false,
+      "foundationGlobalFrameRequired": false,
+      "contextRelativeFrame": true,
+      "contextOrientationCarrier": "ONE_SIDED_SELF_INCIDENCE_LINK",
+      "contextFrameStates": 2,
+      "exactSequenceOrientationAuthority": false,
+      "rawMemoryPresenceIsAuthority": false,
+      "derivedRolesAfterContextMarker": [
+        "START_K",
+        "END_K"
+      ],
+      "relativeTransport": {
+        "group": "Z2",
+        "elements": [
+          "Id",
+          "J"
+        ],
+        "laws": [
+          "g_AA = Id",
+          "g_AB = g_BA",
+          "g_AB ∘ g_BC = g_AC",
+          "J ∘ J = Id"
+        ],
+        "mirrorRoleTransport": [
+          "START_A ↔ END_B",
+          "END_A ↔ START_B"
+        ],
+        "sameRoleTransport": [
+          "START_A ↔ START_B",
+          "END_A ↔ END_B"
+        ]
+      },
+      "semanticCovariance": {
+        "sameFrameContextsSameSemantics": true,
+        "mirrorFrameContextsCovariant": true,
+        "bothChiralSelectionsSameSemanticEquations": true
+      },
+      "postOrientationIdentification": {
+        "chiK": "InR_K = C_K ⟼_K R",
+        "mirrorJChiK": "OutR_K = R ⟼_K O_K"
+      },
+      "recursiveWiresAfterOrientation": {
+        "InR_K": "1688",
+        "OutR_K": "1898"
+      },
+      "operationalEquivalenceAudit": "GREEN_RESEARCH",
+      "contextRelativeExecutableWitness": "ts/test/research-v014-context-relative-a4prime.test.ts",
+      "directGaugeMatchesCurrentKernel": true,
+      "mirrorGaugeIsExactJImage": true,
+      "localResolvedGaugeCount": 2,
+      "finalNormativeChoice": "A4_PRIME_CONTEXT_RELATIVE_Z2_GAUGE",
+      "normativeStatus": "AUTHOR_REFINED_PRE_ACCEPTANCE",
+      "authorDecisionIssue": "#1673",
+      "authorDecisionDate": "2026-09-27",
+      "supersedesFoundationGlobalSelectedWitnessModel": true
+    },
+    "recursiveAlphabet": {
+      "name": "recursive MTS alphabet",
+      "symbols": {
+        "ROOT": "8",
+        "START": "9",
+        "END": "6",
+        "PAIR": "1"
+      },
+      "selfIncidence": {
+        "ROOT": "11",
+        "START": "10",
+        "END": "01",
+        "PAIR": "00"
+      },
+      "isOntology": false,
+      "isCodec": false,
+      "isAnumAlphabet": false,
+      "abstractLinkFormingPrimitiveCount": 1,
+      "abstractLinkFormingPrimitive": "form/canonicalize one Link from two relational pole positions",
+      "emergentStructuralCaseCount": 4,
+      "preOrientedJOrbitClassCount": 3,
+      "preOrientationClasses": {
+        "ROOT": "11",
+        "CHIRAL_PAIR": [
+          "10",
+          "01"
+        ],
+        "PAIR": "00"
+      },
+      "orientedRolesRelativeToContext": true,
+      "primitivePhysicalOpcodes": false
+    },
+    "recursivePrefixCodec": {
+      "grammar": "S ::= 8 | 9 S | 6 S | 1 S S",
+      "examples": {
+        "R": "8",
+        "O": "98",
+        "C": "68",
+        "L": "19868",
+        "U": "16898"
+      },
+      "canonicalTopologyCheckRequired": true,
+      "twoMemoryIdentityRequired": true
+    },
+    "ostensiveFormalNotation": {
+      "synonyms": {
+        "∞": "8",
+        "♂": "9",
+        "♀": "6",
+        "⟼": "1"
+      },
+      "positionalForms": [
+        "∞",
+        "♂S",
+        "S♀",
+        "A ⟼ B"
+      ],
+      "implicitPairAssociativity": "NONE",
+      "ambiguousUngroupedFormsRejected": true,
+      "finalSurfaceGrammar": "GREEN_RESEARCH"
+    },
+    "sequenceSemantics": {
+      "anum": "rooted compact representation/coding of a sequence of Links",
+      "exactSequenceDistinctFromFoldDenotation": true,
+      "recursiveLinkCodecDistinct": true,
+      "rootOrigin": "R"
+    },
+    "reactionResultBasis": {
+      "cases": [
+        "A -> {}",
+        "A -> A",
+        "A -> A♀",
+        "A -> ♂A"
+      ],
+      "successfulEmptyNotation": "{}",
+      "zeroMayMeanSuccessfulEmpty": false,
+      "emptySuccessEqualsNoRelation": false,
+      "identityTransitionEqualsQuiescence": false,
+      "startEndContinuationsDistinct": true
+    },
+    "linkImmutabilityAndRewrite": {
+      "semanticLinkImmutableByStructuralIdentity": true,
+      "inPlacePoleMutation": false,
+      "membershipReplacementDistinctFromStructuralSubstitution": true,
+      "physicalDeletionDistinct": true
+    },
+    "generalizedMpNonRegression": {
+      "status": "GREEN_RESEARCH",
+      "law": "K ⟼ A + A ⟼ B -> K ⟼ B",
+      "newV014ExecutionLaw": false,
+      "theoremChain": [
+        "A14 root asymmetry/chirality",
+        "A16 contextual detachment",
+        "A17 recursive application-closed frontier",
+        "A72w flat generalized modus ponens"
+      ],
+      "coveredProfiles": [
+        "1->0",
+        "1->1",
+        "1->N",
+        "N->1",
+        "N->M"
+      ],
+      "fullInheritedWitnessChainRequired": true
+    },
+    "executionProfileNonRegression": {
+      "status": "GREEN_RESEARCH",
+      "zeroOneManyPreserved": true,
+      "selectedTheoryRuleAuthorityPreserved": true,
+      "canonicalDuplicateConvergencePreserved": true
+    },
+    "representationLayers": {
+      "status": "GREEN_RESEARCH",
+      "ontology": {
+        "level": 0,
+        "id": "ontology",
+        "members": [
+          "Link"
+        ],
+        "introducesOntologyEntity": true
+      },
+      "recursiveStructure": {
+        "level": 1,
+        "id": "recursive-structure",
+        "members": [
+          "8",
+          "9",
+          "6",
+          "1"
+        ],
+        "meaning": [
+          "ROOT",
+          "START_K",
+          "END_K",
+          "PAIR"
+        ],
+        "derivedFrom": "four emergent self-incidence cases of one Link-forming primitive",
+        "introducesOntologyEntity": false
+      },
+      "representationsAndCodecs": {
+        "level": 2,
+        "id": "representations-codecs",
+        "members": [
+          "recursive Link codec",
+          "Anum",
+          "ExactSequence",
+          "Q"
+        ],
+        "introducesOntologyEntity": false
+      },
+      "byteText": {
+        "level": 3,
+        "id": "byte-text",
+        "members": [
+          "STRING",
+          "UTF-8"
+        ],
+        "introducesOntologyEntity": false
+      },
+      "symbolicMetanotation": {
+        "level": 4,
+        "id": "symbolic-metanotation",
+        "members": [
+          "names",
+          "Dictionary",
+          "Grammar",
+          "Theory",
+          "FORMAL"
+        ],
+        "introducesOntologyEntity": false
+      }
+    }
+  },
+  "laws": {
+    "V14-L1": "One Link ontology and one abstract Link-forming primitive induce exactly four self-incidence structural cases 11/10/01/00; after Context orientation these are named ROOT/START_K/END_K/PAIR and encoded by recursive 8/9/6/1, which is not the Anum/Q alphabet.",
+    "V14-L2": "Ostensive ∞/♂/♀/⟼ denote ROOT/START/END/PAIR through an explicit grammar.",
+    "V14-L3": "Q14 [ ] T F is version-separated from immutable legacy Q13 [ ] 1 0.",
+    "V14-L4": "Successful empty reaction {}, active identity, START continuation and END continuation are distinct results.",
+    "V14-L5": "Semantic Link identity is immutable; rewrite changes membership/structure rather than poles in place.",
+    "V14-L6": "Nat starts at U and uses uniform successor N⟼L; Degree remains a separate scale starting at L.",
+    "V14-L7": "Count over canonical ExactSequence returns Nat cardinality.",
+    "V14-L8": "Canonical Add is constructor-scoped and is total/function-like over selected Nat evidence.",
+    "V14-L9": "Derived Le requires canonical Add proof authority.",
+    "V14-L10": "Multiplication/full semiring is explicitly outside the v0.14 acceptance scope.",
+    "V14-L11": "Generalized modus ponens/reaction is preserved from accepted v0.13 through the explicit A14 -> A16 -> A17 -> A72w witness chain covering 1->0, 1->1, 1->N, N->1 and N->M without host function/cardinality opcodes.",
+    "V14-L12": "A4': objective chirality Ω={W,J(W)} exists before any observer and J²=Id; an oriented Context K carries one of two Link-native one-sided self-incidence markers, deriving χ(K) and local START_K/END_K roles. Relative frame transport g_AB lies in {Id,J}, composes as Z2, and semantic laws are covariant; no Foundation-global selected W, ExactSequence, host boolean, or four primitive opcodes are orientation authority.",
+    "V14-L13": "Anum is a rooted compact representation/coding of a sequence of Links; ExactSequence preserves exact positional sequence identity distinct from fold denotation, the recursive Link codec is not Anum, Q is a versioned sequence codec/interpreter, and every local sequence origin is R.",
+    "V14-L14": "MTS representation layers are explicit and non-ontological above Link: recursive structure, representations/codecs, byte-text and symbolic metanotation introduce no second ontology entity."
+  },
+  "conformance": {
+    "requiredPositiveVectors": [
+      "v014-recursive-link-alphabet-grounded",
+      "v014-ostensive-formal-grammar-grounded",
+      "v014-q14-version-separation-grounded",
+      "v014-reaction-result-basis-grounded",
+      "v014-link-immutability-rewrite-grounded",
+      "v014-nat-degree-separation-grounded",
+      "v014-count-to-nat-grounded",
+      "v014-add-total-functionality-grounded",
+      "v014-order-from-canonical-add-grounded",
+      "v014-multiplication-scope-deferred-grounded",
+      "v014-generalized-mp-nonregression-grounded",
+      "v014-orientation-gauge-research-grounded",
+      "v014-a4-operational-equivalence-grounded",
+      "v014-a4prime-chiral-torsor-bootstrap-grounded",
+      "v014-independent-readiness-grounded",
+      "v014-context-relative-a4prime-grounded",
+      "v014-one-link-four-emergent-forms-grounded",
+      "v014-generalized-mp-full-chain-grounded",
+      "v014-anum-sequence-semantics-grounded",
+      "v014-representation-layer-registry-grounded",
+      "v014-documentation-owner-map-grounded",
+      "v014-post-n20c-independent-readiness-grounded"
+    ],
+    "requiredNegativeVectors": [
+      "v014-local-unordered-collapses-o-c-l-u-and-orientation-orbit",
+      "v014-raw-inr-outr-presence-is-not-orientation-authority",
+      "v014-recursive-alphabet-is-not-anum-q-alphabet",
+      "v014-q14-rejects-legacy-1-0-source",
+      "v014-q13-rejects-t-f-source",
+      "v014-mixed-q13-q14-source-rejected",
+      "v014-successful-empty-is-not-nat-zero-or-no-relation",
+      "v014-ambient-nat-membership-is-not-canonical-authority",
+      "v014-ambient-add-link-is-not-canonical-proof-authority",
+      "v014-forged-add-constructor-cannot-witness-functionality",
+      "v014-forged-add-constructor-cannot-witness-le",
+      "v014-legacy-succ-u-equals-l-rejected",
+      "v014-candidate-does-not-change-current-accepted-pointer",
+      "v014-global-selected-w-required-rejected",
+      "v014-exact-sequence-is-not-orientation-authority",
+      "v014-four-recursive-forms-are-not-primitive-opcodes",
+      "v014-anum-exact-sequence-is-not-fold-denotation",
+      "v014-recursive-codec-is-not-anum-carrier",
+      "v014-representation-layer-does-not-create-ontology-sort",
+      "v014-accepted-law-without-doc-owner-rejected"
+    ]
+  },
+  "traceability": {
+    "V14-L1": {
+      "status": "GREEN_RESEARCH",
+      "contractPointer": "/requiredSemanticLaws/V14-L1",
+      "positiveVectors": [
+        "v014-recursive-link-alphabet-grounded",
+        "v014-one-link-four-emergent-forms-grounded"
+      ],
+      "negativeVectors": [
+        "v014-recursive-alphabet-is-not-anum-q-alphabet",
+        "v014-four-recursive-forms-are-not-primitive-opcodes"
+      ],
+      "requiredExecutableGates": [
+        "ts/test/research-v014-foundation-orientation-witness.test.ts",
+        "ts/test/research-v014-ostensive-formal-grammar.test.ts",
+        "ts/test/research-v014-context-relative-a4prime.test.ts",
+        "ts/test/research-v014-preacceptance-closure.test.ts"
+      ]
+    },
+    "V14-L2": {
+      "status": "GREEN_RESEARCH",
+      "contractPointer": "/requiredSemanticLaws/V14-L2",
+      "positiveVectors": [
+        "v014-ostensive-formal-grammar-grounded"
+      ],
+      "negativeVectors": [
+        "v014-recursive-alphabet-is-not-anum-q-alphabet"
+      ],
+      "requiredExecutableGates": [
+        "ts/test/research-v014-ostensive-formal-grammar.test.ts"
+      ]
+    },
+    "V14-L3": {
+      "status": "GREEN_RESEARCH",
+      "contractPointer": "/requiredSemanticLaws/V14-L3",
+      "positiveVectors": [
+        "v014-q14-version-separation-grounded"
+      ],
+      "negativeVectors": [
+        "v014-q14-rejects-legacy-1-0-source",
+        "v014-q13-rejects-t-f-source",
+        "v014-mixed-q13-q14-source-rejected"
+      ],
+      "requiredExecutableGates": [
+        "ts/test/v014-q14-versioned-interpreter.test.ts"
+      ]
+    },
+    "V14-L4": {
+      "status": "GREEN_RESEARCH",
+      "contractPointer": "/requiredSemanticLaws/V14-L4",
+      "positiveVectors": [
+        "v014-reaction-result-basis-grounded"
+      ],
+      "negativeVectors": [
+        "v014-successful-empty-is-not-nat-zero-or-no-relation"
+      ],
+      "requiredExecutableGates": [
+        "ts/test/research-v014-reaction-result-basis.test.ts"
+      ]
+    },
+    "V14-L5": {
+      "status": "GREEN_RESEARCH",
+      "contractPointer": "/requiredSemanticLaws/V14-L5",
+      "positiveVectors": [
+        "v014-link-immutability-rewrite-grounded"
+      ],
+      "negativeVectors": [],
+      "requiredExecutableGates": [
+        "ts/test/research-v014-immutable-link-chiral-rewrite.test.ts"
+      ]
+    },
+    "V14-L6": {
+      "status": "GREEN_RESEARCH",
+      "contractPointer": "/requiredSemanticLaws/V14-L6",
+      "positiveVectors": [
+        "v014-nat-degree-separation-grounded"
+      ],
+      "negativeVectors": [
+        "v014-ambient-nat-membership-is-not-canonical-authority",
+        "v014-legacy-succ-u-equals-l-rejected"
+      ],
+      "requiredExecutableGates": [
+        "ts/test/research-v014-nat-least-closed-authority.test.ts",
+        "ts/test/research-v014-count-nat-degree-separation.test.ts"
+      ]
+    },
+    "V14-L7": {
+      "status": "GREEN_RESEARCH",
+      "contractPointer": "/requiredSemanticLaws/V14-L7",
+      "positiveVectors": [
+        "v014-count-to-nat-grounded"
+      ],
+      "negativeVectors": [
+        "v014-ambient-nat-membership-is-not-canonical-authority"
+      ],
+      "requiredExecutableGates": [
+        "ts/test/research-v014-count-nat-degree-separation.test.ts"
+      ]
+    },
+    "V14-L8": {
+      "status": "GREEN_RESEARCH",
+      "contractPointer": "/requiredSemanticLaws/V14-L8",
+      "positiveVectors": [
+        "v014-add-total-functionality-grounded"
+      ],
+      "negativeVectors": [
+        "v014-ambient-add-link-is-not-canonical-proof-authority",
+        "v014-forged-add-constructor-cannot-witness-functionality"
+      ],
+      "requiredExecutableGates": [
+        "ts/test/research-v014-constructor-scoped-proof.test.ts",
+        "ts/test/research-v014-add-general-functionality.test.ts"
+      ]
+    },
+    "V14-L9": {
+      "status": "GREEN_RESEARCH",
+      "contractPointer": "/requiredSemanticLaws/V14-L9",
+      "positiveVectors": [
+        "v014-order-from-canonical-add-grounded"
+      ],
+      "negativeVectors": [
+        "v014-ambient-add-link-is-not-canonical-proof-authority",
+        "v014-forged-add-constructor-cannot-witness-le"
+      ],
+      "requiredExecutableGates": [
+        "ts/test/research-v014-order-replay-mul-scope.test.ts"
+      ]
+    },
+    "V14-L10": {
+      "status": "EXPLICITLY_DEFERRED_SCOPE",
+      "contractPointer": "/requiredSemanticLaws/V14-L10",
+      "positiveVectors": [
+        "v014-multiplication-scope-deferred-grounded"
+      ],
+      "negativeVectors": [],
+      "requiredExecutableGates": [
+        "ts/test/research-v014-order-replay-mul-scope.test.ts"
+      ]
+    },
+    "V14-L11": {
+      "status": "GREEN_RESEARCH_NON_REGRESSION",
+      "contractPointer": "/requiredSemanticLaws/V14-L11",
+      "positiveVectors": [
+        "v014-generalized-mp-nonregression-grounded",
+        "v014-generalized-mp-full-chain-grounded"
+      ],
+      "negativeVectors": [],
+      "requiredExecutableGates": [
+        "ts/test/research-v014-orientation-gauge-view.test.ts",
+        "ts/test/research-v013-root-asymmetry-chirality-a14.test.ts",
+        "ts/test/research-v013-contextual-truth-dynamic-duality-a16.test.ts",
+        "ts/test/research-v013-application-closed-frontier-a17.test.ts",
+        "ts/test/research-v013-flat-generalized-modus-ponens-a72w.test.ts"
+      ]
+    },
+    "V14-L12": {
+      "status": "GREEN_AUTHOR_REFINED_CONTEXT_RELATIVE",
+      "contractPointer": "/requiredSemanticLaws/V14-L12",
+      "positiveVectors": [
+        "v014-orientation-gauge-research-grounded",
+        "v014-context-relative-a4prime-grounded"
+      ],
+      "negativeVectors": [
+        "v014-local-unordered-collapses-o-c-l-u-and-orientation-orbit",
+        "v014-raw-inr-outr-presence-is-not-orientation-authority",
+        "v014-global-selected-w-required-rejected",
+        "v014-exact-sequence-is-not-orientation-authority",
+        "v014-four-recursive-forms-are-not-primitive-opcodes"
+      ],
+      "requiredExecutableGates": [
+        "ts/test/research-v014-orientation-gauge-view.test.ts",
+        "ts/test/research-v014-context-relative-a4prime.test.ts",
+        "ts/test/research-v014-preacceptance-closure.test.ts"
+      ]
+    },
+    "V14-L13": {
+      "status": "GREEN_RESEARCH",
+      "contractPointer": "/requiredSemanticLaws/V14-L13",
+      "positiveVectors": [
+        "v014-anum-sequence-semantics-grounded"
+      ],
+      "negativeVectors": [
+        "v014-anum-exact-sequence-is-not-fold-denotation",
+        "v014-recursive-codec-is-not-anum-carrier"
+      ],
+      "requiredExecutableGates": [
+        "ts/test/research-v014-preacceptance-closure.test.ts",
+        "ts/test/v013-root-origin-law.test.ts",
+        "ts/test/v014-q14-versioned-interpreter.test.ts"
+      ]
+    },
+    "V14-L14": {
+      "status": "GREEN_RESEARCH",
+      "contractPointer": "/requiredSemanticLaws/V14-L14",
+      "positiveVectors": [
+        "v014-representation-layer-registry-grounded"
+      ],
+      "negativeVectors": [
+        "v014-representation-layer-does-not-create-ontology-sort"
+      ],
+      "requiredExecutableGates": [
+        "ts/test/research-v014-preacceptance-closure.test.ts"
+      ]
+    }
+  },
+  "executionProfile": {
+    "schema": "mts-amemory-execution-profile/v0.1",
+    "id": "minimal-portable-amemory-execution",
+    "profileVersion": "0.1.0",
+    "status": "current-post-v0.13-profile",
+    "foundation": {
+      "mtsVersion": "v0.13",
+      "contract": "contracts/mts-contract-v0.13.json",
+      "conformance": "contracts/mts-conformance-v0.13.json",
+      "acceptedFoundationMutated": false
+    },
+    "classification": {
+      "V013_SUFFICIENT": false,
+      "V013_PLUS_EXECUTION_PROFILE": true,
+      "SEMANTIC_EXTENSION_REQUIRED": false
+    },
+    "authority": {
+      "canonicalSemanticOwner": "docs/specs/Апамять и управление сетью связей.md",
+      "machineReadableProjection": true,
+      "machineReadableProjectionIsCompetingSemanticOwner": false,
+      "issue": 1558
+    },
+    "state": {
+      "currentSemanticState": "members-of-single-published-scope",
+      "currentnessAuthority": "published-current-root",
+      "oldScopesMayRemainPhysically": true,
+      "oldTruthsMayRemainPhysically": true,
+      "physicalDeletionRequiredForSemanticReplacement": false
+    },
+    "theory": {
+      "authority": "selected-theory-admissions",
+      "visibility": "reaction-start-snapshot",
+      "sameSnapshotForAllCurrentMembers": true,
+      "sameReactionNewAdmissionExecutable": false,
+      "nextReactionNewAdmissionExecutable": true,
+      "snapshotIsMtsEntity": false
+    },
+    "reaction": {
+      "relationDiscovery": "exhaustive-over-selected-theory-snapshot",
+      "noAdmittedRelation": "preserve-current-truth",
+      "zeroImage": "zero-successor-contribution",
+      "oneImage": "one-canonical-successor",
+      "manyImages": "union-all-canonical-successors",
+      "duplicateOutputs": "converge-by-canonical-link-identity",
+      "notFoundEquivalentToNoAdmittedRelation": false,
+      "mixedZeroAndNonZero": "union-nonzero-outputs"
+    },
+    "publication": {
+      "fullSuccessorBuiltBeforePublication": true,
+      "atomicCurrentRootHandoff": true,
+      "matchedRelationsPositive": "publish-one-successor-scope",
+      "matchedRelationsZero": "no-handoff-quiescent"
+    },
+    "scheduling": {
+      "physicalScheduleIsSemanticAuthority": false,
+      "threadOrderIsSemanticAuthority": false,
+      "workGroupOrderIsSemanticAuthority": false,
+      "gpuLaneOrderIsSemanticAuthority": false,
+      "allocationOrderIsSemanticAuthority": false,
+      "normalizedSemanticResultMustBeScheduleIndependent": true
+    },
+    "liveness": {
+      "quiescence": "complete-logical-reaction-with-zero-matches-and-zero-handoffs",
+      "schedulerInactivityEqualsQuiescence": false,
+      "recurrenceAllowed": true,
+      "nonterminationAllowed": true,
+      "globalTerminationRequired": false,
+      "structuralEndImpliesGlobalHalt": false
+    },
+    "hierarchicalResult": {
+      "nestedLinkAsResult": "supported-by-minimal-reaction",
+      "dynamicHierarchicalResultConstruction": "INDEPENDENT_LATER_FEATURE",
+      "nestedContextResultLifecycle": "INDEPENDENT_LATER_FEATURE",
+      "persistentResultVersions": "INDEPENDENT_LATER_FEATURE",
+      "deferredResearchRetained": true
+    },
+    "substrate": {
+      "localHandleIsSemanticIdentity": false,
+      "allocationOrderIsSemanticAuthority": false,
+      "concreteMemoryApiIsMtsOntology": false,
+      "doubletsLayoutIsMtsOntology": false,
+      "arrayLayoutIsMtsOntology": false,
+      "gpuLayoutIsMtsOntology": false,
+      "layers": [
+        "link-carrier-substrate",
+        "execution-publication-substrate",
+        "representation-substrate"
+      ]
+    },
+    "selfHosting": {
+      "scopedLinkCarriedProgramSemantics": true,
+      "fullySelfHostedMtsSystem": false
+    },
+    "portableLaws": [
+      "P01_CURRENT_STATE_IS_PUBLISHED_SCOPE_MEMBERS",
+      "P02_PHYSICAL_HISTORY_MAY_REMAIN",
+      "P03_SELECTED_THEORY_IS_RELATION_AUTHORITY",
+      "P04_REACTION_START_THEORY_SNAPSHOT",
+      "P05_ONE_THEORY_SNAPSHOT_PER_REACTION",
+      "P06_EXHAUST_ALL_ADMITTED_RELATIONS",
+      "P07_NO_ADMITTED_RELATION_PRESERVES_TRUTH",
+      "P08_ADMITTED_RELATIONS_REPLACE_BY_ALL_OUTPUTS",
+      "P09_ZERO_CONTRIBUTES_NO_OUTPUT_AND_DOES_NOT_VETO",
+      "P10_DUPLICATES_CONVERGE_CANONICALLY",
+      "P11_BUILD_COMPLETE_SUCCESSOR_BEFORE_PUBLICATION",
+      "P12_POSITIVE_MATCH_PUBLISHES_ONE_ATOMIC_HANDOFF",
+      "P13_ZERO_MATCH_IS_QUIESCENT_WITHOUT_HANDOFF",
+      "P14_NEW_THEORY_ADMISSIONS_EXECUTE_NEXT_REACTION",
+      "P15_PHYSICAL_SCHEDULE_AND_LOCAL_ADDRESSES_ARE_NONSEMANTIC",
+      "P16_RECURRENCE_AND_NONTERMINATION_ARE_ALLOWED",
+      "P17_STRUCTURAL_END_IS_NOT_GLOBAL_HALT"
+    ],
+    "consumerRequirements": {
+      "declareImplementedProfileId": true,
+      "declareCurrentScopeMechanism": true,
+      "declareOldPhysicalLinkRetentionPolicy": true,
+      "declareBackendSubstrateBoundary": true,
+      "schedulingChoicesMustBeDocumentedAsNonSemantic": true,
+      "normalizedBackendEquivalenceTestsRequired": true,
+      "cpuAcceleratorDifferentialEvidenceExpected": true
+    },
+    "evidence": {
+      "sourceIssue": "https://github.com/netkeep80/anum_docs/issues/1558",
+      "witnesses": [
+        "W1",
+        "W2",
+        "W3",
+        "W4",
+        "W5",
+        "W6",
+        "W7"
+      ],
+      "semanticSlices": [
+        "E1",
+        "E2",
+        "E3",
+        "E4",
+        "E5",
+        "E6",
+        "E7"
+      ]
+    }
+  },
+  "veto": {
+    "runtimeOrStorageIdAsSemanticIdentity": false,
+    "readOrReplayMayMaterialize": false,
+    "secondLiveRuntime": false,
+    "pythonCompatibilityRuntime": false,
+    "hiddenAbsoluteStartEndBeforeContext": false,
+    "foundationGlobalSelectedWitnessAsFinalAuthority": false,
+    "exactSequenceAsOrientationAuthority": false,
+    "fourRecursiveFormsAsFourPrimitiveOpcodes": false,
+    "secondOntologyEntityAboveLink": false
+  },
+  "explicitlyDeferred": {
+    "multiplicationScope": {
+      "status": "EXPLICITLY_DEFERRED",
+      "requiredForV014Acceptance": false,
+      "fullSemiring": "DOWNSTREAM_DERIVED_RESEARCH"
+    }
+  },
+  "postAcceptanceWork": [
+    "reconstruct current human documentation from accepted v0.14 owner registry in #1585",
+    "downstream A-memory integration/repin after accepted kernel contract",
+    "multiplication/full semiring derived research remains outside v0.14 acceptance"
+  ],
+  "researchPointers": [
+    {
+      "repository": "netkeep80/anum_docs",
+      "issue": 1558,
+      "normative": false,
+      "topic": "research history and authority of the independently pinned A-memory execution profile"
+    },
+    {
+      "repository": "netkeep80/anum_docs",
+      "issue": 1332,
+      "normative": false,
+      "topic": "MTS Aset <-> Doublets Aset representation boundary"
+    }
+  ]
+}

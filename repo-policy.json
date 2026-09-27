@@ -27,6 +27,8 @@
       "contracts/amemory-conformance-v0.1.json",
       "contracts/upstream/mts-v0.13.lock.json",
       "contracts/upstream/mts-v0.13-requirements.json",
+      "contracts/upstream/mts-v0.14-requirements.json",
+      "contracts/upstream/mts-v0.14.lock.json",
       "scripts/sync-mts-requirements.mjs",
       "scripts/test-mts-upstream-import.mjs",
       ".github/workflows/mts-upstream-check.yml",
@@ -78,6 +80,13 @@
       "members": [
         "contracts/upstream/mts-v0.13.lock.json",
         "contracts/upstream/mts-v0.13-requirements.json"
+      ]
+    },
+    {
+      "id": "mts-upstream-v014-lock-projection",
+      "members": [
+        "contracts/upstream/mts-v0.14.lock.json",
+        "contracts/upstream/mts-v0.14-requirements.json"
       ]
     }
   ]

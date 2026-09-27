@@ -1,0 +1,37 @@
+{
+  "schema": "amemory-upstream-mts-lock/v0.2",
+  "normative": true,
+  "repository": "netkeep80/anum_docs",
+  "acceptedMtsVersion": "mts-contract/v0.14",
+  "acceptedCommit": "fcbc97e2279471c2c5effed57685c5f49ec856be",
+  "floatingRefsAllowed": false,
+  "artifacts": {
+    "contract": {
+      "path": "contracts/mts-contract-v0.14.json",
+      "blobSha": "956fe6e79ddf7a7ba2664113e97633d6fa8a486f"
+    },
+    "conformance": {
+      "path": "contracts/mts-conformance-v0.14.json",
+      "blobSha": "eb94b41d9b9f55dbbf22549f2fc69411d0fb63b7"
+    },
+    "traceability": {
+      "path": "traceability/mts-v0.14.json",
+      "blobSha": "fc486e2356fcc4495a74a893edbfd11eb90c4c2c"
+    },
+    "acceptance": {
+      "path": "cutover/typescript-c1-acceptance-v0.7.json",
+      "blobSha": "818ef74396d3d8d804aa3ddb4704bcde732d8b92"
+    }
+  },
+  "generatedProjection": "contracts/upstream/mts-v0.14-requirements.json",
+  "upgradePolicy": "explicit-governance-only-foundation-and-profile-independent-pins",
+  "executionProfile": {
+    "repository": "netkeep80/anum_docs",
+    "commit": "af4e3dadbb9857fba7239a58f79ed2da59bc5c42",
+    "path": "profiles/amemory-execution-profile.json",
+    "blobSha": "e2c614e1556f31f6230cb69d686d1f22ab2c97e8",
+    "schema": "mts-amemory-execution-profile/v0.1",
+    "id": "minimal-portable-amemory-execution",
+    "profileVersion": "0.1.0"
+  }
+}
