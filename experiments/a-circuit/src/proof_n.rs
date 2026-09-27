@@ -4,11 +4,17 @@ use amemory_optimized_cpu_probe::{
 };
 use serde::Serialize;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::atomic::{AtomicU32, Ordering},
 };
 
 static NEXT_PROOF_MEMORY_ID: AtomicU32 = AtomicU32::new(1);
+
+const WEB_STRUCTURAL_PROOF_SCHEMA_VERSION: u32 = 3;
+const WEB_COMPACT_PROOF_SCHEMA_VERSION: u32 = 1;
+const WEB_COMPACT_PROOF_REPRESENTATION_ID: &str =
+    "amemory-proof-compact-json";
+const WEB_COMPACT_PROOF_REPRESENTATION_VERSION: &str = "0.1.0";
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -238,8 +244,13 @@ fn parse_visual_ref(
 
 impl WebStructuralProof {
     pub(crate) fn compact(&self) -> Option<WebCompactProof> {
+        if self.schema_version != WEB_STRUCTURAL_PROOF_SCHEMA_VERSION {
+            return None;
+        }
+
         let memory_id = self.result.memory_instance_id.as_str();
-        if self.load.memory_instance_id != memory_id
+        if memory_id.is_empty()
+            || self.load.memory_instance_id != memory_id
             || self.execute.memory_instance_id != memory_id
         {
             return None;
@@ -247,6 +258,9 @@ impl WebStructuralProof {
 
         let base_len = self.prepare.carrier_duplets.len() as u32;
         if base_len != self.prepare.compiled_links
+            || self.load.links_after_load != base_len
+            || self.load.imported_duplets != base_len
+            || !self.load.carrier_round_trip
             || self.result.visual_links.len() as u32 != self.result.links_final
         {
             return None;
@@ -325,8 +339,16 @@ impl WebStructuralProof {
             .iter()
             .map(|root| (root.role.as_str(), root))
             .collect::<HashMap<_, _>>();
+        if loaded_by_role.len() != self.load.semantic_roots.len() {
+            return None;
+        }
+
+        let mut prepared_roles = HashSet::new();
         let mut roots = Vec::with_capacity(self.prepare.semantic_roots.len());
         for root in &self.prepare.semantic_roots {
+            if !prepared_roles.insert(root.role.as_str()) {
+                return None;
+            }
             if root.carrier_ref < 1 || root.carrier_ref > base_len {
                 return None;
             }
@@ -350,14 +372,39 @@ impl WebStructuralProof {
             .map(|value| parse_local_ref(value, base_len))
             .collect::<Option<Vec<_>>>()?;
 
+        let expected_active_reactions = self
+            .execute
+            .reactions
+            .iter()
+            .filter(|step| !step.quiescent)
+            .count() as u32;
+        if expected_active_reactions != self.execute.active_reaction_count
+            || self
+                .execute
+                .reactions
+                .last()
+                .map(|step| step.quiescent)
+                .unwrap_or(false)
+                != self.execute.final_quiescent
+        {
+            return None;
+        }
+
+        let mut previous_links_after = self.load.links_after_load;
         let reactions = self
             .execute
             .reactions
             .iter()
-            .map(|step| {
-                if step.memory_instance_id != memory_id {
+            .enumerate()
+            .map(|(index, step)| {
+                if step.memory_instance_id != memory_id
+                    || step.step != index as u32
+                    || step.links_after < previous_links_after
+                    || step.links_after > self.result.links_final
+                {
                     return None;
                 }
+                previous_links_after = step.links_after;
                 let scope_before = step
                     .scope_before
                     .iter()
@@ -381,10 +428,19 @@ impl WebStructuralProof {
             })
             .collect::<Option<Vec<_>>>()?;
 
+        if previous_links_after
+            .checked_add(self.result.identical_rerun_link_delta)?
+            != self.result.links_final
+        {
+            return None;
+        }
+
         Some(WebCompactProof {
-            schema_version: 1,
-            representation_id: "amemory-proof-compact-json".to_owned(),
-            representation_version: "0.1.0".to_owned(),
+            schema_version: WEB_COMPACT_PROOF_SCHEMA_VERSION,
+            representation_id:
+                WEB_COMPACT_PROOF_REPRESENTATION_ID.to_owned(),
+            representation_version:
+                WEB_COMPACT_PROOF_REPRESENTATION_VERSION.to_owned(),
             source_proof_schema_version: self.schema_version,
             block: self.block.clone(),
             memory_instance_id: memory_id.to_owned(),
@@ -722,6 +778,145 @@ pub(crate) fn visual_snapshot(
 mod tests {
     use super::*;
     use amemory_optimized_cpu_probe::ROOT_HANDLE;
+
+
+    fn minimal_structural_proof() -> WebStructuralProof {
+        let memory_id = "A-memory#test".to_owned();
+        WebStructuralProof {
+            schema_version: WEB_STRUCTURAL_PROOF_SCHEMA_VERSION,
+            block: "test".to_owned(),
+            prepare: WebProofPrepareStage {
+                compiler_label: "test".to_owned(),
+                runtime_memory_exists: false,
+                compiled_links: 1,
+                carrier_duplets: vec![WebProofDuplet { start: 1, end: 1 }],
+                semantic_roots: vec![WebProofPreparedRoot {
+                    role: "root".to_owned(),
+                    carrier_ref: 1,
+                    source: "8".to_owned(),
+                }],
+                theory_admissions: vec![],
+            },
+            load: WebProofLoadStage {
+                memory_instance_id: memory_id.clone(),
+                links_before_load: 1,
+                links_after_load: 1,
+                imported_duplets: 1,
+                carrier_round_trip: true,
+                semantic_roots: vec![WebProofLoadedRoot {
+                    role: "root".to_owned(),
+                    carrier_ref: 1,
+                    source: "8".to_owned(),
+                    local_handle: 1,
+                }],
+            },
+            execute: WebProofExecuteStage {
+                memory_instance_id: memory_id.clone(),
+                reactions: vec![WebProofReactionStep {
+                    memory_instance_id: memory_id.clone(),
+                    step: 0,
+                    scope_before: vec!["L1".to_owned()],
+                    raw_rule_matches: 0,
+                    transitioned_members: 0,
+                    handoff_count: 0,
+                    scope_after: vec!["L1".to_owned()],
+                    links_after: 1,
+                    quiescent: true,
+                }],
+                active_reaction_count: 0,
+                final_quiescent: true,
+            },
+            result: WebProofResultStage {
+                memory_instance_id: memory_id.clone(),
+                result_anum: "8".to_owned(),
+                result_sequence_anum: "8".to_owned(),
+                decoded_value: 0,
+                decoded_value_hi: None,
+                oracle_value: 0,
+                oracle_value_hi: None,
+                oracle_matches: true,
+                links_final: 1,
+                identical_rerun_link_delta: 0,
+                visual_links: vec![WebProofVisualLink {
+                    key: format!("{memory_id}:L1"),
+                    start_key: format!("{memory_id}:L1"),
+                    end_key: format!("{memory_id}:L1"),
+                    local_handle: 1,
+                    label: Some("root".to_owned()),
+                    tags: vec!["root".to_owned()],
+                }],
+            },
+        }
+    }
+
+    #[test]
+    fn compact_accepts_consistent_v3_proof() {
+        let proof = minimal_structural_proof();
+        let compact = proof.compact().expect("compact proof");
+        assert_eq!(compact.schema_version, WEB_COMPACT_PROOF_SCHEMA_VERSION);
+        assert_eq!(
+            compact.representation_id,
+            WEB_COMPACT_PROOF_REPRESENTATION_ID
+        );
+        assert_eq!(
+            compact.representation_version,
+            WEB_COMPACT_PROOF_REPRESENTATION_VERSION
+        );
+        assert_eq!(compact.source_proof_schema_version, 3);
+        assert_eq!(compact.topology.base.starts, vec![1]);
+        assert_eq!(compact.topology.base.ends, vec![1]);
+    }
+
+    #[test]
+    fn compact_rejects_unknown_source_schema() {
+        let mut proof = minimal_structural_proof();
+        proof.schema_version += 1;
+        assert!(proof.compact().is_none());
+    }
+
+    #[test]
+    fn compact_rejects_duplicate_root_roles() {
+        let mut proof = minimal_structural_proof();
+        proof.prepare.semantic_roots.push(WebProofPreparedRoot {
+            role: "root".to_owned(),
+            carrier_ref: 1,
+            source: "8".to_owned(),
+        });
+        proof.load.semantic_roots.push(WebProofLoadedRoot {
+            role: "root".to_owned(),
+            carrier_ref: 1,
+            source: "8".to_owned(),
+            local_handle: 1,
+        });
+        assert!(proof.compact().is_none());
+    }
+
+    #[test]
+    fn compact_rejects_inconsistent_reaction_summary() {
+        let mut proof = minimal_structural_proof();
+        proof.execute.active_reaction_count = 1;
+        assert!(proof.compact().is_none());
+    }
+
+    #[test]
+    fn compact_rejects_non_monotonic_runtime_link_counts() {
+        let mut proof = minimal_structural_proof();
+        proof.load.links_after_load = 2;
+        proof.prepare.compiled_links = 2;
+        proof.prepare.carrier_duplets.push(WebProofDuplet { start: 1, end: 1 });
+        proof.load.imported_duplets = 2;
+        proof.result.visual_links.push(WebProofVisualLink {
+            key: "A-memory#test:L2".to_owned(),
+            start_key: "A-memory#test:L1".to_owned(),
+            end_key: "A-memory#test:L1".to_owned(),
+            local_handle: 2,
+            label: None,
+            tags: vec![],
+        });
+        proof.result.links_final = 2;
+        proof.execute.reactions[0].links_after = 1;
+        assert!(proof.compact().is_none());
+    }
 
     #[test]
     fn packed_carrier_reconstructs_complete_shared_topology() {
