@@ -42,7 +42,9 @@
       "experiments/browser-accelerator/web/anum-boundary.mjs",
       "experiments/browser-accelerator/tests/anum-boundary.test.mjs",
       "experiments/browser-accelerator/web/reaction.mjs",
-      "experiments/browser-accelerator/tests/reaction.test.mjs"
+      "experiments/browser-accelerator/tests/reaction.test.mjs",
+      "contracts/amemory-contract-v0.2.json",
+      "contracts/amemory-conformance-v0.2.json"
     ],
     "operational_paths": []
   },
@@ -87,6 +89,13 @@
       "members": [
         "contracts/upstream/mts-v0.14.lock.json",
         "contracts/upstream/mts-v0.14-requirements.json"
+      ]
+    },
+    {
+      "id": "amemory-contract-conformance-v02",
+      "members": [
+        "contracts/amemory-contract-v0.2.json",
+        "contracts/amemory-conformance-v0.2.json"
       ]
     }
   ]
