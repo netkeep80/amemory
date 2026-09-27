@@ -173,8 +173,14 @@ impl OptimizedLinkStore {
         Ok(handle)
     }
 
+    /// Historical direct-gauge recursive 8/9/6/1 compatibility import.
+    ///
+    /// Accepted MTS v0.14 separates this recursive Link codec from Anum and
+    /// requires semantic orientation to come from Link-native Context markers.
+    /// New semantic consumers should use
+    /// orientation::SemanticOrientation::import_recursive_wire.
     pub fn import_anum(&mut self, source: &str) -> Result<Handle, StoreError> {
-        // Whole-Anum import is transactional. Parsing/canonicalization happens
+        // Whole-source import is transactional. Parsing/canonicalization happens
         // against a staging clone; only complete success replaces live state.
         let runtime_instance_id = self.instance_id;
         let mut staging = self.clone();
@@ -295,6 +301,11 @@ impl OptimizedLinkStore {
         Ok(())
     }
 
+    /// Historical direct-gauge recursive 8/9/6/1 compatibility export.
+    ///
+    /// New accepted-v0.14 semantic consumers should use
+    /// orientation::SemanticOrientation::recursive_wire so raw carrier pole
+    /// order cannot become START_K/END_K authority.
     pub fn export_anum(&self, handle: Handle) -> Result<String, StoreError> {
         let mut visiting = HashSet::new();
         let mut output = String::new();
