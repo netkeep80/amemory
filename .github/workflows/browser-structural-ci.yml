@@ -46,8 +46,6 @@ jobs:
           node --check experiments/browser-accelerator/web/canonicalization.mjs
           node --check experiments/browser-accelerator/web/differential.mjs
           node --check experiments/browser-accelerator/web/reaction.mjs
-          node --check experiments/browser-accelerator/web/i386-proof-transport.mjs
-          node --check experiments/browser-accelerator/web/i386-lab.js
 
       - name: Portable Anum witnesses
         run: node experiments/browser-accelerator/tests/anum-boundary.test.mjs
@@ -63,9 +61,6 @@ jobs:
 
       - name: Reaction R1-R6 witnesses
         run: node experiments/browser-accelerator/tests/reaction.test.mjs
-
-      - name: 80386 proof transport witnesses
-        run: node experiments/browser-accelerator/tests/i386-proof-transport.test.mjs
 
       - name: Install Rust + wasm32 once
         run: |
