@@ -1,4 +1,4 @@
-name: A-memory browser Anum boundary check
+name: A-memory browser structural CI
 
 on:
   pull_request:
@@ -7,7 +7,7 @@ on:
       - "contracts/amemory-contract-v0.1.json"
       - "contracts/amemory-conformance-v0.1.json"
       - "repo-policy.json"
-      - ".github/workflows/browser-anum-boundary-check.yml"
+      - ".github/workflows/browser-structural-ci.yml"
   push:
     branches: [main]
     paths:
@@ -15,50 +15,69 @@ on:
       - "contracts/amemory-contract-v0.1.json"
       - "contracts/amemory-conformance-v0.1.json"
       - "repo-policy.json"
-      - ".github/workflows/browser-anum-boundary-check.yml"
+      - ".github/workflows/browser-structural-ci.yml"
   workflow_dispatch:
+
+concurrency:
+  group: browser-structural-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
   verify:
+    name: browser structural witnesses
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - name: Checkout A-memory
+        uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v6
+      - name: Set up Node 24 once
+        uses: actions/setup-node@v6
         with:
           node-version: 24
 
-      - name: Parse browser Anum harness
+      - name: Parse browser structural harnesses
         run: |
           node --check experiments/browser-accelerator/web/app.js
           node --check experiments/browser-accelerator/web/anum-boundary.mjs
+          node --check experiments/browser-accelerator/web/state-store.mjs
+          node --check experiments/browser-accelerator/web/canonicalization.mjs
+          node --check experiments/browser-accelerator/web/differential.mjs
+          node --check experiments/browser-accelerator/web/reaction.mjs
 
-      - name: Portable Anum positive/negative witnesses
+      - name: Portable Anum witnesses
         run: node experiments/browser-accelerator/tests/anum-boundary.test.mjs
 
-      - name: Stateful store regression
+      - name: Stateful store witnesses
         run: node experiments/browser-accelerator/tests/state-store.test.mjs
 
-      - name: Canonicalization regression
+      - name: Canonicalization witnesses
         run: node experiments/browser-accelerator/tests/canonicalization.test.mjs
 
-      - name: Differential regression
+      - name: CPU/GPU differential witnesses
         run: node experiments/browser-accelerator/tests/differential.test.mjs
 
-      - name: Install pinned Rust toolchain
+      - name: Reaction R1-R6 witnesses
+        run: node experiments/browser-accelerator/tests/reaction.test.mjs
+
+      - name: Install Rust + wasm32 once
         run: |
           rustup toolchain install 1.98.1 --profile minimal
           rustup target add --toolchain 1.98.1 wasm32-unknown-unknown
 
-      - name: Native Rust Anum positive/negative witnesses
+      - name: Native Rust oracle witnesses
         run: cargo +1.98.1 test --manifest-path experiments/browser-accelerator/rust/Cargo.toml
 
-      - name: Compile Rust/WASM Anum oracle
+      - name: Compile Rust/WASM oracle once
         run: |
           cargo +1.98.1 build \
             --manifest-path experiments/browser-accelerator/rust/Cargo.toml \
             --target wasm32-unknown-unknown \
             --release
+
+      - name: Consolidation policy
+        run: |
+          echo "Anum, state-store, canonicalization, differential and reaction checks share one runner."
+          echo "Node, Rust and the WASM build are each initialized once."
