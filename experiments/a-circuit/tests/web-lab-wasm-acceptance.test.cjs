@@ -33,6 +33,7 @@ Promise.all([
   let browserTransportNegativeChecked = false;
   let browserTransportFallbackChecked = false;
   let browserTransportCompactAuthorityChecked = false;
+  let browserTransportCompactOnlyChecked = false;
   const jsonBytes = (value) =>
     Buffer.byteLength(JSON.stringify(value), "utf8");
   const readCurrentCompactProof = (label) => {
@@ -410,6 +411,23 @@ Promise.all([
       );
     }
     browserTransportCompactAuthorityChecked = true;
+
+    if (!browserTransportCompactOnlyChecked) {
+      const compactOnly = selectBrowserProof({
+        proof: null,
+        compactProof: producedCompactProof,
+      });
+      if (compactOnly.transport !== "compact" ||
+          compactOnly.proof === null ||
+          compactOnly.compactProof !== producedCompactProof ||
+          compactOnly.v3Proof !== null ||
+          JSON.stringify(compactOnly.proof) !== JSON.stringify(browserSelection.proof)) {
+        throw new Error(
+          registryBlock.id + " compact-only browser authority failed"
+        );
+      }
+      browserTransportCompactOnlyChecked = true;
+    }
 
     if (!browserTransportFallbackChecked) {
       const fallback = selectBrowserProof({ proof, compactProof: null });
@@ -1410,6 +1428,9 @@ Promise.all([
   }
   if (!browserTransportCompactAuthorityChecked) {
     throw new Error("compact browser authority witness was not executed");
+  }
+  if (!browserTransportCompactOnlyChecked) {
+    throw new Error("compact-only browser authority witness was not executed");
   }
   if (!browserTransportFallbackChecked) {
     throw new Error("schema-v3 browser fallback witness was not executed");
