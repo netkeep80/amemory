@@ -5,13 +5,16 @@ import {
   R4_FIXTURE,
   R5_FIXTURE,
   R6_FIXTURE,
+  R7_FIXTURE,
   R5_OBSERVATION_STEPS,
+  R7_FIXED_POINT_STEPS,
   assertR1Fixture,
   assertR2Fixture,
   assertR3Fixture,
   assertR4Fixture,
   assertR5Fixture,
   assertR6Fixture,
+  assertR7Fixture,
   assertReactionStateExact,
   makePortableReactionResult,
   normalizeReactionState,
@@ -26,6 +29,7 @@ assert.equal(assertR3Fixture(), true);
 assert.equal(assertR4Fixture(), true);
 assert.equal(assertR5Fixture(), true);
 assert.equal(assertR6Fixture(), true);
+assert.equal(assertR7Fixture(), true);
 
 assert.deepEqual(splitPairAnum(R1_FIXTURE.current), {
   start: R1_FIXTURE.K,
@@ -55,6 +59,25 @@ assert.equal(pairAnum(R5_FIXTURE.endValue, R5_FIXTURE.startValue), R5_FIXTURE.re
 assert.equal(pairAnum(R1_FIXTURE.A, R4_FIXTURE.C), R6_FIXTURE.relationAC);
 assert.equal(pairAnum(R3_FIXTURE.root, R4_FIXTURE.C), R6_FIXTURE.rootRelationC);
 assert.equal(R5_OBSERVATION_STEPS, 4);
+assert.equal(R7_FIXED_POINT_STEPS, 2);
+assert.deepEqual(splitPairAnum(R7_FIXTURE.zeroRelationB), {
+  start: R1_FIXTURE.B,
+  end: R3_FIXTURE.root,
+});
+assert.deepEqual(splitPairAnum(R7_FIXTURE.fixedRelation), {
+  start: R1_FIXTURE.A,
+  end: R1_FIXTURE.A,
+});
+assert.deepEqual(splitPairAnum(R7_FIXTURE.relationEndContinuation), {
+  start: R1_FIXTURE.A,
+  end: R7_FIXTURE.endContinuation,
+});
+assert.deepEqual(splitPairAnum(R7_FIXTURE.relationStartContinuation), {
+  start: R1_FIXTURE.A,
+  end: R7_FIXTURE.startContinuation,
+});
+assert.notEqual(R7_FIXTURE.endContinuation, R7_FIXTURE.startContinuation);
+assert.notEqual(R7_FIXTURE.stateEndContinuation, R7_FIXTURE.stateStartContinuation);
 
 assert.deepEqual(
   normalizeReactionState([R1_FIXTURE.successor, R1_FIXTURE.current]),
@@ -119,4 +142,4 @@ assert.throws(
   /mismatch/,
 );
 
-console.log("AMEMORY_REACTION_R1_R2_R3_R4_R5_UNIT_WITNESSES=GREEN");
+console.log("AMEMORY_REACTION_R1_R2_R3_R4_R5_R6_R7_UNIT_WITNESSES=GREEN");
