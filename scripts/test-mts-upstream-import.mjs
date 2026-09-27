@@ -155,6 +155,91 @@ function validDocs() {
   };
 }
 
+
+const v014Laws = Object.fromEntries(
+  Array.from({ length: 14 }, (_, i) => [`V14-L${i + 1}`, `v0.14 law ${i + 1}`]),
+);
+const v014Invariants = Object.fromEntries(
+  Object.keys(v014Laws).map((id) => [
+    id,
+    {
+      status: "GREEN_TEST",
+      contractPointer: `/requiredSemanticLaws/${id}`,
+      positive: { requiredPositiveVectors: [`p-${id}`] },
+      negative: { requiredNegativeVectors: [`n-${id}`] },
+      requiredExecutableGates: [`gate-${id}`],
+    },
+  ]),
+);
+const v014Lock = {
+  ...baseLock,
+  acceptedMtsVersion: "mts-contract/v0.14",
+  acceptedCommit: "4".repeat(40),
+  artifacts: {
+    contract: { path: "contract-v014.json", blobSha: "5".repeat(40) },
+    conformance: { path: "conformance-v014.json", blobSha: "6".repeat(40) },
+    traceability: { path: "trace-v014.json", blobSha: "7".repeat(40) },
+    acceptance: { path: "accept-v014.json", blobSha: "8".repeat(40) },
+  },
+  generatedProjection: "v014-projection.json",
+};
+
+function validV014Docs() {
+  return {
+    contract: {
+      schema: "mts-contract/v0.14",
+      status: "accepted",
+      accepted: true,
+      requiredSemanticLaws: { ...v014Laws },
+      inheritedFoundation: {},
+      foundationOrientation: {},
+      recursiveAlphabet: {},
+      recursivePrefixCodec: {},
+      ostensiveFormalNotation: {},
+      sequenceSemantics: {},
+      reactionResultBasis: {},
+      linkImmutabilityAndRewrite: {},
+      generalizedMpNonRegression: {},
+      executionProfileNonRegression: {},
+      representationLayers: {},
+      multiplicationScope: { status: "EXPLICITLY_DEFERRED" },
+    },
+    conformance: {
+      contract: "mts-contract/v0.14",
+      status: "accepted",
+      accepted: true,
+      coverageState: "complete",
+      requiredPositiveVectors: ["p14"],
+      requiredNegativeVectors: ["n14"],
+    },
+    traceability: {
+      accepted: true,
+      contract: "contract-v014.json",
+      conformance: "conformance-v014.json",
+      invariants: v014Invariants,
+    },
+    acceptance: {
+      decision: "ACCEPT_MTS_V0_14",
+      versionDecision: {
+        previousAcceptedVersion: "mts-contract/v0.13",
+        acceptedVersion: "mts-contract/v0.14",
+      },
+      current: {
+        contract: "contract-v014.json",
+        conformance: "conformance-v014.json",
+      },
+      acceptance: {
+        cutoverPerformed: true,
+        downstreamRepinAllowed: true,
+        singleLiveSemanticRuntime: true,
+      },
+      veto: {},
+      postAcceptanceWork: [],
+    },
+    executionProfile: validProfile(),
+  };
+}
+
 // Positive controls.
 validateLock(baseLock);
 validateExecutionProfile(baseLock, validProfile());
@@ -174,6 +259,41 @@ assert.equal(
   "minimal-portable-amemory-execution",
 );
 assertProjectionMatches(projection, stableJson(projection));
+
+validateLock(v014Lock);
+validateUpstream(v014Lock, validV014Docs());
+const v014ProjectionUnit = buildProjection(v014Lock, validV014Docs());
+assert.equal(v014ProjectionUnit.schema, "amemory-mts-requirements-projection/v0.3");
+assert.equal(Object.keys(v014ProjectionUnit.laws).length, 14);
+assert.equal(v014ProjectionUnit.authoritySplit.acceptedFoundation.version, "v0.14");
+assert.equal(v014ProjectionUnit.authoritySplit.executionProfile.foundationMtsVersion, "v0.13");
+assert.equal(v014ProjectionUnit.authoritySplit.sameFoundationVersion, false);
+assert.equal(v014ProjectionUnit.authoritySplit.executionProfileMayBeRelabeledAsAcceptedFoundation, false);
+
+{
+  const docs = validV014Docs();
+  delete docs.contract.requiredSemanticLaws["V14-L12"];
+  expectThrow(
+    () => validateUpstream(v014Lock, docs),
+    /required semantic law missing: V14-L12/,
+  );
+}
+{
+  const docs = validV014Docs();
+  docs.acceptance.decision = "ACCEPT_MTS_V0_13";
+  expectThrow(
+    () => validateUpstream(v014Lock, docs),
+    /acceptance artifact does not authorize the pinned MTS version/,
+  );
+}
+{
+  const docs = validV014Docs();
+  docs.executionProfile.foundation.mtsVersion = "v0.14";
+  expectThrow(
+    () => validateUpstream(v014Lock, docs),
+    /does not preserve accepted MTS v0.13/,
+  );
+}
 
 // Negative: floating accepted foundation ref instead of immutable commit.
 expectThrow(
@@ -335,6 +455,9 @@ console.log("MTS_AND_AMEMORY_PROFILE_IMPORT_NEGATIVE_WITNESSES=GREEN");
   const projection = JSON.parse(
     readFileSync("contracts/upstream/mts-v0.13-requirements.json", "utf8"),
   );
+  const v014Projection = JSON.parse(
+    readFileSync("contracts/upstream/mts-v0.14-requirements.json", "utf8"),
+  );
   const readme = readFileSync("README.md", "utf8");
 
   assert.equal(
@@ -388,6 +511,24 @@ console.log("MTS_AND_AMEMORY_PROFILE_IMPORT_NEGATIVE_WITNESSES=GREEN");
   assert.equal(
     projection.generatedFrom.executionProfile.commit,
     "af4e3dadbb9857fba7239a58f79ed2da59bc5c42",
+  );
+
+  assert.equal(v014Projection.schema, "amemory-mts-requirements-projection/v0.3");
+  assert.equal(
+    v014Projection.generatedFrom.foundation.commit,
+    "fcbc97e2279471c2c5effed57685c5f49ec856be",
+  );
+  assert.equal(
+    v014Projection.generatedFrom.executionProfile.commit,
+    "af4e3dadbb9857fba7239a58f79ed2da59bc5c42",
+  );
+  assert.equal(Object.keys(v014Projection.laws).length, 14);
+  assert.equal(v014Projection.authoritySplit.acceptedFoundation.version, "v0.14");
+  assert.equal(v014Projection.authoritySplit.executionProfile.foundationMtsVersion, "v0.13");
+  assert.equal(v014Projection.authoritySplit.sameFoundationVersion, false);
+  assert.equal(
+    v014Projection.authoritySplit.executionProfileMayBeRelabeledAsAcceptedFoundation,
+    false,
   );
 
   assert.equal(

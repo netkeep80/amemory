@@ -2,7 +2,29 @@ import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
-export const REQUIRED_LAWS = Array.from({ length: 13 }, (_, i) => `L${i + 1}`);
+export const REQUIRED_V013_LAWS = Array.from({ length: 13 }, (_, i) => `L${i + 1}`);
+export const REQUIRED_V014_LAWS = Array.from({ length: 14 }, (_, i) => `V14-L${i + 1}`);
+export const REQUIRED_LAWS = REQUIRED_V013_LAWS;
+export const KNOWN_LOCK_PATHS = [
+  "contracts/upstream/mts-v0.13.lock.json",
+  "contracts/upstream/mts-v0.14.lock.json",
+];
+
+function foundationVersionTag(acceptedMtsVersion) {
+  const match = /^mts-contract\/(v\d+\.\d+)$/.exec(acceptedMtsVersion ?? "");
+  if (!match) throw new Error(`unsupported accepted MTS version: ${acceptedMtsVersion}`);
+  return match[1];
+}
+
+function expectedAcceptanceDecision(acceptedMtsVersion) {
+  return `ACCEPT_MTS_${foundationVersionTag(acceptedMtsVersion).slice(1).replace(".", "_").toUpperCase()}`;
+}
+
+function requiredLawIds(lock) {
+  if (lock.acceptedMtsVersion === "mts-contract/v0.13") return REQUIRED_V013_LAWS;
+  if (lock.acceptedMtsVersion === "mts-contract/v0.14") return REQUIRED_V014_LAWS;
+  throw new Error(`unsupported accepted MTS version: ${lock.acceptedMtsVersion}`);
+}
 export const REQUIRED_PROFILE_LAWS = Array.from(
   { length: 17 },
   (_, i) => `P${String(i + 1).padStart(2, "0")}_`,
@@ -189,11 +211,12 @@ export function validateUpstream(lock, docs) {
     throw new Error("traceability does not bind the pinned contract/conformance");
   }
   if (
-    acceptance?.decision !== "ACCEPT_MTS_V0_13" ||
+    acceptance?.decision !== expectedAcceptanceDecision(lock.acceptedMtsVersion) ||
     acceptance?.versionDecision?.acceptedVersion !== lock.acceptedMtsVersion ||
     acceptance?.current?.contract !== lock.artifacts.contract.path ||
     acceptance?.current?.conformance !== lock.artifacts.conformance.path ||
-    acceptance?.acceptance?.cutoverPerformed !== true
+    acceptance?.acceptance?.cutoverPerformed !== true ||
+    acceptance?.acceptance?.downstreamRepinAllowed !== true
   ) {
     throw new Error("acceptance artifact does not authorize the pinned MTS version");
   }
@@ -202,7 +225,7 @@ export function validateUpstream(lock, docs) {
   if (!laws || typeof laws !== "object") {
     throw new Error("requiredSemanticLaws missing");
   }
-  for (const id of REQUIRED_LAWS) {
+  for (const id of requiredLawIds(lock)) {
     if (typeof laws[id] !== "string" || laws[id].length === 0) {
       throw new Error(`required semantic law missing: ${id}`);
     }
@@ -220,13 +243,13 @@ export function validateUpstream(lock, docs) {
   validateExecutionProfile(lock, executionProfile);
 }
 
-export function buildProjection(lock, docs) {
+function buildV013Projection(lock, docs) {
   validateLock(lock);
   validateUpstream(lock, docs);
 
   const { contract, conformance, traceability, acceptance, executionProfile } = docs;
   const traceProjection = {};
-  for (const id of REQUIRED_LAWS) {
+  for (const id of REQUIRED_V013_LAWS) {
     const item = traceability.invariants[id];
     traceProjection[id] = {
       contractPointer: item.contractPointer,
@@ -303,6 +326,127 @@ export function buildProjection(lock, docs) {
   };
 }
 
+
+function buildV014Projection(lock, docs) {
+  validateLock(lock);
+  validateUpstream(lock, docs);
+
+  const { contract, conformance, traceability, acceptance, executionProfile } = docs;
+  const traceProjection = {};
+  for (const id of REQUIRED_V014_LAWS) {
+    const item = traceability.invariants[id];
+    traceProjection[id] = {
+      status: item.status,
+      contractPointer: item.contractPointer,
+      positiveVectors: item.positive?.requiredPositiveVectors ?? [],
+      negativeVectors: item.negative?.requiredNegativeVectors ?? [],
+      requiredExecutableGates: item.requiredExecutableGates ?? [],
+    };
+  }
+
+  const acceptedFoundationVersion = foundationVersionTag(lock.acceptedMtsVersion);
+  const profileFoundationVersion = executionProfile.foundation?.mtsVersion ?? null;
+
+  return {
+    schema: "amemory-mts-requirements-projection/v0.3",
+    generated: true,
+    generatedFrom: {
+      foundation: {
+        repository: lock.repository,
+        commit: lock.acceptedCommit,
+        mtsVersion: lock.acceptedMtsVersion,
+        artifacts: lock.artifacts,
+      },
+      executionProfile: {
+        repository: lock.executionProfile.repository,
+        commit: lock.executionProfile.commit,
+        path: lock.executionProfile.path,
+        blobSha: lock.executionProfile.blobSha,
+      },
+    },
+    acceptance: {
+      decision: acceptance.decision,
+      acceptedVersion: acceptance.versionDecision.acceptedVersion,
+      previousAcceptedVersion: acceptance.versionDecision.previousAcceptedVersion,
+      current: acceptance.current,
+      contractAccepted: contract.accepted,
+      conformanceAccepted: conformance.accepted,
+      conformanceCoverageState: conformance.coverageState,
+      downstreamRepinAllowed: acceptance.acceptance.downstreamRepinAllowed,
+      singleLiveSemanticRuntime: acceptance.acceptance.singleLiveSemanticRuntime,
+    },
+    authoritySplit: {
+      acceptedFoundation: {
+        version: acceptedFoundationVersion,
+        contract: lock.acceptedMtsVersion,
+        commit: lock.acceptedCommit,
+      },
+      executionProfile: {
+        id: executionProfile.id,
+        profileVersion: executionProfile.profileVersion,
+        status: executionProfile.status,
+        foundationMtsVersion: profileFoundationVersion,
+        commit: lock.executionProfile.commit,
+      },
+      sameFoundationVersion: acceptedFoundationVersion === profileFoundationVersion,
+      executionProfileMayBeRelabeledAsAcceptedFoundation: false,
+      classification:
+        acceptedFoundationVersion === profileFoundationVersion
+          ? "FOUNDATION_AND_PROFILE_SAME_VERSION"
+          : "INDEPENDENT_EXECUTION_PROFILE_PRE_DATES_ACCEPTED_FOUNDATION",
+    },
+    foundation: {
+      inheritedFoundation: contract.inheritedFoundation,
+      foundationOrientation: contract.foundationOrientation,
+      recursiveAlphabet: contract.recursiveAlphabet,
+      recursivePrefixCodec: contract.recursivePrefixCodec,
+      ostensiveFormalNotation: contract.ostensiveFormalNotation,
+      sequenceSemantics: contract.sequenceSemantics,
+      reactionResultBasis: contract.reactionResultBasis,
+      linkImmutabilityAndRewrite: contract.linkImmutabilityAndRewrite,
+      generalizedMpNonRegression: contract.generalizedMpNonRegression,
+      executionProfileNonRegression: contract.executionProfileNonRegression,
+      representationLayers: contract.representationLayers,
+    },
+    laws: contract.requiredSemanticLaws,
+    conformance: {
+      requiredPositiveVectors: conformance.requiredPositiveVectors,
+      requiredNegativeVectors: conformance.requiredNegativeVectors,
+    },
+    traceability: traceProjection,
+    executionProfile,
+    veto: acceptance.veto,
+    explicitlyDeferred: {
+      multiplicationScope: contract.multiplicationScope,
+    },
+    postAcceptanceWork: acceptance.postAcceptanceWork ?? [],
+    researchPointers: [
+      {
+        repository: "netkeep80/anum_docs",
+        issue: 1558,
+        normative: false,
+        topic: "research history and authority of the independently pinned A-memory execution profile",
+      },
+      {
+        repository: "netkeep80/anum_docs",
+        issue: 1332,
+        normative: false,
+        topic: "MTS Aset <-> Doublets Aset representation boundary",
+      },
+    ],
+  };
+}
+
+export function buildProjection(lock, docs) {
+  if (lock?.acceptedMtsVersion === "mts-contract/v0.13") {
+    return buildV013Projection(lock, docs);
+  }
+  if (lock?.acceptedMtsVersion === "mts-contract/v0.14") {
+    return buildV014Projection(lock, docs);
+  }
+  throw new Error(`unsupported accepted MTS version: ${lock?.acceptedMtsVersion}`);
+}
+
 export function assertProjectionMatches(expected, actualText) {
   const expectedText = stableJson(expected);
   if (actualText !== expectedText) {
@@ -324,12 +468,7 @@ async function fetchPinnedJson(repository, commit, artifact, label) {
   return JSON.parse(bytes.toString("utf8"));
 }
 
-async function main() {
-  const mode = process.argv.includes("--write") ? "write" : "check";
-  const lockPath = "contracts/upstream/mts-v0.13.lock.json";
-  const lock = JSON.parse(await readFile(lockPath, "utf8"));
-  validateLock(lock);
-
+async function loadPinnedDocs(lock) {
   const docs = {};
   for (const name of ["contract", "conformance", "traceability", "acceptance"]) {
     docs[name] = await fetchPinnedJson(
@@ -348,7 +487,13 @@ async function main() {
     },
     "executionProfile",
   );
+  return docs;
+}
 
+async function processLock(lockPath, mode) {
+  const lock = JSON.parse(await readFile(lockPath, "utf8"));
+  validateLock(lock);
+  const docs = await loadPinnedDocs(lock);
   const projection = buildProjection(lock, docs);
   const target = lock.generatedProjection;
 
@@ -360,6 +505,14 @@ async function main() {
 
   const actual = await readFile(target, "utf8");
   assertProjectionMatches(projection, actual);
+  process.stdout.write(`MTS_UPSTREAM_IMPORT_GREEN=${lock.acceptedMtsVersion}\n`);
+}
+
+async function main() {
+  const mode = process.argv.includes("--write") ? "write" : "check";
+  for (const lockPath of KNOWN_LOCK_PATHS) {
+    await processLock(lockPath, mode);
+  }
   process.stdout.write("MTS_AND_AMEMORY_PROFILE_UPSTREAM_IMPORT=GREEN\n");
 }
 
