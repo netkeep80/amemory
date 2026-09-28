@@ -98,6 +98,16 @@
     </div>
   </header>
 
+  <div class="notice" id="mts-v014-notation">
+    <strong>MTS v0.14 notation:</strong>
+    <code>∞ = ROOT / 8</code> ·
+    <code>♂S = START_K / 9S</code> ·
+    <code>S♀ = END_K / 6S</code> ·
+    <code>A ⟼ B = PAIR / 1AB</code>.
+    START_K/END_K exist only relative to an oriented Context K.
+    <strong>recursive Link wire ≠ Anum / ExactSequence</strong>.
+  </div>
+
   <section class="status-grid" aria-label="System overview">
     <div class="status-card"><span class="kicker">Rust / WASM</span><span class="value" id="overview-wasm">STARTING</span></div>
     <div class="status-card"><span class="kicker">WebGPU path</span><span class="value" id="overview-webgpu">WAITING</span></div>
@@ -111,7 +121,7 @@
       <span class="kicker">Input</span>
       <h3>Portable Aset</h3>
       <div class="primary" id="flow-input">WAITING</div>
-      <div class="secondary">Multi-Anum atomic load. Failed member ⇒ no partial publication.</div>
+      <div class="secondary">Atomic recursive-wire Aset load. Failed member ⇒ no partial publication.</div>
     </article>
     <article class="flow-card">
       <span class="kicker">Memory</span>
@@ -129,7 +139,7 @@
       <span class="kicker">Result</span>
       <h3>Portable observation</h3>
       <div class="primary" id="flow-result">WAITING</div>
-      <div class="secondary">Scope Anums + matched relations + handoff + quiescence.</div>
+      <div class="secondary">Scope recursive Link wires + matched relations + handoff + quiescence.</div>
     </article>
   </section>
 
@@ -138,7 +148,7 @@
   <h2>Lifecycle evidence</h2>
   <section class="panel">
     <div class="rows">
-      <div class="lifecycle-row"><span class="label">Atomic multi-Anum Aset load</span><span id="aset-atomic">WAITING</span></div>
+      <div class="lifecycle-row"><span class="label">Atomic recursive-wire Aset load</span><span id="aset-atomic">WAITING</span></div>
       <div class="lifecycle-row"><span class="label">Portable reaction result</span><span id="reaction-portable-result">WAITING</span></div>
     </div>
   </section>
@@ -179,12 +189,12 @@
 <div class="row"><span class="label">State negative controls:</span><span id="state-negative">WAITING</span></div></div>
 </details>
   <details class="panel" open>
-  <summary><span>Anum boundary</span><small>Portable import/export, two-memory identity and controls</small></summary>
-  <div class="rows"><div class="row"><span class="label">Anum import CPU:</span><span id="anum-import-cpu">WAITING</span></div>
-<div class="row"><span class="label">Anum import GPU:</span><span id="anum-import-gpu">WAITING</span></div>
-<div class="row"><span class="label">Anum export CPU:</span><span id="anum-export-cpu">WAITING</span></div>
-<div class="row"><span class="label">Anum export GPU:</span><span id="anum-export-gpu">WAITING</span></div>
-<div class="row"><span class="label">Two-memory Anum differential:</span><span id="anum-diff">WAITING</span></div>
+  <summary><span>Recursive Link wire boundary</span><small>Portable structural import/export, two-memory identity and controls</small></summary>
+  <div class="rows"><div class="row"><span class="label">Recursive-wire import CPU:</span><span id="anum-import-cpu">WAITING</span></div>
+<div class="row"><span class="label">Recursive-wire import GPU:</span><span id="anum-import-gpu">WAITING</span></div>
+<div class="row"><span class="label">Recursive-wire export CPU:</span><span id="anum-export-cpu">WAITING</span></div>
+<div class="row"><span class="label">Recursive-wire export GPU:</span><span id="anum-export-gpu">WAITING</span></div>
+<div class="row"><span class="label">Two-memory recursive-wire differential:</span><span id="anum-diff">WAITING</span></div>
 <div class="row"><span class="label">Local handles differ:</span><span id="anum-handles">WAITING</span></div>
 <div class="row"><span class="label">Canonical local reuse:</span><span id="anum-reuse">WAITING</span></div>
 <div class="row"><span class="label">Malformed/foreign/capacity controls:</span><span id="anum-negative">WAITING</span></div></div>
@@ -248,7 +258,7 @@
 <div class="row"><span class="label">Reaction R4 normalized CPU/GPU trajectory differential:</span><span id="reaction-r4-diff">WAITING</span></div></div>
 </details>
   <details class="panel">
-  <summary><span>Reaction R5</span><small>Recurrence and END ≠ global halt</small></summary>
+  <summary><span>Reaction R5</span><small>Recurrence and context-relative END_K / ♀ ≠ global halt</small></summary>
   <div class="rows"><div class="row"><span class="label">Reaction R5 S0 CPU/GPU:</span><span id="reaction-r5-s0">WAITING</span></div>
 <div class="row"><span class="label">Reaction R5 S1 CPU/GPU:</span><span id="reaction-r5-s1">WAITING</span></div>
 <div class="row"><span class="label">Reaction R5 S2 CPU/GPU:</span><span id="reaction-r5-s2">WAITING</span></div>
@@ -259,8 +269,8 @@
 <div class="row"><span class="label">Reaction R5 Scope handoffs:</span><span id="reaction-r5-handoff">WAITING</span></div>
 <div class="row"><span class="label">Reaction R5 quiescence:</span><span id="reaction-r5-quiescence">WAITING</span></div>
 <div class="row"><span class="label">Reaction R5 recurrence:</span><span id="reaction-r5-recurrence">WAITING</span></div>
-<div class="row"><span class="label">Reaction R5 END structure:</span><span id="reaction-r5-end-structure">WAITING</span></div>
-<div class="row"><span class="label">Reaction R5 END continuation:</span><span id="reaction-r5-end-continuation">WAITING</span></div>
+<div class="row"><span class="label">Reaction R5 END_K / ♀ structure:</span><span id="reaction-r5-end-structure">WAITING</span></div>
+<div class="row"><span class="label">Reaction R5 END_K / ♀ continuation:</span><span id="reaction-r5-end-continuation">WAITING</span></div>
 <div class="row"><span class="label">Reaction R5 bounded witness:</span><span id="reaction-r5-bounded">WAITING</span></div>
 <div class="row"><span class="label">Reaction R5 normalized CPU/GPU trajectory differential:</span><span id="reaction-r5-diff">WAITING</span></div></div>
 </details>

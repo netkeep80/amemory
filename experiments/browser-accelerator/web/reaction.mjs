@@ -5,8 +5,8 @@ import {
   cpuPoolCount,
   cpuResetPool,
   createContextRelativeOrientation,
-  createGpuAnumPool,
-  destroyGpuAnumPool,
+  createGpuRecursiveWirePool,
+  destroyGpuRecursiveWirePool,
   gpuExport,
   gpuImport,
   gpuImportBatchAtomic,
@@ -14,9 +14,9 @@ import {
   readCpuTopology,
   readGpuTopology,
   localRef,
-  normalizeAnum,
-  parseAnum,
-  formatAnum,
+  normalizeRecursiveWire,
+  parseRecursiveWire,
+  formatRecursiveWire,
   requireLocalRef,
   wasmU32,
 } from "./anum-boundary.mjs";
@@ -43,6 +43,10 @@ export const R4_FIXTURE = Object.freeze({
   successorC: "198998",
 });
 
+// Historical field names startValue/endValue are retained for fixture API
+// compatibility. In accepted v0.14 they mean context-relative START_K/END_K
+// after this Context is oriented; 98/68 are technical recursive-wire markers,
+// not Foundation-global absolute pole names.
 export const R5_FIXTURE = Object.freeze({
   context: "998",
   startValue: "98",
@@ -83,37 +87,43 @@ function must(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-export function pairAnum(start, end) {
-  return normalizeAnum("1" + normalizeAnum(start) + normalizeAnum(end));
+export function pairRecursiveWire(start, end) {
+  return normalizeRecursiveWire(
+    "1" + normalizeRecursiveWire(start) + normalizeRecursiveWire(end)
+  );
 }
 
-export function splitPairAnum(source) {
-  const node = parseAnum(source);
+export function splitPairRecursiveWire(source) {
+  const node = parseRecursiveWire(source);
   if (node.kind !== "PAIR") {
     throw new Error("reaction record must be PAIR recursive Link wire: " + source);
   }
   return Object.freeze({
-    start: formatAnum(node.start),
-    end: formatAnum(node.end),
+    start: formatRecursiveWire(node.start),
+    end: formatRecursiveWire(node.end),
   });
 }
 
+// Historical helper names retained for test/API compatibility only.
+export const pairAnum = pairRecursiveWire;
+export const splitPairAnum = splitPairRecursiveWire;
+
 export function assertR1Fixture() {
-  const current = splitPairAnum(R1_FIXTURE.current);
-  const relation = splitPairAnum(R1_FIXTURE.relation);
-  const successor = splitPairAnum(R1_FIXTURE.successor);
+  const current = splitPairRecursiveWire(R1_FIXTURE.current);
+  const relation = splitPairRecursiveWire(R1_FIXTURE.relation);
+  const successor = splitPairRecursiveWire(R1_FIXTURE.successor);
   must(current.start === R1_FIXTURE.K && current.end === R1_FIXTURE.A, "bad R1 current");
   must(relation.start === R1_FIXTURE.A && relation.end === R1_FIXTURE.B, "bad R1 relation");
   must(successor.start === R1_FIXTURE.K && successor.end === R1_FIXTURE.B, "bad R1 successor");
-  must(pairAnum(R1_FIXTURE.K, R1_FIXTURE.A) === R1_FIXTURE.current, "noncanonical current");
-  must(pairAnum(R1_FIXTURE.A, R1_FIXTURE.B) === R1_FIXTURE.relation, "noncanonical relation");
-  must(pairAnum(R1_FIXTURE.K, R1_FIXTURE.B) === R1_FIXTURE.successor, "noncanonical successor");
+  must(pairRecursiveWire(R1_FIXTURE.K, R1_FIXTURE.A) === R1_FIXTURE.current, "noncanonical current");
+  must(pairRecursiveWire(R1_FIXTURE.A, R1_FIXTURE.B) === R1_FIXTURE.relation, "noncanonical relation");
+  must(pairRecursiveWire(R1_FIXTURE.K, R1_FIXTURE.B) === R1_FIXTURE.successor, "noncanonical successor");
   return true;
 }
 
 export function assertR2Fixture() {
-  const current = splitPairAnum(R1_FIXTURE.current);
-  const wrongRelation = splitPairAnum(R1_FIXTURE.successor);
+  const current = splitPairRecursiveWire(R1_FIXTURE.current);
+  const wrongRelation = splitPairRecursiveWire(R1_FIXTURE.successor);
   must(current.end === R1_FIXTURE.A, "bad R2 current antecedent");
   must(wrongRelation.start === R1_FIXTURE.K, "bad R2 wrong-relation antecedent");
   must(wrongRelation.start !== current.end, "R2 relation unexpectedly applicable");
@@ -121,52 +131,52 @@ export function assertR2Fixture() {
 }
 
 export function assertR3Fixture() {
-  const zero = splitPairAnum(R3_FIXTURE.zeroRelation);
-  const rootCurrent = splitPairAnum(R3_FIXTURE.rootCurrent);
-  const rootRelation = splitPairAnum(R3_FIXTURE.rootRelation);
+  const zero = splitPairRecursiveWire(R3_FIXTURE.zeroRelation);
+  const rootCurrent = splitPairRecursiveWire(R3_FIXTURE.rootCurrent);
+  const rootRelation = splitPairRecursiveWire(R3_FIXTURE.rootRelation);
   must(zero.start === R1_FIXTURE.A && zero.end === R3_FIXTURE.root, "bad R3 ZERO relation");
   must(rootCurrent.start === R1_FIXTURE.K && rootCurrent.end === R3_FIXTURE.root, "bad R3 root current");
   must(rootRelation.start === R3_FIXTURE.root && rootRelation.end === R1_FIXTURE.B, "bad R3 root relation");
-  must(pairAnum(R1_FIXTURE.A, R3_FIXTURE.root) === R3_FIXTURE.zeroRelation, "noncanonical R3 ZERO");
-  must(pairAnum(R1_FIXTURE.K, R3_FIXTURE.root) === R3_FIXTURE.rootCurrent, "noncanonical R3 root current");
-  must(pairAnum(R3_FIXTURE.root, R1_FIXTURE.B) === R3_FIXTURE.rootRelation, "noncanonical R3 root relation");
+  must(pairRecursiveWire(R1_FIXTURE.A, R3_FIXTURE.root) === R3_FIXTURE.zeroRelation, "noncanonical R3 ZERO");
+  must(pairRecursiveWire(R1_FIXTURE.K, R3_FIXTURE.root) === R3_FIXTURE.rootCurrent, "noncanonical R3 root current");
+  must(pairRecursiveWire(R3_FIXTURE.root, R1_FIXTURE.B) === R3_FIXTURE.rootRelation, "noncanonical R3 root relation");
   return true;
 }
 
 export function assertR4Fixture() {
-  const relationBC = splitPairAnum(R4_FIXTURE.relationBC);
-  const successorC = splitPairAnum(R4_FIXTURE.successorC);
+  const relationBC = splitPairRecursiveWire(R4_FIXTURE.relationBC);
+  const successorC = splitPairRecursiveWire(R4_FIXTURE.successorC);
   must(relationBC.start === R1_FIXTURE.B && relationBC.end === R4_FIXTURE.C, "bad R4 B->C relation");
   must(successorC.start === R1_FIXTURE.K && successorC.end === R4_FIXTURE.C, "bad R4 K->C successor");
-  must(pairAnum(R1_FIXTURE.B, R4_FIXTURE.C) === R4_FIXTURE.relationBC, "noncanonical R4 B->C");
-  must(pairAnum(R1_FIXTURE.K, R4_FIXTURE.C) === R4_FIXTURE.successorC, "noncanonical R4 K->C");
+  must(pairRecursiveWire(R1_FIXTURE.B, R4_FIXTURE.C) === R4_FIXTURE.relationBC, "noncanonical R4 B->C");
+  must(pairRecursiveWire(R1_FIXTURE.K, R4_FIXTURE.C) === R4_FIXTURE.successorC, "noncanonical R4 K->C");
   return true;
 }
 
 export function assertR6Fixture() {
-  const relationAC = splitPairAnum(R6_FIXTURE.relationAC);
-  const rootRelationC = splitPairAnum(R6_FIXTURE.rootRelationC);
+  const relationAC = splitPairRecursiveWire(R6_FIXTURE.relationAC);
+  const rootRelationC = splitPairRecursiveWire(R6_FIXTURE.rootRelationC);
   must(relationAC.start === R1_FIXTURE.A && relationAC.end === R4_FIXTURE.C, "bad R6 A->C relation");
   must(rootRelationC.start === R3_FIXTURE.root && rootRelationC.end === R4_FIXTURE.C, "bad R6 ROOT->C relation");
-  must(pairAnum(R1_FIXTURE.A, R4_FIXTURE.C) === R6_FIXTURE.relationAC, "noncanonical R6 A->C");
-  must(pairAnum(R3_FIXTURE.root, R4_FIXTURE.C) === R6_FIXTURE.rootRelationC, "noncanonical R6 ROOT->C");
+  must(pairRecursiveWire(R1_FIXTURE.A, R4_FIXTURE.C) === R6_FIXTURE.relationAC, "noncanonical R6 A->C");
+  must(pairRecursiveWire(R3_FIXTURE.root, R4_FIXTURE.C) === R6_FIXTURE.rootRelationC, "noncanonical R6 ROOT->C");
   return true;
 }
 
 export function assertR7Fixture() {
-  const secondCurrent = splitPairAnum(R7_FIXTURE.secondCurrent);
-  const zeroB = splitPairAnum(R7_FIXTURE.zeroRelationB);
-  const fixed = splitPairAnum(R7_FIXTURE.fixedRelation);
-  const relationEnd = splitPairAnum(R7_FIXTURE.relationEndContinuation);
-  const relationStart = splitPairAnum(R7_FIXTURE.relationStartContinuation);
-  const stateEnd = splitPairAnum(R7_FIXTURE.stateEndContinuation);
-  const stateStart = splitPairAnum(R7_FIXTURE.stateStartContinuation);
+  const secondCurrent = splitPairRecursiveWire(R7_FIXTURE.secondCurrent);
+  const zeroB = splitPairRecursiveWire(R7_FIXTURE.zeroRelationB);
+  const fixed = splitPairRecursiveWire(R7_FIXTURE.fixedRelation);
+  const relationEnd = splitPairRecursiveWire(R7_FIXTURE.relationEndContinuation);
+  const relationStart = splitPairRecursiveWire(R7_FIXTURE.relationStartContinuation);
+  const stateEnd = splitPairRecursiveWire(R7_FIXTURE.stateEndContinuation);
+  const stateStart = splitPairRecursiveWire(R7_FIXTURE.stateStartContinuation);
 
   must(secondCurrent.start === R1_FIXTURE.K && secondCurrent.end === R1_FIXTURE.B, "bad R7 second current");
   must(zeroB.start === R1_FIXTURE.B && zeroB.end === R3_FIXTURE.root, "bad R7 B->{} relation");
   must(fixed.start === R1_FIXTURE.A && fixed.end === R1_FIXTURE.A, "bad R7 A->A relation");
-  must(parseAnum(R7_FIXTURE.endContinuation).kind === "END", "bad R7 A♀ direct-gauge fixture");
-  must(parseAnum(R7_FIXTURE.startContinuation).kind === "START", "bad R7 ♂A direct-gauge fixture");
+  must(parseRecursiveWire(R7_FIXTURE.endContinuation).kind === "END", "bad R7 A♀ direct-gauge fixture");
+  must(parseRecursiveWire(R7_FIXTURE.startContinuation).kind === "START", "bad R7 ♂A direct-gauge fixture");
   must(relationEnd.start === R1_FIXTURE.A && relationEnd.end === R7_FIXTURE.endContinuation,
     "bad R7 A->A♀ relation");
   must(relationStart.start === R1_FIXTURE.A && relationStart.end === R7_FIXTURE.startContinuation,
@@ -180,11 +190,11 @@ export function assertR7Fixture() {
 }
 
 export function assertR5Fixture() {
-  const stateStart = splitPairAnum(R5_FIXTURE.stateStart);
-  const stateEnd = splitPairAnum(R5_FIXTURE.stateEnd);
-  const relationStartEnd = splitPairAnum(R5_FIXTURE.relationStartEnd);
-  const relationEndStart = splitPairAnum(R5_FIXTURE.relationEndStart);
-  const endNode = parseAnum(R5_FIXTURE.endValue);
+  const stateStart = splitPairRecursiveWire(R5_FIXTURE.stateStart);
+  const stateEnd = splitPairRecursiveWire(R5_FIXTURE.stateEnd);
+  const relationStartEnd = splitPairRecursiveWire(R5_FIXTURE.relationStartEnd);
+  const relationEndStart = splitPairRecursiveWire(R5_FIXTURE.relationEndStart);
+  const endNode = parseRecursiveWire(R5_FIXTURE.endValue);
 
   must(stateStart.start === R5_FIXTURE.context && stateStart.end === R5_FIXTURE.startValue, "bad R5 S_A");
   must(stateEnd.start === R5_FIXTURE.context && stateEnd.end === R5_FIXTURE.endValue, "bad R5 S_C");
@@ -197,15 +207,15 @@ export function assertR5Fixture() {
     "bad R5 C->A relation",
   );
   must(endNode.kind === "END", "R5 endValue must be structural END");
-  must(pairAnum(R5_FIXTURE.context, R5_FIXTURE.startValue) === R5_FIXTURE.stateStart, "noncanonical R5 S_A");
-  must(pairAnum(R5_FIXTURE.context, R5_FIXTURE.endValue) === R5_FIXTURE.stateEnd, "noncanonical R5 S_C");
-  must(pairAnum(R5_FIXTURE.startValue, R5_FIXTURE.endValue) === R5_FIXTURE.relationStartEnd, "noncanonical R5 A->C");
-  must(pairAnum(R5_FIXTURE.endValue, R5_FIXTURE.startValue) === R5_FIXTURE.relationEndStart, "noncanonical R5 C->A");
+  must(pairRecursiveWire(R5_FIXTURE.context, R5_FIXTURE.startValue) === R5_FIXTURE.stateStart, "noncanonical R5 S_A");
+  must(pairRecursiveWire(R5_FIXTURE.context, R5_FIXTURE.endValue) === R5_FIXTURE.stateEnd, "noncanonical R5 S_C");
+  must(pairRecursiveWire(R5_FIXTURE.startValue, R5_FIXTURE.endValue) === R5_FIXTURE.relationStartEnd, "noncanonical R5 A->C");
+  must(pairRecursiveWire(R5_FIXTURE.endValue, R5_FIXTURE.startValue) === R5_FIXTURE.relationEndStart, "noncanonical R5 C->A");
   return true;
 }
 
 export function normalizeReactionState(anums) {
-  return [...new Set(anums.map(normalizeAnum))].sort();
+  return [...new Set(anums.map(normalizeRecursiveWire))].sort();
 }
 
 export function makePortableReactionResult(scope, matchedRelations, handoff, quiescent) {
@@ -1177,7 +1187,7 @@ async function runAtomicAsetToResultBrowser(wasm, device) {
   const cpuRefs = Object.fromEntries(names.map((name, index) => [name, cpuBatch[index]]));
   const cpuLinks = cpuPoolCount(wasm);
 
-  const gpuPool = createGpuAnumPool(device, "gpu-lifecycle-C");
+  const gpuPool = createGpuRecursiveWirePool(device, "gpu-lifecycle-C");
   try {
     const gpuBatch = await gpuImportBatchAtomic(device, gpuPool, sources);
     must(gpuBatch, "GPU atomic R1 Aset load failed");
@@ -1213,7 +1223,7 @@ async function runAtomicAsetToResultBrowser(wasm, device) {
       sameLoadedAsetPath: true,
     };
   } finally {
-    destroyGpuAnumPool(gpuPool);
+    destroyGpuRecursiveWirePool(gpuPool);
   }
 }
 
@@ -1228,7 +1238,7 @@ export async function runReactionBrowser(wasm, device) {
   const logs = [];
   const lifecycle = await runAtomicAsetToResultBrowser(wasm, device);
   const cpuRefs = importCpuFixture(wasm);
-  const gpuPool = createGpuAnumPool(device, "gpu-reaction-B");
+  const gpuPool = createGpuRecursiveWirePool(device, "gpu-reaction-B");
 
   try {
     const gpuRefs = await importGpuFixture(device, gpuPool);
@@ -1354,7 +1364,7 @@ export async function runReactionBrowser(wasm, device) {
       normalizeReactionState(gpuR5.states[1]).join("|") === normalizeReactionState(gpuR5.states[3]).join("|"),
       "R5 END-state recurrence missing",
     );
-    must(parseAnum(R5_FIXTURE.endValue).kind === "END", "R5 END fixture lost structural END aspect");
+    must(parseRecursiveWire(R5_FIXTURE.endValue).kind === "END", "R5 END fixture lost structural END aspect");
     must(
       cpuR5.states[1][0] === R5_FIXTURE.stateEnd && cpuR5.states[2][0] === R5_FIXTURE.stateStart &&
       gpuR5.states[1][0] === R5_FIXTURE.stateEnd && gpuR5.states[2][0] === R5_FIXTURE.stateStart,
@@ -1745,6 +1755,6 @@ export async function runReactionBrowser(wasm, device) {
       logs,
     };
   } finally {
-    destroyGpuAnumPool(gpuPool);
+    destroyGpuRecursiveWirePool(gpuPool);
   }
 }

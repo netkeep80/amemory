@@ -136,6 +136,32 @@ Rust native tests и WASM browser используют одну текущую r
 
 ### Терминология представлений после MTS v0.14
 
+Каноническая публичная поверхность принятого MTS v0.14 разделяет онтологию, рекурсивную структуру и представления:
+
+```text
+онтология:
+  Link
+
+рекурсивный структурный алфавит:
+  ROOT     8     остенсивно: ∞
+  START_K  9S    остенсивно: ♂S
+  END_K    6S    остенсивно: S♀
+  PAIR     1AB   остенсивно: A ⟼ B
+
+самоинцидентность:
+  ROOT  = 11
+  START_K = 10
+  END_K   = 01
+  PAIR  = 00
+```
+
+`START_K` и `END_K` — **контекстно-относительные роли**. Они появляются только после ориентации Context `K`; до выбора локальной рамки нет абсолютных глобальных START/END. Знаки `♂/♀` на публичных поверхностях означают именно эти локальные роли.
+
+`8/9/6/1` — рекурсивный структурный алфавит Link, а не алфавит Anum/Q. `∞/♂/♀/⟼` — остенсивная запись той же структурной формы, а не четыре физических opcode.
+
+Наследованные имена `R/O/C/L/U` и примеры `98/68/19868/16898` остаются допустимыми как зафиксированная v0.13 basis / recursive-prefix запись. Они **не являются** Foundation-global authority для абсолютного START/END в v0.14.
+
+
 Для текущих structural/reaction witnesses используется явное разделение:
 
 ```text
@@ -240,7 +266,7 @@ R5 executable subset:
 
 Observed R5:
   S0 = [199898]
-  S1 = [199868]  // K⟼END
+  S1 = [199868]  // context-relative K⟼END_K / ♀ continuation
   S2 = [199898]
   S3 = [199868]
   S4 = [199898]
@@ -248,7 +274,7 @@ Observed R5:
   handoffCount = 1 on every step
   quiescent = false on every step
   recurrence = PASS
-  structural END continuation = PASS
+  structural context-relative END_K / ♀ continuation = PASS
   bounded witness returned = PASS
 
 AM-C046 R1 = GREEN
