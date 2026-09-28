@@ -8,6 +8,7 @@ use std::{
 
 pub type Handle = u32;
 pub const ROOT_HANDLE: Handle = 1;
+pub const PACKED_CARRIER_SCHEMA_VERSION: u32 = 1;
 const NO_HANDLE: Handle = 0;
 static NEXT_STORE_INSTANCE_ID: AtomicU32 = AtomicU32::new(1);
 
@@ -55,7 +56,161 @@ pub enum StoreError {
         start: Handle,
         end: Handle,
     },
+    UnsupportedPackedCarrierSchema(u32),
+    PackedCarrierLengthMismatch {
+        starts: usize,
+        ends: usize,
+    },
+    InvalidPackedCarrierRoot {
+        expected: Handle,
+        actual: Handle,
+    },
     NonWellFounded(Handle),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PackedCarrierImage {
+    schema_version: u32,
+    root_handle: Handle,
+    starts: Vec<Handle>,
+    ends: Vec<Handle>,
+}
+
+impl PackedCarrierImage {
+    pub fn from_parts(
+        schema_version: u32,
+        root_handle: Handle,
+        starts: Vec<Handle>,
+        ends: Vec<Handle>,
+    ) -> Result<Self, StoreError> {
+        let image = Self {
+            schema_version,
+            root_handle,
+            starts,
+            ends,
+        };
+        image.validate()?;
+        Ok(image)
+    }
+
+    pub fn from_duplets(
+        duplets: &[(Handle, Handle)],
+    ) -> Result<Self, StoreError> {
+        let mut starts = Vec::with_capacity(duplets.len());
+        let mut ends = Vec::with_capacity(duplets.len());
+        for &(start, end) in duplets {
+            starts.push(start);
+            ends.push(end);
+        }
+        Self::from_parts(
+            PACKED_CARRIER_SCHEMA_VERSION,
+            ROOT_HANDLE,
+            starts,
+            ends,
+        )
+    }
+
+    pub fn schema_version(&self) -> u32 {
+        self.schema_version
+    }
+
+    pub fn root_handle(&self) -> Handle {
+        self.root_handle
+    }
+
+    pub fn link_count(&self) -> usize {
+        self.starts.len()
+    }
+
+    pub fn starts(&self) -> &[Handle] {
+        &self.starts
+    }
+
+    pub fn ends(&self) -> &[Handle] {
+        &self.ends
+    }
+
+    pub fn duplet(&self, handle: Handle) -> Option<(Handle, Handle)> {
+        if handle == 0 {
+            return None;
+        }
+        let index = usize::try_from(handle - 1).ok()?;
+        Some((*self.starts.get(index)?, *self.ends.get(index)?))
+    }
+
+    pub fn duplets(
+        &self,
+    ) -> impl ExactSizeIterator<Item = (Handle, Handle)> + '_ {
+        self.starts
+            .iter()
+            .copied()
+            .zip(self.ends.iter().copied())
+    }
+
+    pub fn validate(&self) -> Result<(), StoreError> {
+        if self.schema_version != PACKED_CARRIER_SCHEMA_VERSION {
+            return Err(StoreError::UnsupportedPackedCarrierSchema(
+                self.schema_version,
+            ));
+        }
+        if self.root_handle != ROOT_HANDLE {
+            return Err(StoreError::InvalidPackedCarrierRoot {
+                expected: ROOT_HANDLE,
+                actual: self.root_handle,
+            });
+        }
+        if self.starts.len() != self.ends.len() {
+            return Err(StoreError::PackedCarrierLengthMismatch {
+                starts: self.starts.len(),
+                ends: self.ends.len(),
+            });
+        }
+        if self.starts.is_empty()
+            || self.starts[0] != ROOT_HANDLE
+            || self.ends[0] != ROOT_HANDLE
+        {
+            return Err(StoreError::InvalidPackedCarrier {
+                handle: ROOT_HANDLE,
+                start: self.starts.first().copied().unwrap_or(NO_HANDLE),
+                end: self.ends.first().copied().unwrap_or(NO_HANDLE),
+            });
+        }
+
+        let mut ordinary_pairs = HashSet::new();
+        let mut start_forms = HashSet::new();
+        let mut end_forms = HashSet::new();
+
+        for index in 1..self.starts.len() {
+            let handle = Handle::try_from(index + 1)
+                .map_err(|_| StoreError::CapacityExceeded)?;
+            let start = self.starts[index];
+            let end = self.ends[index];
+
+            let valid = if start == handle {
+                end != NO_HANDLE
+                    && end < handle
+                    && start_forms.insert(end)
+            } else if end == handle {
+                start != NO_HANDLE
+                    && start < handle
+                    && end_forms.insert(start)
+            } else {
+                start != NO_HANDLE
+                    && end != NO_HANDLE
+                    && start < handle
+                    && end < handle
+                    && ordinary_pairs.insert(Pair { start, end })
+            };
+            if !valid {
+                return Err(StoreError::InvalidPackedCarrier {
+                    handle,
+                    start,
+                    end,
+                });
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -233,8 +388,37 @@ impl OptimizedLinkStore {
         self.import_direct_recursive_wires(sources)
     }
 
+    /// Freezes the current canonical store into a backend-neutral immutable
+    /// carrier image. The image contains only dense local substrate topology;
+    /// HashMap canonicalization state and executor caches are deliberately not
+    /// part of the transport boundary.
+    pub fn export_packed_carrier_image(&self) -> PackedCarrierImage {
+        PackedCarrierImage::from_parts(
+            PACKED_CARRIER_SCHEMA_VERSION,
+            ROOT_HANDLE,
+            self.starts[1..].to_vec(),
+            self.ends[1..].to_vec(),
+        )
+        .expect("canonical store must always export a valid packed carrier")
+    }
+
+    /// Atomically loads a typed packed carrier image without parsing recursive
+    /// structural wires. Compatibility reconstruction still rebuilds the CPU
+    /// canonical/index state; C2 will separate that execution state further.
+    pub fn load_packed_carrier_image(
+        &mut self,
+        image: &PackedCarrierImage,
+    ) -> Result<(), StoreError> {
+        image.validate()?;
+        let duplets = image.duplets().collect::<Vec<_>>();
+        self.load_packed_duplets(&duplets)
+    }
+
     /// Exports the executable carrier as dense Link duplets in local-handle
     /// order. Entry `i - 1` is Link handle `i`.
+    ///
+    /// Compatibility projection. New carrier-boundary code should prefer
+    /// `export_packed_carrier_image`.
     pub fn export_packed_duplets(&self) -> Vec<(Handle, Handle)> {
         (1..=self.link_count() as Handle)
             .map(|handle| {
@@ -1098,6 +1282,109 @@ mod tests {
         assert_eq!(batched.instance_id, instance_id);
         assert_eq!(batched.link_count(), before_count);
         assert_eq!(batched.export_anum(stable).unwrap(), before_stable);
+    }
+
+    #[test]
+    fn typed_packed_carrier_image_is_exact_and_backend_neutral() {
+        let mut source = OptimizedLinkStore::new();
+        let o = source.import_anum("98").unwrap();
+        let c = source.import_anum("68").unwrap();
+        let l = source.ensure_pair(o, c).unwrap();
+        let _u = source.ensure_pair(c, o).unwrap();
+        let _top = source.ensure_pair(l, ROOT_HANDLE).unwrap();
+
+        let image = source.export_packed_carrier_image();
+        assert_eq!(image.schema_version(), PACKED_CARRIER_SCHEMA_VERSION);
+        assert_eq!(image.root_handle(), ROOT_HANDLE);
+        assert_eq!(image.link_count(), source.link_count());
+        assert_eq!(image.duplet(ROOT_HANDLE), Some((ROOT_HANDLE, ROOT_HANDLE)));
+        assert_eq!(
+            image.duplets().collect::<Vec<_>>(),
+            source.export_packed_duplets()
+        );
+        assert_eq!(image.starts().len(), image.ends().len());
+
+        let mut loaded = OptimizedLinkStore::new();
+        let instance_id = loaded.instance_id;
+        loaded.load_packed_carrier_image(&image).unwrap();
+
+        assert_eq!(loaded.instance_id, instance_id);
+        assert_eq!(loaded.export_packed_carrier_image(), image);
+        for handle in 1..=source.link_count() as Handle {
+            assert_eq!(
+                loaded.export_anum(handle).unwrap(),
+                source.export_anum(handle).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn typed_packed_carrier_image_rejects_invalid_transport_metadata() {
+        assert_eq!(
+            PackedCarrierImage::from_parts(
+                PACKED_CARRIER_SCHEMA_VERSION + 1,
+                ROOT_HANDLE,
+                vec![ROOT_HANDLE],
+                vec![ROOT_HANDLE],
+            ),
+            Err(StoreError::UnsupportedPackedCarrierSchema(
+                PACKED_CARRIER_SCHEMA_VERSION + 1
+            ))
+        );
+        assert_eq!(
+            PackedCarrierImage::from_parts(
+                PACKED_CARRIER_SCHEMA_VERSION,
+                ROOT_HANDLE,
+                vec![ROOT_HANDLE, ROOT_HANDLE],
+                vec![ROOT_HANDLE],
+            ),
+            Err(StoreError::PackedCarrierLengthMismatch {
+                starts: 2,
+                ends: 1,
+            })
+        );
+        assert_eq!(
+            PackedCarrierImage::from_parts(
+                PACKED_CARRIER_SCHEMA_VERSION,
+                ROOT_HANDLE + 1,
+                vec![ROOT_HANDLE],
+                vec![ROOT_HANDLE],
+            ),
+            Err(StoreError::InvalidPackedCarrierRoot {
+                expected: ROOT_HANDLE,
+                actual: ROOT_HANDLE + 1,
+            })
+        );
+
+        // Handle 2 and handle 3 cannot both be the same ordinary (ROOT,ROOT)
+        // Link. The transport validator rejects the duplicate before loading.
+        assert!(matches!(
+            PackedCarrierImage::from_duplets(&[
+                (ROOT_HANDLE, ROOT_HANDLE),
+                (ROOT_HANDLE, ROOT_HANDLE),
+                (ROOT_HANDLE, ROOT_HANDLE),
+            ]),
+            Err(StoreError::InvalidPackedCarrier {
+                handle: 3,
+                start: ROOT_HANDLE,
+                end: ROOT_HANDLE,
+            })
+        ));
+
+        // Forward references would leak backend construction order into an
+        // invalid executable image and therefore fail closed.
+        assert!(matches!(
+            PackedCarrierImage::from_duplets(&[
+                (ROOT_HANDLE, ROOT_HANDLE),
+                (3, ROOT_HANDLE),
+                (ROOT_HANDLE, ROOT_HANDLE),
+            ]),
+            Err(StoreError::InvalidPackedCarrier {
+                handle: 2,
+                start: 3,
+                end: ROOT_HANDLE,
+            })
+        ));
     }
 
     #[test]
