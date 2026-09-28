@@ -1874,6 +1874,71 @@ mod tests {
             .is_none(),
             "malformed/conflicting wide patch must fail closed"
         );
+        let non_bit = f
+            .store
+            .ensure_pair(p.schema.eax, p.schema.edx)
+            .unwrap();
+        let bad_cf = set_flag_action(
+            &mut f.store,
+            p.schema.flags,
+            p.schema.flags.cf,
+            non_bit,
+        );
+        let undef_pf = undefined_flag_action(
+            &mut f.store,
+            p.schema.flags,
+            p.schema.flags.pf,
+        );
+        let undef_af = undefined_flag_action(
+            &mut f.store,
+            p.schema.flags,
+            p.schema.flags.af,
+        );
+        let undef_zf = undefined_flag_action(
+            &mut f.store,
+            p.schema.flags,
+            p.schema.flags.zf,
+        );
+        let undef_sf = undefined_flag_action(
+            &mut f.store,
+            p.schema.flags,
+            p.schema.flags.sf,
+        );
+        let set_of = set_flag_action(
+            &mut f.store,
+            p.schema.flags,
+            p.schema.flags.of,
+            f.one,
+        );
+        let bad_flag_patch = materialize_exact_sequence(
+            &mut f.store,
+            &[bad_cf, undef_pf, undef_af, undef_zf, undef_sf, set_of],
+        )
+        .unwrap();
+        let bad_flag_payload = materialize_exact_sequence(
+            &mut f.store,
+            &[wide, bad_flag_patch],
+        )
+        .unwrap();
+        let bad_flag_effect = f
+            .store
+            .ensure_pair(
+                p.schema.wide_effect_result_tag,
+                bad_flag_payload,
+            )
+            .unwrap();
+        assert!(
+            wide_transition(
+                &mut f,
+                &p,
+                old,
+                p.schema.eax,
+                p.schema.edx,
+                bad_flag_effect,
+            )
+            .is_none(),
+            "non-bit CF/OF value must fail closed"
+        );
     }
 
     #[test]
