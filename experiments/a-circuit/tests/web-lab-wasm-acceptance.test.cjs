@@ -149,6 +149,47 @@ Promise.all([
     "amemory_i386_state_atomic_scope",
     "amemory_i386_state_steady_link_delta",
     "amemory_i386_state_quiescent",
+    "amemory_i386_memory_offset",
+    "amemory_i386_memory_write_value",
+    "amemory_i386_memory_before_value",
+    "amemory_i386_memory_after_value",
+    "amemory_i386_memory_old_after_value",
+    "amemory_i386_memory_old_root_ref",
+    "amemory_i386_memory_new_root_ref",
+    "amemory_i386_memory_reactions",
+    "amemory_i386_memory_links_after_load",
+    "amemory_i386_memory_links_final",
+    "amemory_i386_memory_steady_link_delta",
+    "amemory_i386_memory_quiescent",
+    "amemory_i386_memory32_address",
+    "amemory_i386_memory32_page24",
+    "amemory_i386_memory32_offset8",
+    "amemory_i386_memory32_write_value",
+    "amemory_i386_memory32_before_value",
+    "amemory_i386_memory32_after_value",
+    "amemory_i386_memory32_old_after_value",
+    "amemory_i386_memory32_old_root_ref",
+    "amemory_i386_memory32_new_root_ref",
+    "amemory_i386_memory32_reactions",
+    "amemory_i386_memory32_links_after_load",
+    "amemory_i386_memory32_links_final",
+    "amemory_i386_memory32_steady_link_delta",
+    "amemory_i386_memory32_quiescent",
+    "amemory_i386_word_memory_width",
+    "amemory_i386_word_memory_address",
+    "amemory_i386_word_memory_write_value",
+    "amemory_i386_word_memory_before_value",
+    "amemory_i386_word_memory_after_value",
+    "amemory_i386_word_memory_old_after_value",
+    "amemory_i386_word_memory_old_root_ref",
+    "amemory_i386_word_memory_new_root_ref",
+    "amemory_i386_word_memory_reactions",
+    "amemory_i386_word_memory_links_after_load",
+    "amemory_i386_word_memory_links_final",
+    "amemory_i386_word_memory_steady_link_delta",
+    "amemory_i386_word_memory_atomic_scope",
+    "amemory_i386_word_memory_crosses_page",
+    "amemory_i386_word_memory_quiescent",
   ]) {
     if (typeof w[retired] !== "undefined") {
       throw new Error("retired schema-v3 browser ABI still exported: " + retired);
@@ -1309,20 +1350,16 @@ Promise.all([
     readCurrentWitnessPayload("M6a", "memory-radix");
   if (memoryPayloadM6a.block !== "M6A_RADIX_PAGE" ||
       (memoryPayloadM6a.address >>> 0) !== 0x25 ||
-      (memoryPayloadM6a.write >>> 0) !== 0xab) {
-    throw new Error("M6a structured memory payload mismatch");
-  }
-  if ((w.amemory_i386_memory_offset() >>> 0) !== 0x25 ||
-      (w.amemory_i386_memory_write_value() >>> 0) !== 0xab ||
-      (w.amemory_i386_memory_before_value() >>> 0) !== 0 ||
-      (w.amemory_i386_memory_after_value() >>> 0) !== 0xab ||
-      (w.amemory_i386_memory_old_after_value() >>> 0) !== 0 ||
-      (w.amemory_i386_memory_old_root_ref() >>> 0) ===
-        (w.amemory_i386_memory_new_root_ref() >>> 0) ||
-      (w.amemory_i386_memory_steady_link_delta() >>> 0) !== 0 ||
-      w.amemory_i386_memory_quiescent() !== 1 ||
-      w.amemory_i386_memory_reactions() <= 40) {
-    throw new Error("M6a structural memory result/persistence mismatch");
+      (memoryPayloadM6a.offset >>> 0) !== 0x25 ||
+      (memoryPayloadM6a.write >>> 0) !== 0xab ||
+      (memoryPayloadM6a.before >>> 0) !== 0 ||
+      (memoryPayloadM6a.after >>> 0) !== 0xab ||
+      (memoryPayloadM6a.oldAfter >>> 0) !== 0 ||
+      (memoryPayloadM6a.oldRoot >>> 0) === (memoryPayloadM6a.newRoot >>> 0) ||
+      (memoryPayloadM6a.steadyDelta >>> 0) !== 0 ||
+      (memoryPayloadM6a.quiescent >>> 0) !== 1 ||
+      (memoryPayloadM6a.reactions >>> 0) <= 40) {
+    throw new Error("M6a structured memory result/persistence mismatch");
   }
   if (w.amemory_i386_memory_run(256, 0xab) !== 0 ||
       w.amemory_i386_memory_run(0x25, 256) !== 0) {
@@ -1334,6 +1371,8 @@ Promise.all([
   if (w.amemory_i386_memory_run(0x25, 0xab) !== 1) {
     throw new Error("M6a valid rerun rejected");
   }
+  const memoryPayloadM6aFinal =
+    readCurrentWitnessPayload("M6a rerun", "memory-radix");
   const memoryProof =
     inflateCompactProof(readCurrentCompactProof("M6A_RADIX_PAGE"));
   if (memoryProof.block !== "M6A_RADIX_PAGE" ||
@@ -1361,7 +1400,7 @@ Promise.all([
       memoryProof.load.linksAfterLoad !== memoryProof.prepare.compiledLinks ||
       !memoryProof.execute.finalQuiescent ||
       memoryProof.execute.activeReactionCount !==
-        (w.amemory_i386_memory_reactions() >>> 0)) {
+        (memoryPayloadM6aFinal.reactions >>> 0)) {
     throw new Error("M6a PREPARE/LOAD/EXECUTE witness mismatch");
   }
   const memoryRoles = new Map(
@@ -1387,8 +1426,8 @@ Promise.all([
       throw new Error("M6a prepared Aset missing semantic root " + role);
     }
   }
-  const oldRootRef = w.amemory_i386_memory_old_root_ref() >>> 0;
-  const newRootRef = w.amemory_i386_memory_new_root_ref() >>> 0;
+  const oldRootRef = memoryPayloadM6aFinal.oldRoot >>> 0;
+  const newRootRef = memoryPayloadM6aFinal.newRoot >>> 0;
   if (oldRootRef !== memoryRoles.get("memory.zero_root").carrierRef ||
       oldRootRef > memoryProof.load.linksAfterLoad ||
       newRootRef <= memoryProof.load.linksAfterLoad ||
@@ -1404,9 +1443,9 @@ Promise.all([
       !visualKeysForMemory.has(newRootKey)) {
     throw new Error("M6a visual topology omitted old/new page root");
   }
-  if ((w.amemory_i386_memory_links_after_load() >>> 0) !==
+  if ((memoryPayloadM6aFinal.linksAfterLoad >>> 0) !==
         memoryProof.load.linksAfterLoad ||
-      (w.amemory_i386_memory_links_final() >>> 0) !==
+      (memoryPayloadM6aFinal.linksFinal >>> 0) !==
         memoryProof.result.linksFinal) {
     throw new Error("M6a WASM/proof Link-count mismatch");
   }
@@ -1425,44 +1464,15 @@ Promise.all([
       (memoryPayloadM6b.address >>> 0) !== 0x00123425 ||
       (memoryPayloadM6b.page24 >>> 0) !== 0x001234 ||
       (memoryPayloadM6b.offset8 >>> 0) !== 0x25 ||
-      (memoryPayloadM6b.write >>> 0) !== 0xab) {
-    throw new Error("M6b structured memory payload mismatch");
-  }
-  if ((w.amemory_i386_memory32_address() >>> 0) !== 0x00123425 ||
-      (w.amemory_i386_memory32_page24() >>> 0) !== 0x001234 ||
-      (w.amemory_i386_memory32_offset8() >>> 0) !== 0x25 ||
-      (w.amemory_i386_memory32_write_value() >>> 0) !== 0xab ||
-      (w.amemory_i386_memory32_before_value() >>> 0) !== 0 ||
-      (w.amemory_i386_memory32_after_value() >>> 0) !== 0xab ||
-      (w.amemory_i386_memory32_old_after_value() >>> 0) !== 0 ||
-      (w.amemory_i386_memory32_old_root_ref() >>> 0) ===
-        (w.amemory_i386_memory32_new_root_ref() >>> 0) ||
-      (w.amemory_i386_memory32_steady_link_delta() >>> 0) !== 0 ||
-      w.amemory_i386_memory32_quiescent() !== 1 ||
-      w.amemory_i386_memory32_reactions() <= 80) {
-    throw new Error("M6b Address32 result/persistence mismatch");
-  }
-  if ((memoryPayloadM6b.before >>> 0) !==
-        (w.amemory_i386_memory32_before_value() >>> 0) ||
-      (memoryPayloadM6b.after >>> 0) !==
-        (w.amemory_i386_memory32_after_value() >>> 0) ||
-      (memoryPayloadM6b.oldAfter >>> 0) !==
-        (w.amemory_i386_memory32_old_after_value() >>> 0) ||
-      (memoryPayloadM6b.oldRoot >>> 0) !==
-        (w.amemory_i386_memory32_old_root_ref() >>> 0) ||
-      (memoryPayloadM6b.newRoot >>> 0) !==
-        (w.amemory_i386_memory32_new_root_ref() >>> 0) ||
-      (memoryPayloadM6b.reactions >>> 0) !==
-        (w.amemory_i386_memory32_reactions() >>> 0) ||
-      (memoryPayloadM6b.linksAfterLoad >>> 0) !==
-        (w.amemory_i386_memory32_links_after_load() >>> 0) ||
-      (memoryPayloadM6b.linksFinal >>> 0) !==
-        (w.amemory_i386_memory32_links_final() >>> 0) ||
-      (memoryPayloadM6b.steadyDelta >>> 0) !==
-        (w.amemory_i386_memory32_steady_link_delta() >>> 0) ||
-      (memoryPayloadM6b.quiescent >>> 0) !==
-        (w.amemory_i386_memory32_quiescent() >>> 0)) {
-    throw new Error("M6b structured/getter compatibility mismatch");
+      (memoryPayloadM6b.write >>> 0) !== 0xab ||
+      (memoryPayloadM6b.before >>> 0) !== 0 ||
+      (memoryPayloadM6b.after >>> 0) !== 0xab ||
+      (memoryPayloadM6b.oldAfter >>> 0) !== 0 ||
+      (memoryPayloadM6b.oldRoot >>> 0) === (memoryPayloadM6b.newRoot >>> 0) ||
+      (memoryPayloadM6b.steadyDelta >>> 0) !== 0 ||
+      (memoryPayloadM6b.quiescent >>> 0) !== 1 ||
+      (memoryPayloadM6b.reactions >>> 0) <= 80) {
+    throw new Error("M6b structured Address32 result/persistence mismatch");
   }
 
   if (w.amemory_i386_memory32_run(0x00123425, 256) !== 0) {
@@ -1473,6 +1483,8 @@ Promise.all([
   if (w.amemory_i386_memory32_run(0x00123425, 0xab) !== 1) {
     throw new Error("M6b valid rerun rejected");
   }
+  const memoryPayloadM6bFinal =
+    readCurrentWitnessPayload("M6b rerun", "memory-byte");
   const memory32Proof =
     inflateCompactProof(readCurrentCompactProof("M6B_MEMORY32"));
   if (memory32Proof.block !== "M6B_MEMORY32" ||
@@ -1500,7 +1512,7 @@ Promise.all([
       memory32Proof.load.linksAfterLoad !== memory32Proof.prepare.compiledLinks ||
       !memory32Proof.execute.finalQuiescent ||
       memory32Proof.execute.activeReactionCount !==
-        (w.amemory_i386_memory32_reactions() >>> 0)) {
+        (memoryPayloadM6bFinal.reactions >>> 0)) {
     throw new Error("M6b PREPARE/LOAD/EXECUTE witness mismatch");
   }
   const memory32Roles = new Map(
@@ -1526,8 +1538,8 @@ Promise.all([
       throw new Error("M6b prepared Aset missing semantic root " + role);
     }
   }
-  const oldMemoryRoot = w.amemory_i386_memory32_old_root_ref() >>> 0;
-  const newMemoryRoot = w.amemory_i386_memory32_new_root_ref() >>> 0;
+  const oldMemoryRoot = memoryPayloadM6bFinal.oldRoot >>> 0;
+  const newMemoryRoot = memoryPayloadM6bFinal.newRoot >>> 0;
   if (oldMemoryRoot !== memory32Roles.get("memory32.zero_root").carrierRef ||
       oldMemoryRoot > memory32Proof.load.linksAfterLoad ||
       newMemoryRoot <= memory32Proof.load.linksAfterLoad ||
@@ -1541,9 +1553,9 @@ Promise.all([
       !memory32Visual.has(memory32Id + ":L" + newMemoryRoot)) {
     throw new Error("M6b visual topology omitted old/new MemoryRoot");
   }
-  if ((w.amemory_i386_memory32_links_after_load() >>> 0) !==
+  if ((memoryPayloadM6bFinal.linksAfterLoad >>> 0) !==
         memory32Proof.load.linksAfterLoad ||
-      (w.amemory_i386_memory32_links_final() >>> 0) !==
+      (memoryPayloadM6bFinal.linksFinal >>> 0) !==
         memory32Proof.result.linksFinal) {
     throw new Error("M6b WASM/proof Link-count mismatch");
   }
@@ -1554,25 +1566,24 @@ Promise.all([
     throw new Error("M6c structural word-memory WASM probe missing");
   }
 
-  if (w.amemory_i386_word_memory_run(16, 0x000000ff, 0xabcd) !== 1 ||
-      (w.amemory_i386_word_memory_width() >>> 0) !== 16 ||
-      (w.amemory_i386_word_memory_address() >>> 0) !== 0x000000ff ||
-      (w.amemory_i386_word_memory_after_value() >>> 0) !== 0xabcd ||
-      (w.amemory_i386_word_memory_old_after_value() >>> 0) !== 0 ||
-      w.amemory_i386_word_memory_atomic_scope() !== 1 ||
-      w.amemory_i386_word_memory_crosses_page() !== 1 ||
-      w.amemory_i386_word_memory_steady_link_delta() !== 0 ||
-      w.amemory_i386_word_memory_quiescent() !== 1) {
-    throw new Error("M6c Word16 cross-page witness failed");
+  if (w.amemory_i386_word_memory_run(16, 0x000000ff, 0xabcd) !== 1) {
+    throw new Error("M6c Word16 cross-page witness rejected");
   }
   const memoryPayloadM6c16 =
     readCurrentWitnessPayload("M6c Word16", "memory-word");
   if (memoryPayloadM6c16.block !== "M6C_MEMORY_WORD16" ||
       (memoryPayloadM6c16.width >>> 0) !== 16 ||
       (memoryPayloadM6c16.address >>> 0) !== 0x000000ff ||
+      (memoryPayloadM6c16.write >>> 0) !== 0xabcd ||
+      (memoryPayloadM6c16.before >>> 0) !== 0 ||
       (memoryPayloadM6c16.after >>> 0) !== 0xabcd ||
-      (memoryPayloadM6c16.crossesPage >>> 0) !== 1) {
-    throw new Error("M6c Word16 structured payload mismatch");
+      (memoryPayloadM6c16.oldAfter >>> 0) !== 0 ||
+      (memoryPayloadM6c16.oldRoot >>> 0) === (memoryPayloadM6c16.newRoot >>> 0) ||
+      (memoryPayloadM6c16.atomicScope >>> 0) !== 1 ||
+      (memoryPayloadM6c16.crossesPage >>> 0) !== 1 ||
+      (memoryPayloadM6c16.steadyDelta >>> 0) !== 0 ||
+      (memoryPayloadM6c16.quiescent >>> 0) !== 1) {
+    throw new Error("M6c Word16 structured cross-page witness failed");
   }
   const word16Proof =
     inflateCompactProof(readCurrentCompactProof("M6C_MEMORY_WORD16"));
@@ -1592,23 +1603,16 @@ Promise.all([
       (memoryPayloadM6c32.width >>> 0) !== 32 ||
       (memoryPayloadM6c32.address >>> 0) !== 0x000000fe ||
       (memoryPayloadM6c32.write >>> 0) !== 0x12345678 ||
-      (memoryPayloadM6c32.crossesPage >>> 0) !== 1) {
-    throw new Error("M6c Word32 structured payload mismatch");
-  }
-  if ((w.amemory_i386_word_memory_width() >>> 0) !== 32 ||
-      (w.amemory_i386_word_memory_address() >>> 0) !== 0x000000fe ||
-      (w.amemory_i386_word_memory_write_value() >>> 0) !== 0x12345678 ||
-      (w.amemory_i386_word_memory_before_value() >>> 0) !== 0 ||
-      (w.amemory_i386_word_memory_after_value() >>> 0) !== 0x12345678 ||
-      (w.amemory_i386_word_memory_old_after_value() >>> 0) !== 0 ||
-      (w.amemory_i386_word_memory_old_root_ref() >>> 0) ===
-        (w.amemory_i386_word_memory_new_root_ref() >>> 0) ||
-      w.amemory_i386_word_memory_atomic_scope() !== 1 ||
-      w.amemory_i386_word_memory_crosses_page() !== 1 ||
-      w.amemory_i386_word_memory_steady_link_delta() !== 0 ||
-      w.amemory_i386_word_memory_quiescent() !== 1 ||
-      w.amemory_i386_word_memory_reactions() <= 100) {
-    throw new Error("M6c Word32 result/atomicity/persistence mismatch");
+      (memoryPayloadM6c32.before >>> 0) !== 0 ||
+      (memoryPayloadM6c32.after >>> 0) !== 0x12345678 ||
+      (memoryPayloadM6c32.oldAfter >>> 0) !== 0 ||
+      (memoryPayloadM6c32.oldRoot >>> 0) === (memoryPayloadM6c32.newRoot >>> 0) ||
+      (memoryPayloadM6c32.atomicScope >>> 0) !== 1 ||
+      (memoryPayloadM6c32.crossesPage >>> 0) !== 1 ||
+      (memoryPayloadM6c32.steadyDelta >>> 0) !== 0 ||
+      (memoryPayloadM6c32.quiescent >>> 0) !== 1 ||
+      (memoryPayloadM6c32.reactions >>> 0) <= 100) {
+    throw new Error("M6c Word32 structured result/atomicity/persistence mismatch");
   }
   if (w.amemory_i386_word_memory_run(16, 0x100, 0x10000) !== 0 ||
       w.amemory_i386_word_memory_run(8, 0x100, 0xab) !== 0) {
@@ -1619,6 +1623,8 @@ Promise.all([
   if (w.amemory_i386_word_memory_run(32, 0x000000fe, 0x12345678) !== 1) {
     throw new Error("M6c Word32 valid rerun rejected");
   }
+  const memoryPayloadM6cFinal =
+    readCurrentWitnessPayload("M6c Word32 rerun", "memory-word");
   const wordProof =
     inflateCompactProof(readCurrentCompactProof("M6C_MEMORY_WORD32"));
   if (wordProof.block !== "M6C_MEMORY_WORD32" ||
@@ -1646,7 +1652,7 @@ Promise.all([
       wordProof.load.linksAfterLoad !== wordProof.prepare.compiledLinks ||
       !wordProof.execute.finalQuiescent ||
       wordProof.execute.activeReactionCount !==
-        (w.amemory_i386_word_memory_reactions() >>> 0)) {
+        (memoryPayloadM6cFinal.reactions >>> 0)) {
     throw new Error("M6c PREPARE/LOAD/EXECUTE witness mismatch");
   }
   const wordRoles = new Map(
@@ -1673,8 +1679,8 @@ Promise.all([
       throw new Error("M6c prepared Aset missing semantic root " + role);
     }
   }
-  const oldWordRoot = w.amemory_i386_word_memory_old_root_ref() >>> 0;
-  const newWordRoot = w.amemory_i386_word_memory_new_root_ref() >>> 0;
+  const oldWordRoot = memoryPayloadM6cFinal.oldRoot >>> 0;
+  const newWordRoot = memoryPayloadM6cFinal.newRoot >>> 0;
   if (oldWordRoot !== wordRoles.get("memory_word.zero_root").carrierRef ||
       oldWordRoot > wordProof.load.linksAfterLoad ||
       newWordRoot <= wordProof.load.linksAfterLoad ||
@@ -1688,9 +1694,9 @@ Promise.all([
       !wordVisual.has(wordMemoryId + ":L" + newWordRoot)) {
     throw new Error("M6c visual topology omitted old/new MemoryRoot");
   }
-  if ((w.amemory_i386_word_memory_links_after_load() >>> 0) !==
+  if ((memoryPayloadM6cFinal.linksAfterLoad >>> 0) !==
         wordProof.load.linksAfterLoad ||
-      (w.amemory_i386_word_memory_links_final() >>> 0) !==
+      (memoryPayloadM6cFinal.linksFinal >>> 0) !==
         wordProof.result.linksFinal) {
     throw new Error("M6c WASM/proof Link-count mismatch");
   }
