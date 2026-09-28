@@ -22,8 +22,8 @@ for (const required of [
   "Full GPR",
   "EDX:EAX",
   "Stateₜ₊₁",
-  "M6 structural radix memory witness",
-  "amemory_i386_memory_run",
+  "M6 structural Address32 memory witness",
+  "amemory_i386_memory32_run",
 ]) {
   if (!labPageSource.includes(required)) {
     throw new Error("M5 Pages witness wiring missing: " + required);
