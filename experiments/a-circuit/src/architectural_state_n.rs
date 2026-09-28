@@ -1212,6 +1212,16 @@ fn web_prove_architectural_state_add_target(
         ),
         semantic_source(
             &compiler.store,
+            "state.memory_root_id",
+            program.schema.memory_root,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.memory.detached",
+            program.schema.memory_detached,
+        ),
+        semantic_source(
+            &compiler.store,
             "state.flag.undefined",
             program.schema.undefined,
         ),
@@ -1596,6 +1606,16 @@ pub(crate) fn web_prove_architectural_state_mul(
             &compiler.store,
             "state.eip",
             program.schema.eip,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.memory_root_id",
+            program.schema.memory_root,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.memory.detached",
+            program.schema.memory_detached,
         ),
         semantic_source(
             &compiler.store,
@@ -2168,14 +2188,14 @@ mod tests {
     }
 
     #[test]
-    fn m5c_state_payload_preserves_m5_prefix_and_appends_new_slots() {
+    fn m6d1_state_payload_preserves_m5c_prefix_and_appends_memory_root() {
         let mut f = FullFixture::new();
         let p = ArchitecturalStateProgram::install(&mut f);
         let state = make_state(&mut f, &p, initial(&p));
         let (tag, payload) = f.store.poles(state).unwrap();
         assert_eq!(tag, p.schema.state_tag);
         let fields = read_exact_sequence(&f.store, payload).unwrap();
-        assert_eq!(fields.len(), 15);
+        assert_eq!(fields.len(), 16);
 
         let expected_ids = [
             p.schema.eax,
@@ -2193,11 +2213,100 @@ mod tests {
             p.schema.ebp,
             p.schema.esp,
             p.schema.eip,
+            p.schema.memory_root,
         ];
         for (field, expected_id) in fields.into_iter().zip(expected_ids) {
             let (id, _value) = f.store.poles(field).unwrap();
             assert_eq!(id, expected_id);
         }
+    }
+
+    #[test]
+    fn m6d1_single_and_wide_alu_preserve_arbitrary_memory_root_identity() {
+        let mut f = FullFixture::new();
+        let p = ArchitecturalStateProgram::install(&mut f);
+        let custom_memory_root = f
+            .store
+            .ensure_pair(p.schema.memory_detached, f.full)
+            .unwrap();
+        assert_ne!(custom_memory_root, p.schema.memory_detached);
+
+        let mut old_value = initial(&p);
+        old_value.memory_root = custom_memory_root;
+        let old = make_state(&mut f, &p, old_value);
+
+        let effect = make_full_effect(
+            &mut f,
+            &p,
+            1,
+            0x5566_7788,
+            [0, 1, 0, 1, 0, 1],
+        );
+        let single =
+            transition(&mut f, &p, old, p.schema.eax, effect).unwrap();
+        assert_eq!(
+            decode_state(&f, p.schema, single).unwrap().memory_root,
+            custom_memory_root
+        );
+
+        let wide_effect = make_wide_mul_effect(
+            &mut f,
+            &p,
+            0xffff_fffe,
+            1,
+            1,
+            1,
+        );
+        let wide = wide_transition(
+            &mut f,
+            &p,
+            old,
+            p.schema.eax,
+            p.schema.edx,
+            wide_effect,
+        )
+        .unwrap();
+        assert_eq!(
+            decode_state(&f, p.schema, wide).unwrap().memory_root,
+            custom_memory_root
+        );
+        assert!(f.store.is_valid(old));
+        assert!(f.store.is_valid(custom_memory_root));
+    }
+
+    #[test]
+    fn m6d1_legacy_state_without_memory_root_fails_closed() {
+        let mut f = FullFixture::new();
+        let p = ArchitecturalStateProgram::install(&mut f);
+        let state = make_state(&mut f, &p, initial(&p));
+        let (_tag, payload) = f.store.poles(state).unwrap();
+        let fields = read_exact_sequence(&f.store, payload).unwrap();
+        assert_eq!(fields.len(), 16);
+
+        let legacy_payload =
+            materialize_exact_sequence(&mut f.store, &fields[..15]).unwrap();
+        let legacy_state =
+            f.store.ensure_pair(p.schema.state_tag, legacy_payload).unwrap();
+        assert!(decode_state(&f, p.schema, legacy_state).is_none());
+
+        let effect = make_full_effect(
+            &mut f,
+            &p,
+            1,
+            0x5566_7788,
+            [0, 1, 0, 1, 0, 1],
+        );
+        assert!(
+            transition(
+                &mut f,
+                &p,
+                legacy_state,
+                p.schema.eax,
+                effect,
+            )
+            .is_none(),
+            "legacy 15-field State must not match the M6d1 transition"
+        );
     }
 
     #[test]
