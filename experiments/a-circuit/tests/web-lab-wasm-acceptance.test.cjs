@@ -22,8 +22,9 @@ for (const required of [
   "Full GPR",
   "EDX:EAX",
   "Stateₜ₊₁",
-  "M6 structural Address32 memory witness",
+  "M6 structural word memory witness",
   "amemory_i386_memory32_run",
+  "amemory_i386_word_memory_run",
 ]) {
   if (!labPageSource.includes(required)) {
     throw new Error("M5 Pages witness wiring missing: " + required);
@@ -1355,6 +1356,135 @@ Promise.all([
       (w.amemory_i386_memory32_links_final() >>> 0) !==
         memory32Proof.result.linksFinal) {
     throw new Error("M6b WASM/proof Link-count mismatch");
+  }
+
+  // M6c: little-endian Word16/Word32 over the same Address32 byte memory.
+  if (typeof w.amemory_i386_word_memory_probe !== "function" ||
+      w.amemory_i386_word_memory_probe() !== 0x60c) {
+    throw new Error("M6c structural word-memory WASM probe missing");
+  }
+
+  if (w.amemory_i386_word_memory_run(16, 0x000000ff, 0xabcd) !== 1 ||
+      (w.amemory_i386_word_memory_width() >>> 0) !== 16 ||
+      (w.amemory_i386_word_memory_address() >>> 0) !== 0x000000ff ||
+      (w.amemory_i386_word_memory_after_value() >>> 0) !== 0xabcd ||
+      (w.amemory_i386_word_memory_old_after_value() >>> 0) !== 0 ||
+      w.amemory_i386_word_memory_atomic_scope() !== 1 ||
+      w.amemory_i386_word_memory_crosses_page() !== 1 ||
+      w.amemory_i386_word_memory_steady_link_delta() !== 0 ||
+      w.amemory_i386_word_memory_quiescent() !== 1) {
+    throw new Error("M6c Word16 cross-page witness failed");
+  }
+  const word16Proof =
+    inflateCompactProof(readCurrentCompactProof("M6C_MEMORY_WORD16"));
+  if (word16Proof.block !== "M6C_MEMORY_WORD16" ||
+      !word16Proof.result.oracleMatches ||
+      (word16Proof.result.decodedValue >>> 0) !== 0xabcd ||
+      word16Proof.result.identicalRerunLinkDelta !== 0) {
+    throw new Error("M6c Word16 compact proof mismatch");
+  }
+
+  if (w.amemory_i386_word_memory_run(32, 0x000000fe, 0x12345678) !== 1) {
+    throw new Error("M6c Word32 cross-page witness rejected");
+  }
+  if ((w.amemory_i386_word_memory_width() >>> 0) !== 32 ||
+      (w.amemory_i386_word_memory_address() >>> 0) !== 0x000000fe ||
+      (w.amemory_i386_word_memory_write_value() >>> 0) !== 0x12345678 ||
+      (w.amemory_i386_word_memory_before_value() >>> 0) !== 0 ||
+      (w.amemory_i386_word_memory_after_value() >>> 0) !== 0x12345678 ||
+      (w.amemory_i386_word_memory_old_after_value() >>> 0) !== 0 ||
+      (w.amemory_i386_word_memory_old_root_ref() >>> 0) ===
+        (w.amemory_i386_word_memory_new_root_ref() >>> 0) ||
+      w.amemory_i386_word_memory_atomic_scope() !== 1 ||
+      w.amemory_i386_word_memory_crosses_page() !== 1 ||
+      w.amemory_i386_word_memory_steady_link_delta() !== 0 ||
+      w.amemory_i386_word_memory_quiescent() !== 1 ||
+      w.amemory_i386_word_memory_reactions() <= 100) {
+    throw new Error("M6c Word32 result/atomicity/persistence mismatch");
+  }
+  if (w.amemory_i386_word_memory_run(16, 0x100, 0x10000) !== 0 ||
+      w.amemory_i386_word_memory_run(8, 0x100, 0xab) !== 0) {
+    throw new Error("M6c WASM ABI accepted invalid width/value");
+  }
+
+  // Restore the accepted Word32 compact proof after negative ABI checks.
+  if (w.amemory_i386_word_memory_run(32, 0x000000fe, 0x12345678) !== 1) {
+    throw new Error("M6c Word32 valid rerun rejected");
+  }
+  const wordProof =
+    inflateCompactProof(readCurrentCompactProof("M6C_MEMORY_WORD32"));
+  if (wordProof.block !== "M6C_MEMORY_WORD32" ||
+      wordProof.schemaVersion !== 4 ||
+      !wordProof.result.oracleMatches ||
+      (wordProof.result.decodedValue >>> 0) !== 0x12345678 ||
+      (wordProof.result.decodedValueHi >>> 0) !== 0 ||
+      wordProof.result.identicalRerunLinkDelta !== 0) {
+    throw new Error("M6c Word32 compact proof result mismatch");
+  }
+  const wordMemoryId = wordProof.load.memoryInstanceId;
+  if (!wordMemoryId ||
+      wordProof.execute.memoryInstanceId !== wordMemoryId ||
+      wordProof.result.memoryInstanceId !== wordMemoryId ||
+      !wordProof.execute.reactions.every(
+        (step) => step.memoryInstanceId === wordMemoryId &&
+          step.scopeBefore.length === 1 &&
+          step.scopeAfter.length === 1
+      )) {
+    throw new Error("M6c proof is not one-memory/atomic-scope");
+  }
+  if (wordProof.prepare.runtimeMemoryExists !== false ||
+      !wordProof.load.carrierRoundTrip ||
+      wordProof.load.linksBeforeLoad !== 1 ||
+      wordProof.load.linksAfterLoad !== wordProof.prepare.compiledLinks ||
+      !wordProof.execute.finalQuiescent ||
+      wordProof.execute.activeReactionCount !==
+        (w.amemory_i386_word_memory_reactions() >>> 0)) {
+    throw new Error("M6c PREPARE/LOAD/EXECUTE witness mismatch");
+  }
+  const wordRoles = new Map(
+    wordProof.prepare.semanticRoots.map((root) => [root.role, root])
+  );
+  for (const role of [
+    "function.memory_word.read",
+    "function.memory_word.write",
+    "function.memory_word.address_next",
+    "memory_word.zero_root",
+    "memory_word.read_result_tag",
+    "memory_word.write_result_tag",
+    "data.address32",
+    "data.word",
+    "data.bit.zero",
+    "data.bit.one",
+    "execution.interpreter",
+    "execution.theory",
+    "execution.apply",
+    "scope.initial",
+    "context.result",
+  ]) {
+    if (!wordRoles.has(role)) {
+      throw new Error("M6c prepared Aset missing semantic root " + role);
+    }
+  }
+  const oldWordRoot = w.amemory_i386_word_memory_old_root_ref() >>> 0;
+  const newWordRoot = w.amemory_i386_word_memory_new_root_ref() >>> 0;
+  if (oldWordRoot !== wordRoles.get("memory_word.zero_root").carrierRef ||
+      oldWordRoot > wordProof.load.linksAfterLoad ||
+      newWordRoot <= wordProof.load.linksAfterLoad ||
+      newWordRoot > wordProof.result.linksFinal) {
+    throw new Error("M6c old/new MemoryRoot runtime locator boundary mismatch");
+  }
+  const wordVisual = new Set(
+    wordProof.result.visualLinks.map((link) => link.key)
+  );
+  if (!wordVisual.has(wordMemoryId + ":L" + oldWordRoot) ||
+      !wordVisual.has(wordMemoryId + ":L" + newWordRoot)) {
+    throw new Error("M6c visual topology omitted old/new MemoryRoot");
+  }
+  if ((w.amemory_i386_word_memory_links_after_load() >>> 0) !==
+        wordProof.load.linksAfterLoad ||
+      (w.amemory_i386_word_memory_links_final() >>> 0) !==
+        wordProof.result.linksFinal) {
+    throw new Error("M6c WASM/proof Link-count mismatch");
   }
 
   // Real WASM execution smoke: composed structural MUX1.
