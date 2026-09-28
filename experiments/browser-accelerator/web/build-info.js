@@ -8,14 +8,22 @@ async function loadBuildInfo() {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const info = await response.json();
 
-    if (info.schemaVersion !== 1 || typeof info.version !== "string" || typeof info.mainSha !== "string") {
-      throw new Error("unsupported build-info schema");
+    if (info.schemaVersion !== 2 ||
+        typeof info.version !== "string" ||
+        !info.version.trim() ||
+        typeof info.mainSha !== "string" ||
+        !/^[0-9a-f]{40}$/.test(info.mainSha) ||
+        !Number.isInteger(info.acceptanceRunId)) {
+      throw new Error("unsupported or corrupt build-info schema");
     }
 
-    versionNode.textContent = `v${info.version}`;
-    shaNode.textContent = info.mainSha.slice(0, 12);
-    shaNode.title = info.mainSha;
-    badge.title = `built ${info.builtAt || "unknown"} from ${info.mainSha}`;
+    const version = info.version.trim();
+    const mainSha = info.mainSha;
+    versionNode.textContent = `v${version}`;
+    shaNode.textContent = mainSha.slice(0, 12);
+    shaNode.title = mainSha;
+    badge.title =
+      `accepted web-lab run ${info.acceptanceRunId} · built ${info.builtAt || "unknown"} from ${mainSha}`;
   } catch (error) {
     versionNode.textContent = "version unavailable";
     shaNode.textContent = "unknown SHA";
