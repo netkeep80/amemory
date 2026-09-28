@@ -1459,8 +1459,18 @@ pub(crate) fn web_prove_memory32(
         192,
     )?;
 
+    // Read-back is an independent verification pass over the exact runtime
+    // carrier state. It must not extend the authoritative proof memory after
+    // EXECUTE, otherwise compact-proof link accounting would include
+    // verification-only Links that are absent from the recorded reaction trace.
+    // Cloning preserves all semantic/local Link identities while giving the
+    // verifier its own non-semantic store/cache identity.
+    let mut verification_memory = ProofRuntimeMemory {
+        id: memory.id.clone(),
+        store: memory.store.clone(),
+    };
     let after_value = runtime_read32(
-        &mut memory,
+        &mut verification_memory,
         interpreter,
         apply,
         read,
@@ -1472,7 +1482,7 @@ pub(crate) fn web_prove_memory32(
         one,
     )?;
     let old_after_value = runtime_read32(
-        &mut memory,
+        &mut verification_memory,
         interpreter,
         apply,
         read,
@@ -1631,6 +1641,10 @@ mod tests {
         assert_eq!(execution.proof.block, "M6B_MEMORY32");
         assert!(execution.proof.result.oracle_matches);
         assert!(execution.proof.execute.active_reaction_count > 80);
+        assert!(
+            execution.proof.compact().is_some(),
+            "post-execute verification must not escape compact proof accounting"
+        );
         assert_eq!(
             execution.proof.load.memory_instance_id,
             execution.proof.result.memory_instance_id
