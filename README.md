@@ -150,8 +150,8 @@ Rust native tests и WASM browser используют одну текущую r
 
 самоинцидентность:
   ROOT  = 11
-  START = 10
-  END   = 01
+  START_K = 10
+  END_K   = 01
   PAIR  = 00
 ```
 
@@ -274,7 +274,7 @@ Observed R5:
   handoffCount = 1 on every step
   quiescent = false on every step
   recurrence = PASS
-  structural END continuation = PASS
+  structural context-relative END_K / ♀ continuation = PASS
   bounded witness returned = PASS
 
 AM-C046 R1 = GREEN
