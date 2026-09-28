@@ -1277,12 +1277,9 @@ mod tests {
             [0x78, 0x56, 0x34, 0x12],
         );
 
-        let pop = invoke(
-            &mut f,
-            p.pop32,
-            &[state_from_value(&mut f, p.state.schema, pushed).unwrap()],
-        )
-        .unwrap();
+        let pushed_state =
+            state_from_value(&mut f, p.state.schema, pushed).unwrap();
+        let pop = invoke(&mut f, p.pop32, &[pushed_state]).unwrap();
         let (popped, value) = parse_stack_result(
             &f,
             p.state.schema,
