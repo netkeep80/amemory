@@ -77,10 +77,72 @@ struct LabResultEnvelope {
 
 #[cfg(test)]
 static LAST_PROOF_JSON: Mutex<String> = Mutex::new(String::new());
-static LAST_COMPACT_PROOF_JSON: Mutex<String> = Mutex::new(String::new());
-static LAST_RESULT_JSON: Mutex<String> = Mutex::new(String::new());
 
-fn set_last_compact_proof(proof: &WebStructuralProof) -> Option<()> {
+const MAX_LAB_INSTANCES: usize = 4;
+
+#[derive(Default)]
+struct LabInstanceState {
+    active: bool,
+    result_json: String,
+    compact_proof_json: String,
+}
+
+impl LabInstanceState {
+    fn active() -> Self {
+        Self {
+            active: true,
+            result_json: String::new(),
+            compact_proof_json: String::new(),
+        }
+    }
+}
+
+static LAB_RUNTIME: Mutex<Vec<LabInstanceState>> = Mutex::new(Vec::new());
+
+fn ensure_default_instance(runtime: &mut Vec<LabInstanceState>) {
+    if runtime.is_empty() {
+        runtime.push(LabInstanceState::active());
+    }
+}
+
+fn with_lab_instance<T>(
+    instance_id: u32,
+    f: impl FnOnce(&LabInstanceState) -> T,
+) -> Option<T> {
+    let mut runtime = LAB_RUNTIME
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    ensure_default_instance(&mut runtime);
+    let state = runtime.get(instance_id as usize)?;
+    if !state.active {
+        return None;
+    }
+    Some(f(state))
+}
+
+fn with_lab_instance_mut<T>(
+    instance_id: u32,
+    f: impl FnOnce(&mut LabInstanceState) -> T,
+) -> Option<T> {
+    let mut runtime = LAB_RUNTIME
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    ensure_default_instance(&mut runtime);
+    let state = runtime.get_mut(instance_id as usize)?;
+    if !state.active {
+        return None;
+    }
+    Some(f(state))
+}
+
+fn lab_instance_active(instance_id: u32) -> bool {
+    with_lab_instance(instance_id, |_| ()).is_some()
+}
+
+fn set_compact_proof_for_instance(
+    instance_id: u32,
+    proof: &WebStructuralProof,
+) -> Option<()> {
     let compact = proof.compact()?;
     let compact_json = serde_json::to_string(&compact).ok()?;
 
@@ -93,53 +155,54 @@ fn set_last_compact_proof(proof: &WebStructuralProof) -> Option<()> {
         *proof_guard = proof_json;
     }
 
-    let mut compact_guard = LAST_COMPACT_PROOF_JSON
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    *compact_guard = compact_json;
-    Some(())
+    with_lab_instance_mut(instance_id, |state| {
+        state.compact_proof_json = compact_json;
+    })
 }
 
-fn clear_last_compact_proof() {
+fn set_last_compact_proof(proof: &WebStructuralProof) -> Option<()> {
+    set_compact_proof_for_instance(DEFAULT_LAB_INSTANCE_ID, proof)
+}
+
+fn clear_compact_proof_for_instance(instance_id: u32) {
     #[cfg(test)]
-    {
+    if instance_id == DEFAULT_LAB_INSTANCE_ID {
         let mut proof_guard = LAST_PROOF_JSON
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         proof_guard.clear();
     }
 
-    let mut compact_guard = LAST_COMPACT_PROOF_JSON
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    compact_guard.clear();
+    let _ = with_lab_instance_mut(instance_id, |state| {
+        state.compact_proof_json.clear();
+    });
 }
 
-fn clear_last_result() {
-    let mut guard = LAST_RESULT_JSON
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    guard.clear();
+fn clear_last_compact_proof() {
+    clear_compact_proof_for_instance(DEFAULT_LAB_INSTANCE_ID);
 }
 
-fn set_last_result(
+fn clear_result_for_instance(instance_id: u32) {
+    let _ = with_lab_instance_mut(instance_id, |state| {
+        state.result_json.clear();
+    });
+}
+
+fn set_result_for_instance(
+    instance_id: u32,
     op: u32,
     a: u32,
     b: u32,
     input_flag: u32,
     outcome: LabOutcome,
 ) -> Option<()> {
-    let compact_proof_available = {
-        let guard = LAST_COMPACT_PROOF_JSON
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        !guard.is_empty()
-    };
+    let compact_proof_available =
+        with_lab_instance(instance_id, |state| !state.compact_proof_json.is_empty())?;
     let envelope = LabResultEnvelope {
         schema_version: LAB_RESULT_SCHEMA_VERSION,
         representation_id: LAB_RESULT_REPRESENTATION_ID,
         representation_version: LAB_RESULT_REPRESENTATION_VERSION,
-        instance_id: DEFAULT_LAB_INSTANCE_ID,
+        instance_id,
         witness_kind: "registry-block",
         operation: LabOperation {
             opcode: op,
@@ -151,19 +214,23 @@ fn set_last_result(
         compact_proof_available,
     };
     let json = serde_json::to_string(&envelope).ok()?;
-    let mut guard = LAST_RESULT_JSON
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    *guard = json;
-    Some(())
+    with_lab_instance_mut(instance_id, |state| {
+        state.result_json = json;
+    })
 }
 
-fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
-    clear_last_compact_proof();
+fn execute_for_instance(
+    instance_id: u32,
+    op: u32,
+    a: u32,
+    b: u32,
+    input_flag: u32,
+) -> Option<LabOutcome> {
+    clear_compact_proof_for_instance(instance_id);
 
     if (1..=5).contains(&op) {
         let execution = web_prove_logic(op, a, b)?;
-        set_last_compact_proof(&execution.proof)?;
+        set_compact_proof_for_instance(instance_id, &execution.proof)?;
         let out = execution.outcome;
         return Some(LabOutcome {
             value: out.value,
@@ -200,7 +267,7 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
 
     if (6..=10).contains(&op) {
         let execution = web_prove_arithmetic(op, a, b, input_flag)?;
-        set_last_compact_proof(&execution.proof)?;
+        set_compact_proof_for_instance(instance_id, &execution.proof)?;
         let out = execution.outcome;
         return Some(LabOutcome {
             value: out.value,
@@ -237,7 +304,7 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
 
     if op == 11 {
         let execution = web_prove_mux32(input_flag, a, b)?;
-        set_last_compact_proof(&execution.proof)?;
+        set_compact_proof_for_instance(instance_id, &execution.proof)?;
         let out = execution.outcome;
         return Some(LabOutcome {
             value: out.value,
@@ -257,7 +324,7 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
 
     if op == 12 {
         let proof = web_prove_mux1(input_flag, a, b)?;
-        set_last_compact_proof(&proof)?;
+        set_compact_proof_for_instance(instance_id, &proof)?;
         let out = LabOutcome {
             value: u32::from(proof.result.decoded_value),
             value_hi: 0,
@@ -278,7 +345,7 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
 
     if (13..=15).contains(&op) {
         let execution = web_prove_shift32(op, a, b)?;
-        set_last_compact_proof(&execution.proof)?;
+        set_compact_proof_for_instance(instance_id, &execution.proof)?;
         let out = execution.outcome;
         return Some(LabOutcome {
             value: out.value,
@@ -315,7 +382,7 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
 
     if (16..=17).contains(&op) {
         let execution = web_prove_rotate32(op, a, b)?;
-        set_last_compact_proof(&execution.proof)?;
+        set_compact_proof_for_instance(instance_id, &execution.proof)?;
         let out = execution.outcome;
         return Some(LabOutcome {
             value: out.value,
@@ -352,7 +419,7 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
 
     if (18..=19).contains(&op) {
         let execution = web_prove_rotate_carry32(op, a, b, input_flag)?;
-        set_last_compact_proof(&execution.proof)?;
+        set_compact_proof_for_instance(instance_id, &execution.proof)?;
         let out = execution.outcome;
         return Some(LabOutcome {
             value: out.value,
@@ -389,7 +456,7 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
 
     if (20..=22).contains(&op) {
         let execution = web_prove_unary32(op, a)?;
-        set_last_compact_proof(&execution.proof)?;
+        set_compact_proof_for_instance(instance_id, &execution.proof)?;
         let out = execution.outcome;
         return Some(LabOutcome {
             value: out.value,
@@ -426,7 +493,7 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
 
     if op == 23 {
         let execution = web_prove_mul32(a, b)?;
-        set_last_compact_proof(&execution.proof)?;
+        set_compact_proof_for_instance(instance_id, &execution.proof)?;
         let out = execution.outcome;
         return Some(LabOutcome {
             value: out.lo,
@@ -446,7 +513,7 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
 
     if op == 24 {
         let execution = web_prove_mul_effect(a, b)?;
-        set_last_compact_proof(&execution.proof)?;
+        set_compact_proof_for_instance(instance_id, &execution.proof)?;
         let out = execution.outcome;
         return Some(LabOutcome {
             value: out.lo,
@@ -465,6 +532,10 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
     }
 
     None
+}
+
+fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
+    execute_for_instance(DEFAULT_LAB_INSTANCE_ID, op, a, b, input_flag)
 }
 
 static mut LAST_VALUE: u32 = 0;
@@ -1210,36 +1281,96 @@ pub extern "C" fn amemory_i386_lab_supports(op: u32) -> u32 {
 }
 
 #[no_mangle]
+pub extern "C" fn amemory_i386_lab_instance_capacity() -> u32 {
+    MAX_LAB_INSTANCES as u32
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_lab_instance_create() -> u32 {
+    let mut runtime = LAB_RUNTIME
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    ensure_default_instance(&mut runtime);
+
+    for index in 1..runtime.len() {
+        if !runtime[index].active {
+            runtime[index] = LabInstanceState::active();
+            return index as u32;
+        }
+    }
+    if runtime.len() >= MAX_LAB_INSTANCES {
+        return u32::MAX;
+    }
+    runtime.push(LabInstanceState::active());
+    (runtime.len() - 1) as u32
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_lab_instance_destroy(instance_id: u32) -> u32 {
+    if instance_id == DEFAULT_LAB_INSTANCE_ID {
+        return 0;
+    }
+    let mut runtime = LAB_RUNTIME
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    ensure_default_instance(&mut runtime);
+    let Some(state) = runtime.get_mut(instance_id as usize) else {
+        return 0;
+    };
+    if !state.active {
+        return 0;
+    }
+    *state = LabInstanceState::default();
+    1
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_lab_instance_run(
+    instance_id: u32,
+    op: u32,
+    a: u32,
+    b: u32,
+    input_flag: u32,
+) -> u32 {
+    if !lab_instance_active(instance_id) {
+        return 0;
+    }
+    clear_result_for_instance(instance_id);
+    let Some(out) = execute_for_instance(instance_id, op, a, b, input_flag) else {
+        return 0;
+    };
+    if set_result_for_instance(instance_id, op, a, b, input_flag, out).is_none() {
+        clear_compact_proof_for_instance(instance_id);
+        return 0;
+    }
+
+    if instance_id == DEFAULT_LAB_INSTANCE_ID {
+        unsafe {
+            LAST_VALUE = out.value;
+            LAST_VALUE_HI = out.value_hi;
+            LAST_WRITEBACK = out.writeback;
+            LAST_DEFINED_MASK = out.defined_mask;
+            LAST_VALUE_MASK = out.value_mask;
+            LAST_UNDEFINED_MASK = out.undefined_mask;
+            LAST_PRESERVE_MASK = out.preserve_mask;
+            LAST_REACTIONS = out.reactions;
+            LAST_LINKS_AFTER_BUILD = out.links_after_build;
+            LAST_LINKS_AFTER_FIRST = out.links_after_first;
+            LAST_STEADY_LINK_DELTA = out.steady_link_delta;
+            LAST_QUIESCENT = out.quiescent;
+        }
+    }
+    1
+}
+
+#[no_mangle]
 pub extern "C" fn amemory_i386_lab_run(
     op: u32,
     a: u32,
     b: u32,
     input_flag: u32,
 ) -> u32 {
-    clear_last_result();
-    let Some(out) = execute(op, a, b, input_flag) else {
-        return 0;
-    };
-    if set_last_result(op, a, b, input_flag, out).is_none() {
-        clear_last_compact_proof();
-        return 0;
-    }
-
-    unsafe {
-        LAST_VALUE = out.value;
-        LAST_VALUE_HI = out.value_hi;
-        LAST_WRITEBACK = out.writeback;
-        LAST_DEFINED_MASK = out.defined_mask;
-        LAST_VALUE_MASK = out.value_mask;
-        LAST_UNDEFINED_MASK = out.undefined_mask;
-        LAST_PRESERVE_MASK = out.preserve_mask;
-        LAST_REACTIONS = out.reactions;
-        LAST_LINKS_AFTER_BUILD = out.links_after_build;
-        LAST_LINKS_AFTER_FIRST = out.links_after_first;
-        LAST_STEADY_LINK_DELTA = out.steady_link_delta;
-        LAST_QUIESCENT = out.quiescent;
-    }
-    1
+    amemory_i386_lab_instance_run(DEFAULT_LAB_INSTANCE_ID, op, a, b, input_flag)
 }
 
 #[no_mangle]
@@ -1268,79 +1399,123 @@ pub extern "C" fn amemory_i386_lab_steady_link_delta() -> u32 { unsafe { LAST_ST
 pub extern "C" fn amemory_i386_lab_quiescent() -> u32 { unsafe { LAST_QUIESCENT } }
 
 #[no_mangle]
+pub extern "C" fn amemory_i386_lab_instance_result_available(instance_id: u32) -> u32 {
+    with_lab_instance(instance_id, |state| u32::from(!state.result_json.is_empty()))
+        .unwrap_or(0)
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_lab_instance_result_json_len(instance_id: u32) -> u32 {
+    with_lab_instance(instance_id, |state| state.result_json.len() as u32)
+        .unwrap_or(0)
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_lab_instance_result_json_ptr(instance_id: u32) -> u32 {
+    with_lab_instance(instance_id, |state| state.result_json.as_ptr() as usize as u32)
+        .unwrap_or(0)
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_lab_instance_result_json_byte(
+    instance_id: u32,
+    index: u32,
+) -> u32 {
+    with_lab_instance(instance_id, |state| {
+        state
+            .result_json
+            .as_bytes()
+            .get(index as usize)
+            .copied()
+            .map(u32::from)
+            .unwrap_or(u32::MAX)
+    })
+    .unwrap_or(u32::MAX)
+}
+
+#[no_mangle]
 pub extern "C" fn amemory_i386_lab_result_available() -> u32 {
-    let guard = LAST_RESULT_JSON
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    u32::from(!guard.is_empty())
+    amemory_i386_lab_instance_result_available(DEFAULT_LAB_INSTANCE_ID)
 }
 
 #[no_mangle]
 pub extern "C" fn amemory_i386_lab_result_json_len() -> u32 {
-    let guard = LAST_RESULT_JSON
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    guard.len() as u32
+    amemory_i386_lab_instance_result_json_len(DEFAULT_LAB_INSTANCE_ID)
 }
 
 #[no_mangle]
 pub extern "C" fn amemory_i386_lab_result_json_ptr() -> u32 {
-    let guard = LAST_RESULT_JSON
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    guard.as_ptr() as usize as u32
+    amemory_i386_lab_instance_result_json_ptr(DEFAULT_LAB_INSTANCE_ID)
 }
 
 #[no_mangle]
 pub extern "C" fn amemory_i386_lab_result_json_byte(index: u32) -> u32 {
-    let guard = LAST_RESULT_JSON
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    guard
-        .as_bytes()
-        .get(index as usize)
-        .copied()
-        .map(u32::from)
-        .unwrap_or(u32::MAX)
+    amemory_i386_lab_instance_result_json_byte(DEFAULT_LAB_INSTANCE_ID, index)
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_lab_instance_compact_proof_available(
+    instance_id: u32,
+) -> u32 {
+    with_lab_instance(instance_id, |state| {
+        u32::from(!state.compact_proof_json.is_empty())
+    })
+    .unwrap_or(0)
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_lab_instance_compact_proof_json_len(
+    instance_id: u32,
+) -> u32 {
+    with_lab_instance(instance_id, |state| state.compact_proof_json.len() as u32)
+        .unwrap_or(0)
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_lab_instance_compact_proof_json_ptr(
+    instance_id: u32,
+) -> u32 {
+    with_lab_instance(instance_id, |state| {
+        state.compact_proof_json.as_ptr() as usize as u32
+    })
+    .unwrap_or(0)
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_lab_instance_compact_proof_json_byte(
+    instance_id: u32,
+    index: u32,
+) -> u32 {
+    with_lab_instance(instance_id, |state| {
+        state
+            .compact_proof_json
+            .as_bytes()
+            .get(index as usize)
+            .copied()
+            .map(u32::from)
+            .unwrap_or(u32::MAX)
+    })
+    .unwrap_or(u32::MAX)
 }
 
 #[no_mangle]
 pub extern "C" fn amemory_i386_lab_compact_proof_available() -> u32 {
-    let guard = LAST_COMPACT_PROOF_JSON
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    u32::from(!guard.is_empty())
+    amemory_i386_lab_instance_compact_proof_available(DEFAULT_LAB_INSTANCE_ID)
 }
 
 #[no_mangle]
 pub extern "C" fn amemory_i386_lab_compact_proof_json_len() -> u32 {
-    let guard = LAST_COMPACT_PROOF_JSON
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    guard.len() as u32
+    amemory_i386_lab_instance_compact_proof_json_len(DEFAULT_LAB_INSTANCE_ID)
 }
 
 #[no_mangle]
 pub extern "C" fn amemory_i386_lab_compact_proof_json_ptr() -> u32 {
-    let guard = LAST_COMPACT_PROOF_JSON
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    guard.as_ptr() as usize as u32
+    amemory_i386_lab_instance_compact_proof_json_ptr(DEFAULT_LAB_INSTANCE_ID)
 }
 
 #[no_mangle]
-pub extern "C" fn amemory_i386_lab_compact_proof_json_byte(
-    index: u32,
-) -> u32 {
-    let guard = LAST_COMPACT_PROOF_JSON
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    guard
-        .as_bytes()
-        .get(index as usize)
-        .copied()
-        .map(u32::from)
-        .unwrap_or(u32::MAX)
+pub extern "C" fn amemory_i386_lab_compact_proof_json_byte(index: u32) -> u32 {
+    amemory_i386_lab_instance_compact_proof_json_byte(DEFAULT_LAB_INSTANCE_ID, index)
 }
 
 #[cfg(test)]
