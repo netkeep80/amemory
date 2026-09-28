@@ -31,9 +31,29 @@ for (const required of [
   "amemory_i386_stack_run",
   "collectBrowserProof",
   "renderProofPipeline",
+  "amemory_i386_lab_result_available",
+  "amemory-i386-lab-result-json",
 ]) {
   if (!labPageSource.includes(required)) {
     throw new Error("Pages witness wiring missing: " + required);
+  }
+}
+for (const retiredBrowserGetter of [
+  "amemory_i386_lab_value()",
+  "amemory_i386_lab_value_hi()",
+  "amemory_i386_lab_writeback()",
+  "amemory_i386_lab_defined_mask()",
+  "amemory_i386_lab_value_mask()",
+  "amemory_i386_lab_undefined_mask()",
+  "amemory_i386_lab_preserve_mask()",
+  "amemory_i386_lab_reactions()",
+  "amemory_i386_lab_links_after_build()",
+  "amemory_i386_lab_links_after_first()",
+  "amemory_i386_lab_steady_link_delta()",
+  "amemory_i386_lab_quiescent()",
+]) {
+  if (labPageSource.includes(retiredBrowserGetter)) {
+    throw new Error("browser still depends on scalar result getter: " + retiredBrowserGetter);
   }
 }
 const bytes = fs.readFileSync(wasmPath);
@@ -97,6 +117,37 @@ Promise.all([
       throw new Error(label + " compact proof result representation mismatch");
     }
     return compact;
+  };
+  const readCurrentLabResult = (label, expected) => {
+    if (w.amemory_i386_lab_result_available() !== 1) {
+      throw new Error(label + " structured result JSON missing");
+    }
+    const len = w.amemory_i386_lab_result_json_len() >>> 0;
+    const ptr = w.amemory_i386_lab_result_json_ptr() >>> 0;
+    if (!len || ptr + len > w.memory.buffer.byteLength) {
+      throw new Error(label + " structured result JSON pointer/length invalid");
+    }
+    const result = JSON.parse(
+      Buffer.from(w.memory.buffer, ptr, len).toString("utf8")
+    );
+    if (result.schemaVersion !== 1 ||
+        result.representationId !== "amemory-i386-lab-result-json" ||
+        result.representationVersion !== "0.1.0" ||
+        result.instanceId !== 0 ||
+        result.witnessKind !== "registry-block") {
+      throw new Error(label + " structured result representation mismatch");
+    }
+    const operation = result.operation || {};
+    if ((operation.opcode >>> 0) !== (expected.op >>> 0) ||
+        (operation.a >>> 0) !== (expected.a >>> 0) ||
+        (operation.b >>> 0) !== (expected.b >>> 0) ||
+        (operation.inputFlag >>> 0) !== (expected.flag >>> 0)) {
+      throw new Error(label + " structured result request mismatch");
+    }
+    if (!result.outcome || result.compactProofAvailable !== true) {
+      throw new Error(label + " structured result outcome/proof marker missing");
+    }
+    return result;
   };
   const proofMetrics = (proof, registryBlock) => {
     const { visualLinks, ...resultMetadata } = proof.result;
@@ -1629,7 +1680,11 @@ Promise.all([
   if (w.amemory_i386_lab_run(12, 1, 0, 1) !== 1) {
     throw new Error("MUX1 WASM execution rejected");
   }
-  if (w.amemory_i386_lab_value() !== 0) {
+  const muxStructured = readCurrentLabResult("MUX1", {
+    op: 12, a: 1, b: 0, flag: 1,
+  });
+  if ((muxStructured.outcome.value >>> 0) !== 0 ||
+      (w.amemory_i386_lab_value() >>> 0) !== 0) {
     throw new Error("MUX1 WASM wrong result");
   }
   if (w.amemory_i386_lab_reactions() !== 7) {
@@ -1693,13 +1748,34 @@ Promise.all([
     if (w.amemory_i386_lab_run(op, a, b, flag) !== 1) {
       throw new Error(label + " WASM execution rejected");
     }
-    if ((w.amemory_i386_lab_value() >>> 0) !== (expected >>> 0)) {
+    const structured = readCurrentLabResult(label, { op, a, b, flag });
+    const outcome = structured.outcome;
+    const compatibility = {
+      value: w.amemory_i386_lab_value() >>> 0,
+      valueHi: w.amemory_i386_lab_value_hi() >>> 0,
+      writeback: w.amemory_i386_lab_writeback() >>> 0,
+      definedMask: w.amemory_i386_lab_defined_mask() >>> 0,
+      valueMask: w.amemory_i386_lab_value_mask() >>> 0,
+      undefinedMask: w.amemory_i386_lab_undefined_mask() >>> 0,
+      preserveMask: w.amemory_i386_lab_preserve_mask() >>> 0,
+      reactions: w.amemory_i386_lab_reactions() >>> 0,
+      linksAfterBuild: w.amemory_i386_lab_links_after_build() >>> 0,
+      linksAfterFirst: w.amemory_i386_lab_links_after_first() >>> 0,
+      steadyLinkDelta: w.amemory_i386_lab_steady_link_delta() >>> 0,
+      quiescent: w.amemory_i386_lab_quiescent() >>> 0,
+    };
+    for (const [key, value] of Object.entries(compatibility)) {
+      if ((outcome[key] >>> 0) !== value) {
+        throw new Error(label + " structured/compatibility result mismatch: " + key);
+      }
+    }
+    if ((outcome.value >>> 0) !== (expected >>> 0)) {
       throw new Error(label + " WASM wrong result");
     }
-    if (w.amemory_i386_lab_quiescent() !== 1) {
+    if ((outcome.quiescent >>> 0) !== 1) {
       throw new Error(label + " WASM did not reach quiescence");
     }
-    if (w.amemory_i386_lab_steady_link_delta() !== 0) {
+    if ((outcome.steadyLinkDelta >>> 0) !== 0) {
       throw new Error(label + " repeated run grew Links");
     }
   };

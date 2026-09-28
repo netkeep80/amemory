@@ -1,3 +1,5 @@
+import { readJsonAbi } from "./i386-wasm-json.mjs";
+
 const LEGACY_SOURCE_SCHEMA = 3;
 const SOURCE_SCHEMA = 4;
 const LEGACY_COMPACT_SCHEMA = 1;
@@ -283,33 +285,6 @@ export function inflateCompactProof(compact) {
       visualLinks,
     },
   };
-}
-
-function readJsonAbi(wasm,names,label) {
-  const available=wasm[names.available];
-  if (typeof available!=="function" || available()!==1) return null;
-  const length=wasm[names.length];
-  if (typeof length!=="function") fail(`${label} length ABI missing`);
-  const len=length()>>>0;
-  if (!len) fail(`${label} ABI reported empty JSON`);
-  let bytes;
-  const pointer=wasm[names.pointer];
-  if (wasm.memory && typeof pointer==="function") {
-    const ptr=pointer()>>>0;
-    if (ptr>wasm.memory.buffer.byteLength || len>wasm.memory.buffer.byteLength-ptr) fail(`${label} pointer outside WASM memory`);
-    bytes=new Uint8Array(wasm.memory.buffer,ptr,len);
-  } else {
-    const byte=wasm[names.byte];
-    if (typeof byte!=="function") fail(`${label} byte ABI missing`);
-    bytes=new Uint8Array(len);
-    for (let i=0;i<len;i+=1) {
-      const value=byte(i)>>>0;
-      if (value>255) fail(`${label} invalid byte at ${i}`);
-      bytes[i]=value;
-    }
-  }
-  try { return JSON.parse(new TextDecoder().decode(bytes)); }
-  catch (error) { fail(`${label} JSON parse failed: ${error.message}`); }
 }
 
 export function collectBrowserProof(wasm) {

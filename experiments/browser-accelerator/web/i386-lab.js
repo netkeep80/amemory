@@ -12,6 +12,7 @@ import {
 } from "./i386-lab-view.mjs";
 import { renderProofPipeline } from "./i386-proof-view.mjs";
 import { collectBrowserProof } from "./i386-proof-transport.mjs";
+import { readJsonAbi } from "./i386-wasm-json.mjs";
 
 function parseWord(text) {
   const value = String(text).trim();
@@ -1108,20 +1109,53 @@ function abiArgs(block, values) {
   return [block.opcode, a >>> 0, b >>> 0, flag >>> 0];
 }
 
-function collectOutcome(wasm) {
+function collectOutcome(wasm, expectedArgs) {
+  const envelope = readJsonAbi(wasm, {
+    available: "amemory_i386_lab_result_available",
+    length: "amemory_i386_lab_result_json_len",
+    pointer: "amemory_i386_lab_result_json_ptr",
+    byte: "amemory_i386_lab_result_json_byte",
+  }, "A-Circuit result");
+  if (!envelope ||
+      envelope.schemaVersion !== 1 ||
+      envelope.representationId !== "amemory-i386-lab-result-json" ||
+      envelope.representationVersion !== "0.1.0" ||
+      envelope.instanceId !== 0 ||
+      envelope.witnessKind !== "registry-block") {
+    throw new Error("unsupported A-Circuit structured result envelope");
+  }
+  const [opcode, a, b, inputFlag] = expectedArgs;
+  const operation = envelope.operation || {};
+  if ((operation.opcode >>> 0) !== opcode ||
+      (operation.a >>> 0) !== a ||
+      (operation.b >>> 0) !== b ||
+      (operation.inputFlag >>> 0) !== inputFlag) {
+    throw new Error("A-Circuit structured result does not match the executed request");
+  }
+  const out = envelope.outcome || {};
+  for (const key of [
+    "value", "valueHi", "writeback", "definedMask", "valueMask",
+    "undefinedMask", "preserveMask", "reactions", "linksAfterBuild",
+    "linksAfterFirst", "steadyLinkDelta", "quiescent",
+  ]) {
+    if (!Number.isInteger(out[key]) || out[key] < 0 || out[key] > 0xffffffff) {
+      throw new Error("A-Circuit structured result field invalid: " + key);
+    }
+  }
   return {
-    value: wasm.amemory_i386_lab_value() >>> 0,
-    valueHi: wasm.amemory_i386_lab_value_hi() >>> 0,
-    writeback: wasm.amemory_i386_lab_writeback() >>> 0,
-    defined: wasm.amemory_i386_lab_defined_mask() >>> 0,
-    flagValues: wasm.amemory_i386_lab_value_mask() >>> 0,
-    undefined: wasm.amemory_i386_lab_undefined_mask() >>> 0,
-    preserve: wasm.amemory_i386_lab_preserve_mask() >>> 0,
-    reactions: wasm.amemory_i386_lab_reactions() >>> 0,
-    linksBuild: wasm.amemory_i386_lab_links_after_build() >>> 0,
-    linksFirst: wasm.amemory_i386_lab_links_after_first() >>> 0,
-    steadyDelta: wasm.amemory_i386_lab_steady_link_delta() >>> 0,
-    quiescent: wasm.amemory_i386_lab_quiescent() >>> 0,
+    value: out.value >>> 0,
+    valueHi: out.valueHi >>> 0,
+    writeback: out.writeback >>> 0,
+    defined: out.definedMask >>> 0,
+    flagValues: out.valueMask >>> 0,
+    undefined: out.undefinedMask >>> 0,
+    preserve: out.preserveMask >>> 0,
+    reactions: out.reactions >>> 0,
+    linksBuild: out.linksAfterBuild >>> 0,
+    linksFirst: out.linksAfterFirst >>> 0,
+    steadyDelta: out.steadyLinkDelta >>> 0,
+    quiescent: out.quiescent >>> 0,
+    compactProofAvailable: envelope.compactProofAvailable === true,
   };
 }
 
@@ -1129,9 +1163,10 @@ function runBlock(wasm, block, values) {
   if (wasm.amemory_i386_lab_supports?.(block.opcode) !== 1) {
     throw new Error(`registry block ${block.name} is not supported by A-Circuit WASM`);
   }
-  const ok = wasm.amemory_i386_lab_run(...abiArgs(block, values));
+  const args = abiArgs(block, values);
+  const ok = wasm.amemory_i386_lab_run(...args);
   if (ok !== 1) throw new Error(`${block.name}: A-Circuit rejected input`);
-  const outcome = collectOutcome(wasm);
+  const outcome = collectOutcome(wasm, args);
   const { proof, compactProof, transport } = collectBrowserProof(wasm);
   outcome.proof = proof;
   outcome.compactProof = compactProof;

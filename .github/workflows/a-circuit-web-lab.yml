@@ -41,6 +41,8 @@ jobs:
           node --check /tmp/i386-lab.mjs
           node --check experiments/browser-accelerator/web/i386-lab-view.mjs
           node --check experiments/browser-accelerator/web/i386-proof-view.mjs
+          node --check experiments/browser-accelerator/web/i386-proof-transport.mjs
+          node --check experiments/browser-accelerator/web/i386-wasm-json.mjs
 
           node --input-type=module <<'NODE'
           import {

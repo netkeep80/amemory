@@ -20,6 +20,7 @@ use crate::{
     unary_arith_n::{web_prove_unary32, web_run_unary32},
     proof_n::WebStructuralProof,
 };
+use serde::Serialize;
 use std::sync::Mutex;
 
 const FLAG_CF: u32 = 1 << 0;
@@ -30,7 +31,8 @@ const FLAG_SF: u32 = 1 << 7;
 const FLAG_OF: u32 = 1 << 11;
 const STATUS_FLAGS: u32 = FLAG_CF | FLAG_PF | FLAG_AF | FLAG_ZF | FLAG_SF | FLAG_OF;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct LabOutcome {
     value: u32,
     value_hi: u32,
@@ -46,9 +48,37 @@ struct LabOutcome {
     quiescent: u32,
 }
 
+const LAB_RESULT_SCHEMA_VERSION: u32 = 1;
+const LAB_RESULT_REPRESENTATION_ID: &str = "amemory-i386-lab-result-json";
+const LAB_RESULT_REPRESENTATION_VERSION: &str = "0.1.0";
+const DEFAULT_LAB_INSTANCE_ID: u32 = 0;
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LabOperation {
+    opcode: u32,
+    a: u32,
+    b: u32,
+    input_flag: u32,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LabResultEnvelope {
+    schema_version: u32,
+    representation_id: &'static str,
+    representation_version: &'static str,
+    instance_id: u32,
+    witness_kind: &'static str,
+    operation: LabOperation,
+    outcome: LabOutcome,
+    compact_proof_available: bool,
+}
+
 #[cfg(test)]
 static LAST_PROOF_JSON: Mutex<String> = Mutex::new(String::new());
 static LAST_COMPACT_PROOF_JSON: Mutex<String> = Mutex::new(String::new());
+static LAST_RESULT_JSON: Mutex<String> = Mutex::new(String::new());
 
 fn set_last_compact_proof(proof: &WebStructuralProof) -> Option<()> {
     let compact = proof.compact()?;
@@ -83,6 +113,49 @@ fn clear_last_compact_proof() {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     compact_guard.clear();
+}
+
+fn clear_last_result() {
+    let mut guard = LAST_RESULT_JSON
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    guard.clear();
+}
+
+fn set_last_result(
+    op: u32,
+    a: u32,
+    b: u32,
+    input_flag: u32,
+    outcome: LabOutcome,
+) -> Option<()> {
+    let compact_proof_available = {
+        let guard = LAST_COMPACT_PROOF_JSON
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        !guard.is_empty()
+    };
+    let envelope = LabResultEnvelope {
+        schema_version: LAB_RESULT_SCHEMA_VERSION,
+        representation_id: LAB_RESULT_REPRESENTATION_ID,
+        representation_version: LAB_RESULT_REPRESENTATION_VERSION,
+        instance_id: DEFAULT_LAB_INSTANCE_ID,
+        witness_kind: "registry-block",
+        operation: LabOperation {
+            opcode: op,
+            a,
+            b,
+            input_flag,
+        },
+        outcome,
+        compact_proof_available,
+    };
+    let json = serde_json::to_string(&envelope).ok()?;
+    let mut guard = LAST_RESULT_JSON
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *guard = json;
+    Some(())
 }
 
 fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
@@ -1143,9 +1216,14 @@ pub extern "C" fn amemory_i386_lab_run(
     b: u32,
     input_flag: u32,
 ) -> u32 {
+    clear_last_result();
     let Some(out) = execute(op, a, b, input_flag) else {
         return 0;
     };
+    if set_last_result(op, a, b, input_flag, out).is_none() {
+        clear_last_compact_proof();
+        return 0;
+    }
 
     unsafe {
         LAST_VALUE = out.value;
@@ -1188,6 +1266,43 @@ pub extern "C" fn amemory_i386_lab_links_after_first() -> u32 { unsafe { LAST_LI
 pub extern "C" fn amemory_i386_lab_steady_link_delta() -> u32 { unsafe { LAST_STEADY_LINK_DELTA } }
 #[no_mangle]
 pub extern "C" fn amemory_i386_lab_quiescent() -> u32 { unsafe { LAST_QUIESCENT } }
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_lab_result_available() -> u32 {
+    let guard = LAST_RESULT_JSON
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    u32::from(!guard.is_empty())
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_lab_result_json_len() -> u32 {
+    let guard = LAST_RESULT_JSON
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    guard.len() as u32
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_lab_result_json_ptr() -> u32 {
+    let guard = LAST_RESULT_JSON
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    guard.as_ptr() as usize as u32
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_lab_result_json_byte(index: u32) -> u32 {
+    let guard = LAST_RESULT_JSON
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    guard
+        .as_bytes()
+        .get(index as usize)
+        .copied()
+        .map(u32::from)
+        .unwrap_or(u32::MAX)
+}
 
 #[no_mangle]
 pub extern "C" fn amemory_i386_lab_compact_proof_available() -> u32 {
