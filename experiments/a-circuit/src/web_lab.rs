@@ -574,19 +574,6 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
     execute_for_instance(DEFAULT_LAB_INSTANCE_ID, op, a, b, input_flag)
 }
 
-static mut LAST_VALUE: u32 = 0;
-static mut LAST_VALUE_HI: u32 = 0;
-static mut LAST_WRITEBACK: u32 = 0;
-static mut LAST_DEFINED_MASK: u32 = 0;
-static mut LAST_VALUE_MASK: u32 = 0;
-static mut LAST_UNDEFINED_MASK: u32 = 0;
-static mut LAST_PRESERVE_MASK: u32 = 0;
-static mut LAST_REACTIONS: u32 = 0;
-static mut LAST_LINKS_AFTER_BUILD: u32 = 0;
-static mut LAST_LINKS_AFTER_FIRST: u32 = 0;
-static mut LAST_STEADY_LINK_DELTA: u32 = 0;
-static mut LAST_QUIESCENT: u32 = 0;
-
 static mut M5A_EAX_BEFORE: u32 = 0;
 static mut M5A_EBX_BEFORE: u32 = 0;
 static mut M5A_EDX_BEFORE: u32 = 0;
@@ -1585,22 +1572,6 @@ pub extern "C" fn amemory_i386_lab_instance_run(
         return 0;
     }
 
-    if instance_id == DEFAULT_LAB_INSTANCE_ID {
-        unsafe {
-            LAST_VALUE = out.value;
-            LAST_VALUE_HI = out.value_hi;
-            LAST_WRITEBACK = out.writeback;
-            LAST_DEFINED_MASK = out.defined_mask;
-            LAST_VALUE_MASK = out.value_mask;
-            LAST_UNDEFINED_MASK = out.undefined_mask;
-            LAST_PRESERVE_MASK = out.preserve_mask;
-            LAST_REACTIONS = out.reactions;
-            LAST_LINKS_AFTER_BUILD = out.links_after_build;
-            LAST_LINKS_AFTER_FIRST = out.links_after_first;
-            LAST_STEADY_LINK_DELTA = out.steady_link_delta;
-            LAST_QUIESCENT = out.quiescent;
-        }
-    }
     1
 }
 
@@ -1613,31 +1584,6 @@ pub extern "C" fn amemory_i386_lab_run(
 ) -> u32 {
     amemory_i386_lab_instance_run(DEFAULT_LAB_INSTANCE_ID, op, a, b, input_flag)
 }
-
-#[no_mangle]
-pub extern "C" fn amemory_i386_lab_value() -> u32 { unsafe { LAST_VALUE } }
-#[no_mangle]
-pub extern "C" fn amemory_i386_lab_value_hi() -> u32 { unsafe { LAST_VALUE_HI } }
-#[no_mangle]
-pub extern "C" fn amemory_i386_lab_writeback() -> u32 { unsafe { LAST_WRITEBACK } }
-#[no_mangle]
-pub extern "C" fn amemory_i386_lab_defined_mask() -> u32 { unsafe { LAST_DEFINED_MASK } }
-#[no_mangle]
-pub extern "C" fn amemory_i386_lab_value_mask() -> u32 { unsafe { LAST_VALUE_MASK } }
-#[no_mangle]
-pub extern "C" fn amemory_i386_lab_undefined_mask() -> u32 { unsafe { LAST_UNDEFINED_MASK } }
-#[no_mangle]
-pub extern "C" fn amemory_i386_lab_preserve_mask() -> u32 { unsafe { LAST_PRESERVE_MASK } }
-#[no_mangle]
-pub extern "C" fn amemory_i386_lab_reactions() -> u32 { unsafe { LAST_REACTIONS } }
-#[no_mangle]
-pub extern "C" fn amemory_i386_lab_links_after_build() -> u32 { unsafe { LAST_LINKS_AFTER_BUILD } }
-#[no_mangle]
-pub extern "C" fn amemory_i386_lab_links_after_first() -> u32 { unsafe { LAST_LINKS_AFTER_FIRST } }
-#[no_mangle]
-pub extern "C" fn amemory_i386_lab_steady_link_delta() -> u32 { unsafe { LAST_STEADY_LINK_DELTA } }
-#[no_mangle]
-pub extern "C" fn amemory_i386_lab_quiescent() -> u32 { unsafe { LAST_QUIESCENT } }
 
 #[no_mangle]
 pub extern "C" fn amemory_i386_lab_instance_result_available(instance_id: u32) -> u32 {

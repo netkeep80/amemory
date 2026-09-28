@@ -85,6 +85,18 @@ Promise.all([
     "amemory_i386_lab_proof_json_len",
     "amemory_i386_lab_proof_json_ptr",
     "amemory_i386_lab_proof_json_byte",
+    "amemory_i386_lab_value",
+    "amemory_i386_lab_value_hi",
+    "amemory_i386_lab_writeback",
+    "amemory_i386_lab_defined_mask",
+    "amemory_i386_lab_value_mask",
+    "amemory_i386_lab_undefined_mask",
+    "amemory_i386_lab_preserve_mask",
+    "amemory_i386_lab_reactions",
+    "amemory_i386_lab_links_after_build",
+    "amemory_i386_lab_links_after_first",
+    "amemory_i386_lab_steady_link_delta",
+    "amemory_i386_lab_quiescent",
   ]) {
     if (typeof w[retired] !== "undefined") {
       throw new Error("retired schema-v3 browser ABI still exported: " + retired);
@@ -1892,19 +1904,19 @@ Promise.all([
   const muxStructured = readCurrentLabResult("MUX1", {
     op: 12, a: 1, b: 0, flag: 1,
   });
-  if ((muxStructured.outcome.value >>> 0) !== 0 ||
-      (w.amemory_i386_lab_value() >>> 0) !== 0) {
+  if ((muxStructured.outcome.value >>> 0) !== 0) {
     throw new Error("MUX1 WASM wrong result");
   }
-  if (w.amemory_i386_lab_reactions() !== 7) {
+  if ((muxStructured.outcome.reactions >>> 0) !== 7) {
     throw new Error("MUX1 WASM wrong reaction count");
   }
-  if (w.amemory_i386_lab_quiescent() !== 1) {
+  if ((muxStructured.outcome.quiescent >>> 0) !== 1) {
     throw new Error("MUX1 WASM did not reach quiescence");
   }
-  if (w.amemory_i386_lab_steady_link_delta() !== 0) {
+  if ((muxStructured.outcome.steadyLinkDelta >>> 0) !== 0) {
     throw new Error("MUX1 repeated run grew Links");
   }
+  const defaultResultBeforeInstances = JSON.stringify(muxStructured);
   const proof = inflateCompactProof(readCurrentCompactProof("MUX1"));
   if (proof.schemaVersion !== 4) {
     throw new Error("MUX1 reconstructed renderer proof schema is not v4");
@@ -2016,8 +2028,13 @@ Promise.all([
       readInstanceText(instanceA, "proof") !== aProofBefore) {
     throw new Error("B2 instance B overwrote instance A evidence");
   }
-  if ((w.amemory_i386_lab_value() >>> 0) !== 0) {
-    throw new Error("B2 non-default instance mutated compatibility scalar state");
+  const defaultResultAfterInstances = JSON.stringify(
+    readCurrentLabResult("MUX1 default after instance runs", {
+      op: 12, a: 1, b: 0, flag: 1,
+    })
+  );
+  if (defaultResultAfterInstances !== defaultResultBeforeInstances) {
+    throw new Error("B2 non-default instance mutated default structured result");
   }
 
   if (w.amemory_i386_lab_instance_destroy(instanceA) !== 1 ||
@@ -2041,27 +2058,9 @@ Promise.all([
     if (w.amemory_i386_lab_run(op, a, b, flag) !== 1) {
       throw new Error(label + " WASM execution rejected");
     }
-    const structured = readCurrentLabResult(label, { op, a, b, flag });
-    const outcome = structured.outcome;
-    const compatibility = {
-      value: w.amemory_i386_lab_value() >>> 0,
-      valueHi: w.amemory_i386_lab_value_hi() >>> 0,
-      writeback: w.amemory_i386_lab_writeback() >>> 0,
-      definedMask: w.amemory_i386_lab_defined_mask() >>> 0,
-      valueMask: w.amemory_i386_lab_value_mask() >>> 0,
-      undefinedMask: w.amemory_i386_lab_undefined_mask() >>> 0,
-      preserveMask: w.amemory_i386_lab_preserve_mask() >>> 0,
-      reactions: w.amemory_i386_lab_reactions() >>> 0,
-      linksAfterBuild: w.amemory_i386_lab_links_after_build() >>> 0,
-      linksAfterFirst: w.amemory_i386_lab_links_after_first() >>> 0,
-      steadyLinkDelta: w.amemory_i386_lab_steady_link_delta() >>> 0,
-      quiescent: w.amemory_i386_lab_quiescent() >>> 0,
-    };
-    for (const [key, value] of Object.entries(compatibility)) {
-      if ((outcome[key] >>> 0) !== value) {
-        throw new Error(label + " structured/compatibility result mismatch: " + key);
-      }
-    }
+    const outcome = readCurrentLabResult(
+      label, { op, a, b, flag }
+    ).outcome;
     if ((outcome.value >>> 0) !== (expected >>> 0)) {
       throw new Error(label + " WASM wrong result");
     }
@@ -2071,6 +2070,7 @@ Promise.all([
     if ((outcome.steadyLinkDelta >>> 0) !== 0) {
       throw new Error(label + " repeated run grew Links");
     }
+    return outcome;
   };
 
 
@@ -2095,8 +2095,8 @@ Promise.all([
   };
 
   const verifyLogicProof = (op, a, b, expected, expectedWriteback, block) => {
-    run(op, a, b, 0, expected, block);
-    if ((w.amemory_i386_lab_writeback() >>> 0) !== (expectedWriteback >>> 0)) {
+    const outcome = run(op, a, b, 0, expected, block);
+    if ((outcome.writeback >>> 0) !== (expectedWriteback >>> 0)) {
       throw new Error(block + " WASM writeback mismatch");
     }
     const proof = readCurrentProof(block);
@@ -2199,8 +2199,8 @@ Promise.all([
     op, a, b, inputFlag, expected, expectedWriteback,
     expectedX, expectedMode, block
   ) => {
-    run(op, a, b, inputFlag, expected, block);
-    if ((w.amemory_i386_lab_writeback() >>> 0) !== (expectedWriteback >>> 0)) {
+    const outcome = run(op, a, b, inputFlag, expected, block);
+    if ((outcome.writeback >>> 0) !== (expectedWriteback >>> 0)) {
       throw new Error(block + " WASM writeback mismatch");
     }
     const proof = readCurrentProof(block);
@@ -2335,25 +2335,31 @@ Promise.all([
     if (w.amemory_i386_lab_run(op, a, b, 0) !== 1) {
       throw new Error(label + " WASM execution rejected");
     }
-    if ((w.amemory_i386_lab_value() >>> 0) !== (expectedLo >>> 0)) {
+    const outcome = readCurrentLabResult(
+      label, { op, a, b, flag: 0 }
+    ).outcome;
+    if ((outcome.value >>> 0) !== (expectedLo >>> 0)) {
       throw new Error(label + " WASM wrong low half");
     }
-    if ((w.amemory_i386_lab_value_hi() >>> 0) !== (expectedHi >>> 0)) {
+    if ((outcome.valueHi >>> 0) !== (expectedHi >>> 0)) {
       throw new Error(label + " WASM wrong high half");
     }
-    if (w.amemory_i386_lab_reactions() !== reactions) {
+    if ((outcome.reactions >>> 0) !== (reactions >>> 0)) {
       throw new Error(label + " WASM wrong reaction count");
     }
-    if (w.amemory_i386_lab_quiescent() !== 1) {
+    if ((outcome.quiescent >>> 0) !== 1) {
       throw new Error(label + " WASM did not reach quiescence");
     }
-    if (w.amemory_i386_lab_steady_link_delta() !== 0) {
+    if ((outcome.steadyLinkDelta >>> 0) !== 0) {
       throw new Error(label + " repeated run grew Links");
     }
+    return outcome;
   };
 
   const verifyShiftProof = (op, value, count, expected, block) => {
-    run(op, value, count, 0, expected, block + " count=" + count);
+    const outcome = run(
+      op, value, count, 0, expected, block + " count=" + count
+    );
     const proof = readCurrentProof(block);
     if (proof.block !== block) {
       throw new Error(block + " proof block identity mismatch");
@@ -2416,12 +2422,12 @@ Promise.all([
     return {
       countRef: refByRole.get("data.count.word"),
       countWitness: witnessByRole.get("data.count.word"),
-      value: w.amemory_i386_lab_value() >>> 0,
-      defined: w.amemory_i386_lab_defined_mask() >>> 0,
-      values: w.amemory_i386_lab_value_mask() >>> 0,
-      undefined: w.amemory_i386_lab_undefined_mask() >>> 0,
-      preserve: w.amemory_i386_lab_preserve_mask() >>> 0,
-      reactions: w.amemory_i386_lab_reactions() >>> 0,
+      value: outcome.value >>> 0,
+      defined: outcome.definedMask >>> 0,
+      values: outcome.valueMask >>> 0,
+      undefined: outcome.undefinedMask >>> 0,
+      preserve: outcome.preserveMask >>> 0,
+      reactions: outcome.reactions >>> 0,
     };
   };
 
@@ -2447,7 +2453,9 @@ Promise.all([
   const verifyRotateProof = (
     op, value, count, cfIn, expected, block, carry
   ) => {
-    run(op, value, count, cfIn, expected, block + " count=" + count);
+    const outcome = run(
+      op, value, count, cfIn, expected, block + " count=" + count
+    );
     const proof = readCurrentProof(block);
     const memoryId = proof.load.memoryInstanceId;
     if (proof.block !== block ||
@@ -2535,12 +2543,12 @@ Promise.all([
     return {
       countRef: refByRole.get("data.count.word"),
       countWitness: witnessByRole.get("data.count.word"),
-      value: w.amemory_i386_lab_value() >>> 0,
-      defined: w.amemory_i386_lab_defined_mask() >>> 0,
-      values: w.amemory_i386_lab_value_mask() >>> 0,
-      undefined: w.amemory_i386_lab_undefined_mask() >>> 0,
-      preserve: w.amemory_i386_lab_preserve_mask() >>> 0,
-      reactions: w.amemory_i386_lab_reactions() >>> 0,
+      value: outcome.value >>> 0,
+      defined: outcome.definedMask >>> 0,
+      values: outcome.valueMask >>> 0,
+      undefined: outcome.undefinedMask >>> 0,
+      preserve: outcome.preserveMask >>> 0,
+      reactions: outcome.reactions >>> 0,
     };
   };
 
@@ -2582,7 +2590,7 @@ Promise.all([
   const verifyUnaryProof = (
     op, value, expected, block, cfDefined, cfSet
   ) => {
-    run(op, value, 0, 0, expected, block);
+    const outcome = run(op, value, 0, 0, expected, block);
     const proof = readCurrentProof(block);
     const memoryId = proof.load.memoryInstanceId;
     if (proof.block !== block ||
@@ -2636,10 +2644,10 @@ Promise.all([
       throw new Error(block + " selected structural function mismatch");
     }
 
-    const defined = w.amemory_i386_lab_defined_mask() >>> 0;
-    const values = w.amemory_i386_lab_value_mask() >>> 0;
-    const undefined = w.amemory_i386_lab_undefined_mask() >>> 0;
-    const preserve = w.amemory_i386_lab_preserve_mask() >>> 0;
+    const defined = outcome.definedMask >>> 0;
+    const values = outcome.valueMask >>> 0;
+    const undefined = outcome.undefinedMask >>> 0;
+    const preserve = outcome.preserveMask >>> 0;
     if (undefined !== 0) {
       throw new Error(block + " unexpectedly produced undefined status flags");
     }
@@ -2663,8 +2671,10 @@ Promise.all([
   verifyUnaryProof(22, 0x00000001, 0xffffffff, "NEG32", true, true);
   verifyUnaryProof(22, 0x00000000, 0x00000000, "NEG32", true, false);
 
-  runWide(23, 0xffffffff, 2, 0xfffffffe, 1, 33 + 1038, "MUL32 raw Wide64");
-  if ((w.amemory_i386_lab_preserve_mask() >>> 0) !== 0x000008d5) {
+  const rawMulOutcome = runWide(
+    23, 0xffffffff, 2, 0xfffffffe, 1, 33 + 1038, "MUL32 raw Wide64"
+  );
+  if ((rawMulOutcome.preserveMask >>> 0) !== 0x000008d5) {
     throw new Error("MUL32 raw must preserve status flags");
   }
   const rawMulProof = readCurrentProof("MUL32 raw Wide64");
@@ -2702,17 +2712,19 @@ Promise.all([
     throw new Error("MUL32 raw visual snapshot is incomplete");
   }
 
-  runWide(24, 0xffffffff, 2, 0xfffffffe, 1, 97 + 1038, "x86 MUL32 effect");
-  if ((w.amemory_i386_lab_defined_mask() >>> 0) !== 0x00000801) {
+  const mulEffectOutcome = runWide(
+    24, 0xffffffff, 2, 0xfffffffe, 1, 97 + 1038, "x86 MUL32 effect"
+  );
+  if ((mulEffectOutcome.definedMask >>> 0) !== 0x00000801) {
     throw new Error("x86 MUL32 wrong defined flag mask");
   }
-  if ((w.amemory_i386_lab_value_mask() >>> 0) !== 0x00000801) {
+  if ((mulEffectOutcome.valueMask >>> 0) !== 0x00000801) {
     throw new Error("x86 MUL32 must set CF and OF when high half is non-zero");
   }
-  if ((w.amemory_i386_lab_undefined_mask() >>> 0) !== 0x000000d4) {
+  if ((mulEffectOutcome.undefinedMask >>> 0) !== 0x000000d4) {
     throw new Error("x86 MUL32 wrong undefined flag mask");
   }
-  if ((w.amemory_i386_lab_preserve_mask() >>> 0) !== 0) {
+  if ((mulEffectOutcome.preserveMask >>> 0) !== 0) {
     throw new Error("x86 MUL32 must not preserve status flags");
   }
   const mulEffectProof = readCurrentProof("x86 MUL32 effect");
