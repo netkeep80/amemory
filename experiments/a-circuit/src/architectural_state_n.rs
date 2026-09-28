@@ -35,6 +35,12 @@ pub(crate) struct ArchitecturalStateSchema {
     pub(crate) eax: Handle,
     pub(crate) ebx: Handle,
     pub(crate) edx: Handle,
+    pub(crate) ecx: Handle,
+    pub(crate) esi: Handle,
+    pub(crate) edi: Handle,
+    pub(crate) ebp: Handle,
+    pub(crate) esp: Handle,
+    pub(crate) eip: Handle,
     pub(crate) undefined: Handle,
     pub(crate) flags: FlagPatchSchema,
     pub(crate) effect_result_tag: Handle,
@@ -46,6 +52,12 @@ struct StateValue {
     eax: u32,
     ebx: u32,
     edx: u32,
+    ecx: u32,
+    esi: u32,
+    edi: u32,
+    ebp: u32,
+    esp: u32,
+    eip: u32,
     cf: Option<u8>,
     pf: Option<u8>,
     af: Option<u8>,
@@ -107,7 +119,16 @@ fn state_link(
     zf: Handle,
     sf: Handle,
     of: Handle,
+    ecx: Handle,
+    esi: Handle,
+    edi: Handle,
+    ebp: Handle,
+    esp: Handle,
+    eip: Handle,
 ) -> Handle {
+    // Stable M5 prefix MUST NOT be reordered:
+    // [EAX, EBX, EDX, CF, PF, AF, ZF, SF, OF].
+    // M5c extends the record append-only.
     let fields = [
         binding(store, schema.eax, eax),
         binding(store, schema.ebx, ebx),
@@ -118,6 +139,12 @@ fn state_link(
         binding(store, schema.flags.zf, zf),
         binding(store, schema.flags.sf, sf),
         binding(store, schema.flags.of, of),
+        binding(store, schema.ecx, ecx),
+        binding(store, schema.esi, esi),
+        binding(store, schema.edi, edi),
+        binding(store, schema.ebp, ebp),
+        binding(store, schema.esp, esp),
+        binding(store, schema.eip, eip),
     ];
     let payload = materialize_exact_sequence(store, &fields).unwrap();
     store.ensure_pair(schema.state_tag, payload).unwrap()
@@ -233,6 +260,12 @@ fn install_case(
     let old_eax = anchors.next(&mut f.store);
     let old_ebx = anchors.next(&mut f.store);
     let old_edx = anchors.next(&mut f.store);
+    let old_ecx = anchors.next(&mut f.store);
+    let old_esi = anchors.next(&mut f.store);
+    let old_edi = anchors.next(&mut f.store);
+    let old_ebp = anchors.next(&mut f.store);
+    let old_esp = anchors.next(&mut f.store);
+    let old_eip = anchors.next(&mut f.store);
     let old_cf = anchors.next(&mut f.store);
     let old_pf = anchors.next(&mut f.store);
     let old_af = anchors.next(&mut f.store);
@@ -259,6 +292,12 @@ fn install_case(
         old_zf,
         old_sf,
         old_of,
+        old_ecx,
+        old_esi,
+        old_edi,
+        old_ebp,
+        old_esp,
+        old_eip,
     );
     let before_effect = effect_template(
         &mut f.store,
@@ -294,6 +333,36 @@ fn install_case(
     } else {
         old_ebx
     };
+    let next_edx = if write && target == schema.edx {
+        word
+    } else {
+        old_edx
+    };
+    let next_ecx = if write && target == schema.ecx {
+        word
+    } else {
+        old_ecx
+    };
+    let next_esi = if write && target == schema.esi {
+        word
+    } else {
+        old_esi
+    };
+    let next_edi = if write && target == schema.edi {
+        word
+    } else {
+        old_edi
+    };
+    let next_ebp = if write && target == schema.ebp {
+        word
+    } else {
+        old_ebp
+    };
+    let next_esp = if write && target == schema.esp {
+        word
+    } else {
+        old_esp
+    };
     let (next_cf, next_pf, next_af, next_zf, next_sf, next_of) =
         match shape {
             PatchShape::FullSet6 => {
@@ -315,18 +384,25 @@ fn install_case(
         schema,
         next_eax,
         next_ebx,
-        old_edx,
+        next_edx,
         next_cf,
         next_pf,
         next_af,
         next_zf,
         next_sf,
         next_of,
+        next_ecx,
+        next_esi,
+        next_edi,
+        next_ebp,
+        next_esp,
+        old_eip,
     );
     let after = f.store.ensure_pair(f.k, after_state).unwrap();
 
     let mut roles = vec![
-        old_eax, old_ebx, old_edx, old_cf, old_pf, old_af, old_zf,
+        old_eax, old_ebx, old_edx, old_ecx, old_esi, old_edi,
+        old_ebp, old_esp, old_eip, old_cf, old_pf, old_af, old_zf,
         old_sf, old_of, word,
     ];
     match shape {
@@ -370,6 +446,12 @@ fn install_wide_mul_case(
     let old_eax = anchors.next(&mut f.store);
     let old_ebx = anchors.next(&mut f.store);
     let old_edx = anchors.next(&mut f.store);
+    let old_ecx = anchors.next(&mut f.store);
+    let old_esi = anchors.next(&mut f.store);
+    let old_edi = anchors.next(&mut f.store);
+    let old_ebp = anchors.next(&mut f.store);
+    let old_esp = anchors.next(&mut f.store);
+    let old_eip = anchors.next(&mut f.store);
     let old_cf = anchors.next(&mut f.store);
     let old_pf = anchors.next(&mut f.store);
     let old_af = anchors.next(&mut f.store);
@@ -391,6 +473,12 @@ fn install_wide_mul_case(
         old_zf,
         old_sf,
         old_of,
+        old_ecx,
+        old_esi,
+        old_edi,
+        old_ebp,
+        old_esp,
+        old_eip,
     );
     let wide =
         materialize_exact_sequence(&mut f.store, &[lo, hi]).unwrap();
@@ -440,11 +528,18 @@ fn install_wide_mul_case(
         schema.undefined,
         schema.undefined,
         new_of,
+        old_ecx,
+        old_esi,
+        old_edi,
+        old_ebp,
+        old_esp,
+        old_eip,
     );
     let after = f.store.ensure_pair(f.k, after_state).unwrap();
 
     let roles = [
-        old_eax, old_ebx, old_edx, old_cf, old_pf, old_af, old_zf,
+        old_eax, old_ebx, old_edx, old_ecx, old_esi, old_edi,
+        old_ebp, old_esp, old_eip, old_cf, old_pf, old_af, old_zf,
         old_sf, old_of, lo, hi,
     ];
     let (_, admission) = define_bundle_rule(
@@ -491,6 +586,12 @@ impl ArchitecturalStateProgram {
         let eax = anchors.next(&mut f.store);
         let ebx = anchors.next(&mut f.store);
         let edx = anchors.next(&mut f.store);
+        let ecx = anchors.next(&mut f.store);
+        let esi = anchors.next(&mut f.store);
+        let edi = anchors.next(&mut f.store);
+        let ebp = anchors.next(&mut f.store);
+        let esp = anchors.next(&mut f.store);
+        let eip = anchors.next(&mut f.store);
         let undefined = anchors.next(&mut f.store);
 
         let schema = ArchitecturalStateSchema {
@@ -500,13 +601,28 @@ impl ArchitecturalStateProgram {
             eax,
             ebx,
             edx,
+            ecx,
+            esi,
+            edi,
+            ebp,
+            esp,
+            eip,
             undefined,
             flags,
             effect_result_tag,
             wide_effect_result_tag,
         };
 
-        for target in [schema.eax, schema.ebx] {
+        for target in [
+            schema.eax,
+            schema.ebx,
+            schema.ecx,
+            schema.edx,
+            schema.esi,
+            schema.edi,
+            schema.ebp,
+            schema.esp,
+        ] {
             for writeback in [f.zero, f.one] {
                 for shape in [
                     PatchShape::FullSet6,
@@ -621,7 +737,7 @@ fn decode_state(
         return None;
     }
     let fields = read_exact_sequence(&f.store, payload).ok()?;
-    if fields.len() != 9 {
+    if fields.len() != 15 {
         return None;
     }
 
@@ -667,11 +783,41 @@ fn decode_state(
         schema,
         decode_binding(&f.store, fields[8], schema.flags.of)?,
     )?;
+    let ecx = decode_word(
+        f,
+        decode_binding(&f.store, fields[9], schema.ecx)?,
+    )?;
+    let esi = decode_word(
+        f,
+        decode_binding(&f.store, fields[10], schema.esi)?,
+    )?;
+    let edi = decode_word(
+        f,
+        decode_binding(&f.store, fields[11], schema.edi)?,
+    )?;
+    let ebp = decode_word(
+        f,
+        decode_binding(&f.store, fields[12], schema.ebp)?,
+    )?;
+    let esp = decode_word(
+        f,
+        decode_binding(&f.store, fields[13], schema.esp)?,
+    )?;
+    let eip = decode_word(
+        f,
+        decode_binding(&f.store, fields[14], schema.eip)?,
+    )?;
 
     Some(StateValue {
         eax,
         ebx,
         edx,
+        ecx,
+        esi,
+        edi,
+        ebp,
+        esp,
+        eip,
         cf,
         pf,
         af,
@@ -744,7 +890,7 @@ fn decode_state_in_store(
         return None;
     }
     let fields = read_exact_sequence(store, payload).ok()?;
-    if fields.len() != 9 {
+    if fields.len() != 15 {
         return None;
     }
 
@@ -760,6 +906,12 @@ fn decode_state_in_store(
             schema.flags.zf,
             schema.flags.sf,
             schema.flags.of,
+            schema.ecx,
+            schema.esi,
+            schema.edi,
+            schema.ebp,
+            schema.esp,
+            schema.eip,
         ])
         .map(|(field, expected)| decode_binding(store, field, expected))
         .collect::<Option<Vec<_>>>()?;
@@ -774,6 +926,12 @@ fn decode_state_in_store(
         zf: decode_flag_in_store(values[6], zero, one, schema.undefined)?,
         sf: decode_flag_in_store(values[7], zero, one, schema.undefined)?,
         of: decode_flag_in_store(values[8], zero, one, schema.undefined)?,
+        ecx: decode_word_in_store(store, zero, one, values[9])?,
+        esi: decode_word_in_store(store, zero, one, values[10])?,
+        edi: decode_word_in_store(store, zero, one, values[11])?,
+        ebp: decode_word_in_store(store, zero, one, values[12])?,
+        esp: decode_word_in_store(store, zero, one, values[13])?,
+        eip: decode_word_in_store(store, zero, one, values[14])?,
     })
 }
 
@@ -785,6 +943,12 @@ fn state_from_value(
     let eax = word_in_store(&mut f.store, f.zero, f.one, value.eax)?;
     let ebx = word_in_store(&mut f.store, f.zero, f.one, value.ebx)?;
     let edx = word_in_store(&mut f.store, f.zero, f.one, value.edx)?;
+    let ecx = word_in_store(&mut f.store, f.zero, f.one, value.ecx)?;
+    let esi = word_in_store(&mut f.store, f.zero, f.one, value.esi)?;
+    let edi = word_in_store(&mut f.store, f.zero, f.one, value.edi)?;
+    let ebp = word_in_store(&mut f.store, f.zero, f.one, value.ebp)?;
+    let esp = word_in_store(&mut f.store, f.zero, f.one, value.esp)?;
+    let eip = word_in_store(&mut f.store, f.zero, f.one, value.eip)?;
     let flag = |value: Option<u8>| -> Option<Handle> {
         match value {
             Some(0) => Some(f.zero),
@@ -805,6 +969,12 @@ fn state_from_value(
         flag(value.zf)?,
         flag(value.sf)?,
         flag(value.of)?,
+        ecx,
+        esi,
+        edi,
+        ebp,
+        esp,
+        eip,
     ))
 }
 
