@@ -60,6 +60,8 @@ for (const [label, pattern] of [
   ["M5 state observation getter", /wasm\.amemory_i386_state_(?:eax|ebx|ecx|edx|esi|edi|ebp|esp|eip|flags_|reactions|old_state_retained|atomic_scope|steady_link_delta|quiescent)/],
   ["M6b byte-memory observation getter", /wasm\.amemory_i386_memory32_(?:address|page24|offset8|write_value|before_value|after_value|old_after_value|old_root_ref|new_root_ref|reactions|links_after_load|links_final|steady_link_delta|quiescent)/],
   ["M6c word-memory observation getter", /wasm\.amemory_i386_word_memory_(?:width|address|write_value|before_value|after_value|old_after_value|old_root_ref|new_root_ref|reactions|links_after_load|links_final|steady_link_delta|atomic_scope|crosses_page|quiescent)/],
+  ["M6d FETCH observation getter", /wasm\.amemory_i386_fetch_(?:eip_before|eip_after|byte|initial_root_ref|final_root_ref|seeded_write|state_preserved|old_state_retained|atomic_scope|reactions|links_after_load|links_final|steady_link_delta|quiescent)/],
+  ["M6d STACK observation getter", /wasm\.amemory_i386_stack_(?:esp_before|esp_after|value|initial_root_ref|final_root_ref|state_preserved|old_state_retained|old_memory_retained|atomic_scope|reactions|links_after_load|links_final|steady_link_delta|quiescent)/],
 ]) {
   if (pattern.test(labPageSource)) {
     throw new Error("browser still depends on " + label);
@@ -1685,6 +1687,15 @@ Promise.all([
   if (w.amemory_i386_fetch_run(0x000000ff, 0x90, 1) !== 1) {
     throw new Error("M6d2 seeded FETCH real-WASM witness rejected");
   }
+  const fetchPayload =
+    readCurrentWitnessPayload("M6d2 seeded FETCH", "instruction-fetch");
+  if (fetchPayload.block !== "M6D2_FETCH_SEEDED" ||
+      (fetchPayload.eipBefore >>> 0) !== 0x000000ff ||
+      (fetchPayload.eipAfter >>> 0) !== 0x00000100 ||
+      (fetchPayload.byte >>> 0) !== 0x90 ||
+      (fetchPayload.seededWrite >>> 0) !== 1) {
+    throw new Error("M6d2 structured FETCH payload mismatch");
+  }
   if ((w.amemory_i386_fetch_eip_before() >>> 0) !== 0x000000ff ||
       (w.amemory_i386_fetch_eip_after() >>> 0) !== 0x00000100 ||
       (w.amemory_i386_fetch_byte() >>> 0) !== 0x90 ||
@@ -1699,6 +1710,29 @@ Promise.all([
       w.amemory_i386_fetch_reactions() === 0) {
     throw new Error("M6d2 seeded FETCH State/MemoryRoot witness failed");
   }
+  if ((fetchPayload.initialRoot >>> 0) !==
+        (w.amemory_i386_fetch_initial_root_ref() >>> 0) ||
+      (fetchPayload.finalRoot >>> 0) !==
+        (w.amemory_i386_fetch_final_root_ref() >>> 0) ||
+      (fetchPayload.statePreserved >>> 0) !==
+        (w.amemory_i386_fetch_state_preserved() >>> 0) ||
+      (fetchPayload.oldStateRetained >>> 0) !==
+        (w.amemory_i386_fetch_old_state_retained() >>> 0) ||
+      (fetchPayload.atomicScope >>> 0) !==
+        (w.amemory_i386_fetch_atomic_scope() >>> 0) ||
+      (fetchPayload.reactions >>> 0) !==
+        (w.amemory_i386_fetch_reactions() >>> 0) ||
+      (fetchPayload.linksAfterLoad >>> 0) !==
+        (w.amemory_i386_fetch_links_after_load() >>> 0) ||
+      (fetchPayload.linksFinal >>> 0) !==
+        (w.amemory_i386_fetch_links_final() >>> 0) ||
+      (fetchPayload.steadyDelta >>> 0) !==
+        (w.amemory_i386_fetch_steady_link_delta() >>> 0) ||
+      (fetchPayload.quiescent >>> 0) !==
+        (w.amemory_i386_fetch_quiescent() >>> 0)) {
+    throw new Error("M6d2 structured/getter compatibility mismatch");
+  }
+
   let fetchProof =
     inflateCompactProof(readCurrentCompactProof("M6D2_FETCH_SEEDED"));
   if (fetchProof.block !== "M6D2_FETCH_SEEDED" ||
@@ -1735,6 +1769,17 @@ Promise.all([
         (w.amemory_i386_fetch_final_root_ref() >>> 0)) {
     throw new Error("M6d2 0xffffffff -> 0 FETCH wrap failed");
   }
+  const fetchWrapPayload =
+    readCurrentWitnessPayload("M6d2 wrap FETCH", "instruction-fetch");
+  if (fetchWrapPayload.block !== "M6D2_FETCH_ZERO" ||
+      (fetchWrapPayload.eipBefore >>> 0) !== 0xffffffff ||
+      (fetchWrapPayload.eipAfter >>> 0) !== 0 ||
+      (fetchWrapPayload.byte >>> 0) !== 0 ||
+      (fetchWrapPayload.seededWrite >>> 0) !== 0 ||
+      (fetchWrapPayload.initialRoot >>> 0) !==
+        (fetchWrapPayload.finalRoot >>> 0)) {
+    throw new Error("M6d2 wrap structured payload mismatch");
+  }
   fetchProof = inflateCompactProof(readCurrentCompactProof("M6D2_FETCH_ZERO"));
   if (fetchProof.block !== "M6D2_FETCH_ZERO" ||
       !fetchProof.result.oracleMatches ||
@@ -1764,6 +1809,14 @@ Promise.all([
   if (w.amemory_i386_stack_run(0x00000103, 0x12345678) !== 1) {
     throw new Error("M6d3 PUSH32->POP32 real-WASM witness rejected");
   }
+  const stackPayload =
+    readCurrentWitnessPayload("M6d3 STACK", "stack-roundtrip");
+  if (stackPayload.block !== "M6D3_STACK_ROUNDTRIP" ||
+      (stackPayload.espBefore >>> 0) !== 0x00000103 ||
+      (stackPayload.espAfter >>> 0) !== 0x00000103 ||
+      (stackPayload.value >>> 0) !== 0x12345678) {
+    throw new Error("M6d3 structured STACK payload mismatch");
+  }
   if ((w.amemory_i386_stack_esp_before() >>> 0) !== 0x00000103 ||
       (w.amemory_i386_stack_esp_after() >>> 0) !== 0x00000103 ||
       (w.amemory_i386_stack_value() >>> 0) !== 0x12345678 ||
@@ -1778,6 +1831,31 @@ Promise.all([
       w.amemory_i386_stack_reactions() === 0) {
     throw new Error("M6d3 PUSH32->POP32 State/MemoryRoot witness failed");
   }
+  if ((stackPayload.initialRoot >>> 0) !==
+        (w.amemory_i386_stack_initial_root_ref() >>> 0) ||
+      (stackPayload.finalRoot >>> 0) !==
+        (w.amemory_i386_stack_final_root_ref() >>> 0) ||
+      (stackPayload.statePreserved >>> 0) !==
+        (w.amemory_i386_stack_state_preserved() >>> 0) ||
+      (stackPayload.oldStateRetained >>> 0) !==
+        (w.amemory_i386_stack_old_state_retained() >>> 0) ||
+      (stackPayload.oldMemoryRetained >>> 0) !==
+        (w.amemory_i386_stack_old_memory_retained() >>> 0) ||
+      (stackPayload.atomicScope >>> 0) !==
+        (w.amemory_i386_stack_atomic_scope() >>> 0) ||
+      (stackPayload.reactions >>> 0) !==
+        (w.amemory_i386_stack_reactions() >>> 0) ||
+      (stackPayload.linksAfterLoad >>> 0) !==
+        (w.amemory_i386_stack_links_after_load() >>> 0) ||
+      (stackPayload.linksFinal >>> 0) !==
+        (w.amemory_i386_stack_links_final() >>> 0) ||
+      (stackPayload.steadyDelta >>> 0) !==
+        (w.amemory_i386_stack_steady_link_delta() >>> 0) ||
+      (stackPayload.quiescent >>> 0) !==
+        (w.amemory_i386_stack_quiescent() >>> 0)) {
+    throw new Error("M6d3 structured/getter compatibility mismatch");
+  }
+
   const stackProof =
     inflateCompactProof(readCurrentCompactProof("M6D3_STACK_ROUNDTRIP"));
   if (stackProof.block !== "M6D3_STACK_ROUNDTRIP" ||
