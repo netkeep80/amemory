@@ -116,6 +116,8 @@ pub(crate) struct RadixMemoryProgram {
     pub(crate) witness: Handle,
     pub(crate) result_tag: Handle,
     pub(crate) zero_root: Handle,
+    read_result_tag: Handle,
+    write_result_tag: Handle,
     leaf_tag: Handle,
     witness_stage: Vec<Handle>,
     zero: Vec<Handle>,
@@ -149,6 +151,8 @@ impl RadixMemoryProgram {
         let witness =
             f.store.ensure_pair(witness_left, witness_right).unwrap();
         let result_tag = anchors.next(&mut f.store);
+        let read_result_tag = anchors.next(&mut f.store);
+        let write_result_tag = anchors.next(&mut f.store);
         let leaf_tag = anchors.next(&mut f.store);
 
         let mut witness_stage = Vec::with_capacity(4);
@@ -164,7 +168,12 @@ impl RadixMemoryProgram {
         let mut validate_tag = Vec::with_capacity(WIDTH);
 
         for _ in 0..=WIDTH {
-            zero.push(anchors.next(&mut f.store));
+            let descriptor = anchors.next(&mut f.store);
+            zero.push(
+                f.store
+                    .ensure_start_self_closed(descriptor)
+                    .unwrap(),
+            );
         }
         for slot in branch_tag.iter_mut().skip(1) {
             *slot = anchors.next(&mut f.store);
@@ -194,6 +203,8 @@ impl RadixMemoryProgram {
             witness,
             result_tag,
             zero_root: zero[WIDTH],
+            read_result_tag,
+            write_result_tag,
             leaf_tag,
             witness_stage,
             zero,
@@ -378,7 +389,9 @@ impl RadixMemoryProgram {
             let leaf =
                 byte_leaf(&mut f.store, self.leaf_tag, byte);
             let before = f.store.ensure_pair(caller, leaf).unwrap();
-            let after = f.store.ensure_pair(k, byte).unwrap();
+            let result =
+                f.store.ensure_pair(self.read_result_tag, byte).unwrap();
+            let after = f.store.ensure_pair(k, result).unwrap();
             let (_, admission) = define_bundle_rule(
                 &mut f.store,
                 f.theory,
@@ -405,8 +418,11 @@ impl RadixMemoryProgram {
                 .store
                 .ensure_pair(caller, self.zero[0])
                 .unwrap();
-            let after =
-                f.store.ensure_pair(k, self.byte_zero).unwrap();
+            let result = f
+                .store
+                .ensure_pair(self.read_result_tag, self.byte_zero)
+                .unwrap();
+            let after = f.store.ensure_pair(k, result).unwrap();
             let (_, admission) = define_bundle_rule(
                 &mut f.store,
                 f.theory,
@@ -446,7 +462,12 @@ impl RadixMemoryProgram {
                 self.validate_tag[0],
                 &[k, root, offset],
             );
-            let after = f.store.ensure_pair(caller, byte).unwrap();
+            let validation = f
+                .store
+                .ensure_pair(self.validate_tag[0], byte)
+                .unwrap();
+            let after =
+                f.store.ensure_pair(caller, validation).unwrap();
             let (_, admission) = define_bundle_rule(
                 &mut f.store,
                 f.theory,
@@ -483,8 +504,12 @@ impl RadixMemoryProgram {
                 );
                 let tail =
                     seq_with_head(&mut f.store, bit, &rest);
+                let validation = f
+                    .store
+                    .ensure_pair(self.validate_tag[position], tail)
+                    .unwrap();
                 let before =
-                    f.store.ensure_pair(caller, tail).unwrap();
+                    f.store.ensure_pair(caller, validation).unwrap();
 
                 let mut validated =
                     Vec::with_capacity(prefix.len() + 1);
@@ -509,8 +534,15 @@ impl RadixMemoryProgram {
                             &rest,
                         )
                         .unwrap();
+                    let next_validation = f
+                        .store
+                        .ensure_pair(
+                            self.validate_tag[position + 1],
+                            next_tail,
+                        )
+                        .unwrap();
                     f.store
-                        .ensure_pair(next_caller, next_tail)
+                        .ensure_pair(next_caller, next_validation)
                         .unwrap()
                 } else {
                     let byte = materialize_exact_sequence(
@@ -737,8 +769,12 @@ impl RadixMemoryProgram {
                 self.up_tag[WIDTH],
                 &[k, path_seq],
             );
+            let up_value = f
+                .store
+                .ensure_pair(self.up_tag[WIDTH], new_leaf)
+                .unwrap();
             let after =
-                f.store.ensure_pair(up_caller, new_leaf).unwrap();
+                f.store.ensure_pair(up_caller, up_value).unwrap();
 
             let mut roles = Vec::with_capacity(WIDTH + 3);
             roles.extend_from_slice(&[k, byte, old_byte]);
@@ -783,8 +819,12 @@ impl RadixMemoryProgram {
                 self.up_tag[WIDTH],
                 &[k, path_seq],
             );
+            let up_value = f
+                .store
+                .ensure_pair(self.up_tag[WIDTH], new_leaf)
+                .unwrap();
             let after =
-                f.store.ensure_pair(up_caller, new_leaf).unwrap();
+                f.store.ensure_pair(up_caller, up_value).unwrap();
 
             let mut roles = Vec::with_capacity(WIDTH + 2);
             roles.extend_from_slice(&[k, byte]);
@@ -831,8 +871,12 @@ impl RadixMemoryProgram {
                     self.up_tag[level],
                     &[k, path_seq],
                 );
+                let up_value = f
+                    .store
+                    .ensure_pair(self.up_tag[level], child)
+                    .unwrap();
                 let before =
-                    f.store.ensure_pair(caller, child).unwrap();
+                    f.store.ensure_pair(caller, up_value).unwrap();
 
                 let node = if bit == f.zero {
                     radix_branch(
@@ -862,11 +906,19 @@ impl RadixMemoryProgram {
                         self.up_tag[level - 1],
                         &[k, next_path],
                     );
+                    let next_up_value = f
+                        .store
+                        .ensure_pair(self.up_tag[level - 1], node)
+                        .unwrap();
                     f.store
-                        .ensure_pair(next_caller, node)
+                        .ensure_pair(next_caller, next_up_value)
                         .unwrap()
                 } else {
-                    f.store.ensure_pair(k, node).unwrap()
+                    let result = f
+                        .store
+                        .ensure_pair(self.write_result_tag, node)
+                        .unwrap();
+                    f.store.ensure_pair(k, result).unwrap()
                 };
 
                 let mut roles =
@@ -949,8 +1001,12 @@ impl RadixMemoryProgram {
                 self.witness_stage[0],
                 &[k, root, offset, byte],
             );
+            let read_result = f
+                .store
+                .ensure_pair(self.read_result_tag, before_byte)
+                .unwrap();
             let before =
-                f.store.ensure_pair(caller, before_byte).unwrap();
+                f.store.ensure_pair(caller, read_result).unwrap();
 
             let next = frame(
                 &mut f.store,
@@ -976,7 +1032,7 @@ impl RadixMemoryProgram {
             );
             index_rule_for(
                 &mut f.store,
-                &[self.witness_stage[0]],
+                &[self.read_result_tag],
                 admission,
             );
         }
@@ -994,8 +1050,12 @@ impl RadixMemoryProgram {
                 self.witness_stage[1],
                 &[k, root, offset, byte, before_byte],
             );
+            let write_result = f
+                .store
+                .ensure_pair(self.write_result_tag, new_root)
+                .unwrap();
             let before =
-                f.store.ensure_pair(caller, new_root).unwrap();
+                f.store.ensure_pair(caller, write_result).unwrap();
 
             let next = frame(
                 &mut f.store,
@@ -1021,7 +1081,7 @@ impl RadixMemoryProgram {
             );
             index_rule_for(
                 &mut f.store,
-                &[self.witness_stage[1]],
+                &[self.write_result_tag],
                 admission,
             );
         }
@@ -1040,8 +1100,12 @@ impl RadixMemoryProgram {
                 self.witness_stage[2],
                 &[k, root, offset, byte, before_byte, new_root],
             );
+            let read_result = f
+                .store
+                .ensure_pair(self.read_result_tag, after_byte)
+                .unwrap();
             let before =
-                f.store.ensure_pair(caller, after_byte).unwrap();
+                f.store.ensure_pair(caller, read_result).unwrap();
 
             let next = frame(
                 &mut f.store,
@@ -1083,7 +1147,7 @@ impl RadixMemoryProgram {
             );
             index_rule_for(
                 &mut f.store,
-                &[self.witness_stage[2]],
+                &[self.read_result_tag],
                 admission,
             );
         }
@@ -1112,8 +1176,12 @@ impl RadixMemoryProgram {
                     after_byte,
                 ],
             );
+            let read_result = f
+                .store
+                .ensure_pair(self.read_result_tag, old_after)
+                .unwrap();
             let before =
-                f.store.ensure_pair(caller, old_after).unwrap();
+                f.store.ensure_pair(caller, read_result).unwrap();
 
             let result_sequence = materialize_exact_sequence(
                 &mut f.store,
@@ -1150,7 +1218,7 @@ impl RadixMemoryProgram {
             );
             index_rule_for(
                 &mut f.store,
-                &[self.witness_stage[3]],
+                &[self.read_result_tag],
                 admission,
             );
         }
@@ -1483,7 +1551,11 @@ mod tests {
         offset: u8,
     ) -> Option<u8> {
         let offset = word8(f, offset);
-        let value = invoke(f, p.read, &[root, offset])?;
+        let envelope = invoke(f, p.read, &[root, offset])?;
+        let (tag, value) = f.store.poles(envelope).ok()?;
+        if tag != p.read_result_tag {
+            return None;
+        }
         decode_word8(f, value)
     }
 
@@ -1496,7 +1568,9 @@ mod tests {
     ) -> Option<Handle> {
         let offset = word8(f, offset);
         let byte = word8(f, value);
-        invoke(f, p.write, &[root, offset, byte])
+        let envelope = invoke(f, p.write, &[root, offset, byte])?;
+        let (tag, new_root) = f.store.poles(envelope).ok()?;
+        (tag == p.write_result_tag).then_some(new_root)
     }
 
     #[test]
@@ -1582,7 +1656,10 @@ mod tests {
         }
         assert!(f.engine.quiescent());
         let first_final = f.engine.current()[0];
-        let (_, first_root) = f.store.poles(first_final).unwrap();
+        let (_, first_envelope) = f.store.poles(first_final).unwrap();
+        let (first_tag, first_root) =
+            f.store.poles(first_envelope).unwrap();
+        assert_eq!(first_tag, p.write_result_tag);
         assert_eq!(first_root, root1);
 
         let links = f.store.link_count();
@@ -1594,7 +1671,10 @@ mod tests {
             }
         }
         let second_final = f.engine.current()[0];
-        let (_, second_root) = f.store.poles(second_final).unwrap();
+        let (_, second_envelope) = f.store.poles(second_final).unwrap();
+        let (second_tag, second_root) =
+            f.store.poles(second_envelope).unwrap();
+        assert_eq!(second_tag, p.write_result_tag);
         assert_eq!(second_root, root1);
         assert_eq!(f.store.link_count(), links);
     }
