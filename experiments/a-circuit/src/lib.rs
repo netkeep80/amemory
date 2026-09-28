@@ -1,4 +1,5 @@
 mod memory_n;
+mod memory32_n;
 mod architectural_state_n;
 mod flag_patch;
 mod flags_n;
