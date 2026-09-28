@@ -582,6 +582,264 @@ function setupArchitecturalStateWitness(section, wasm) {
   runEcx.addEventListener("click", () => executeStateWitness("ecx"));
 }
 
+
+function setupM6dWitness(section, wasm) {
+  const shell = section.querySelector("#lab-m6d-witness");
+  const status = section.querySelector("#lab-m6d-status");
+  const result = section.querySelector("#lab-m6d-result");
+  const proofTarget = section.querySelector("#lab-m6d-proof");
+  const runFetch = section.querySelector("#lab-run-fetch");
+  const runStack = section.querySelector("#lab-run-stack");
+  const fetchEipInput = section.querySelector("#lab-fetch-eip");
+  const fetchByteInput = section.querySelector("#lab-fetch-byte");
+  const stackEspInput = section.querySelector("#lab-stack-esp");
+  const stackValueInput = section.querySelector("#lab-stack-value");
+
+  if (!shell || !status || !result || !proofTarget ||
+      !runFetch || !runStack || !fetchEipInput || !fetchByteInput ||
+      !stackEspInput || !stackValueInput) {
+    return;
+  }
+
+  const hasFetch =
+    wasm.amemory_i386_fetch_probe?.() === 0x60d &&
+    typeof wasm.amemory_i386_fetch_run === "function";
+  const hasStack =
+    wasm.amemory_i386_stack_probe?.() === 0x60e &&
+    typeof wasm.amemory_i386_stack_run === "function";
+  if (!hasFetch || !hasStack) {
+    status.textContent =
+      "M6d State+MemoryRoot ABI is incomplete; refusing to fake FETCH/STACK.";
+    status.className = "notice lab-error";
+    runFetch.disabled = !hasFetch;
+    runStack.disabled = !hasStack;
+    return;
+  }
+
+  status.textContent =
+    "M6d ready: real WASM FETCH and PUSH32→POP32 execute through the compact one-A-memory proof path.";
+  status.className = "notice";
+
+  const validateProof = (proof, expectedBlock, reactions) => {
+    if (!proof || proof.schemaVersion !== 4 ||
+        proof.block !== expectedBlock ||
+        !proof.result.oracleMatches ||
+        proof.result.identicalRerunLinkDelta !== 0 ||
+        !proof.execute.finalQuiescent ||
+        proof.execute.activeReactionCount !== reactions) {
+      throw new Error(expectedBlock + " compact structural proof mismatch");
+    }
+    const memoryId = proof.load.memoryInstanceId;
+    if (!memoryId ||
+        proof.execute.memoryInstanceId !== memoryId ||
+        proof.result.memoryInstanceId !== memoryId ||
+        !proof.execute.reactions.every(
+          (step) => step.memoryInstanceId === memoryId &&
+            step.scopeBefore.length === 1 &&
+            step.scopeAfter.length === 1
+        )) {
+      throw new Error(expectedBlock + " is not a one-memory / one-member Scope proof");
+    }
+    return memoryId;
+  };
+
+  runFetch.addEventListener("click", async () => {
+    try {
+      const eip = parseWord(fetchEipInput.value);
+      const byte = parseWord(fetchByteInput.value);
+      if (byte > 0xff) throw new Error("Instruction Byte8 must fit 0..255");
+
+      status.textContent =
+        "Executing structural WRITE8 seed → State(EIP,MemoryRoot) FETCH → atomic State′…";
+      status.className = "notice";
+      result.innerHTML = "";
+      proofTarget.innerHTML = "";
+
+      if (wasm.amemory_i386_fetch_run(eip, byte, 1) !== 1) {
+        throw new Error("M6d2 real WASM FETCH rejected the inputs");
+      }
+      const observed = {
+        eipBefore: wasm.amemory_i386_fetch_eip_before() >>> 0,
+        eipAfter: wasm.amemory_i386_fetch_eip_after() >>> 0,
+        byte: wasm.amemory_i386_fetch_byte() >>> 0,
+        initialRoot: wasm.amemory_i386_fetch_initial_root_ref() >>> 0,
+        finalRoot: wasm.amemory_i386_fetch_final_root_ref() >>> 0,
+        seededWrite: wasm.amemory_i386_fetch_seeded_write() >>> 0,
+        statePreserved: wasm.amemory_i386_fetch_state_preserved() >>> 0,
+        oldStateRetained: wasm.amemory_i386_fetch_old_state_retained() >>> 0,
+        atomicScope: wasm.amemory_i386_fetch_atomic_scope() >>> 0,
+        reactions: wasm.amemory_i386_fetch_reactions() >>> 0,
+        linksAfterLoad: wasm.amemory_i386_fetch_links_after_load() >>> 0,
+        linksFinal: wasm.amemory_i386_fetch_links_final() >>> 0,
+        steadyDelta: wasm.amemory_i386_fetch_steady_link_delta() >>> 0,
+        quiescent: wasm.amemory_i386_fetch_quiescent() >>> 0,
+      };
+      const expectedEip = (eip + 1) >>> 0;
+      const expectedRootChanged = byte !== 0;
+      if (observed.eipBefore !== eip ||
+          observed.eipAfter !== expectedEip ||
+          observed.byte !== byte ||
+          observed.seededWrite !== 1 ||
+          observed.statePreserved !== 1 ||
+          observed.oldStateRetained !== 1 ||
+          observed.atomicScope !== 1 ||
+          observed.steadyDelta !== 0 ||
+          observed.quiescent !== 1 ||
+          observed.reactions === 0 ||
+          (observed.initialRoot !== observed.finalRoot) !== expectedRootChanged) {
+        throw new Error("M6d2 FETCH State/MemoryRoot/currentness witness failed");
+      }
+
+      const { proof, transport } = collectBrowserProof(wasm);
+      const memoryId = validateProof(
+        proof,
+        "M6D2_FETCH_SEEDED",
+        observed.reactions
+      );
+      if ((proof.result.decodedValue >>> 0) !== byte ||
+          (proof.result.decodedValueHi >>> 0) !== expectedEip ||
+          observed.linksAfterLoad !== proof.load.linksAfterLoad ||
+          observed.linksFinal !== proof.result.linksFinal) {
+        throw new Error("M6d2 FETCH WASM/proof observation mismatch");
+      }
+
+      result.innerHTML = `
+        <div class="lab-state-grid">
+          <div class="lab-state-snapshot">
+            <h4>Stateₜ / seeded memory</h4>
+            <div class="lab-state-registers">
+              <code>EIP = ${hex32(observed.eipBefore)}</code>
+              <code>seed Byte8 = 0x${byte.toString(16).padStart(2, "0")}</code>
+              <code>pre-seed root = ${escapeHtml(memoryId)}:L${observed.initialRoot}</code>
+              <code>fetch root = ${escapeHtml(memoryId)}:L${observed.finalRoot}</code>
+            </div>
+            <p class="lab-state-note">The optional structural WRITE8 prepares the instruction byte in the same A-memory. FETCH itself carries that MemoryRoot into State′ while advancing EIP.</p>
+          </div>
+          <div class="lab-state-snapshot">
+            <h4>FETCH result / Stateₜ₊₁</h4>
+            <div class="lab-state-registers">
+              <code>Byte8 = 0x${observed.byte.toString(16).padStart(2, "0")}</code>
+              <code>EIP′ = ${hex32(observed.eipAfter)}</code>
+              <code>architecture preserved = YES</code>
+              <code>old State retained = YES</code>
+            </div>
+          </div>
+        </div>
+        <div class="lab-metrics">
+          <div class="lab-metric"><small>Structural reactions</small><strong>${observed.reactions}</strong></div>
+          <div class="lab-metric"><small>One-member Scope</small><strong>YES</strong></div>
+          <div class="lab-metric"><small>Final quiescence</small><strong>YES</strong></div>
+          <div class="lab-metric"><small>Identical rerun ΔLinks</small><strong>${observed.steadyDelta}</strong></div>
+          <div class="lab-metric"><small>Compact proof</small><strong>schema-v4</strong></div>
+        </div>`;
+      await renderProofPipeline(proofTarget, proof);
+      status.textContent =
+        "M6d2 FETCH PASS: real WASM advanced EIP, returned Byte8 and atomically published State′ in one A-memory; " +
+        transport + " proof rendered below.";
+      status.className = "notice lab-ok";
+    } catch (error) {
+      status.textContent = error.message;
+      status.className = "notice lab-error";
+    }
+  });
+
+  runStack.addEventListener("click", async () => {
+    try {
+      const esp = parseWord(stackEspInput.value);
+      const value = parseWord(stackValueInput.value);
+
+      status.textContent =
+        "Executing structural PUSH32 → immutable MemoryRoot′ → POP32 → atomic State′…";
+      status.className = "notice";
+      result.innerHTML = "";
+      proofTarget.innerHTML = "";
+
+      if (wasm.amemory_i386_stack_run(esp, value) !== 1) {
+        throw new Error("M6d3 real WASM PUSH32→POP32 rejected the inputs");
+      }
+      const observed = {
+        espBefore: wasm.amemory_i386_stack_esp_before() >>> 0,
+        espAfter: wasm.amemory_i386_stack_esp_after() >>> 0,
+        value: wasm.amemory_i386_stack_value() >>> 0,
+        initialRoot: wasm.amemory_i386_stack_initial_root_ref() >>> 0,
+        finalRoot: wasm.amemory_i386_stack_final_root_ref() >>> 0,
+        statePreserved: wasm.amemory_i386_stack_state_preserved() >>> 0,
+        oldStateRetained: wasm.amemory_i386_stack_old_state_retained() >>> 0,
+        oldMemoryRetained: wasm.amemory_i386_stack_old_memory_retained() >>> 0,
+        atomicScope: wasm.amemory_i386_stack_atomic_scope() >>> 0,
+        reactions: wasm.amemory_i386_stack_reactions() >>> 0,
+        linksAfterLoad: wasm.amemory_i386_stack_links_after_load() >>> 0,
+        linksFinal: wasm.amemory_i386_stack_links_final() >>> 0,
+        steadyDelta: wasm.amemory_i386_stack_steady_link_delta() >>> 0,
+        quiescent: wasm.amemory_i386_stack_quiescent() >>> 0,
+      };
+      if (observed.espBefore !== esp ||
+          observed.espAfter !== esp ||
+          observed.value !== value ||
+          observed.initialRoot === observed.finalRoot ||
+          observed.statePreserved !== 1 ||
+          observed.oldStateRetained !== 1 ||
+          observed.oldMemoryRetained !== 1 ||
+          observed.atomicScope !== 1 ||
+          observed.steadyDelta !== 0 ||
+          observed.quiescent !== 1 ||
+          observed.reactions === 0) {
+        throw new Error("M6d3 stack State/MemoryRoot/currentness witness failed");
+      }
+
+      const { proof, transport } = collectBrowserProof(wasm);
+      const memoryId = validateProof(
+        proof,
+        "M6D3_STACK_ROUNDTRIP",
+        observed.reactions
+      );
+      if ((proof.result.decodedValue >>> 0) !== value ||
+          (proof.result.decodedValueHi >>> 0) !== esp ||
+          observed.linksAfterLoad !== proof.load.linksAfterLoad ||
+          observed.linksFinal !== proof.result.linksFinal) {
+        throw new Error("M6d3 stack WASM/proof observation mismatch");
+      }
+
+      result.innerHTML = `
+        <div class="lab-state-grid">
+          <div class="lab-state-snapshot">
+            <h4>Before PUSH32</h4>
+            <div class="lab-state-registers">
+              <code>ESP = ${hex32(observed.espBefore)}</code>
+              <code>Word32 = ${hex32(value)}</code>
+              <code>MemoryRoot = ${escapeHtml(memoryId)}:L${observed.initialRoot}</code>
+            </div>
+            <p class="lab-state-note">PUSH32 publishes only the completed ESP-4 + WRITE32 successor. The old State and old MemoryRoot remain physically valid.</p>
+          </div>
+          <div class="lab-state-snapshot">
+            <h4>After PUSH32 → POP32</h4>
+            <div class="lab-state-registers">
+              <code>POP32 value = ${hex32(observed.value)}</code>
+              <code>ESP restored = ${hex32(observed.espAfter)}</code>
+              <code>MemoryRoot′ = ${escapeHtml(memoryId)}:L${observed.finalRoot}</code>
+              <code>old State / root retained = YES</code>
+            </div>
+          </div>
+        </div>
+        <div class="lab-metrics">
+          <div class="lab-metric"><small>Structural reactions</small><strong>${observed.reactions}</strong></div>
+          <div class="lab-metric"><small>One-member Scope</small><strong>YES</strong></div>
+          <div class="lab-metric"><small>Old MemoryRoot retained</small><strong>YES</strong></div>
+          <div class="lab-metric"><small>Identical rerun ΔLinks</small><strong>${observed.steadyDelta}</strong></div>
+          <div class="lab-metric"><small>Compact proof</small><strong>schema-v4</strong></div>
+        </div>`;
+      await renderProofPipeline(proofTarget, proof);
+      status.textContent =
+        "M6d3 STACK PASS: PUSH32→POP32 restored ESP/value while preserving the immutable memory history in one A-memory; " +
+        transport + " proof rendered below.";
+      status.className = "notice lab-ok";
+    } catch (error) {
+      status.textContent = error.message;
+      status.className = "notice lab-error";
+    }
+  });
+}
+
 function setupMemoryWitness(section, wasm) {
   const shell = section.querySelector("#lab-memory-witness");
   const status = section.querySelector("#lab-memory-status");
@@ -1148,6 +1406,7 @@ async function bootLab() {
   if (!section) return;
   setupArchitecturalStateWitness(section, wasm);
   setupMemoryWitness(section, wasm);
+  setupM6dWitness(section, wasm);
   const byId = new Map(registry.blocks.map((block) => [block.id, block]));
   const selectBlock = (id) => {
     const block = byId.get(id);
