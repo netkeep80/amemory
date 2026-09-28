@@ -318,6 +318,8 @@ jobs:
           fi
 
       - name: Build the real A-Circuit WASM
+        env:
+          CARGO_TARGET_DIR: experiments/a-circuit/target
         run: |
           cargo +1.98.1 build \
             --release \

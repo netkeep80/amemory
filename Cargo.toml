@@ -1,0 +1,19 @@
+[workspace]
+resolver = "2"
+members = [
+  "experiments/browser-accelerator/rust",
+  "experiments/optimized-cpu-rust",
+  "experiments/a-circuit",
+]
+
+[workspace.dependencies]
+serde = "=1.0.229"
+serde_json = "=1.0.151"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+
+[profile.release.package.amemory-browser-probe]
+opt-level = "s"

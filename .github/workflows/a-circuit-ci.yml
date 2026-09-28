@@ -36,6 +36,27 @@ jobs:
       - name: Install pinned Rust toolchain once
         run: rustup toolchain install 1.98.1 --profile minimal
 
+      - name: Workspace dependency direction and generated lock
+        run: |
+          set -euo pipefail
+          cargo +1.98.1 generate-lockfile
+          echo "=== GENERATED_CARGO_LOCK_BEGIN ==="
+          cat Cargo.lock
+          echo "=== GENERATED_CARGO_LOCK_END ==="
+          cargo +1.98.1 metadata --format-version 1 --no-deps > /tmp/workspace-metadata.json
+          python3 - <<'PY'
+          import json
+          data = json.load(open("/tmp/workspace-metadata.json", "r", encoding="utf-8"))
+          packages = {p["name"]: p for p in data["packages"]}
+          expected = {"amemory-browser-probe", "amemory-optimized-cpu-probe", "amemory-a-circuit"}
+          assert expected.issubset(packages), packages.keys()
+          for owner in ("amemory-optimized-cpu-probe", "amemory-a-circuit"):
+              deps = {d["name"]: d.get("kind") for d in packages[owner]["dependencies"]}
+              assert deps.get("amemory-browser-probe") == "dev", (owner, deps)
+          print("WORKSPACE_DEPENDENCY_DIRECTION=PASS")
+          PY
+          cargo +1.98.1 test --workspace --no-run
+
       - name: C0-C1 semantic witnesses
         run: |
           cargo +1.98.1 test \
