@@ -18,6 +18,8 @@ for (const required of [
   "setupArchitecturalStateWitness",
   "amemory_i386_state_run_add32",
   "amemory_i386_state_run_mul32",
+  "amemory_i386_state_run_add_ecx",
+  "Full GPR",
   "EDX:EAX",
   "Stateₜ₊₁",
 ]) {
@@ -724,6 +726,37 @@ Promise.all([
       proofMetrics(proof, registryBlock)
     );
   };
+  const readArchitecturalState = (suffix) => {
+    const call = (name) => {
+      const fn = w["amemory_i386_state_" + name + "_" + suffix];
+      if (typeof fn !== "function") {
+        throw new Error("missing M5 state getter " + name + "_" + suffix);
+      }
+      return fn() >>> 0;
+    };
+    return {
+      eax: call("eax"),
+      ebx: call("ebx"),
+      ecx: call("ecx"),
+      edx: call("edx"),
+      esi: call("esi"),
+      edi: call("edi"),
+      ebp: call("ebp"),
+      esp: call("esp"),
+      eip: call("eip"),
+    };
+  };
+  const assertStateEquals = (actual, expected, label) => {
+    for (const [name, value] of Object.entries(expected)) {
+      if ((actual[name] >>> 0) !== (value >>> 0)) {
+        throw new Error(
+          label + " " + name.toUpperCase() + " mismatch: " +
+          actual[name].toString(16) + " != " + value.toString(16)
+        );
+      }
+    }
+  };
+
 
   // M5a is deliberately not a new ALU opcode. It is a dedicated
   // architectural-state witness composed from the real ADD32 structural
@@ -735,14 +768,28 @@ Promise.all([
   if (w.amemory_i386_state_run_add32() !== 1) {
     throw new Error("M5a real ADD32 state transition rejected");
   }
-  if ((w.amemory_i386_state_eax_before() >>> 0) !== 0xffffffff ||
-      (w.amemory_i386_state_ebx_before() >>> 0) !== 0x11223344 ||
-      (w.amemory_i386_state_edx_before() >>> 0) !== 0x55667788 ||
-      (w.amemory_i386_state_eax_after() >>> 0) !== 0 ||
-      (w.amemory_i386_state_ebx_after() >>> 0) !== 0x11223344 ||
-      (w.amemory_i386_state_edx_after() >>> 0) !== 0x55667788) {
-    throw new Error("M5a structural register-state transition mismatch");
-  }
+  assertStateEquals(readArchitecturalState("before"), {
+    eax: 0xffffffff,
+    ebx: 0x11223344,
+    ecx: 0x01020304,
+    edx: 0x55667788,
+    esi: 0x11112222,
+    edi: 0x33334444,
+    ebp: 0x55556666,
+    esp: 0x77778888,
+    eip: 0x00401000,
+  }, "M5a before");
+  assertStateEquals(readArchitecturalState("after"), {
+    eax: 0,
+    ebx: 0x11223344,
+    ecx: 0x01020304,
+    edx: 0x55667788,
+    esi: 0x11112222,
+    edi: 0x33334444,
+    ebp: 0x55556666,
+    esp: 0x77778888,
+    eip: 0x00401000,
+  }, "M5a after");
   if ((w.amemory_i386_state_flags_defined_mask() >>> 0) !== 0x000008d5 ||
       (w.amemory_i386_state_flags_value_mask() >>> 0) !== 0x00000055 ||
       (w.amemory_i386_state_flags_undefined_mask() >>> 0) !== 0) {
@@ -852,14 +899,28 @@ Promise.all([
   if (w.amemory_i386_state_run_mul32() !== 1) {
     throw new Error("M5b real MUL32 state transition rejected");
   }
-  if ((w.amemory_i386_state_eax_before() >>> 0) !== 0xffffffff ||
-      (w.amemory_i386_state_edx_before() >>> 0) !== 0xa5a55a5a ||
-      (w.amemory_i386_state_ebx_before() >>> 0) !== 0x11223344 ||
-      (w.amemory_i386_state_eax_after() >>> 0) !== 0xfffffffe ||
-      (w.amemory_i386_state_edx_after() >>> 0) !== 0x00000001 ||
-      (w.amemory_i386_state_ebx_after() >>> 0) !== 0x11223344) {
-    throw new Error("M5b EDX:EAX structural state transition mismatch");
-  }
+  assertStateEquals(readArchitecturalState("before"), {
+    eax: 0xffffffff,
+    ebx: 0x11223344,
+    ecx: 0x01020304,
+    edx: 0xa5a55a5a,
+    esi: 0x11112222,
+    edi: 0x33334444,
+    ebp: 0x55556666,
+    esp: 0x77778888,
+    eip: 0x00401000,
+  }, "M5b before");
+  assertStateEquals(readArchitecturalState("after"), {
+    eax: 0xfffffffe,
+    ebx: 0x11223344,
+    ecx: 0x01020304,
+    edx: 0x00000001,
+    esi: 0x11112222,
+    edi: 0x33334444,
+    ebp: 0x55556666,
+    esp: 0x77778888,
+    eip: 0x00401000,
+  }, "M5b after");
   if ((w.amemory_i386_state_flags_defined_mask() >>> 0) !== 0x00000801 ||
       (w.amemory_i386_state_flags_value_mask() >>> 0) !== 0x00000801 ||
       (w.amemory_i386_state_flags_undefined_mask() >>> 0) !== 0x000000d4) {
@@ -964,6 +1025,122 @@ Promise.all([
     : 0;
   if (wideFinalHandle <= wideStateProof.load.linksAfterLoad) {
     throw new Error("M5b successor was not materialized at runtime");
+  }
+
+  // M5c: the same real ADD effect targets ECX in a complete
+  // GPR+EIP state. EIP is present and preserved, not an ordinary ALU target.
+  if (typeof w.amemory_i386_state_full_probe !== "function" ||
+      w.amemory_i386_state_full_probe() !== 0x50c) {
+    throw new Error("M5c full-state WASM probe missing");
+  }
+  if (w.amemory_i386_state_run_add_ecx() !== 1) {
+    throw new Error("M5c real ADD->ECX state transition rejected");
+  }
+  assertStateEquals(readArchitecturalState("before"), {
+    eax: 0x10203040,
+    ebx: 0x11223344,
+    ecx: 0xffffffff,
+    edx: 0x55667788,
+    esi: 0x11112222,
+    edi: 0x33334444,
+    ebp: 0x55556666,
+    esp: 0x77778888,
+    eip: 0x00401000,
+  }, "M5c before");
+  assertStateEquals(readArchitecturalState("after"), {
+    eax: 0x10203040,
+    ebx: 0x11223344,
+    ecx: 0,
+    edx: 0x55667788,
+    esi: 0x11112222,
+    edi: 0x33334444,
+    ebp: 0x55556666,
+    esp: 0x77778888,
+    eip: 0x00401000,
+  }, "M5c after");
+  if ((w.amemory_i386_state_flags_defined_mask() >>> 0) !== 0x000008d5 ||
+      (w.amemory_i386_state_flags_value_mask() >>> 0) !== 0x00000055 ||
+      (w.amemory_i386_state_flags_undefined_mask() >>> 0) !== 0 ||
+      w.amemory_i386_state_old_state_retained() !== 1 ||
+      w.amemory_i386_state_atomic_scope() !== 1 ||
+      w.amemory_i386_state_steady_link_delta() !== 0 ||
+      w.amemory_i386_state_quiescent() !== 1) {
+    throw new Error("M5c flags/currentness/atomicity witness failed");
+  }
+
+  const fullStateProof =
+    inflateCompactProof(readCurrentCompactProof("M5C_STATE_ADD_ECX"));
+  if (fullStateProof.block !== "M5C_STATE_ADD_ECX" ||
+      !fullStateProof.result.oracleMatches ||
+      (fullStateProof.result.decodedValue >>> 0) !== 0 ||
+      (fullStateProof.result.decodedValueHi >>> 0) !== 0x00401000 ||
+      fullStateProof.result.identicalRerunLinkDelta !== 0) {
+    throw new Error("M5c compact structural proof result mismatch");
+  }
+  const fullMemoryId = fullStateProof.load.memoryInstanceId;
+  if (!fullMemoryId ||
+      fullStateProof.execute.memoryInstanceId !== fullMemoryId ||
+      fullStateProof.result.memoryInstanceId !== fullMemoryId ||
+      !fullStateProof.execute.reactions.every(
+        (step) => step.memoryInstanceId === fullMemoryId &&
+          step.scopeBefore.length === 1 &&
+          step.scopeAfter.length === 1
+      )) {
+    throw new Error("M5c full-state proof is not one-memory/atomic");
+  }
+  const fullRoles = new Map(
+    fullStateProof.prepare.semanticRoots.map((root) => [root.role, root])
+  );
+  for (const role of [
+    "function.effect.arithmetic",
+    "state.schema.tag",
+    "state.apply.frame_tag",
+    "state.register.eax",
+    "state.register.ebx",
+    "state.register.ecx",
+    "state.register.edx",
+    "state.register.esi",
+    "state.register.edi",
+    "state.register.ebp",
+    "state.register.esp",
+    "state.eip",
+    "state.before",
+    "state.target",
+    "state.continuation",
+    "result.alu_effect_tag",
+    "scope.initial",
+    "context.result",
+  ]) {
+    if (!fullRoles.has(role)) {
+      throw new Error("M5c prepared Aset missing semantic root " + role);
+    }
+  }
+  if (fullRoles.has("state.after")) {
+    throw new Error("M5c host/preparation injected a successor state");
+  }
+  if (fullRoles.get("state.target").carrierRef !==
+        fullRoles.get("state.register.ecx").carrierRef ||
+      fullRoles.get("state.target").carrierRef ===
+        fullRoles.get("state.eip").carrierRef) {
+    throw new Error("M5c target is not structural ECX or aliases EIP");
+  }
+  const fullBeforeRef = fullRoles.get("state.before").carrierRef;
+  if (!fullStateProof.result.visualLinks.some(
+    (link) => link.key === fullMemoryId + ":L" + fullBeforeRef
+  )) {
+    throw new Error("M5c old full State was not retained physically");
+  }
+  const fullActive = fullStateProof.execute.reactions.filter(
+    (step) => !step.quiescent
+  );
+  const fullFinalScope =
+    fullActive[fullActive.length - 1]?.scopeAfter?.[0];
+  const fullFinalHandle = typeof fullFinalScope === "string" &&
+      /^L\d+$/.test(fullFinalScope)
+    ? Number(fullFinalScope.slice(1))
+    : 0;
+  if (fullFinalHandle <= fullStateProof.load.linksAfterLoad) {
+    throw new Error("M5c successor was not materialized at runtime");
   }
 
   // Real WASM execution smoke: composed structural MUX1.
