@@ -84,28 +84,35 @@ fn storage_scale(size: usize, probes: usize) {
     let intrusive_root_started = Instant::now();
     let mut intrusive_root = 0u32;
     for _ in 0..probes {
-        intrusive_root = intrusive.start_heads()[ROOT_HANDLE as usize];
+        let pole = black_box(ROOT_HANDLE);
+        intrusive_root = intrusive.start_heads()[pole as usize];
         black_box(intrusive_root);
     }
     let intrusive_root_elapsed = intrusive_root_started.elapsed();
 
-    let membership_target =
-        ((store.link_count() + 1) / 2).max(1) as u32;
-    assert_eq!(store.poles(membership_target).unwrap().0, ROOT_HANDLE);
     let membership_probes =
         probes.min((40_000_000usize / store.link_count().max(1)).max(4));
+    let membership_target = |probe: usize| -> u32 {
+        let count = store.link_count() as u64;
+        1 + (((probe as u64)
+            .wrapping_mul(2_654_435_761)
+            .wrapping_add(count / 2))
+            % count) as u32)
+    };
 
     let intrusive_membership_started = Instant::now();
-    let mut intrusive_found = false;
-    for _ in 0..membership_probes {
-        intrusive_found = intrusive
+    let mut intrusive_found = 0usize;
+    for probe in 0..membership_probes {
+        let target = black_box(membership_target(probe));
+        let found = intrusive
             .start_incidence(ROOT_HANDLE)
             .unwrap()
-            .any(|handle| handle == membership_target);
-        black_box(intrusive_found);
+            .any(|handle| handle == target);
+        intrusive_found += usize::from(found);
+        black_box(found);
     }
     let intrusive_membership_elapsed = intrusive_membership_started.elapsed();
-    assert!(intrusive_found);
+    assert_eq!(intrusive_found, membership_probes);
 
     let intrusive_full_started = Instant::now();
     let intrusive_full_count =
@@ -126,22 +133,25 @@ fn storage_scale(size: usize, probes: usize) {
     let binary_root_started = Instant::now();
     let mut binary_root = 0u32;
     for _ in 0..probes {
-        binary_root = binary.start_root(ROOT_HANDLE).unwrap();
+        let pole = black_box(ROOT_HANDLE);
+        binary_root = binary.start_root(pole).unwrap();
         black_box(binary_root);
     }
     let binary_root_elapsed = binary_root_started.elapsed();
     assert_ne!(binary_root, 0);
 
     let binary_membership_started = Instant::now();
-    let mut binary_found = false;
-    for _ in 0..membership_probes {
-        binary_found = binary
-            .start_contains(ROOT_HANDLE, membership_target)
+    let mut binary_found = 0usize;
+    for probe in 0..membership_probes {
+        let target = black_box(membership_target(probe));
+        let found = binary
+            .start_contains(ROOT_HANDLE, target)
             .unwrap();
-        black_box(binary_found);
+        binary_found += usize::from(found);
+        black_box(found);
     }
     let binary_membership_elapsed = binary_membership_started.elapsed();
-    assert!(binary_found);
+    assert_eq!(binary_found, membership_probes);
 
     let binary_full_started = Instant::now();
     let binary_full_count =
