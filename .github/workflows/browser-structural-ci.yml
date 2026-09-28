@@ -137,6 +137,8 @@ jobs:
             -- --ignored --nocapture --test-threads=1
 
       - name: Compile Rust/WASM oracle once
+        env:
+          RUSTFLAGS: "-C panic=abort"
         run: |
           cargo +1.98.1 build \
             --manifest-path experiments/browser-accelerator/rust/Cargo.toml \
