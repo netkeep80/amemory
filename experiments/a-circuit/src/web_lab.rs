@@ -7,6 +7,7 @@ use crate::{
     arithmetic_effect_n::{web_prove_arithmetic, web_run_arithmetic},
     logic_effect_n::{web_prove_logic, web_run_logic},
     memory_n::web_prove_radix_memory,
+    memory32_n::web_prove_memory32,
     mul32_n::web_prove_mul32,
     mul_effect_n::web_prove_mul_effect,
     mux_n::{web_prove_mux1, web_prove_mux32},
@@ -722,6 +723,121 @@ pub extern "C" fn amemory_i386_memory_steady_link_delta() -> u32 {
 #[no_mangle]
 pub extern "C" fn amemory_i386_memory_quiescent() -> u32 {
     unsafe { M6A_QUIESCENT }
+}
+
+
+static mut M6B_ADDRESS: u32 = 0;
+static mut M6B_PAGE24: u32 = 0;
+static mut M6B_OFFSET8: u32 = 0;
+static mut M6B_WRITE_VALUE: u32 = 0;
+static mut M6B_BEFORE_VALUE: u32 = 0;
+static mut M6B_AFTER_VALUE: u32 = 0;
+static mut M6B_OLD_AFTER_VALUE: u32 = 0;
+static mut M6B_OLD_ROOT_REF: u32 = 0;
+static mut M6B_NEW_ROOT_REF: u32 = 0;
+static mut M6B_REACTIONS: u32 = 0;
+static mut M6B_LINKS_AFTER_LOAD: u32 = 0;
+static mut M6B_LINKS_FINAL: u32 = 0;
+static mut M6B_STEADY_LINK_DELTA: u32 = 0;
+static mut M6B_QUIESCENT: u32 = 0;
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_memory32_probe() -> u32 {
+    0x0000_060b
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_memory32_run(
+    address: u32,
+    value: u32,
+) -> u32 {
+    if value > 0xff {
+        return 0;
+    }
+    clear_last_compact_proof();
+    let Some(execution) =
+        web_prove_memory32(address, value as u8)
+    else {
+        return 0;
+    };
+    if set_last_compact_proof(&execution.proof).is_none() {
+        return 0;
+    }
+    let out = execution.outcome;
+    unsafe {
+        M6B_ADDRESS = out.address;
+        M6B_PAGE24 = out.page24;
+        M6B_OFFSET8 = out.offset8;
+        M6B_WRITE_VALUE = out.write_value;
+        M6B_BEFORE_VALUE = out.before_value;
+        M6B_AFTER_VALUE = out.after_value;
+        M6B_OLD_AFTER_VALUE = out.old_after_value;
+        M6B_OLD_ROOT_REF = out.old_root_ref;
+        M6B_NEW_ROOT_REF = out.new_root_ref;
+        M6B_REACTIONS = out.reactions;
+        M6B_LINKS_AFTER_LOAD = out.links_after_load;
+        M6B_LINKS_FINAL = out.links_final;
+        M6B_STEADY_LINK_DELTA = out.steady_link_delta;
+        M6B_QUIESCENT = u32::from(out.quiescent);
+    }
+    1
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_memory32_address() -> u32 {
+    unsafe { M6B_ADDRESS }
+}
+#[no_mangle]
+pub extern "C" fn amemory_i386_memory32_page24() -> u32 {
+    unsafe { M6B_PAGE24 }
+}
+#[no_mangle]
+pub extern "C" fn amemory_i386_memory32_offset8() -> u32 {
+    unsafe { M6B_OFFSET8 }
+}
+#[no_mangle]
+pub extern "C" fn amemory_i386_memory32_write_value() -> u32 {
+    unsafe { M6B_WRITE_VALUE }
+}
+#[no_mangle]
+pub extern "C" fn amemory_i386_memory32_before_value() -> u32 {
+    unsafe { M6B_BEFORE_VALUE }
+}
+#[no_mangle]
+pub extern "C" fn amemory_i386_memory32_after_value() -> u32 {
+    unsafe { M6B_AFTER_VALUE }
+}
+#[no_mangle]
+pub extern "C" fn amemory_i386_memory32_old_after_value() -> u32 {
+    unsafe { M6B_OLD_AFTER_VALUE }
+}
+#[no_mangle]
+pub extern "C" fn amemory_i386_memory32_old_root_ref() -> u32 {
+    unsafe { M6B_OLD_ROOT_REF }
+}
+#[no_mangle]
+pub extern "C" fn amemory_i386_memory32_new_root_ref() -> u32 {
+    unsafe { M6B_NEW_ROOT_REF }
+}
+#[no_mangle]
+pub extern "C" fn amemory_i386_memory32_reactions() -> u32 {
+    unsafe { M6B_REACTIONS }
+}
+#[no_mangle]
+pub extern "C" fn amemory_i386_memory32_links_after_load() -> u32 {
+    unsafe { M6B_LINKS_AFTER_LOAD }
+}
+#[no_mangle]
+pub extern "C" fn amemory_i386_memory32_links_final() -> u32 {
+    unsafe { M6B_LINKS_FINAL }
+}
+#[no_mangle]
+pub extern "C" fn amemory_i386_memory32_steady_link_delta() -> u32 {
+    unsafe { M6B_STEADY_LINK_DELTA }
+}
+#[no_mangle]
+pub extern "C" fn amemory_i386_memory32_quiescent() -> u32 {
+    unsafe { M6B_QUIESCENT }
 }
 
 #[no_mangle]

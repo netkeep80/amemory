@@ -22,8 +22,8 @@ for (const required of [
   "Full GPR",
   "EDX:EAX",
   "Stateₜ₊₁",
-  "M6 structural radix memory witness",
-  "amemory_i386_memory_run",
+  "M6 structural Address32 memory witness",
+  "amemory_i386_memory32_run",
 ]) {
   if (!labPageSource.includes(required)) {
     throw new Error("M5 Pages witness wiring missing: " + required);
@@ -1250,6 +1250,111 @@ Promise.all([
       (w.amemory_i386_memory_links_final() >>> 0) !==
         memoryProof.result.linksFinal) {
     throw new Error("M6a WASM/proof Link-count mismatch");
+  }
+
+  // M6b: full Address32 is structurally split into Page24 + Offset8.
+  if (typeof w.amemory_i386_memory32_probe !== "function" ||
+      w.amemory_i386_memory32_probe() !== 0x60b) {
+    throw new Error("M6b Address32 structural-memory WASM probe missing");
+  }
+  if (w.amemory_i386_memory32_run(0x00123425, 0xab) !== 1) {
+    throw new Error("M6b Address32 structural memory witness rejected");
+  }
+  if ((w.amemory_i386_memory32_address() >>> 0) !== 0x00123425 ||
+      (w.amemory_i386_memory32_page24() >>> 0) !== 0x001234 ||
+      (w.amemory_i386_memory32_offset8() >>> 0) !== 0x25 ||
+      (w.amemory_i386_memory32_write_value() >>> 0) !== 0xab ||
+      (w.amemory_i386_memory32_before_value() >>> 0) !== 0 ||
+      (w.amemory_i386_memory32_after_value() >>> 0) !== 0xab ||
+      (w.amemory_i386_memory32_old_after_value() >>> 0) !== 0 ||
+      (w.amemory_i386_memory32_old_root_ref() >>> 0) ===
+        (w.amemory_i386_memory32_new_root_ref() >>> 0) ||
+      (w.amemory_i386_memory32_steady_link_delta() >>> 0) !== 0 ||
+      w.amemory_i386_memory32_quiescent() !== 1 ||
+      w.amemory_i386_memory32_reactions() <= 80) {
+    throw new Error("M6b Address32 result/persistence mismatch");
+  }
+  if (w.amemory_i386_memory32_run(0x00123425, 256) !== 0) {
+    throw new Error("M6b WASM ABI accepted out-of-range Byte8");
+  }
+
+  // Restore the accepted proof after the deliberate invalid-input check.
+  if (w.amemory_i386_memory32_run(0x00123425, 0xab) !== 1) {
+    throw new Error("M6b valid rerun rejected");
+  }
+  const memory32Proof =
+    inflateCompactProof(readCurrentCompactProof("M6B_MEMORY32"));
+  if (memory32Proof.block !== "M6B_MEMORY32" ||
+      memory32Proof.schemaVersion !== 4 ||
+      !memory32Proof.result.oracleMatches ||
+      (memory32Proof.result.decodedValue >>> 0) !== 0xab ||
+      (memory32Proof.result.decodedValueHi >>> 0) !== 0 ||
+      memory32Proof.result.identicalRerunLinkDelta !== 0) {
+    throw new Error("M6b compact structural proof result mismatch");
+  }
+  const memory32Id = memory32Proof.load.memoryInstanceId;
+  if (!memory32Id ||
+      memory32Proof.execute.memoryInstanceId !== memory32Id ||
+      memory32Proof.result.memoryInstanceId !== memory32Id ||
+      !memory32Proof.execute.reactions.every(
+        (step) => step.memoryInstanceId === memory32Id &&
+          step.scopeBefore.length === 1 &&
+          step.scopeAfter.length === 1
+      )) {
+    throw new Error("M6b proof is not one-memory/single-scope");
+  }
+  if (memory32Proof.prepare.runtimeMemoryExists !== false ||
+      !memory32Proof.load.carrierRoundTrip ||
+      memory32Proof.load.linksBeforeLoad !== 1 ||
+      memory32Proof.load.linksAfterLoad !== memory32Proof.prepare.compiledLinks ||
+      !memory32Proof.execute.finalQuiescent ||
+      memory32Proof.execute.activeReactionCount !==
+        (w.amemory_i386_memory32_reactions() >>> 0)) {
+    throw new Error("M6b PREPARE/LOAD/EXECUTE witness mismatch");
+  }
+  const memory32Roles = new Map(
+    memory32Proof.prepare.semanticRoots.map((root) => [root.role, root])
+  );
+  for (const role of [
+    "function.memory32.read",
+    "function.memory32.write",
+    "memory32.zero_root",
+    "memory32.read_result_tag",
+    "memory32.write_result_tag",
+    "data.address32",
+    "data.byte8",
+    "data.bit.zero",
+    "data.bit.one",
+    "execution.interpreter",
+    "execution.theory",
+    "execution.apply",
+    "scope.initial",
+    "context.result",
+  ]) {
+    if (!memory32Roles.has(role)) {
+      throw new Error("M6b prepared Aset missing semantic root " + role);
+    }
+  }
+  const oldMemoryRoot = w.amemory_i386_memory32_old_root_ref() >>> 0;
+  const newMemoryRoot = w.amemory_i386_memory32_new_root_ref() >>> 0;
+  if (oldMemoryRoot !== memory32Roles.get("memory32.zero_root").carrierRef ||
+      oldMemoryRoot > memory32Proof.load.linksAfterLoad ||
+      newMemoryRoot <= memory32Proof.load.linksAfterLoad ||
+      newMemoryRoot > memory32Proof.result.linksFinal) {
+    throw new Error("M6b old/new MemoryRoot runtime locator boundary mismatch");
+  }
+  const memory32Visual = new Set(
+    memory32Proof.result.visualLinks.map((link) => link.key)
+  );
+  if (!memory32Visual.has(memory32Id + ":L" + oldMemoryRoot) ||
+      !memory32Visual.has(memory32Id + ":L" + newMemoryRoot)) {
+    throw new Error("M6b visual topology omitted old/new MemoryRoot");
+  }
+  if ((w.amemory_i386_memory32_links_after_load() >>> 0) !==
+        memory32Proof.load.linksAfterLoad ||
+      (w.amemory_i386_memory32_links_final() >>> 0) !==
+        memory32Proof.result.linksFinal) {
+    throw new Error("M6b WASM/proof Link-count mismatch");
   }
 
   // Real WASM execution smoke: composed structural MUX1.

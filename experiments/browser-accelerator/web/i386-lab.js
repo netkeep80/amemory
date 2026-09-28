@@ -279,22 +279,22 @@ function buildLab(registry) {
     <div class="lab-state-shell" id="lab-memory-witness">
       <div class="lab-state-head">
         <div>
-          <h3>M6 structural radix memory witness</h3>
-          <p>Immutable 256-byte structural page: READ old root → WRITE one Byte8 → READ new root → READ old root again. JavaScript supplies only Offset8/Byte8 inputs and renders the compact proof.</p>
+          <h3>M6 structural Address32 memory witness</h3>
+          <p>Sparse 32-bit byte-addressed memory: Address32 is structurally split into Page24 + Offset8, the selected page is updated by the accepted M6a radix-page primitive, and the old MemoryRoot remains valid.</p>
         </div>
         <button class="lab-run" id="lab-run-memory" type="button">Run structural memory</button>
       </div>
       <div class="lab-state-grid">
         <label class="lab-state-snapshot">
-          <strong>Offset8</strong>
-          <input id="lab-memory-offset" type="number" min="0" max="255" step="1" value="37">
+          <strong>Address32</strong>
+          <input id="lab-memory-address" type="number" min="0" max="4294967295" step="1" value="1192997">
         </label>
         <label class="lab-state-snapshot">
           <strong>Byte8 value</strong>
           <input id="lab-memory-value" type="number" min="0" max="255" step="1" value="171">
         </label>
       </div>
-      <div class="notice" id="lab-memory-status">M6a WASM witness ready check pending…</div>
+      <div class="notice" id="lab-memory-status">M6b WASM witness ready check pending…</div>
       <div id="lab-memory-result"></div>
       <div id="lab-memory-proof"></div>
     </div>
@@ -559,25 +559,32 @@ function setupMemoryWitness(section, wasm) {
   const result = section.querySelector("#lab-memory-result");
   const proofTarget = section.querySelector("#lab-memory-proof");
   const run = section.querySelector("#lab-run-memory");
-  const offsetInput = section.querySelector("#lab-memory-offset");
+  const addressInput = section.querySelector("#lab-memory-address");
   const valueInput = section.querySelector("#lab-memory-value");
 
   if (!shell || !status || !result || !proofTarget ||
-      !run || !offsetInput || !valueInput) {
+      !run || !addressInput || !valueInput) {
     return;
   }
-  if (wasm.amemory_i386_memory_probe?.() !== 0x60a ||
-      typeof wasm.amemory_i386_memory_run !== "function") {
+  if (wasm.amemory_i386_memory32_probe?.() !== 0x60b ||
+      typeof wasm.amemory_i386_memory32_run !== "function") {
     status.textContent =
-      "M6a structural-memory ABI is missing; refusing to fake memory.";
+      "M6b Address32 structural-memory ABI is missing; refusing to fake memory.";
     status.className = "notice lab-error";
     run.disabled = true;
     return;
   }
   status.textContent =
-    "M6a ready: immutable structural radix page, no host semantic RAM.";
+    "M6b ready: sparse Address32 → Page24 + Offset8 structural memory, no host semantic RAM.";
   status.className = "notice";
 
+  const u32Input = (input, label) => {
+    const value = Number(input.value);
+    if (!Number.isInteger(value) || value < 0 || value > 0xffffffff) {
+      throw new Error(label + " must be an integer 0..4294967295");
+    }
+    return value >>> 0;
+  };
   const byteInput = (input, label) => {
     const value = Number(input.value);
     if (!Number.isInteger(value) || value < 0 || value > 255) {
@@ -588,32 +595,36 @@ function setupMemoryWitness(section, wasm) {
 
   run.addEventListener("click", async () => {
     try {
-      const offset = byteInput(offsetInput, "Offset8");
+      const address = u32Input(addressInput, "Address32");
       const value = byteInput(valueInput, "Byte8");
       status.textContent =
-        "Executing structural READ → WRITE → READ → persistence check…";
+        "Executing structural Address32 split → page select → WRITE → READ-back → persistence check…";
       status.className = "notice";
       result.innerHTML = "";
       proofTarget.innerHTML = "";
 
-      if (wasm.amemory_i386_memory_run(offset, value) !== 1) {
-        throw new Error("M6a A-Circuit WASM rejected memory inputs");
+      if (wasm.amemory_i386_memory32_run(address, value) !== 1) {
+        throw new Error("M6b A-Circuit WASM rejected memory inputs");
       }
       const observed = {
-        offset: wasm.amemory_i386_memory_offset() >>> 0,
-        write: wasm.amemory_i386_memory_write_value() >>> 0,
-        before: wasm.amemory_i386_memory_before_value() >>> 0,
-        after: wasm.amemory_i386_memory_after_value() >>> 0,
-        oldAfter: wasm.amemory_i386_memory_old_after_value() >>> 0,
-        oldRoot: wasm.amemory_i386_memory_old_root_ref() >>> 0,
-        newRoot: wasm.amemory_i386_memory_new_root_ref() >>> 0,
-        reactions: wasm.amemory_i386_memory_reactions() >>> 0,
-        linksAfterLoad: wasm.amemory_i386_memory_links_after_load() >>> 0,
-        linksFinal: wasm.amemory_i386_memory_links_final() >>> 0,
-        steadyDelta: wasm.amemory_i386_memory_steady_link_delta() >>> 0,
-        quiescent: wasm.amemory_i386_memory_quiescent() >>> 0,
+        address: wasm.amemory_i386_memory32_address() >>> 0,
+        page: wasm.amemory_i386_memory32_page24() >>> 0,
+        offset: wasm.amemory_i386_memory32_offset8() >>> 0,
+        write: wasm.amemory_i386_memory32_write_value() >>> 0,
+        before: wasm.amemory_i386_memory32_before_value() >>> 0,
+        after: wasm.amemory_i386_memory32_after_value() >>> 0,
+        oldAfter: wasm.amemory_i386_memory32_old_after_value() >>> 0,
+        oldRoot: wasm.amemory_i386_memory32_old_root_ref() >>> 0,
+        newRoot: wasm.amemory_i386_memory32_new_root_ref() >>> 0,
+        reactions: wasm.amemory_i386_memory32_reactions() >>> 0,
+        linksAfterLoad: wasm.amemory_i386_memory32_links_after_load() >>> 0,
+        linksFinal: wasm.amemory_i386_memory32_links_final() >>> 0,
+        steadyDelta: wasm.amemory_i386_memory32_steady_link_delta() >>> 0,
+        quiescent: wasm.amemory_i386_memory32_quiescent() >>> 0,
       };
-      if (observed.offset !== offset ||
+      if (observed.address !== address ||
+          observed.page !== (address >>> 8) ||
+          observed.offset !== (address & 0xff) ||
           observed.write !== value ||
           observed.before !== 0 ||
           observed.after !== value ||
@@ -621,30 +632,34 @@ function setupMemoryWitness(section, wasm) {
           observed.oldRoot === observed.newRoot ||
           observed.steadyDelta !== 0 ||
           observed.quiescent !== 1) {
-        throw new Error("M6a structural memory persistence check failed");
+        throw new Error("M6b structural Address32 persistence check failed");
       }
 
       const { proof, transport } = collectBrowserProof(wasm);
-      if (!proof || proof.block !== "M6A_RADIX_PAGE") {
-        throw new Error("M6a compact proof did not reconstruct memory witness");
+      if (!proof || proof.block !== "M6B_MEMORY32") {
+        throw new Error("M6b compact proof did not reconstruct Address32 witness");
       }
       const memoryId = proof.load.memoryInstanceId;
+      const pageHex = observed.page.toString(16).padStart(6, "0");
+      const byteHex = (number) => number.toString(16).padStart(2, "0");
       result.innerHTML = `
         <div class="lab-state-grid">
           <div class="lab-state-snapshot">
-            <h4>Old page root</h4>
+            <h4>Old MemoryRoot</h4>
             <div class="lab-state-registers">
               <code>${escapeHtml(memoryId)}:L${observed.oldRoot}</code>
-              <code>READ[${hex32(offset)}] = 0x${observed.before.toString(16).padStart(2,"0")}</code>
-              <code>READ old root after WRITE = 0x${observed.oldAfter.toString(16).padStart(2,"0")}</code>
+              <code>Address32 = ${hex32(observed.address)}</code>
+              <code>Page24 = 0x${pageHex} · Offset8 = 0x${byteHex(observed.offset)}</code>
+              <code>READ old root = 0x${byteHex(observed.before)}</code>
             </div>
           </div>
           <div class="lab-state-snapshot">
-            <h4>New immutable page root</h4>
+            <h4>New immutable MemoryRoot</h4>
             <div class="lab-state-registers">
               <code>${escapeHtml(memoryId)}:L${observed.newRoot}</code>
-              <code>WRITE[${hex32(offset)}] = 0x${observed.write.toString(16).padStart(2,"0")}</code>
-              <code>READ new root = 0x${observed.after.toString(16).padStart(2,"0")}</code>
+              <code>WRITE[${hex32(observed.address)}] = 0x${byteHex(observed.write)}</code>
+              <code>READ new root = 0x${byteHex(observed.after)}</code>
+              <code>READ old root after WRITE = 0x${byteHex(observed.oldAfter)}</code>
             </div>
           </div>
         </div>
@@ -652,12 +667,12 @@ function setupMemoryWitness(section, wasm) {
           <div class="lab-metric"><small>Structural reactions</small><strong>${observed.reactions}</strong></div>
           <div class="lab-metric"><small>Links after LOAD</small><strong>${observed.linksAfterLoad}</strong></div>
           <div class="lab-metric"><small>Links final</small><strong>${observed.linksFinal}</strong></div>
-          <div class="lab-metric"><small>Old root preserved</small><strong>YES</strong></div>
+          <div class="lab-metric"><small>Old MemoryRoot preserved</small><strong>YES</strong></div>
           <div class="lab-metric"><small>Identical rerun Link growth</small><strong>${observed.steadyDelta}</strong></div>
         </div>`;
       await renderProofPipeline(proofTarget, proof);
       status.textContent =
-        "M6a PASS: structural radix memory persisted old/new roots in one A-memory; " +
+        "M6b PASS: Address32 page selection and persistent write executed inside one A-memory; " +
         transport + " proof rendered below.";
       status.className = "notice lab-ok";
     } catch (error) {
