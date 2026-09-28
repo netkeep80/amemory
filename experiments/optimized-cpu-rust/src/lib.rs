@@ -9,6 +9,7 @@ use std::{
 pub type Handle = u32;
 pub const ROOT_HANDLE: Handle = 1;
 pub const PACKED_CARRIER_SCHEMA_VERSION: u32 = 1;
+pub const PACKED_INCIDENCE_INDEX_SCHEMA_VERSION: u32 = 1;
 const NO_HANDLE: Handle = 0;
 static NEXT_STORE_INSTANCE_ID: AtomicU32 = AtomicU32::new(1);
 
@@ -61,6 +62,15 @@ pub enum StoreError {
         starts: usize,
         ends: usize,
     },
+    UnsupportedPackedIncidenceIndexSchema(u32),
+    PackedIncidenceIndexLengthMismatch {
+        expected: usize,
+        start_head: usize,
+        end_head: usize,
+        next_by_start: usize,
+        next_by_end: usize,
+    },
+    InvalidPackedIncidenceIndex,
     InvalidPackedCarrierRoot {
         expected: Handle,
         actual: Handle,
@@ -208,6 +218,170 @@ impl PackedCarrierImage {
                     end,
                 });
             }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PackedIncidenceIndexImage {
+    schema_version: u32,
+    start_head: Vec<Handle>,
+    end_head: Vec<Handle>,
+    next_by_start: Vec<Handle>,
+    next_by_end: Vec<Handle>,
+}
+
+fn derive_packed_incidence_arrays(
+    carrier: &PackedCarrierImage,
+) -> Result<(Vec<Handle>, Vec<Handle>, Vec<Handle>, Vec<Handle>), StoreError> {
+    carrier.validate()?;
+    let len = carrier
+        .link_count()
+        .checked_add(1)
+        .ok_or(StoreError::CapacityExceeded)?;
+    let mut start_head = vec![NO_HANDLE; len];
+    let mut end_head = vec![NO_HANDLE; len];
+    let mut next_by_start = vec![NO_HANDLE; len];
+    let mut next_by_end = vec![NO_HANDLE; len];
+
+    for raw_handle in 1..=carrier.link_count() {
+        let handle =
+            Handle::try_from(raw_handle).map_err(|_| StoreError::CapacityExceeded)?;
+        let (start, end) = carrier
+            .duplet(handle)
+            .ok_or(StoreError::InvalidPackedIncidenceIndex)?;
+        let hi = handle as usize;
+        let si = start as usize;
+        let ei = end as usize;
+
+        next_by_start[hi] = start_head[si];
+        start_head[si] = handle;
+        next_by_end[hi] = end_head[ei];
+        end_head[ei] = handle;
+    }
+
+    Ok((start_head, end_head, next_by_start, next_by_end))
+}
+
+impl PackedIncidenceIndexImage {
+    pub fn from_carrier(carrier: &PackedCarrierImage) -> Result<Self, StoreError> {
+        let (start_head, end_head, next_by_start, next_by_end) =
+            derive_packed_incidence_arrays(carrier)?;
+        Ok(Self {
+            schema_version: PACKED_INCIDENCE_INDEX_SCHEMA_VERSION,
+            start_head,
+            end_head,
+            next_by_start,
+            next_by_end,
+        })
+    }
+
+    pub fn from_parts(
+        schema_version: u32,
+        carrier: &PackedCarrierImage,
+        start_head: Vec<Handle>,
+        end_head: Vec<Handle>,
+        next_by_start: Vec<Handle>,
+        next_by_end: Vec<Handle>,
+    ) -> Result<Self, StoreError> {
+        let image = Self {
+            schema_version,
+            start_head,
+            end_head,
+            next_by_start,
+            next_by_end,
+        };
+        image.validate_against(carrier)?;
+        Ok(image)
+    }
+
+    pub fn schema_version(&self) -> u32 {
+        self.schema_version
+    }
+
+    pub fn link_count(&self) -> usize {
+        self.start_head.len().saturating_sub(1)
+    }
+
+    pub fn start_heads(&self) -> &[Handle] {
+        &self.start_head
+    }
+
+    pub fn end_heads(&self) -> &[Handle] {
+        &self.end_head
+    }
+
+    pub fn next_by_start(&self) -> &[Handle] {
+        &self.next_by_start
+    }
+
+    pub fn next_by_end(&self) -> &[Handle] {
+        &self.next_by_end
+    }
+
+    pub fn start_incidence(
+        &self,
+        start: Handle,
+    ) -> Result<IncidenceIter<'_>, StoreError> {
+        if start == NO_HANDLE || start as usize >= self.start_head.len() {
+            return Err(StoreError::UnknownHandle(start));
+        }
+        Ok(IncidenceIter {
+            next: &self.next_by_start,
+            current: self.start_head[start as usize],
+        })
+    }
+
+    pub fn end_incidence(
+        &self,
+        end: Handle,
+    ) -> Result<IncidenceIter<'_>, StoreError> {
+        if end == NO_HANDLE || end as usize >= self.end_head.len() {
+            return Err(StoreError::UnknownHandle(end));
+        }
+        Ok(IncidenceIter {
+            next: &self.next_by_end,
+            current: self.end_head[end as usize],
+        })
+    }
+
+    pub fn validate_against(
+        &self,
+        carrier: &PackedCarrierImage,
+    ) -> Result<(), StoreError> {
+        if self.schema_version != PACKED_INCIDENCE_INDEX_SCHEMA_VERSION {
+            return Err(StoreError::UnsupportedPackedIncidenceIndexSchema(
+                self.schema_version,
+            ));
+        }
+        carrier.validate()?;
+        let expected = carrier
+            .link_count()
+            .checked_add(1)
+            .ok_or(StoreError::CapacityExceeded)?;
+        if self.start_head.len() != expected
+            || self.end_head.len() != expected
+            || self.next_by_start.len() != expected
+            || self.next_by_end.len() != expected
+        {
+            return Err(StoreError::PackedIncidenceIndexLengthMismatch {
+                expected,
+                start_head: self.start_head.len(),
+                end_head: self.end_head.len(),
+                next_by_start: self.next_by_start.len(),
+                next_by_end: self.next_by_end.len(),
+            });
+        }
+
+        let (start_head, end_head, next_by_start, next_by_end) =
+            derive_packed_incidence_arrays(carrier)?;
+        if self.start_head != start_head
+            || self.end_head != end_head
+            || self.next_by_start != next_by_start
+            || self.next_by_end != next_by_end
+        {
+            return Err(StoreError::InvalidPackedIncidenceIndex);
         }
         Ok(())
     }
@@ -400,6 +574,18 @@ impl OptimizedLinkStore {
             self.ends[1..].to_vec(),
         )
         .expect("canonical store must always export a valid packed carrier")
+    }
+
+    /// Freezes the current start/end incidence projection independently from
+    /// canonical HashMap identity. It is fully derivable from the immutable
+    /// packed carrier and therefore carries no additional semantic authority.
+    pub fn export_packed_incidence_index_image(
+        &self,
+    ) -> PackedIncidenceIndexImage {
+        PackedIncidenceIndexImage::from_carrier(
+            &self.export_packed_carrier_image(),
+        )
+        .expect("canonical store must always export a valid incidence index")
     }
 
     /// Atomically loads a typed packed carrier image without parsing recursive
@@ -1385,6 +1571,100 @@ mod tests {
                 end: ROOT_HANDLE,
             })
         ));
+    }
+
+    #[test]
+    fn packed_incidence_index_image_is_deterministic_and_exact() {
+        let mut store = OptimizedLinkStore::new();
+        let o = store.import_anum("98").unwrap();
+        let c = store.import_anum("68").unwrap();
+        let l = store.ensure_pair(o, c).unwrap();
+        let _u = store.ensure_pair(c, o).unwrap();
+        let _top = store.ensure_pair(l, ROOT_HANDLE).unwrap();
+
+        let carrier = store.export_packed_carrier_image();
+        let index = store.export_packed_incidence_index_image();
+        let rebuilt = PackedIncidenceIndexImage::from_carrier(&carrier).unwrap();
+
+        assert_eq!(index, rebuilt);
+        assert_eq!(
+            index.schema_version(),
+            PACKED_INCIDENCE_INDEX_SCHEMA_VERSION
+        );
+        assert_eq!(index.link_count(), carrier.link_count());
+        assert_eq!(index.start_heads().len(), carrier.link_count() + 1);
+        assert_eq!(index.end_heads().len(), carrier.link_count() + 1);
+        assert_eq!(index.next_by_start().len(), carrier.link_count() + 1);
+        assert_eq!(index.next_by_end().len(), carrier.link_count() + 1);
+
+        let round_trip = PackedIncidenceIndexImage::from_parts(
+            index.schema_version(),
+            &carrier,
+            index.start_heads().to_vec(),
+            index.end_heads().to_vec(),
+            index.next_by_start().to_vec(),
+            index.next_by_end().to_vec(),
+        )
+        .unwrap();
+        assert_eq!(round_trip, index);
+
+        let mut start_seen = vec![0u8; carrier.link_count() + 1];
+        let mut end_seen = vec![0u8; carrier.link_count() + 1];
+        for raw_pole in 1..=carrier.link_count() {
+            let pole = raw_pole as Handle;
+            let indexed_start = index.start_incidence(pole).unwrap().collect::<Vec<_>>();
+            let store_start = store.start_incidence(pole).unwrap().collect::<Vec<_>>();
+            assert_eq!(indexed_start, store_start);
+            for handle in indexed_start {
+                assert_eq!(carrier.duplet(handle).unwrap().0, pole);
+                start_seen[handle as usize] += 1;
+            }
+
+            let indexed_end = index.end_incidence(pole).unwrap().collect::<Vec<_>>();
+            let store_end = store.end_incidence(pole).unwrap().collect::<Vec<_>>();
+            assert_eq!(indexed_end, store_end);
+            for handle in indexed_end {
+                assert_eq!(carrier.duplet(handle).unwrap().1, pole);
+                end_seen[handle as usize] += 1;
+            }
+        }
+
+        assert!(start_seen[1..].iter().all(|count| *count == 1));
+        assert!(end_seen[1..].iter().all(|count| *count == 1));
+    }
+
+    #[test]
+    fn packed_incidence_index_image_rejects_non_derivable_transport() {
+        let mut store = OptimizedLinkStore::new();
+        let o = store.import_anum("98").unwrap();
+        let c = store.import_anum("68").unwrap();
+        let _pair = store.ensure_pair(o, c).unwrap();
+
+        let carrier = store.export_packed_carrier_image();
+        let index = store.export_packed_incidence_index_image();
+
+        let mut wrong_schema = index.clone();
+        wrong_schema.schema_version += 1;
+        assert_eq!(
+            wrong_schema.validate_against(&carrier),
+            Err(StoreError::UnsupportedPackedIncidenceIndexSchema(
+                PACKED_INCIDENCE_INDEX_SCHEMA_VERSION + 1
+            ))
+        );
+
+        let mut wrong_length = index.clone();
+        wrong_length.next_by_end.pop();
+        assert!(matches!(
+            wrong_length.validate_against(&carrier),
+            Err(StoreError::PackedIncidenceIndexLengthMismatch { .. })
+        ));
+
+        let mut wrong_chain = index;
+        wrong_chain.start_head[ROOT_HANDLE as usize] = NO_HANDLE;
+        assert_eq!(
+            wrong_chain.validate_against(&carrier),
+            Err(StoreError::InvalidPackedIncidenceIndex)
+        );
     }
 
     #[test]
