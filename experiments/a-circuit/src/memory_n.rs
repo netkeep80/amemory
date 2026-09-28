@@ -1192,6 +1192,260 @@ fn decode_word8(
     Some(out)
 }
 
+fn decode_word8_store(
+    store: &OptimizedLinkStore,
+    zero: Handle,
+    one: Handle,
+    value: Handle,
+) -> Option<u8> {
+    let bits = read_exact_sequence(store, value).ok()?;
+    if bits.len() != WIDTH {
+        return None;
+    }
+    let mut out = 0u8;
+    for (index, bit) in bits.into_iter().enumerate() {
+        if bit == one {
+            out |= 1u8 << index;
+        } else if bit != zero {
+            return None;
+        }
+    }
+    Some(out)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct WebRadixMemoryOutcome {
+    pub(crate) offset: u32,
+    pub(crate) write_value: u32,
+    pub(crate) before_value: u32,
+    pub(crate) after_value: u32,
+    pub(crate) old_after_value: u32,
+    pub(crate) old_root_ref: u32,
+    pub(crate) new_root_ref: u32,
+    pub(crate) reactions: u32,
+    pub(crate) links_after_load: u32,
+    pub(crate) links_final: u32,
+    pub(crate) steady_link_delta: u32,
+    pub(crate) quiescent: u8,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct WebRadixMemoryExecution {
+    pub(crate) outcome: WebRadixMemoryOutcome,
+    pub(crate) proof: WebStructuralProof,
+}
+
+pub(crate) fn web_prove_radix_memory(
+    offset_value: u8,
+    byte_value: u8,
+) -> Option<WebRadixMemoryExecution> {
+    let mut compiler = FullFixture::new();
+    let program = RadixMemoryProgram::install(&mut compiler);
+    let offset = word8(&mut compiler, offset_value);
+    let byte = word8(&mut compiler, byte_value);
+
+    let args = materialize_exact_sequence(
+        &mut compiler.store,
+        &[program.zero_root, offset, byte],
+    )
+    .ok()?;
+    let invocation =
+        call(&mut compiler.store, compiler.apply, program.witness, args);
+    let initial =
+        compiler.store.ensure_pair(compiler.k, invocation).ok()?;
+
+    let prepared_roots = vec![
+        semantic_source(
+            &compiler.store,
+            "function.memory.witness",
+            program.witness,
+        ),
+        semantic_source(
+            &compiler.store,
+            "function.memory.read",
+            program.read,
+        ),
+        semantic_source(
+            &compiler.store,
+            "function.memory.write",
+            program.write,
+        ),
+        semantic_source(
+            &compiler.store,
+            "memory.zero_root",
+            program.zero_root,
+        ),
+        semantic_source(
+            &compiler.store,
+            "memory.result_tag",
+            program.result_tag,
+        ),
+        semantic_source(
+            &compiler.store,
+            "data.offset8",
+            offset,
+        ),
+        semantic_source(
+            &compiler.store,
+            "data.byte8",
+            byte,
+        ),
+        semantic_source(
+            &compiler.store,
+            "data.bit.zero",
+            compiler.zero,
+        ),
+        semantic_source(
+            &compiler.store,
+            "data.bit.one",
+            compiler.one,
+        ),
+        semantic_source(
+            &compiler.store,
+            "execution.interpreter",
+            compiler.interpreter,
+        ),
+        semantic_source(
+            &compiler.store,
+            "execution.theory",
+            compiler.theory,
+        ),
+        semantic_source(
+            &compiler.store,
+            "execution.apply",
+            compiler.apply,
+        ),
+        semantic_source(
+            &compiler.store,
+            "scope.initial",
+            initial,
+        ),
+        semantic_source(
+            &compiler.store,
+            "context.result",
+            compiler.k,
+        ),
+    ];
+    let admissions =
+        theory_admissions(&compiler.store, compiler.theory)?;
+    let prepare =
+        prepare_stage(&compiler.store, prepared_roots, admissions);
+    let (mut memory, load) = load_runtime(&prepare)?;
+
+    let interpreter =
+        loaded_handle(&load, "execution.interpreter")?;
+    let initial = loaded_handle(&load, "scope.initial")?;
+    let expected_old_root =
+        loaded_handle(&load, "memory.zero_root")?;
+    let result_tag =
+        loaded_handle(&load, "memory.result_tag")?;
+    let zero = loaded_handle(&load, "data.bit.zero")?;
+    let one = loaded_handle(&load, "data.bit.one")?;
+    let result_context =
+        loaded_handle(&load, "context.result")?;
+
+    let (mut engine, execute) = execute_to_quiescence(
+        &mut memory,
+        interpreter,
+        initial,
+        128,
+        96,
+    )?;
+    if engine.current().len() != 1 {
+        return None;
+    }
+
+    let final_link = engine.current()[0];
+    let (caller, envelope) = memory.store.poles(final_link).ok()?;
+    if caller != result_context {
+        return None;
+    }
+    let (tag, result_sequence) =
+        memory.store.poles(envelope).ok()?;
+    if tag != result_tag {
+        return None;
+    }
+    let values =
+        read_exact_sequence(&memory.store, result_sequence).ok()?;
+    if values.len() != 5 {
+        return None;
+    }
+
+    let old_root = values[0];
+    let new_root = values[1];
+    let before_byte = values[2];
+    let after_byte = values[3];
+    let old_after_byte = values[4];
+    if old_root != expected_old_root
+        || !memory.store.is_valid(old_root)
+        || !memory.store.is_valid(new_root)
+    {
+        return None;
+    }
+
+    let before_value =
+        decode_word8_store(&memory.store, zero, one, before_byte)?;
+    let after_value =
+        decode_word8_store(&memory.store, zero, one, after_byte)?;
+    let old_after_value =
+        decode_word8_store(&memory.store, zero, one, old_after_byte)?;
+    let oracle_matches = before_value == 0
+        && after_value == byte_value
+        && old_after_value == 0;
+
+    let result_recursive_wire =
+        memory.store.export_anum(final_link).ok()?;
+    let result_sequence_anum =
+        memory.store.export_anum(result_sequence).ok()?;
+    let identical_rerun_link_delta = identical_rerun(
+        &mut memory,
+        &mut engine,
+        initial,
+        &result_recursive_wire,
+        96,
+    )?;
+    let visual_links = visual_snapshot(&memory, &load.semantic_roots);
+
+    let proof = WebStructuralProof {
+        schema_version: 4,
+        block: "M6A_RADIX_PAGE".to_owned(),
+        prepare,
+        load,
+        execute,
+        result: WebProofResultStage {
+            memory_instance_id: memory.id.clone(),
+            result_anum: result_recursive_wire,
+            result_sequence_anum,
+            decoded_value: u32::from(after_value),
+            decoded_value_hi: Some(u32::from(old_after_value)),
+            oracle_value: u32::from(byte_value),
+            oracle_value_hi: Some(0),
+            oracle_matches,
+            links_final: memory.store.link_count() as u32,
+            identical_rerun_link_delta,
+            visual_links,
+        },
+    };
+
+    Some(WebRadixMemoryExecution {
+        outcome: WebRadixMemoryOutcome {
+            offset: u32::from(offset_value),
+            write_value: u32::from(byte_value),
+            before_value: u32::from(before_value),
+            after_value: u32::from(after_value),
+            old_after_value: u32::from(old_after_value),
+            old_root_ref: old_root,
+            new_root_ref: new_root,
+            reactions: proof.execute.active_reaction_count,
+            links_after_load: proof.load.links_after_load,
+            links_final: proof.result.links_final,
+            steady_link_delta: proof.result.identical_rerun_link_delta,
+            quiescent: u8::from(proof.execute.final_quiescent),
+        },
+        proof,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1243,6 +1497,28 @@ mod tests {
         let offset = word8(f, offset);
         let byte = word8(f, value);
         invoke(f, p.write, &[root, offset, byte])
+    }
+
+    #[test]
+    fn m6a_real_one_memory_persistence_proof() {
+        let execution = web_prove_radix_memory(0x25, 0xab).unwrap();
+        assert_eq!(execution.outcome.offset, 0x25);
+        assert_eq!(execution.outcome.write_value, 0xab);
+        assert_eq!(execution.outcome.before_value, 0);
+        assert_eq!(execution.outcome.after_value, 0xab);
+        assert_eq!(execution.outcome.old_after_value, 0);
+        assert_ne!(
+            execution.outcome.old_root_ref,
+            execution.outcome.new_root_ref
+        );
+        assert!(execution.outcome.reactions > 40);
+        assert_eq!(execution.outcome.steady_link_delta, 0);
+        assert_eq!(execution.outcome.quiescent, 1);
+        assert_eq!(execution.proof.block, "M6A_RADIX_PAGE");
+        assert!(execution.proof.result.oracle_matches);
+        assert!(execution.proof.execute.reactions.iter().all(|step| {
+            step.scope_before.len() == 1 && step.scope_after.len() == 1
+        }));
     }
 
     #[test]
