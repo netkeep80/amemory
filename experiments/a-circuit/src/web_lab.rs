@@ -70,8 +70,12 @@ struct LabResultEnvelope {
     representation_version: &'static str,
     instance_id: u32,
     witness_kind: &'static str,
-    operation: LabOperation,
-    outcome: LabOutcome,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    operation: Option<LabOperation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    outcome: Option<LabOutcome>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    payload: Option<serde_json::Value>,
     compact_proof_available: bool,
 }
 
@@ -204,19 +208,51 @@ fn set_result_for_instance(
         representation_version: LAB_RESULT_REPRESENTATION_VERSION,
         instance_id,
         witness_kind: "registry-block",
-        operation: LabOperation {
+        operation: Some(LabOperation {
             opcode: op,
             a,
             b,
             input_flag,
-        },
-        outcome,
+        }),
+        outcome: Some(outcome),
+        payload: None,
         compact_proof_available,
     };
     let json = serde_json::to_string(&envelope).ok()?;
     with_lab_instance_mut(instance_id, |state| {
         state.result_json = json;
     })
+}
+
+fn set_witness_result_for_instance(
+    instance_id: u32,
+    witness_kind: &'static str,
+    payload: serde_json::Value,
+) -> Option<()> {
+    let compact_proof_available =
+        with_lab_instance(instance_id, |state| !state.compact_proof_json.is_empty())?;
+    let envelope = LabResultEnvelope {
+        schema_version: LAB_RESULT_SCHEMA_VERSION,
+        representation_id: LAB_RESULT_REPRESENTATION_ID,
+        representation_version: LAB_RESULT_REPRESENTATION_VERSION,
+        instance_id,
+        witness_kind,
+        operation: None,
+        outcome: None,
+        payload: Some(payload),
+        compact_proof_available,
+    };
+    let json = serde_json::to_string(&envelope).ok()?;
+    with_lab_instance_mut(instance_id, |state| {
+        state.result_json = json;
+    })
+}
+
+fn set_default_witness_result(
+    witness_kind: &'static str,
+    payload: serde_json::Value,
+) -> Option<()> {
+    set_witness_result_for_instance(DEFAULT_LAB_INSTANCE_ID, witness_kind, payload)
 }
 
 fn execute_for_instance(
@@ -616,16 +652,67 @@ fn store_state_outcome(
     }
 }
 
+fn state_witness_payload(
+    block: &'static str,
+    out: &crate::architectural_state_n::WebArchitecturalStateOutcome,
+) -> serde_json::Value {
+    serde_json::json!({
+        "block": block,
+        "before": {
+            "eax": out.eax_before,
+            "ebx": out.ebx_before,
+            "ecx": out.ecx_before,
+            "edx": out.edx_before,
+            "esi": out.esi_before,
+            "edi": out.edi_before,
+            "ebp": out.ebp_before,
+            "esp": out.esp_before,
+            "eip": out.eip_before
+        },
+        "after": {
+            "eax": out.eax_after,
+            "ebx": out.ebx_after,
+            "ecx": out.ecx_after,
+            "edx": out.edx_after,
+            "esi": out.esi_after,
+            "edi": out.edi_after,
+            "ebp": out.ebp_after,
+            "esp": out.esp_after,
+            "eip": out.eip_after
+        },
+        "flags": {
+            "defined": out.flags_defined_mask,
+            "flagValues": out.flags_value_mask,
+            "undefined": out.flags_undefined_mask,
+            "preserve": 0
+        },
+        "reactions": out.reactions,
+        "oldStateRetained": u32::from(out.old_state_retained),
+        "atomicScope": u32::from(out.atomic_scope),
+        "steadyDelta": out.steady_link_delta,
+        "quiescent": u32::from(out.quiescent)
+    })
+}
+
 #[no_mangle]
 pub extern "C" fn amemory_i386_state_run_add32() -> u32 {
     clear_last_compact_proof();
+    clear_result_for_instance(DEFAULT_LAB_INSTANCE_ID);
     let Some(execution) = web_prove_architectural_state_add() else {
         return 0;
     };
     if set_last_compact_proof(&execution.proof).is_none() {
         return 0;
     }
-    store_state_outcome(execution.outcome);
+    let out = execution.outcome;
+    if set_default_witness_result(
+        "architectural-state",
+        state_witness_payload("M5A_STATE_ADD32", &out),
+    ).is_none() {
+        clear_last_compact_proof();
+        return 0;
+    }
+    store_state_outcome(out);
     1
 }
 
@@ -637,13 +724,22 @@ pub extern "C" fn amemory_i386_state_wide_probe() -> u32 {
 #[no_mangle]
 pub extern "C" fn amemory_i386_state_run_mul32() -> u32 {
     clear_last_compact_proof();
+    clear_result_for_instance(DEFAULT_LAB_INSTANCE_ID);
     let Some(execution) = web_prove_architectural_state_mul() else {
         return 0;
     };
     if set_last_compact_proof(&execution.proof).is_none() {
         return 0;
     }
-    store_state_outcome(execution.outcome);
+    let out = execution.outcome;
+    if set_default_witness_result(
+        "architectural-state",
+        state_witness_payload("M5B_STATE_MUL32", &out),
+    ).is_none() {
+        clear_last_compact_proof();
+        return 0;
+    }
+    store_state_outcome(out);
     1
 }
 
@@ -655,13 +751,22 @@ pub extern "C" fn amemory_i386_state_full_probe() -> u32 {
 #[no_mangle]
 pub extern "C" fn amemory_i386_state_run_add_ecx() -> u32 {
     clear_last_compact_proof();
+    clear_result_for_instance(DEFAULT_LAB_INSTANCE_ID);
     let Some(execution) = web_prove_architectural_state_add_ecx() else {
         return 0;
     };
     if set_last_compact_proof(&execution.proof).is_none() {
         return 0;
     }
-    store_state_outcome(execution.outcome);
+    let out = execution.outcome;
+    if set_default_witness_result(
+        "architectural-state",
+        state_witness_payload("M5C_STATE_ADD_ECX", &out),
+    ).is_none() {
+        clear_last_compact_proof();
+        return 0;
+    }
+    store_state_outcome(out);
     1
 }
 
@@ -797,6 +902,7 @@ pub extern "C" fn amemory_i386_memory_run(
         return 0;
     }
     clear_last_compact_proof();
+    clear_result_for_instance(DEFAULT_LAB_INSTANCE_ID);
     let Some(execution) =
         web_prove_radix_memory(offset as u8, value as u8)
     else {
@@ -806,6 +912,31 @@ pub extern "C" fn amemory_i386_memory_run(
         return 0;
     }
     let out = execution.outcome;
+    if set_default_witness_result(
+        "memory-radix",
+        serde_json::json!({
+            "block": "M6A_RADIX_PAGE",
+            "width": 8,
+            "address": out.offset,
+            "offset": out.offset,
+            "write": out.write_value,
+            "before": out.before_value,
+            "after": out.after_value,
+            "oldAfter": out.old_after_value,
+            "oldRoot": out.old_root_ref,
+            "newRoot": out.new_root_ref,
+            "reactions": out.reactions,
+            "linksAfterLoad": out.links_after_load,
+            "linksFinal": out.links_final,
+            "steadyDelta": out.steady_link_delta,
+            "atomicScope": 1,
+            "crossesPage": 0,
+            "quiescent": u32::from(out.quiescent)
+        }),
+    ).is_none() {
+        clear_last_compact_proof();
+        return 0;
+    }
     unsafe {
         M6A_OFFSET = out.offset;
         M6A_WRITE_VALUE = out.write_value;
@@ -902,6 +1033,7 @@ pub extern "C" fn amemory_i386_memory32_run(
         return 0;
     }
     clear_last_compact_proof();
+    clear_result_for_instance(DEFAULT_LAB_INSTANCE_ID);
     let Some(execution) =
         web_prove_memory32(address, value as u8)
     else {
@@ -911,6 +1043,32 @@ pub extern "C" fn amemory_i386_memory32_run(
         return 0;
     }
     let out = execution.outcome;
+    if set_default_witness_result(
+        "memory-byte",
+        serde_json::json!({
+            "block": "M6B_MEMORY32",
+            "width": 8,
+            "address": out.address,
+            "page24": out.page24,
+            "offset8": out.offset8,
+            "write": out.write_value,
+            "before": out.before_value,
+            "after": out.after_value,
+            "oldAfter": out.old_after_value,
+            "oldRoot": out.old_root_ref,
+            "newRoot": out.new_root_ref,
+            "reactions": out.reactions,
+            "linksAfterLoad": out.links_after_load,
+            "linksFinal": out.links_final,
+            "steadyDelta": out.steady_link_delta,
+            "atomicScope": 1,
+            "crossesPage": 0,
+            "quiescent": u32::from(out.quiescent)
+        }),
+    ).is_none() {
+        clear_last_compact_proof();
+        return 0;
+    }
     unsafe {
         M6B_ADDRESS = out.address;
         M6B_PAGE24 = out.page24;
@@ -1019,6 +1177,7 @@ pub extern "C" fn amemory_i386_word_memory_run(
         return 0;
     }
     clear_last_compact_proof();
+    clear_result_for_instance(DEFAULT_LAB_INSTANCE_ID);
     let execution = match width {
         16 => web_prove_word16_memory(address, value),
         32 => web_prove_word32_memory(address, value),
@@ -1031,6 +1190,35 @@ pub extern "C" fn amemory_i386_word_memory_run(
         return 0;
     }
     let out = execution.outcome;
+    let block = if out.width == 16 {
+        "M6C_MEMORY_WORD16"
+    } else {
+        "M6C_MEMORY_WORD32"
+    };
+    if set_default_witness_result(
+        "memory-word",
+        serde_json::json!({
+            "block": block,
+            "width": out.width,
+            "address": out.address,
+            "write": out.write_value,
+            "before": out.before_value,
+            "after": out.after_value,
+            "oldAfter": out.old_after_value,
+            "oldRoot": out.old_root_ref,
+            "newRoot": out.new_root_ref,
+            "reactions": out.reactions,
+            "linksAfterLoad": out.links_after_load,
+            "linksFinal": out.links_final,
+            "steadyDelta": out.steady_link_delta,
+            "atomicScope": u32::from(out.atomic_scope),
+            "crossesPage": u32::from(out.crosses_page),
+            "quiescent": u32::from(out.quiescent)
+        }),
+    ).is_none() {
+        clear_last_compact_proof();
+        return 0;
+    }
     unsafe {
         M6C_WIDTH = out.width;
         M6C_ADDRESS = out.address;

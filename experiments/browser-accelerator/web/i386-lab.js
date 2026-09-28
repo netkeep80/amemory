@@ -390,27 +390,6 @@ function setupArchitecturalStateWitness(section, wasm) {
     : "M5 state partially available; unavailable witnesses are disabled.";
   status.className = "notice";
 
-  const readState = (suffix) => {
-    const value = (name) => {
-      const getter = wasm["amemory_i386_state_" + name + "_" + suffix];
-      if (typeof getter !== "function") {
-        throw new Error("missing state getter " + name + "_" + suffix);
-      }
-      return getter() >>> 0;
-    };
-    return {
-      eax: value("eax"),
-      ebx: value("ebx"),
-      ecx: value("ecx"),
-      edx: value("edx"),
-      esi: value("esi"),
-      edi: value("edi"),
-      ebp: value("ebp"),
-      esp: value("esp"),
-      eip: value("eip"),
-    };
-  };
-
   const cases = {
     add: {
       run: () => wasm.amemory_i386_state_run_add32(),
@@ -501,24 +480,21 @@ function setupArchitecturalStateWitness(section, wasm) {
       if (spec.run() !== 1) {
         throw new Error(spec.label + " A-Circuit WASM rejected the state witness");
       }
-      const before = readState("before");
-      const after = readState("after");
+      const observed = collectWitnessPayload(wasm, "architectural-state");
+      if (observed.block !== spec.block) {
+        throw new Error(spec.label + " structured result block mismatch");
+      }
+      const before = observed.before || {};
+      const after = observed.after || {};
       assertSnapshot(before, spec.before, spec.label + " before");
       assertSnapshot(after, spec.after, spec.label + " after");
 
-      const flags = {
-        defined: wasm.amemory_i386_state_flags_defined_mask() >>> 0,
-        flagValues: wasm.amemory_i386_state_flags_value_mask() >>> 0,
-        undefined: wasm.amemory_i386_state_flags_undefined_mask() >>> 0,
-        preserve: 0,
-      };
-      const reactions = wasm.amemory_i386_state_reactions() >>> 0;
-      const oldStateRetained =
-        wasm.amemory_i386_state_old_state_retained() >>> 0;
-      const atomicScope = wasm.amemory_i386_state_atomic_scope() >>> 0;
-      const steadyDelta =
-        wasm.amemory_i386_state_steady_link_delta() >>> 0;
-      const quiescent = wasm.amemory_i386_state_quiescent() >>> 0;
+      const flags = observed.flags || {};
+      const reactions = observed.reactions >>> 0;
+      const oldStateRetained = observed.oldStateRetained >>> 0;
+      const atomicScope = observed.atomicScope >>> 0;
+      const steadyDelta = observed.steadyDelta >>> 0;
+      const quiescent = observed.quiescent >>> 0;
 
       if (flags.defined !== spec.flags.defined ||
           flags.flagValues !== spec.flags.values ||
@@ -917,45 +893,13 @@ function setupMemoryWitness(section, wasm) {
         if (wasm.amemory_i386_memory32_run(address, value) !== 1) {
           throw new Error("M6b Byte8 A-Circuit WASM rejected memory inputs");
         }
-        observed = {
-          width,
-          address: wasm.amemory_i386_memory32_address() >>> 0,
-          write: wasm.amemory_i386_memory32_write_value() >>> 0,
-          before: wasm.amemory_i386_memory32_before_value() >>> 0,
-          after: wasm.amemory_i386_memory32_after_value() >>> 0,
-          oldAfter: wasm.amemory_i386_memory32_old_after_value() >>> 0,
-          oldRoot: wasm.amemory_i386_memory32_old_root_ref() >>> 0,
-          newRoot: wasm.amemory_i386_memory32_new_root_ref() >>> 0,
-          reactions: wasm.amemory_i386_memory32_reactions() >>> 0,
-          linksAfterLoad: wasm.amemory_i386_memory32_links_after_load() >>> 0,
-          linksFinal: wasm.amemory_i386_memory32_links_final() >>> 0,
-          steadyDelta: wasm.amemory_i386_memory32_steady_link_delta() >>> 0,
-          atomicScope: 1,
-          crossesPage: 0,
-          quiescent: wasm.amemory_i386_memory32_quiescent() >>> 0,
-        };
+        observed = collectWitnessPayload(wasm, "memory-byte");
         expectedBlock = "M6B_MEMORY32";
       } else {
         if (wasm.amemory_i386_word_memory_run(width, address, value) !== 1) {
           throw new Error("M6c word-memory A-Circuit WASM rejected inputs");
         }
-        observed = {
-          width: wasm.amemory_i386_word_memory_width() >>> 0,
-          address: wasm.amemory_i386_word_memory_address() >>> 0,
-          write: wasm.amemory_i386_word_memory_write_value() >>> 0,
-          before: wasm.amemory_i386_word_memory_before_value() >>> 0,
-          after: wasm.amemory_i386_word_memory_after_value() >>> 0,
-          oldAfter: wasm.amemory_i386_word_memory_old_after_value() >>> 0,
-          oldRoot: wasm.amemory_i386_word_memory_old_root_ref() >>> 0,
-          newRoot: wasm.amemory_i386_word_memory_new_root_ref() >>> 0,
-          reactions: wasm.amemory_i386_word_memory_reactions() >>> 0,
-          linksAfterLoad: wasm.amemory_i386_word_memory_links_after_load() >>> 0,
-          linksFinal: wasm.amemory_i386_word_memory_links_final() >>> 0,
-          steadyDelta: wasm.amemory_i386_word_memory_steady_link_delta() >>> 0,
-          atomicScope: wasm.amemory_i386_word_memory_atomic_scope() >>> 0,
-          crossesPage: wasm.amemory_i386_word_memory_crosses_page() >>> 0,
-          quiescent: wasm.amemory_i386_word_memory_quiescent() >>> 0,
-        };
+        observed = collectWitnessPayload(wasm, "memory-word");
         expectedBlock = width === 16
           ? "M6C_MEMORY_WORD16"
           : "M6C_MEMORY_WORD32";
@@ -964,7 +908,8 @@ function setupMemoryWitness(section, wasm) {
       const byteCount = width / 8;
       const expectedCross =
         ((address & 0xff) + byteCount - 1) > 0xff ? 1 : 0;
-      if (observed.width !== width ||
+      if (observed.block !== expectedBlock ||
+          observed.width !== width ||
           observed.address !== address ||
           observed.write !== value ||
           observed.before !== 0 ||
@@ -1109,7 +1054,7 @@ function abiArgs(block, values) {
   return [block.opcode, a >>> 0, b >>> 0, flag >>> 0];
 }
 
-function collectOutcome(wasm, expectedArgs) {
+function collectResultEnvelope(wasm) {
   const envelope = readJsonAbi(wasm, {
     available: "amemory_i386_lab_result_available",
     length: "amemory_i386_lab_result_json_len",
@@ -1121,8 +1066,16 @@ function collectOutcome(wasm, expectedArgs) {
       envelope.representationId !== "amemory-i386-lab-result-json" ||
       envelope.representationVersion !== "0.1.0" ||
       envelope.instanceId !== 0 ||
-      envelope.witnessKind !== "registry-block") {
+      envelope.compactProofAvailable !== true) {
     throw new Error("unsupported A-Circuit structured result envelope");
+  }
+  return envelope;
+}
+
+function collectOutcome(wasm, expectedArgs) {
+  const envelope = collectResultEnvelope(wasm);
+  if (envelope.witnessKind !== "registry-block") {
+    throw new Error("expected registry-block structured result");
   }
   const [opcode, a, b, inputFlag] = expectedArgs;
   const operation = envelope.operation || {};
@@ -1155,8 +1108,19 @@ function collectOutcome(wasm, expectedArgs) {
     linksFirst: out.linksAfterFirst >>> 0,
     steadyDelta: out.steadyLinkDelta >>> 0,
     quiescent: out.quiescent >>> 0,
-    compactProofAvailable: envelope.compactProofAvailable === true,
+    compactProofAvailable: true,
   };
+}
+
+function collectWitnessPayload(wasm, expectedKind) {
+  const envelope = collectResultEnvelope(wasm);
+  if (envelope.witnessKind !== expectedKind ||
+      !envelope.payload ||
+      typeof envelope.payload !== "object" ||
+      Array.isArray(envelope.payload)) {
+    throw new Error("unexpected structured witness payload: " + expectedKind);
+  }
+  return envelope.payload;
 }
 
 function runBlock(wasm, block, values) {

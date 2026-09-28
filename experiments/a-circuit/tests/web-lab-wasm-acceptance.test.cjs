@@ -56,6 +56,15 @@ for (const retiredBrowserGetter of [
     throw new Error("browser still depends on scalar result getter: " + retiredBrowserGetter);
   }
 }
+for (const [label, pattern] of [
+  ["M5 state observation getter", /wasm\.amemory_i386_state_(?:eax|ebx|ecx|edx|esi|edi|ebp|esp|eip|flags_|reactions|old_state_retained|atomic_scope|steady_link_delta|quiescent)/],
+  ["M6b byte-memory observation getter", /wasm\.amemory_i386_memory32_(?:address|page24|offset8|write_value|before_value|after_value|old_after_value|old_root_ref|new_root_ref|reactions|links_after_load|links_final|steady_link_delta|quiescent)/],
+  ["M6c word-memory observation getter", /wasm\.amemory_i386_word_memory_(?:width|address|write_value|before_value|after_value|old_after_value|old_root_ref|new_root_ref|reactions|links_after_load|links_final|steady_link_delta|atomic_scope|crosses_page|quiescent)/],
+]) {
+  if (pattern.test(labPageSource)) {
+    throw new Error("browser still depends on " + label);
+  }
+}
 const bytes = fs.readFileSync(wasmPath);
 const sourceSha =
   process.env.AMEMORY_SOURCE_SHA || process.env.GITHUB_SHA || null;
@@ -148,6 +157,30 @@ Promise.all([
       throw new Error(label + " structured result outcome/proof marker missing");
     }
     return result;
+  };
+  const readCurrentWitnessPayload = (label, expectedKind) => {
+    if (w.amemory_i386_lab_result_available() !== 1) {
+      throw new Error(label + " structured witness JSON missing");
+    }
+    const len = w.amemory_i386_lab_result_json_len() >>> 0;
+    const ptr = w.amemory_i386_lab_result_json_ptr() >>> 0;
+    if (!len || ptr + len > w.memory.buffer.byteLength) {
+      throw new Error(label + " structured witness pointer/length invalid");
+    }
+    const result = JSON.parse(
+      Buffer.from(w.memory.buffer, ptr, len).toString("utf8")
+    );
+    if (result.schemaVersion !== 1 ||
+        result.representationId !== "amemory-i386-lab-result-json" ||
+        result.representationVersion !== "0.1.0" ||
+        result.instanceId !== 0 ||
+        result.witnessKind !== expectedKind ||
+        result.compactProofAvailable !== true ||
+        !result.payload ||
+        typeof result.payload !== "object") {
+      throw new Error(label + " structured witness envelope mismatch");
+    }
+    return result.payload;
   };
   const proofMetrics = (proof, registryBlock) => {
     const { visualLinks, ...resultMetadata } = proof.result;
@@ -828,6 +861,11 @@ Promise.all([
   if (w.amemory_i386_state_run_add32() !== 1) {
     throw new Error("M5a real ADD32 state transition rejected");
   }
+  const statePayloadM5a =
+    readCurrentWitnessPayload("M5a", "architectural-state");
+  if (statePayloadM5a.block !== "M5A_STATE_ADD32") {
+    throw new Error("M5a structured state block mismatch");
+  }
   assertStateEquals(readArchitecturalState("before"), {
     eax: 0xffffffff,
     ebx: 0x11223344,
@@ -850,6 +888,32 @@ Promise.all([
     esp: 0x77778888,
     eip: 0x00401000,
   }, "M5a after");
+  assertStateEquals(
+    statePayloadM5c.before,
+    readArchitecturalState("before"),
+    "M5c structured/compat before"
+  );
+  assertStateEquals(
+    statePayloadM5c.after,
+    readArchitecturalState("after"),
+    "M5c structured/compat after"
+  );
+  if ((statePayloadM5c.flags.defined >>> 0) !==
+        (w.amemory_i386_state_flags_defined_mask() >>> 0) ||
+      (statePayloadM5c.flags.flagValues >>> 0) !==
+        (w.amemory_i386_state_flags_value_mask() >>> 0) ||
+      (statePayloadM5c.flags.undefined >>> 0) !==
+        (w.amemory_i386_state_flags_undefined_mask() >>> 0) ||
+      (statePayloadM5c.oldStateRetained >>> 0) !==
+        (w.amemory_i386_state_old_state_retained() >>> 0) ||
+      (statePayloadM5c.atomicScope >>> 0) !==
+        (w.amemory_i386_state_atomic_scope() >>> 0) ||
+      (statePayloadM5c.steadyDelta >>> 0) !==
+        (w.amemory_i386_state_steady_link_delta() >>> 0) ||
+      (statePayloadM5c.quiescent >>> 0) !==
+        (w.amemory_i386_state_quiescent() >>> 0)) {
+    throw new Error("M5c structured/getter compatibility mismatch");
+  }
   if ((w.amemory_i386_state_flags_defined_mask() >>> 0) !== 0x000008d5 ||
       (w.amemory_i386_state_flags_value_mask() >>> 0) !== 0x00000055 ||
       (w.amemory_i386_state_flags_undefined_mask() >>> 0) !== 0) {
@@ -958,6 +1022,11 @@ Promise.all([
   }
   if (w.amemory_i386_state_run_mul32() !== 1) {
     throw new Error("M5b real MUL32 state transition rejected");
+  }
+  const statePayloadM5b =
+    readCurrentWitnessPayload("M5b", "architectural-state");
+  if (statePayloadM5b.block !== "M5B_STATE_MUL32") {
+    throw new Error("M5b structured state block mismatch");
   }
   assertStateEquals(readArchitecturalState("before"), {
     eax: 0xffffffff,
@@ -1096,6 +1165,11 @@ Promise.all([
   if (w.amemory_i386_state_run_add_ecx() !== 1) {
     throw new Error("M5c real ADD->ECX state transition rejected");
   }
+  const statePayloadM5c =
+    readCurrentWitnessPayload("M5c", "architectural-state");
+  if (statePayloadM5c.block !== "M5C_STATE_ADD_ECX") {
+    throw new Error("M5c structured state block mismatch");
+  }
   assertStateEquals(readArchitecturalState("before"), {
     eax: 0x10203040,
     ebx: 0x11223344,
@@ -1211,6 +1285,13 @@ Promise.all([
   if (w.amemory_i386_memory_run(0x25, 0xab) !== 1) {
     throw new Error("M6a structural memory witness rejected");
   }
+  const memoryPayloadM6a =
+    readCurrentWitnessPayload("M6a", "memory-radix");
+  if (memoryPayloadM6a.block !== "M6A_RADIX_PAGE" ||
+      (memoryPayloadM6a.address >>> 0) !== 0x25 ||
+      (memoryPayloadM6a.write >>> 0) !== 0xab) {
+    throw new Error("M6a structured memory payload mismatch");
+  }
   if ((w.amemory_i386_memory_offset() >>> 0) !== 0x25 ||
       (w.amemory_i386_memory_write_value() >>> 0) !== 0xab ||
       (w.amemory_i386_memory_before_value() >>> 0) !== 0 ||
@@ -1318,6 +1399,15 @@ Promise.all([
   if (w.amemory_i386_memory32_run(0x00123425, 0xab) !== 1) {
     throw new Error("M6b Address32 structural memory witness rejected");
   }
+  const memoryPayloadM6b =
+    readCurrentWitnessPayload("M6b", "memory-byte");
+  if (memoryPayloadM6b.block !== "M6B_MEMORY32" ||
+      (memoryPayloadM6b.address >>> 0) !== 0x00123425 ||
+      (memoryPayloadM6b.page24 >>> 0) !== 0x001234 ||
+      (memoryPayloadM6b.offset8 >>> 0) !== 0x25 ||
+      (memoryPayloadM6b.write >>> 0) !== 0xab) {
+    throw new Error("M6b structured memory payload mismatch");
+  }
   if ((w.amemory_i386_memory32_address() >>> 0) !== 0x00123425 ||
       (w.amemory_i386_memory32_page24() >>> 0) !== 0x001234 ||
       (w.amemory_i386_memory32_offset8() >>> 0) !== 0x25 ||
@@ -1332,6 +1422,29 @@ Promise.all([
       w.amemory_i386_memory32_reactions() <= 80) {
     throw new Error("M6b Address32 result/persistence mismatch");
   }
+  if ((memoryPayloadM6b.before >>> 0) !==
+        (w.amemory_i386_memory32_before_value() >>> 0) ||
+      (memoryPayloadM6b.after >>> 0) !==
+        (w.amemory_i386_memory32_after_value() >>> 0) ||
+      (memoryPayloadM6b.oldAfter >>> 0) !==
+        (w.amemory_i386_memory32_old_after_value() >>> 0) ||
+      (memoryPayloadM6b.oldRoot >>> 0) !==
+        (w.amemory_i386_memory32_old_root_ref() >>> 0) ||
+      (memoryPayloadM6b.newRoot >>> 0) !==
+        (w.amemory_i386_memory32_new_root_ref() >>> 0) ||
+      (memoryPayloadM6b.reactions >>> 0) !==
+        (w.amemory_i386_memory32_reactions() >>> 0) ||
+      (memoryPayloadM6b.linksAfterLoad >>> 0) !==
+        (w.amemory_i386_memory32_links_after_load() >>> 0) ||
+      (memoryPayloadM6b.linksFinal >>> 0) !==
+        (w.amemory_i386_memory32_links_final() >>> 0) ||
+      (memoryPayloadM6b.steadyDelta >>> 0) !==
+        (w.amemory_i386_memory32_steady_link_delta() >>> 0) ||
+      (memoryPayloadM6b.quiescent >>> 0) !==
+        (w.amemory_i386_memory32_quiescent() >>> 0)) {
+    throw new Error("M6b structured/getter compatibility mismatch");
+  }
+
   if (w.amemory_i386_memory32_run(0x00123425, 256) !== 0) {
     throw new Error("M6b WASM ABI accepted out-of-range Byte8");
   }
@@ -1432,6 +1545,15 @@ Promise.all([
       w.amemory_i386_word_memory_quiescent() !== 1) {
     throw new Error("M6c Word16 cross-page witness failed");
   }
+  const memoryPayloadM6c16 =
+    readCurrentWitnessPayload("M6c Word16", "memory-word");
+  if (memoryPayloadM6c16.block !== "M6C_MEMORY_WORD16" ||
+      (memoryPayloadM6c16.width >>> 0) !== 16 ||
+      (memoryPayloadM6c16.address >>> 0) !== 0x000000ff ||
+      (memoryPayloadM6c16.after >>> 0) !== 0xabcd ||
+      (memoryPayloadM6c16.crossesPage >>> 0) !== 1) {
+    throw new Error("M6c Word16 structured payload mismatch");
+  }
   const word16Proof =
     inflateCompactProof(readCurrentCompactProof("M6C_MEMORY_WORD16"));
   if (word16Proof.block !== "M6C_MEMORY_WORD16" ||
@@ -1443,6 +1565,15 @@ Promise.all([
 
   if (w.amemory_i386_word_memory_run(32, 0x000000fe, 0x12345678) !== 1) {
     throw new Error("M6c Word32 cross-page witness rejected");
+  }
+  const memoryPayloadM6c32 =
+    readCurrentWitnessPayload("M6c Word32", "memory-word");
+  if (memoryPayloadM6c32.block !== "M6C_MEMORY_WORD32" ||
+      (memoryPayloadM6c32.width >>> 0) !== 32 ||
+      (memoryPayloadM6c32.address >>> 0) !== 0x000000fe ||
+      (memoryPayloadM6c32.write >>> 0) !== 0x12345678 ||
+      (memoryPayloadM6c32.crossesPage >>> 0) !== 1) {
+    throw new Error("M6c Word32 structured payload mismatch");
   }
   if ((w.amemory_i386_word_memory_width() >>> 0) !== 32 ||
       (w.amemory_i386_word_memory_address() >>> 0) !== 0x000000fe ||
