@@ -1,6 +1,7 @@
 use crate::{
     architectural_state_n::{
         web_prove_architectural_state_add,
+        web_prove_architectural_state_add_ecx,
         web_prove_architectural_state_mul,
     },
     arithmetic_effect_n::{web_prove_arithmetic, web_run_arithmetic},
@@ -404,9 +405,21 @@ static mut LAST_QUIESCENT: u32 = 0;
 static mut M5A_EAX_BEFORE: u32 = 0;
 static mut M5A_EBX_BEFORE: u32 = 0;
 static mut M5A_EDX_BEFORE: u32 = 0;
+static mut M5A_ECX_BEFORE: u32 = 0;
+static mut M5A_ESI_BEFORE: u32 = 0;
+static mut M5A_EDI_BEFORE: u32 = 0;
+static mut M5A_EBP_BEFORE: u32 = 0;
+static mut M5A_ESP_BEFORE: u32 = 0;
+static mut M5A_EIP_BEFORE: u32 = 0;
 static mut M5A_EAX_AFTER: u32 = 0;
 static mut M5A_EBX_AFTER: u32 = 0;
 static mut M5A_EDX_AFTER: u32 = 0;
+static mut M5A_ECX_AFTER: u32 = 0;
+static mut M5A_ESI_AFTER: u32 = 0;
+static mut M5A_EDI_AFTER: u32 = 0;
+static mut M5A_EBP_AFTER: u32 = 0;
+static mut M5A_ESP_AFTER: u32 = 0;
+static mut M5A_EIP_AFTER: u32 = 0;
 static mut M5A_FLAGS_DEFINED_MASK: u32 = 0;
 static mut M5A_FLAGS_VALUE_MASK: u32 = 0;
 static mut M5A_FLAGS_UNDEFINED_MASK: u32 = 0;
@@ -428,9 +441,21 @@ fn store_state_outcome(
         M5A_EAX_BEFORE = out.eax_before;
         M5A_EBX_BEFORE = out.ebx_before;
         M5A_EDX_BEFORE = out.edx_before;
+        M5A_ECX_BEFORE = out.ecx_before;
+        M5A_ESI_BEFORE = out.esi_before;
+        M5A_EDI_BEFORE = out.edi_before;
+        M5A_EBP_BEFORE = out.ebp_before;
+        M5A_ESP_BEFORE = out.esp_before;
+        M5A_EIP_BEFORE = out.eip_before;
         M5A_EAX_AFTER = out.eax_after;
         M5A_EBX_AFTER = out.ebx_after;
         M5A_EDX_AFTER = out.edx_after;
+        M5A_ECX_AFTER = out.ecx_after;
+        M5A_ESI_AFTER = out.esi_after;
+        M5A_EDI_AFTER = out.edi_after;
+        M5A_EBP_AFTER = out.ebp_after;
+        M5A_ESP_AFTER = out.esp_after;
+        M5A_EIP_AFTER = out.eip_after;
         M5A_FLAGS_DEFINED_MASK = out.flags_defined_mask;
         M5A_FLAGS_VALUE_MASK = out.flags_value_mask;
         M5A_FLAGS_UNDEFINED_MASK = out.flags_undefined_mask;
@@ -474,6 +499,24 @@ pub extern "C" fn amemory_i386_state_run_mul32() -> u32 {
 }
 
 #[no_mangle]
+pub extern "C" fn amemory_i386_state_full_probe() -> u32 {
+    0x0000_050c
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_state_run_add_ecx() -> u32 {
+    clear_last_compact_proof();
+    let Some(execution) = web_prove_architectural_state_add_ecx() else {
+        return 0;
+    };
+    if set_last_compact_proof(&execution.proof).is_none() {
+        return 0;
+    }
+    store_state_outcome(execution.outcome);
+    1
+}
+
+#[no_mangle]
 pub extern "C" fn amemory_i386_state_eax_before() -> u32 {
     unsafe { M5A_EAX_BEFORE }
 }
@@ -486,6 +529,30 @@ pub extern "C" fn amemory_i386_state_edx_before() -> u32 {
     unsafe { M5A_EDX_BEFORE }
 }
 #[no_mangle]
+pub extern "C" fn amemory_i386_state_ecx_before() -> u32 {
+    unsafe { M5A_ECX_BEFORE }
+}
+#[no_mangle]
+pub extern "C" fn amemory_i386_state_esi_before() -> u32 {
+    unsafe { M5A_ESI_BEFORE }
+}
+#[no_mangle]
+pub extern "C" fn amemory_i386_state_edi_before() -> u32 {
+    unsafe { M5A_EDI_BEFORE }
+}
+#[no_mangle]
+pub extern "C" fn amemory_i386_state_ebp_before() -> u32 {
+    unsafe { M5A_EBP_BEFORE }
+}
+#[no_mangle]
+pub extern "C" fn amemory_i386_state_esp_before() -> u32 {
+    unsafe { M5A_ESP_BEFORE }
+}
+#[no_mangle]
+pub extern "C" fn amemory_i386_state_eip_before() -> u32 {
+    unsafe { M5A_EIP_BEFORE }
+}
+#[no_mangle]
 pub extern "C" fn amemory_i386_state_eax_after() -> u32 {
     unsafe { M5A_EAX_AFTER }
 }
@@ -496,6 +563,30 @@ pub extern "C" fn amemory_i386_state_ebx_after() -> u32 {
 #[no_mangle]
 pub extern "C" fn amemory_i386_state_edx_after() -> u32 {
     unsafe { M5A_EDX_AFTER }
+}
+#[no_mangle]
+pub extern "C" fn amemory_i386_state_ecx_after() -> u32 {
+    unsafe { M5A_ECX_AFTER }
+}
+#[no_mangle]
+pub extern "C" fn amemory_i386_state_esi_after() -> u32 {
+    unsafe { M5A_ESI_AFTER }
+}
+#[no_mangle]
+pub extern "C" fn amemory_i386_state_edi_after() -> u32 {
+    unsafe { M5A_EDI_AFTER }
+}
+#[no_mangle]
+pub extern "C" fn amemory_i386_state_ebp_after() -> u32 {
+    unsafe { M5A_EBP_AFTER }
+}
+#[no_mangle]
+pub extern "C" fn amemory_i386_state_esp_after() -> u32 {
+    unsafe { M5A_ESP_AFTER }
+}
+#[no_mangle]
+pub extern "C" fn amemory_i386_state_eip_after() -> u32 {
+    unsafe { M5A_EIP_AFTER }
 }
 #[no_mangle]
 pub extern "C" fn amemory_i386_state_flags_defined_mask() -> u32 {
