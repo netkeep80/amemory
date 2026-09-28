@@ -25,9 +25,15 @@ for (const required of [
   "M6 structural word memory witness",
   "amemory_i386_memory32_run",
   "amemory_i386_word_memory_run",
+  "M6d State + MemoryRoot fetch / stack witness",
+  "setupM6dWitness",
+  "amemory_i386_fetch_run",
+  "amemory_i386_stack_run",
+  "collectBrowserProof",
+  "renderProofPipeline",
 ]) {
   if (!labPageSource.includes(required)) {
-    throw new Error("M5 Pages witness wiring missing: " + required);
+    throw new Error("Pages witness wiring missing: " + required);
   }
 }
 const bytes = fs.readFileSync(wasmPath);
@@ -1485,6 +1491,138 @@ Promise.all([
       (w.amemory_i386_word_memory_links_final() >>> 0) !==
         wordProof.result.linksFinal) {
     throw new Error("M6c WASM/proof Link-count mismatch");
+  }
+
+
+  // M6d State+MemoryRoot FETCH/STACK: real WASM acceptance, not UI-only wiring.
+  if (typeof w.amemory_i386_fetch_probe !== "function" ||
+      w.amemory_i386_fetch_probe() !== 0x60d ||
+      typeof w.amemory_i386_fetch_run !== "function") {
+    throw new Error("M6d2 FETCH WASM ABI missing");
+  }
+  if (w.amemory_i386_fetch_run(0x000000ff, 0x90, 1) !== 1) {
+    throw new Error("M6d2 seeded FETCH real-WASM witness rejected");
+  }
+  if ((w.amemory_i386_fetch_eip_before() >>> 0) !== 0x000000ff ||
+      (w.amemory_i386_fetch_eip_after() >>> 0) !== 0x00000100 ||
+      (w.amemory_i386_fetch_byte() >>> 0) !== 0x90 ||
+      (w.amemory_i386_fetch_seeded_write() >>> 0) !== 1 ||
+      (w.amemory_i386_fetch_initial_root_ref() >>> 0) ===
+        (w.amemory_i386_fetch_final_root_ref() >>> 0) ||
+      w.amemory_i386_fetch_state_preserved() !== 1 ||
+      w.amemory_i386_fetch_old_state_retained() !== 1 ||
+      w.amemory_i386_fetch_atomic_scope() !== 1 ||
+      w.amemory_i386_fetch_steady_link_delta() !== 0 ||
+      w.amemory_i386_fetch_quiescent() !== 1 ||
+      w.amemory_i386_fetch_reactions() === 0) {
+    throw new Error("M6d2 seeded FETCH State/MemoryRoot witness failed");
+  }
+  let fetchProof =
+    inflateCompactProof(readCurrentCompactProof("M6D2_FETCH_SEEDED"));
+  if (fetchProof.block !== "M6D2_FETCH_SEEDED" ||
+      fetchProof.schemaVersion !== 4 ||
+      !fetchProof.result.oracleMatches ||
+      (fetchProof.result.decodedValue >>> 0) !== 0x90 ||
+      (fetchProof.result.decodedValueHi >>> 0) !== 0x00000100 ||
+      fetchProof.result.identicalRerunLinkDelta !== 0 ||
+      !fetchProof.execute.finalQuiescent ||
+      fetchProof.execute.activeReactionCount !==
+        (w.amemory_i386_fetch_reactions() >>> 0)) {
+    throw new Error("M6d2 seeded FETCH compact proof mismatch");
+  }
+  const fetchMemoryId = fetchProof.load.memoryInstanceId;
+  if (!fetchMemoryId ||
+      fetchProof.execute.memoryInstanceId !== fetchMemoryId ||
+      fetchProof.result.memoryInstanceId !== fetchMemoryId ||
+      !fetchProof.execute.reactions.every(
+        (step) => step.memoryInstanceId === fetchMemoryId &&
+          step.scopeBefore.length === 1 &&
+          step.scopeAfter.length === 1
+      ) ||
+      (w.amemory_i386_fetch_links_after_load() >>> 0) !==
+        fetchProof.load.linksAfterLoad ||
+      (w.amemory_i386_fetch_links_final() >>> 0) !==
+        fetchProof.result.linksFinal) {
+    throw new Error("M6d2 FETCH proof is not one-memory / one-member Scope");
+  }
+
+  // Explicit wrapping fetch is part of M6d2 architectural acceptance.
+  if (w.amemory_i386_fetch_run(0xffffffff, 0, 0) !== 1 ||
+      (w.amemory_i386_fetch_eip_after() >>> 0) !== 0 ||
+      (w.amemory_i386_fetch_initial_root_ref() >>> 0) !==
+        (w.amemory_i386_fetch_final_root_ref() >>> 0)) {
+    throw new Error("M6d2 0xffffffff -> 0 FETCH wrap failed");
+  }
+  fetchProof = inflateCompactProof(readCurrentCompactProof("M6D2_FETCH_ZERO"));
+  if (fetchProof.block !== "M6D2_FETCH_ZERO" ||
+      !fetchProof.result.oracleMatches ||
+      (fetchProof.result.decodedValueHi >>> 0) !== 0) {
+    throw new Error("M6d2 wrap compact proof mismatch");
+  }
+  if (w.amemory_i386_fetch_run(0x100, 0x100, 1) !== 0 ||
+      w.amemory_i386_fetch_run(0x100, 0x90, 2) !== 0) {
+    throw new Error("M6d2 FETCH ABI accepted invalid Byte8/seed flag");
+  }
+
+  // Restore the seeded proof after negative controls.
+  if (w.amemory_i386_fetch_run(0x000000ff, 0x90, 1) !== 1) {
+    throw new Error("M6d2 seeded FETCH valid rerun rejected");
+  }
+  fetchProof = inflateCompactProof(readCurrentCompactProof("M6D2_FETCH_SEEDED"));
+  if (fetchProof.block !== "M6D2_FETCH_SEEDED" ||
+      !fetchProof.result.oracleMatches) {
+    throw new Error("M6d2 seeded FETCH proof was not restored");
+  }
+
+  if (typeof w.amemory_i386_stack_probe !== "function" ||
+      w.amemory_i386_stack_probe() !== 0x60e ||
+      typeof w.amemory_i386_stack_run !== "function") {
+    throw new Error("M6d3 STACK WASM ABI missing");
+  }
+  if (w.amemory_i386_stack_run(0x00000103, 0x12345678) !== 1) {
+    throw new Error("M6d3 PUSH32->POP32 real-WASM witness rejected");
+  }
+  if ((w.amemory_i386_stack_esp_before() >>> 0) !== 0x00000103 ||
+      (w.amemory_i386_stack_esp_after() >>> 0) !== 0x00000103 ||
+      (w.amemory_i386_stack_value() >>> 0) !== 0x12345678 ||
+      (w.amemory_i386_stack_initial_root_ref() >>> 0) ===
+        (w.amemory_i386_stack_final_root_ref() >>> 0) ||
+      w.amemory_i386_stack_state_preserved() !== 1 ||
+      w.amemory_i386_stack_old_state_retained() !== 1 ||
+      w.amemory_i386_stack_old_memory_retained() !== 1 ||
+      w.amemory_i386_stack_atomic_scope() !== 1 ||
+      w.amemory_i386_stack_steady_link_delta() !== 0 ||
+      w.amemory_i386_stack_quiescent() !== 1 ||
+      w.amemory_i386_stack_reactions() === 0) {
+    throw new Error("M6d3 PUSH32->POP32 State/MemoryRoot witness failed");
+  }
+  const stackProof =
+    inflateCompactProof(readCurrentCompactProof("M6D3_STACK_ROUNDTRIP"));
+  if (stackProof.block !== "M6D3_STACK_ROUNDTRIP" ||
+      stackProof.schemaVersion !== 4 ||
+      !stackProof.result.oracleMatches ||
+      (stackProof.result.decodedValue >>> 0) !== 0x12345678 ||
+      (stackProof.result.decodedValueHi >>> 0) !== 0x00000103 ||
+      stackProof.result.identicalRerunLinkDelta !== 0 ||
+      !stackProof.execute.finalQuiescent ||
+      stackProof.execute.activeReactionCount !==
+        (w.amemory_i386_stack_reactions() >>> 0)) {
+    throw new Error("M6d3 STACK compact proof mismatch");
+  }
+  const stackMemoryId = stackProof.load.memoryInstanceId;
+  if (!stackMemoryId ||
+      stackProof.execute.memoryInstanceId !== stackMemoryId ||
+      stackProof.result.memoryInstanceId !== stackMemoryId ||
+      !stackProof.execute.reactions.every(
+        (step) => step.memoryInstanceId === stackMemoryId &&
+          step.scopeBefore.length === 1 &&
+          step.scopeAfter.length === 1
+      ) ||
+      (w.amemory_i386_stack_links_after_load() >>> 0) !==
+        stackProof.load.linksAfterLoad ||
+      (w.amemory_i386_stack_links_final() >>> 0) !==
+        stackProof.result.linksFinal) {
+    throw new Error("M6d3 STACK proof is not one-memory / one-member Scope");
   }
 
   // Real WASM execution smoke: composed structural MUX1.
