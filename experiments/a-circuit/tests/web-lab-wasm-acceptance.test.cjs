@@ -22,6 +22,8 @@ for (const required of [
   "Full GPR",
   "EDX:EAX",
   "Stateₜ₊₁",
+  "M6 structural radix memory witness",
+  "amemory_i386_memory_run",
 ]) {
   if (!labPageSource.includes(required)) {
     throw new Error("M5 Pages witness wiring missing: " + required);
@@ -1141,6 +1143,113 @@ Promise.all([
     : 0;
   if (fullFinalHandle <= fullStateProof.load.linksAfterLoad) {
     throw new Error("M5c successor was not materialized at runtime");
+  }
+
+  // M6a: addressable memory is structural and persistent, not a host map.
+  if (typeof w.amemory_i386_memory_probe !== "function" ||
+      w.amemory_i386_memory_probe() !== 0x60a) {
+    throw new Error("M6a structural-memory WASM probe missing");
+  }
+  if (w.amemory_i386_memory_run(0x25, 0xab) !== 1) {
+    throw new Error("M6a structural memory witness rejected");
+  }
+  if ((w.amemory_i386_memory_offset() >>> 0) !== 0x25 ||
+      (w.amemory_i386_memory_write_value() >>> 0) !== 0xab ||
+      (w.amemory_i386_memory_before_value() >>> 0) !== 0 ||
+      (w.amemory_i386_memory_after_value() >>> 0) !== 0xab ||
+      (w.amemory_i386_memory_old_after_value() >>> 0) !== 0 ||
+      (w.amemory_i386_memory_old_root_ref() >>> 0) ===
+        (w.amemory_i386_memory_new_root_ref() >>> 0) ||
+      (w.amemory_i386_memory_steady_link_delta() >>> 0) !== 0 ||
+      w.amemory_i386_memory_quiescent() !== 1 ||
+      w.amemory_i386_memory_reactions() <= 40) {
+    throw new Error("M6a structural memory result/persistence mismatch");
+  }
+  if (w.amemory_i386_memory_run(256, 0xab) !== 0 ||
+      w.amemory_i386_memory_run(0x25, 256) !== 0) {
+    throw new Error("M6a WASM ABI accepted out-of-range Byte8/Offset8");
+  }
+
+  // Re-run the valid witness because rejected ABI inputs intentionally do not
+  // replace the last accepted compact proof.
+  if (w.amemory_i386_memory_run(0x25, 0xab) !== 1) {
+    throw new Error("M6a valid rerun rejected");
+  }
+  const memoryProof =
+    inflateCompactProof(readCurrentCompactProof("M6A_RADIX_PAGE"));
+  if (memoryProof.block !== "M6A_RADIX_PAGE" ||
+      memoryProof.schemaVersion !== 4 ||
+      !memoryProof.result.oracleMatches ||
+      (memoryProof.result.decodedValue >>> 0) !== 0xab ||
+      (memoryProof.result.decodedValueHi >>> 0) !== 0 ||
+      memoryProof.result.identicalRerunLinkDelta !== 0) {
+    throw new Error("M6a compact structural proof result mismatch");
+  }
+  const memoryProofId = memoryProof.load.memoryInstanceId;
+  if (!memoryProofId ||
+      memoryProof.execute.memoryInstanceId !== memoryProofId ||
+      memoryProof.result.memoryInstanceId !== memoryProofId ||
+      !memoryProof.execute.reactions.every(
+        (step) => step.memoryInstanceId === memoryProofId &&
+          step.scopeBefore.length === 1 &&
+          step.scopeAfter.length === 1
+      )) {
+    throw new Error("M6a proof is not one-memory/single-scope");
+  }
+  if (memoryProof.prepare.runtimeMemoryExists !== false ||
+      !memoryProof.load.carrierRoundTrip ||
+      memoryProof.load.linksBeforeLoad !== 1 ||
+      memoryProof.load.linksAfterLoad !== memoryProof.prepare.compiledLinks ||
+      !memoryProof.execute.finalQuiescent ||
+      memoryProof.execute.activeReactionCount !==
+        (w.amemory_i386_memory_reactions() >>> 0)) {
+    throw new Error("M6a PREPARE/LOAD/EXECUTE witness mismatch");
+  }
+  const memoryRoles = new Map(
+    memoryProof.prepare.semanticRoots.map((root) => [root.role, root])
+  );
+  for (const role of [
+    "function.memory.witness",
+    "function.memory.read",
+    "function.memory.write",
+    "memory.zero_root",
+    "memory.result_tag",
+    "data.offset8",
+    "data.byte8",
+    "data.bit.zero",
+    "data.bit.one",
+    "execution.interpreter",
+    "execution.theory",
+    "execution.apply",
+    "scope.initial",
+    "context.result",
+  ]) {
+    if (!memoryRoles.has(role)) {
+      throw new Error("M6a prepared Aset missing semantic root " + role);
+    }
+  }
+  const oldRootRef = w.amemory_i386_memory_old_root_ref() >>> 0;
+  const newRootRef = w.amemory_i386_memory_new_root_ref() >>> 0;
+  if (oldRootRef !== memoryRoles.get("memory.zero_root").carrierRef ||
+      oldRootRef > memoryProof.load.linksAfterLoad ||
+      newRootRef <= memoryProof.load.linksAfterLoad ||
+      newRootRef > memoryProof.result.linksFinal) {
+    throw new Error("M6a old/new root runtime locator boundary mismatch");
+  }
+  const oldRootKey = memoryProofId + ":L" + oldRootRef;
+  const newRootKey = memoryProofId + ":L" + newRootRef;
+  const visualKeysForMemory = new Set(
+    memoryProof.result.visualLinks.map((link) => link.key)
+  );
+  if (!visualKeysForMemory.has(oldRootKey) ||
+      !visualKeysForMemory.has(newRootKey)) {
+    throw new Error("M6a visual topology omitted old/new page root");
+  }
+  if ((w.amemory_i386_memory_links_after_load() >>> 0) !==
+        memoryProof.load.linksAfterLoad ||
+      (w.amemory_i386_memory_links_final() >>> 0) !==
+        memoryProof.result.linksFinal) {
+    throw new Error("M6a WASM/proof Link-count mismatch");
   }
 
   // Real WASM execution smoke: composed structural MUX1.
