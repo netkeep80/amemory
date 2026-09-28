@@ -2101,6 +2101,72 @@ mod tests {
     }
 
     #[test]
+    fn m5c_real_add_pipeline_updates_ecx_and_preserves_full_state() {
+        let execution = web_prove_architectural_state_add_ecx().unwrap();
+        assert_eq!(execution.outcome.ecx_before, 0xffff_ffff);
+        assert_eq!(execution.outcome.ecx_after, 0);
+        assert_eq!(execution.outcome.eax_before, 0x1020_3040);
+        assert_eq!(execution.outcome.eax_after, execution.outcome.eax_before);
+        assert_eq!(execution.outcome.ebx_after, execution.outcome.ebx_before);
+        assert_eq!(execution.outcome.edx_after, execution.outcome.edx_before);
+        assert_eq!(execution.outcome.esi_after, execution.outcome.esi_before);
+        assert_eq!(execution.outcome.edi_after, execution.outcome.edi_before);
+        assert_eq!(execution.outcome.ebp_after, execution.outcome.ebp_before);
+        assert_eq!(execution.outcome.esp_after, execution.outcome.esp_before);
+        assert_eq!(execution.outcome.eip_after, execution.outcome.eip_before);
+        assert_eq!(execution.outcome.flags_defined_mask, 0x0000_08d5);
+        assert_eq!(execution.outcome.flags_value_mask, 0x0000_0055);
+        assert_eq!(execution.outcome.flags_undefined_mask, 0);
+        assert_eq!(execution.outcome.old_state_retained, 1);
+        assert_eq!(execution.outcome.atomic_scope, 1);
+        assert_eq!(execution.outcome.steady_link_delta, 0);
+        assert_eq!(execution.outcome.quiescent, 1);
+        assert_eq!(execution.proof.block, "M5C_STATE_ADD_ECX");
+        assert!(execution.proof.result.oracle_matches);
+        assert_eq!(execution.proof.result.decoded_value, 0);
+        assert_eq!(
+            execution.proof.result.decoded_value_hi,
+            Some(execution.outcome.eip_after)
+        );
+        assert!(execution.proof.execute.reactions.iter().all(|step| {
+            step.scope_before.len() == 1 && step.scope_after.len() == 1
+        }));
+    }
+
+    #[test]
+    fn m5c_state_payload_preserves_m5_prefix_and_appends_new_slots() {
+        let mut f = FullFixture::new();
+        let p = ArchitecturalStateProgram::install(&mut f);
+        let state = make_state(&mut f, &p, initial());
+        let (tag, payload) = f.store.poles(state).unwrap();
+        assert_eq!(tag, p.schema.state_tag);
+        let fields = read_exact_sequence(&f.store, payload).unwrap();
+        assert_eq!(fields.len(), 15);
+
+        let expected_ids = [
+            p.schema.eax,
+            p.schema.ebx,
+            p.schema.edx,
+            p.schema.flags.cf,
+            p.schema.flags.pf,
+            p.schema.flags.af,
+            p.schema.flags.zf,
+            p.schema.flags.sf,
+            p.schema.flags.of,
+            p.schema.ecx,
+            p.schema.esi,
+            p.schema.edi,
+            p.schema.ebp,
+            p.schema.esp,
+            p.schema.eip,
+        ];
+        for (field, expected_id) in fields.into_iter().zip(expected_ids) {
+            let (id, _value) = f.store.poles(field).unwrap();
+            assert_eq!(id, expected_id);
+        }
+    }
+
+    #[test]
     fn m5c_single_effect_targets_all_gprs_but_not_eip() {
         let targets = |p: &ArchitecturalStateProgram| [
             p.schema.eax,
