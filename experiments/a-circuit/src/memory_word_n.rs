@@ -877,6 +877,7 @@ fn runtime_read_word(
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct WebWordMemoryOutcome {
+    pub(crate) width: u32,
     pub(crate) address: u32,
     pub(crate) write_value: u32,
     pub(crate) before_value: u32,
@@ -899,41 +900,61 @@ pub(crate) struct WebWordMemoryExecution {
     pub(crate) proof: WebStructuralProof,
 }
 
-/// One-runtime M6c proof for a structural little-endian Word32 write.
-///
-/// Host code contributes only the external Address32/Word32 fixture values.
-/// Address progression A+1/A+2/A+3, byte selection, cross-page routing and
-/// intermediate MemoryRoots are generated structurally inside A-memory.
-/// Only the final MemoryRoot' is returned to the stable caller.
-pub(crate) fn web_prove_word32_memory(
+fn web_prove_word_memory(
     address_value: u32,
     word_value: u32,
+    width: usize,
 ) -> Option<WebWordMemoryExecution> {
+    if !matches!(width, 16 | 32) {
+        return None;
+    }
+    if width == 16 && word_value > 0xffff {
+        return None;
+    }
+
     let mut compiler = FullFixture::new();
     let program = MemoryWordProgram::install(&mut compiler);
-    let address = exact_value(&mut compiler, 32, address_value);
-    let word = exact_value(&mut compiler, 32, word_value);
+    let (read, write, read_result_tag, write_result_tag, block_name) =
+        if width == 16 {
+            (
+                program.read16,
+                program.write16,
+                program.read16_result_tag,
+                program.write16_result_tag,
+                "M6C_MEMORY_WORD16",
+            )
+        } else {
+            (
+                program.read32,
+                program.write32,
+                program.read32_result_tag,
+                program.write32_result_tag,
+                "M6C_MEMORY_WORD32",
+            )
+        };
 
+    let address = exact_value(&mut compiler, 32, address_value);
+    let word = exact_value(&mut compiler, width, word_value);
     let args = materialize_exact_sequence(
         &mut compiler.store,
         &[program.memory.zero_root, address, word],
     )
     .ok()?;
     let invocation =
-        call(&mut compiler.store, compiler.apply, program.write32, args);
+        call(&mut compiler.store, compiler.apply, write, args);
     let initial =
         compiler.store.ensure_pair(compiler.k, invocation).ok()?;
 
     let prepared_roots = vec![
         semantic_source(
             &compiler.store,
-            "function.memory_word.read32",
-            program.read32,
+            "function.memory_word.read",
+            read,
         ),
         semantic_source(
             &compiler.store,
-            "function.memory_word.write32",
-            program.write32,
+            "function.memory_word.write",
+            write,
         ),
         semantic_source(
             &compiler.store,
@@ -947,13 +968,13 @@ pub(crate) fn web_prove_word32_memory(
         ),
         semantic_source(
             &compiler.store,
-            "memory_word.read32_result_tag",
-            program.read32_result_tag,
+            "memory_word.read_result_tag",
+            read_result_tag,
         ),
         semantic_source(
             &compiler.store,
-            "memory_word.write32_result_tag",
-            program.write32_result_tag,
+            "memory_word.write_result_tag",
+            write_result_tag,
         ),
         semantic_source(
             &compiler.store,
@@ -962,7 +983,7 @@ pub(crate) fn web_prove_word32_memory(
         ),
         semantic_source(
             &compiler.store,
-            "data.word32",
+            "data.word",
             word,
         ),
         semantic_source(
@@ -1011,16 +1032,16 @@ pub(crate) fn web_prove_word32_memory(
     let interpreter =
         loaded_handle(&load, "execution.interpreter")?;
     let apply = loaded_handle(&load, "execution.apply")?;
-    let read32 =
-        loaded_handle(&load, "function.memory_word.read32")?;
+    let read =
+        loaded_handle(&load, "function.memory_word.read")?;
     let initial = loaded_handle(&load, "scope.initial")?;
     let old_root =
         loaded_handle(&load, "memory_word.zero_root")?;
     let address = loaded_handle(&load, "data.address32")?;
-    let read32_result_tag =
-        loaded_handle(&load, "memory_word.read32_result_tag")?;
-    let write32_result_tag =
-        loaded_handle(&load, "memory_word.write32_result_tag")?;
+    let read_result_tag =
+        loaded_handle(&load, "memory_word.read_result_tag")?;
+    let write_result_tag =
+        loaded_handle(&load, "memory_word.write_result_tag")?;
     let zero = loaded_handle(&load, "data.bit.zero")?;
     let one = loaded_handle(&load, "data.bit.one")?;
     let result_context =
@@ -1049,7 +1070,7 @@ pub(crate) fn web_prove_word32_memory(
         return None;
     }
     let (tag, new_root) = memory.store.poles(envelope).ok()?;
-    if tag != write32_result_tag
+    if tag != write_result_tag
         || !memory.store.is_valid(old_root)
         || !memory.store.is_valid(new_root)
         || old_root == new_root
@@ -1069,9 +1090,8 @@ pub(crate) fn web_prove_word32_memory(
         2048,
     )?;
 
-    // Verification is isolated from authoritative proof accounting. The
-    // clone preserves all local Link identities while read-back may freely
-    // materialize verification-only calls/results.
+    // Verification uses a clone of the exact runtime carrier so read-back
+    // cannot pollute authoritative compact-proof link accounting.
     let mut verification_memory = ProofRuntimeMemory {
         id: memory.id.clone(),
         store: memory.store.clone(),
@@ -1080,27 +1100,27 @@ pub(crate) fn web_prove_word32_memory(
         &mut verification_memory,
         interpreter,
         apply,
-        read32,
-        read32_result_tag,
+        read,
+        read_result_tag,
         result_context,
         new_root,
         address,
         zero,
         one,
-        32,
+        width,
     )?;
     let old_after_value = runtime_read_word(
         &mut verification_memory,
         interpreter,
         apply,
-        read32,
-        read32_result_tag,
+        read,
+        read_result_tag,
         result_context,
         old_root,
         address,
         zero,
         one,
-        32,
+        width,
     )?;
 
     let oracle_matches =
@@ -1112,7 +1132,7 @@ pub(crate) fn web_prove_word32_memory(
         visual_snapshot(&memory, &load.semantic_roots);
     let proof = WebStructuralProof {
         schema_version: 4,
-        block: "M6C_MEMORY_WORD32".to_owned(),
+        block: block_name.to_owned(),
         prepare,
         load,
         execute,
@@ -1131,8 +1151,13 @@ pub(crate) fn web_prove_word32_memory(
         },
     };
 
+    let byte_count = width / 8;
+    let end_offset =
+        (address_value & 0xff) as usize + byte_count - 1;
+
     Some(WebWordMemoryExecution {
         outcome: WebWordMemoryOutcome {
+            width: width as u32,
             address: address_value,
             write_value: word_value,
             before_value: 0,
@@ -1146,13 +1171,25 @@ pub(crate) fn web_prove_word32_memory(
             steady_link_delta:
                 proof.result.identical_rerun_link_delta,
             atomic_scope: 1,
-            crosses_page: u8::from(
-                (address_value & 0xff) > 0xfc
-            ),
+            crosses_page: u8::from(end_offset > 0xff),
             quiescent: u8::from(proof.execute.final_quiescent),
         },
         proof,
     })
+}
+
+pub(crate) fn web_prove_word16_memory(
+    address_value: u32,
+    word_value: u32,
+) -> Option<WebWordMemoryExecution> {
+    web_prove_word_memory(address_value, word_value, 16)
+}
+
+pub(crate) fn web_prove_word32_memory(
+    address_value: u32,
+    word_value: u32,
+) -> Option<WebWordMemoryExecution> {
+    web_prove_word_memory(address_value, word_value, 32)
 }
 
 #[cfg(test)]
@@ -1257,10 +1294,28 @@ mod tests {
     }
 
     #[test]
+    fn m6c_real_cross_page_word16_proof_is_atomic_and_compact() {
+        let execution =
+            web_prove_word16_memory(0x0000_00ff, 0xabcd)
+                .unwrap();
+        assert_eq!(execution.outcome.width, 16);
+        assert_eq!(execution.outcome.address, 0x0000_00ff);
+        assert_eq!(execution.outcome.after_value, 0xabcd);
+        assert_eq!(execution.outcome.old_after_value, 0);
+        assert_eq!(execution.outcome.crosses_page, 1);
+        assert_eq!(execution.outcome.atomic_scope, 1);
+        assert_eq!(execution.outcome.steady_link_delta, 0);
+        assert_eq!(execution.proof.block, "M6C_MEMORY_WORD16");
+        assert!(execution.proof.result.oracle_matches);
+        assert!(execution.proof.compact().is_some());
+    }
+
+    #[test]
     fn m6c_real_cross_page_word32_proof_is_atomic_and_compact() {
         let execution =
             web_prove_word32_memory(0x0000_00fe, 0x1234_5678)
                 .unwrap();
+        assert_eq!(execution.outcome.width, 32);
         assert_eq!(execution.outcome.address, 0x0000_00fe);
         assert_eq!(execution.outcome.write_value, 0x1234_5678);
         assert_eq!(execution.outcome.after_value, 0x1234_5678);
