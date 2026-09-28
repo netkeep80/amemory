@@ -1014,9 +1014,21 @@ pub(crate) struct WebArchitecturalStateOutcome {
     pub(crate) eax_before: u32,
     pub(crate) ebx_before: u32,
     pub(crate) edx_before: u32,
+    pub(crate) ecx_before: u32,
+    pub(crate) esi_before: u32,
+    pub(crate) edi_before: u32,
+    pub(crate) ebp_before: u32,
+    pub(crate) esp_before: u32,
+    pub(crate) eip_before: u32,
     pub(crate) eax_after: u32,
     pub(crate) ebx_after: u32,
     pub(crate) edx_after: u32,
+    pub(crate) ecx_after: u32,
+    pub(crate) esi_after: u32,
+    pub(crate) edi_after: u32,
+    pub(crate) ebp_after: u32,
+    pub(crate) esp_after: u32,
+    pub(crate) eip_after: u32,
     pub(crate) flags_defined_mask: u32,
     pub(crate) flags_value_mask: u32,
     pub(crate) flags_undefined_mask: u32,
@@ -1133,6 +1145,36 @@ pub(crate) fn web_prove_architectural_state_add(
             &compiler.store,
             "state.register.edx",
             program.schema.edx,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.register.ecx",
+            program.schema.ecx,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.register.esi",
+            program.schema.esi,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.register.edi",
+            program.schema.edi,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.register.ebp",
+            program.schema.ebp,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.register.esp",
+            program.schema.esp,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.eip",
+            program.schema.eip,
         ),
         semantic_source(
             &compiler.store,
@@ -1348,9 +1390,21 @@ pub(crate) fn web_prove_architectural_state_add(
             eax_before: before_value.eax,
             ebx_before: before_value.ebx,
             edx_before: before_value.edx,
+            ecx_before: before_value.ecx,
+            esi_before: before_value.esi,
+            edi_before: before_value.edi,
+            ebp_before: before_value.ebp,
+            esp_before: before_value.esp,
+            eip_before: before_value.eip,
             eax_after: actual.eax,
             ebx_after: actual.ebx,
             edx_after: actual.edx,
+            ecx_after: actual.ecx,
+            esi_after: actual.esi,
+            edi_after: actual.edi,
+            ebp_after: actual.ebp,
+            esp_after: actual.esp,
+            eip_after: actual.eip,
             flags_defined_mask: defined,
             flags_value_mask: values,
             flags_undefined_mask: undefined_mask,
@@ -1467,6 +1521,36 @@ pub(crate) fn web_prove_architectural_state_mul(
             &compiler.store,
             "state.register.edx",
             program.schema.edx,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.register.ecx",
+            program.schema.ecx,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.register.esi",
+            program.schema.esi,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.register.edi",
+            program.schema.edi,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.register.ebp",
+            program.schema.ebp,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.register.esp",
+            program.schema.esp,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.eip",
+            program.schema.eip,
         ),
         semantic_source(
             &compiler.store,
@@ -1667,9 +1751,21 @@ pub(crate) fn web_prove_architectural_state_mul(
             eax_before: before_value.eax,
             ebx_before: before_value.ebx,
             edx_before: before_value.edx,
+            ecx_before: before_value.ecx,
+            esi_before: before_value.esi,
+            edi_before: before_value.edi,
+            ebp_before: before_value.ebp,
+            esp_before: before_value.esp,
+            eip_before: before_value.eip,
             eax_after: actual.eax,
             ebx_after: actual.ebx,
             edx_after: actual.edx,
+            ecx_after: actual.ecx,
+            esi_after: actual.esi,
+            edi_after: actual.edi,
+            ebp_after: actual.ebp,
+            esp_after: actual.esp,
+            eip_after: actual.eip,
             flags_defined_mask: defined,
             flags_value_mask: values,
             flags_undefined_mask: undefined_mask,
@@ -1990,6 +2086,86 @@ mod tests {
     }
 
     #[test]
+    fn m5c_single_effect_targets_all_gprs_but_not_eip() {
+        let targets = |p: &ArchitecturalStateProgram| [
+            p.schema.eax,
+            p.schema.ebx,
+            p.schema.ecx,
+            p.schema.edx,
+            p.schema.esi,
+            p.schema.edi,
+            p.schema.ebp,
+            p.schema.esp,
+        ];
+
+        for target_index in 0..8 {
+            let mut f = FullFixture::new();
+            let p = ArchitecturalStateProgram::install(&mut f);
+            let old_value = initial();
+            let old = make_state(&mut f, &p, old_value);
+            let effect = make_full_effect(
+                &mut f,
+                &p,
+                1,
+                0xdead_beef,
+                [0, 1, 0, 1, 0, 1],
+            );
+            let target = targets(&p)[target_index];
+            let next =
+                transition(&mut f, &p, old, target, effect).unwrap();
+            let actual = decode_state(&f, p.schema, next).unwrap();
+
+            let expected_registers = [
+                actual.eax,
+                actual.ebx,
+                actual.ecx,
+                actual.edx,
+                actual.esi,
+                actual.edi,
+                actual.ebp,
+                actual.esp,
+            ];
+            let old_registers = [
+                old_value.eax,
+                old_value.ebx,
+                old_value.ecx,
+                old_value.edx,
+                old_value.esi,
+                old_value.edi,
+                old_value.ebp,
+                old_value.esp,
+            ];
+            for (index, value) in expected_registers.into_iter().enumerate() {
+                assert_eq!(
+                    value,
+                    if index == target_index {
+                        0xdead_beef
+                    } else {
+                        old_registers[index]
+                    },
+                    "target index {target_index}, register index {index}"
+                );
+            }
+            assert_eq!(actual.eip, old_value.eip);
+        }
+
+        let mut f = FullFixture::new();
+        let p = ArchitecturalStateProgram::install(&mut f);
+        let old = make_state(&mut f, &p, initial());
+        let effect = make_full_effect(
+            &mut f,
+            &p,
+            1,
+            0xdead_beef,
+            [0, 1, 0, 1, 0, 1],
+        );
+        assert!(
+            transition(&mut f, &p, old, p.schema.eip, effect).is_none(),
+            "EIP is structural state but not an ordinary ALU destination"
+        );
+    }
+
+    #[test]
     fn m5b_direct_wide_applier_updates_two_registers_in_one_state() {
         let mut f = FullFixture::new();
         let p = ArchitecturalStateProgram::install(&mut f);
@@ -2177,9 +2353,13 @@ mod tests {
         assert_eq!(execution.outcome.eax_before, 0xffff_ffff);
         assert_eq!(execution.outcome.edx_before, 0xa5a5_5a5a);
         assert_eq!(execution.outcome.ebx_before, 0x1122_3344);
+        assert_eq!(execution.outcome.ecx_before, 0x0102_0304);
+        assert_eq!(execution.outcome.eip_before, 0x0040_1000);
         assert_eq!(execution.outcome.eax_after, 0xffff_fffe);
         assert_eq!(execution.outcome.edx_after, 0x0000_0001);
         assert_eq!(execution.outcome.ebx_after, 0x1122_3344);
+        assert_eq!(execution.outcome.ecx_after, execution.outcome.ecx_before);
+        assert_eq!(execution.outcome.eip_after, execution.outcome.eip_before);
         assert_eq!(execution.outcome.flags_defined_mask, 0x0000_0801);
         assert_eq!(execution.outcome.flags_value_mask, 0x0000_0801);
         assert_eq!(execution.outcome.flags_undefined_mask, 0x0000_00d4);
@@ -2204,6 +2384,10 @@ mod tests {
         assert_eq!(execution.outcome.ebx_after, 0x1122_3344);
         assert_eq!(execution.outcome.edx_before, 0x5566_7788);
         assert_eq!(execution.outcome.edx_after, 0x5566_7788);
+        assert_eq!(execution.outcome.ecx_before, 0x0102_0304);
+        assert_eq!(execution.outcome.ecx_after, execution.outcome.ecx_before);
+        assert_eq!(execution.outcome.eip_before, 0x0040_1000);
+        assert_eq!(execution.outcome.eip_after, execution.outcome.eip_before);
         assert_eq!(execution.outcome.flags_defined_mask, 0x0000_08d5);
         assert_eq!(execution.outcome.flags_value_mask, 0x0000_0055);
         assert_eq!(execution.outcome.flags_undefined_mask, 0);
