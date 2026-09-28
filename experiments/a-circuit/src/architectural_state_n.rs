@@ -41,6 +41,8 @@ pub(crate) struct ArchitecturalStateSchema {
     pub(crate) ebp: Handle,
     pub(crate) esp: Handle,
     pub(crate) eip: Handle,
+    pub(crate) memory_root: Handle,
+    pub(crate) memory_detached: Handle,
     pub(crate) undefined: Handle,
     pub(crate) flags: FlagPatchSchema,
     pub(crate) effect_result_tag: Handle,
@@ -58,6 +60,7 @@ struct StateValue {
     ebp: u32,
     esp: u32,
     eip: u32,
+    memory_root: Handle,
     cf: Option<u8>,
     pf: Option<u8>,
     af: Option<u8>,
@@ -125,10 +128,12 @@ fn state_link(
     ebp: Handle,
     esp: Handle,
     eip: Handle,
+    memory_root: Handle,
 ) -> Handle {
     // Stable M5 prefix MUST NOT be reordered:
     // [EAX, EBX, EDX, CF, PF, AF, ZF, SF, OF].
-    // M5c extends the record append-only.
+    // M5c extends with ECX/ESI/EDI/EBP/ESP/EIP.
+    // M6d1 appends MemoryRoot as field 16; no previous slot moves.
     let fields = [
         binding(store, schema.eax, eax),
         binding(store, schema.ebx, ebx),
@@ -145,6 +150,7 @@ fn state_link(
         binding(store, schema.ebp, ebp),
         binding(store, schema.esp, esp),
         binding(store, schema.eip, eip),
+        binding(store, schema.memory_root, memory_root),
     ];
     let payload = materialize_exact_sequence(store, &fields).unwrap();
     store.ensure_pair(schema.state_tag, payload).unwrap()
@@ -266,6 +272,7 @@ fn install_case(
     let old_ebp = anchors.next(&mut f.store);
     let old_esp = anchors.next(&mut f.store);
     let old_eip = anchors.next(&mut f.store);
+    let old_memory_root = anchors.next(&mut f.store);
     let old_cf = anchors.next(&mut f.store);
     let old_pf = anchors.next(&mut f.store);
     let old_af = anchors.next(&mut f.store);
@@ -298,6 +305,7 @@ fn install_case(
         old_ebp,
         old_esp,
         old_eip,
+        old_memory_root,
     );
     let before_effect = effect_template(
         &mut f.store,
@@ -397,13 +405,14 @@ fn install_case(
         next_ebp,
         next_esp,
         old_eip,
+        old_memory_root,
     );
     let after = f.store.ensure_pair(f.k, after_state).unwrap();
 
     let mut roles = vec![
         old_eax, old_ebx, old_edx, old_ecx, old_esi, old_edi,
-        old_ebp, old_esp, old_eip, old_cf, old_pf, old_af, old_zf,
-        old_sf, old_of, word,
+        old_ebp, old_esp, old_eip, old_memory_root,
+        old_cf, old_pf, old_af, old_zf, old_sf, old_of, word,
     ];
     match shape {
         PatchShape::FullSet6 => {
@@ -452,6 +461,7 @@ fn install_wide_mul_case(
     let old_ebp = anchors.next(&mut f.store);
     let old_esp = anchors.next(&mut f.store);
     let old_eip = anchors.next(&mut f.store);
+    let old_memory_root = anchors.next(&mut f.store);
     let old_cf = anchors.next(&mut f.store);
     let old_pf = anchors.next(&mut f.store);
     let old_af = anchors.next(&mut f.store);
@@ -479,6 +489,7 @@ fn install_wide_mul_case(
         old_ebp,
         old_esp,
         old_eip,
+        old_memory_root,
     );
     let wide =
         materialize_exact_sequence(&mut f.store, &[lo, hi]).unwrap();
@@ -534,13 +545,14 @@ fn install_wide_mul_case(
         old_ebp,
         old_esp,
         old_eip,
+        old_memory_root,
     );
     let after = f.store.ensure_pair(f.k, after_state).unwrap();
 
     let roles = [
         old_eax, old_ebx, old_edx, old_ecx, old_esi, old_edi,
-        old_ebp, old_esp, old_eip, old_cf, old_pf, old_af, old_zf,
-        old_sf, old_of, lo, hi,
+        old_ebp, old_esp, old_eip, old_memory_root,
+        old_cf, old_pf, old_af, old_zf, old_sf, old_of, lo, hi,
     ];
     let (_, admission) = define_bundle_rule(
         &mut f.store,
@@ -592,6 +604,8 @@ impl ArchitecturalStateProgram {
         let ebp = anchors.next(&mut f.store);
         let esp = anchors.next(&mut f.store);
         let eip = anchors.next(&mut f.store);
+        let memory_root = anchors.next(&mut f.store);
+        let memory_detached = anchors.next(&mut f.store);
         let undefined = anchors.next(&mut f.store);
 
         let schema = ArchitecturalStateSchema {
@@ -607,6 +621,8 @@ impl ArchitecturalStateProgram {
             ebp,
             esp,
             eip,
+            memory_root,
+            memory_detached,
             undefined,
             flags,
             effect_result_tag,
@@ -737,7 +753,7 @@ fn decode_state(
         return None;
     }
     let fields = read_exact_sequence(&f.store, payload).ok()?;
-    if fields.len() != 15 {
+    if fields.len() != 16 {
         return None;
     }
 
@@ -807,6 +823,8 @@ fn decode_state(
         f,
         decode_binding(&f.store, fields[14], schema.eip)?,
     )?;
+    let memory_root =
+        decode_binding(&f.store, fields[15], schema.memory_root)?;
 
     Some(StateValue {
         eax,
@@ -818,6 +836,7 @@ fn decode_state(
         ebp,
         esp,
         eip,
+        memory_root,
         cf,
         pf,
         af,
@@ -890,7 +909,7 @@ fn decode_state_in_store(
         return None;
     }
     let fields = read_exact_sequence(store, payload).ok()?;
-    if fields.len() != 15 {
+    if fields.len() != 16 {
         return None;
     }
 
@@ -912,6 +931,7 @@ fn decode_state_in_store(
             schema.ebp,
             schema.esp,
             schema.eip,
+            schema.memory_root,
         ])
         .map(|(field, expected)| decode_binding(store, field, expected))
         .collect::<Option<Vec<_>>>()?;
@@ -932,6 +952,7 @@ fn decode_state_in_store(
         ebp: decode_word_in_store(store, zero, one, values[12])?,
         esp: decode_word_in_store(store, zero, one, values[13])?,
         eip: decode_word_in_store(store, zero, one, values[14])?,
+        memory_root: values[15],
     })
 }
 
@@ -949,6 +970,9 @@ fn state_from_value(
     let ebp = word_in_store(&mut f.store, f.zero, f.one, value.ebp)?;
     let esp = word_in_store(&mut f.store, f.zero, f.one, value.esp)?;
     let eip = word_in_store(&mut f.store, f.zero, f.one, value.eip)?;
+    if !f.store.is_valid(value.memory_root) {
+        return None;
+    }
     let flag = |value: Option<u8>| -> Option<Handle> {
         match value {
             Some(0) => Some(f.zero),
@@ -975,6 +999,7 @@ fn state_from_value(
         ebp,
         esp,
         eip,
+        value.memory_root,
     ))
 }
 
@@ -1081,6 +1106,7 @@ fn web_prove_architectural_state_add_target(
         ebp: 0x5555_6666,
         esp: 0x7777_8888,
         eip: 0x0040_1000,
+        memory_root: program.schema.memory_detached,
         cf: Some(0),
         pf: Some(0),
         af: Some(0),
@@ -1186,6 +1212,16 @@ fn web_prove_architectural_state_add_target(
         ),
         semantic_source(
             &compiler.store,
+            "state.memory_root_id",
+            program.schema.memory_root,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.memory.detached",
+            program.schema.memory_detached,
+        ),
+        semantic_source(
+            &compiler.store,
             "state.flag.undefined",
             program.schema.undefined,
         ),
@@ -1279,6 +1315,8 @@ fn web_prove_architectural_state_add_target(
         ebp: loaded(program.schema.ebp)?,
         esp: loaded(program.schema.esp)?,
         eip: loaded(program.schema.eip)?,
+        memory_root: loaded(program.schema.memory_root)?,
+        memory_detached: loaded(program.schema.memory_detached)?,
         undefined: loaded(program.schema.undefined)?,
         flags: FlagPatchSchema {
             set_tag: loaded(program.schema.flags.set_tag)?,
@@ -1467,6 +1505,7 @@ pub(crate) fn web_prove_architectural_state_mul(
         ebp: 0x5555_6666,
         esp: 0x7777_8888,
         eip: 0x0040_1000,
+        memory_root: program.schema.memory_detached,
         cf: Some(0),
         pf: Some(0),
         af: Some(1),
@@ -1484,6 +1523,7 @@ pub(crate) fn web_prove_architectural_state_mul(
         ebp: before_value.ebp,
         esp: before_value.esp,
         eip: before_value.eip,
+        memory_root: before_value.memory_root,
         cf: Some(1),
         pf: None,
         af: None,
@@ -1566,6 +1606,16 @@ pub(crate) fn web_prove_architectural_state_mul(
             &compiler.store,
             "state.eip",
             program.schema.eip,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.memory_root_id",
+            program.schema.memory_root,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.memory.detached",
+            program.schema.memory_detached,
         ),
         semantic_source(
             &compiler.store,
@@ -1667,6 +1717,8 @@ pub(crate) fn web_prove_architectural_state_mul(
         ebp: loaded(program.schema.ebp)?,
         esp: loaded(program.schema.esp)?,
         eip: loaded(program.schema.eip)?,
+        memory_root: loaded(program.schema.memory_root)?,
+        memory_detached: loaded(program.schema.memory_detached)?,
         undefined: loaded(program.schema.undefined)?,
         flags: FlagPatchSchema {
             set_tag: loaded(program.schema.flags.set_tag)?,
@@ -1852,6 +1904,7 @@ mod tests {
             ebp,
             esp,
             eip,
+            value.memory_root,
         )
     }
 
@@ -2080,7 +2133,7 @@ mod tests {
         Some(successor)
     }
 
-    fn initial() -> StateValue {
+    fn initial(p: &ArchitecturalStateProgram) -> StateValue {
         StateValue {
             eax: 0x1122_3344,
             ebx: 0xaabb_ccdd,
@@ -2091,6 +2144,7 @@ mod tests {
             ebp: 0x5555_6666,
             esp: 0x7777_8888,
             eip: 0x0040_1000,
+            memory_root: p.schema.memory_detached,
             cf: Some(1),
             pf: Some(0),
             af: Some(1),
@@ -2134,14 +2188,14 @@ mod tests {
     }
 
     #[test]
-    fn m5c_state_payload_preserves_m5_prefix_and_appends_new_slots() {
+    fn m6d1_state_payload_preserves_m5c_prefix_and_appends_memory_root() {
         let mut f = FullFixture::new();
         let p = ArchitecturalStateProgram::install(&mut f);
-        let state = make_state(&mut f, &p, initial());
+        let state = make_state(&mut f, &p, initial(&p));
         let (tag, payload) = f.store.poles(state).unwrap();
         assert_eq!(tag, p.schema.state_tag);
         let fields = read_exact_sequence(&f.store, payload).unwrap();
-        assert_eq!(fields.len(), 15);
+        assert_eq!(fields.len(), 16);
 
         let expected_ids = [
             p.schema.eax,
@@ -2159,11 +2213,100 @@ mod tests {
             p.schema.ebp,
             p.schema.esp,
             p.schema.eip,
+            p.schema.memory_root,
         ];
         for (field, expected_id) in fields.into_iter().zip(expected_ids) {
             let (id, _value) = f.store.poles(field).unwrap();
             assert_eq!(id, expected_id);
         }
+    }
+
+    #[test]
+    fn m6d1_single_and_wide_alu_preserve_arbitrary_memory_root_identity() {
+        let mut f = FullFixture::new();
+        let p = ArchitecturalStateProgram::install(&mut f);
+        let custom_memory_root = f
+            .store
+            .ensure_pair(p.schema.memory_detached, f.full)
+            .unwrap();
+        assert_ne!(custom_memory_root, p.schema.memory_detached);
+
+        let mut old_value = initial(&p);
+        old_value.memory_root = custom_memory_root;
+        let old = make_state(&mut f, &p, old_value);
+
+        let effect = make_full_effect(
+            &mut f,
+            &p,
+            1,
+            0x5566_7788,
+            [0, 1, 0, 1, 0, 1],
+        );
+        let single =
+            transition(&mut f, &p, old, p.schema.eax, effect).unwrap();
+        assert_eq!(
+            decode_state(&f, p.schema, single).unwrap().memory_root,
+            custom_memory_root
+        );
+
+        let wide_effect = make_wide_mul_effect(
+            &mut f,
+            &p,
+            0xffff_fffe,
+            1,
+            1,
+            1,
+        );
+        let wide = wide_transition(
+            &mut f,
+            &p,
+            old,
+            p.schema.eax,
+            p.schema.edx,
+            wide_effect,
+        )
+        .unwrap();
+        assert_eq!(
+            decode_state(&f, p.schema, wide).unwrap().memory_root,
+            custom_memory_root
+        );
+        assert!(f.store.is_valid(old));
+        assert!(f.store.is_valid(custom_memory_root));
+    }
+
+    #[test]
+    fn m6d1_legacy_state_without_memory_root_fails_closed() {
+        let mut f = FullFixture::new();
+        let p = ArchitecturalStateProgram::install(&mut f);
+        let state = make_state(&mut f, &p, initial(&p));
+        let (_tag, payload) = f.store.poles(state).unwrap();
+        let fields = read_exact_sequence(&f.store, payload).unwrap();
+        assert_eq!(fields.len(), 16);
+
+        let legacy_payload =
+            materialize_exact_sequence(&mut f.store, &fields[..15]).unwrap();
+        let legacy_state =
+            f.store.ensure_pair(p.schema.state_tag, legacy_payload).unwrap();
+        assert!(decode_state(&f, p.schema, legacy_state).is_none());
+
+        let effect = make_full_effect(
+            &mut f,
+            &p,
+            1,
+            0x5566_7788,
+            [0, 1, 0, 1, 0, 1],
+        );
+        assert!(
+            transition(
+                &mut f,
+                &p,
+                legacy_state,
+                p.schema.eax,
+                effect,
+            )
+            .is_none(),
+            "legacy 15-field State must not match the M6d1 transition"
+        );
     }
 
     #[test]
@@ -2182,7 +2325,7 @@ mod tests {
         for target_index in 0..8 {
             let mut f = FullFixture::new();
             let p = ArchitecturalStateProgram::install(&mut f);
-            let old_value = initial();
+            let old_value = initial(&p);
             let old = make_state(&mut f, &p, old_value);
             let effect = make_full_effect(
                 &mut f,
@@ -2232,7 +2375,7 @@ mod tests {
 
         let mut f = FullFixture::new();
         let p = ArchitecturalStateProgram::install(&mut f);
-        let old = make_state(&mut f, &p, initial());
+        let old = make_state(&mut f, &p, initial(&p));
         let effect = make_full_effect(
             &mut f,
             &p,
@@ -2250,7 +2393,7 @@ mod tests {
     fn m5b_direct_wide_applier_updates_two_registers_in_one_state() {
         let mut f = FullFixture::new();
         let p = ArchitecturalStateProgram::install(&mut f);
-        let old_value = initial();
+        let old_value = initial(&p);
         let old = make_state(&mut f, &p, old_value);
         let effect = make_wide_mul_effect(
             &mut f,
@@ -2282,6 +2425,7 @@ mod tests {
                 ebp: old_value.ebp,
                 esp: old_value.esp,
                 eip: old_value.eip,
+                memory_root: old_value.memory_root,
                 cf: Some(1),
                 pf: None,
                 af: None,
@@ -2296,7 +2440,7 @@ mod tests {
     fn m5b_repeated_targets_and_malformed_patch_fail_closed() {
         let mut f = FullFixture::new();
         let p = ArchitecturalStateProgram::install(&mut f);
-        let old = make_state(&mut f, &p, initial());
+        let old = make_state(&mut f, &p, initial(&p));
         let effect = make_wide_mul_effect(
             &mut f,
             &p,
@@ -2488,7 +2632,7 @@ mod tests {
     fn m5a_add_like_writeback_updates_eax_and_flags_atomically() {
         let mut f = FullFixture::new();
         let p = ArchitecturalStateProgram::install(&mut f);
-        let old = make_state(&mut f, &p, initial());
+        let old = make_state(&mut f, &p, initial(&p));
         let effect = make_full_effect(
             &mut f,
             &p,
@@ -2510,6 +2654,7 @@ mod tests {
                 ebp: 0x5555_6666,
                 esp: 0x7777_8888,
                 eip: 0x0040_1000,
+                memory_root: p.schema.memory_detached,
                 cf: Some(0),
                 pf: Some(1),
                 af: Some(0),
@@ -2524,7 +2669,7 @@ mod tests {
     fn m5a_cmp_like_no_writeback_preserves_registers_and_updates_flags() {
         let mut f = FullFixture::new();
         let p = ArchitecturalStateProgram::install(&mut f);
-        let old_value = initial();
+        let old_value = initial(&p);
         let old = make_state(&mut f, &p, old_value);
         let effect = make_full_effect(
             &mut f,
@@ -2548,7 +2693,7 @@ mod tests {
     fn m5a_test_like_logic_patch_publishes_explicit_undefined_af() {
         let mut f = FullFixture::new();
         let p = ArchitecturalStateProgram::install(&mut f);
-        let old_value = initial();
+        let old_value = initial(&p);
         let old = make_state(&mut f, &p, old_value);
         let effect =
             make_logic_effect(&mut f, &p, 0, 0, 1, 1, 0);
@@ -2569,7 +2714,7 @@ mod tests {
     fn m5a_inc_like_patch_preserves_cf() {
         let mut f = FullFixture::new();
         let p = ArchitecturalStateProgram::install(&mut f);
-        let old_value = initial();
+        let old_value = initial(&p);
         let old = make_state(&mut f, &p, old_value);
         let effect =
             make_inc_effect(&mut f, &p, 0x1122_3345, [1, 0, 0, 0, 0]);
@@ -2586,7 +2731,7 @@ mod tests {
     fn m5a_unknown_target_and_conflicting_patch_fail_closed() {
         let mut f = FullFixture::new();
         let p = ArchitecturalStateProgram::install(&mut f);
-        let old = make_state(&mut f, &p, initial());
+        let old = make_state(&mut f, &p, initial(&p));
         let effect = make_full_effect(
             &mut f,
             &p,
