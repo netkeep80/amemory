@@ -387,6 +387,70 @@ impl PackedIncidenceIndexImage {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PackedExecutionView {
+    carrier: PackedCarrierImage,
+    incidence: PackedIncidenceIndexImage,
+}
+
+impl PackedExecutionView {
+    pub fn from_carrier(
+        carrier: PackedCarrierImage,
+    ) -> Result<Self, StoreError> {
+        carrier.validate()?;
+        let incidence = PackedIncidenceIndexImage::from_carrier(&carrier)?;
+        Ok(Self { carrier, incidence })
+    }
+
+    pub fn from_parts(
+        carrier: PackedCarrierImage,
+        incidence: PackedIncidenceIndexImage,
+    ) -> Result<Self, StoreError> {
+        carrier.validate()?;
+        incidence.validate_against(&carrier)?;
+        Ok(Self { carrier, incidence })
+    }
+
+    pub fn carrier(&self) -> &PackedCarrierImage {
+        &self.carrier
+    }
+
+    pub fn incidence_index(&self) -> &PackedIncidenceIndexImage {
+        &self.incidence
+    }
+
+    pub fn link_count(&self) -> usize {
+        self.carrier.link_count()
+    }
+
+    pub fn is_valid(&self, handle: Handle) -> bool {
+        handle > 0 && (handle as usize) <= self.link_count()
+    }
+
+    pub fn poles(
+        &self,
+        handle: Handle,
+    ) -> Result<(Handle, Handle), StoreError> {
+        self.carrier
+            .duplet(handle)
+            .ok_or(StoreError::UnknownHandle(handle))
+    }
+
+    pub fn start_incidence(
+        &self,
+        start: Handle,
+    ) -> Result<IncidenceIter<'_>, StoreError> {
+        self.incidence.start_incidence(start)
+    }
+
+    pub fn end_incidence(
+        &self,
+        end: Handle,
+    ) -> Result<IncidenceIter<'_>, StoreError> {
+        self.incidence.end_incidence(end)
+    }
+}
+
 #[derive(Debug)]
 pub struct OptimizedLinkStore {
     // Non-semantic runtime identity used only to scope executor caches. It is
@@ -586,6 +650,16 @@ impl OptimizedLinkStore {
             &self.export_packed_carrier_image(),
         )
         .expect("canonical store must always export a valid incidence index")
+    }
+
+    /// Projects the canonical store into a read-only execution boundary.
+    ///
+    /// The view deliberately contains no canonical HashMaps and exposes no Link
+    /// construction/publication API. It is a snapshot of substrate topology +
+    /// incidence indexes suitable for matching/discovery consumers.
+    pub fn export_packed_execution_view(&self) -> PackedExecutionView {
+        PackedExecutionView::from_carrier(self.export_packed_carrier_image())
+            .expect("canonical store must always export a valid execution view")
     }
 
     /// Atomically loads a typed packed carrier image without parsing recursive
@@ -1665,6 +1739,86 @@ mod tests {
             wrong_chain.validate_against(&carrier),
             Err(StoreError::InvalidPackedIncidenceIndex)
         );
+    }
+
+    #[test]
+    fn packed_execution_view_matches_store_read_boundary_exactly() {
+        let mut store = OptimizedLinkStore::new();
+        let o = store.import_anum("98").unwrap();
+        let c = store.import_anum("68").unwrap();
+        let l = store.ensure_pair(o, c).unwrap();
+        let _u = store.ensure_pair(c, o).unwrap();
+        let _top = store.ensure_pair(l, ROOT_HANDLE).unwrap();
+
+        let view = store.export_packed_execution_view();
+        assert_eq!(view.link_count(), store.link_count());
+        assert_eq!(
+            view.carrier(),
+            &store.export_packed_carrier_image()
+        );
+        assert_eq!(
+            view.incidence_index(),
+            &store.export_packed_incidence_index_image()
+        );
+
+        for raw_handle in 1..=store.link_count() {
+            let handle = raw_handle as Handle;
+            assert!(view.is_valid(handle));
+            assert_eq!(view.poles(handle).unwrap(), store.poles(handle).unwrap());
+            assert_eq!(
+                view.start_incidence(handle).unwrap().collect::<Vec<_>>(),
+                store.start_incidence(handle).unwrap().collect::<Vec<_>>()
+            );
+            assert_eq!(
+                view.end_incidence(handle).unwrap().collect::<Vec<_>>(),
+                store.end_incidence(handle).unwrap().collect::<Vec<_>>()
+            );
+        }
+        assert!(!view.is_valid(NO_HANDLE));
+        assert_eq!(
+            view.poles(NO_HANDLE),
+            Err(StoreError::UnknownHandle(NO_HANDLE))
+        );
+    }
+
+    #[test]
+    fn packed_execution_view_is_an_immutable_snapshot() {
+        let mut store = OptimizedLinkStore::new();
+        let o = store.import_anum("98").unwrap();
+        let c = store.import_anum("68").unwrap();
+        let view_before = store.export_packed_execution_view();
+
+        let pair = store.ensure_pair(o, c).unwrap();
+        let view_after = store.export_packed_execution_view();
+
+        assert!(!view_before.is_valid(pair));
+        assert!(view_after.is_valid(pair));
+        assert_eq!(view_before.link_count() + 1, view_after.link_count());
+        assert_eq!(
+            view_before.poles(ROOT_HANDLE).unwrap(),
+            (ROOT_HANDLE, ROOT_HANDLE)
+        );
+    }
+
+    #[test]
+    fn packed_execution_view_rejects_mismatched_index_projection() {
+        let mut first = OptimizedLinkStore::new();
+        let o = first.import_anum("98").unwrap();
+        let c = first.import_anum("68").unwrap();
+        let carrier_before = first.export_packed_carrier_image();
+        let index_before = first.export_packed_incidence_index_image();
+
+        let _pair = first.ensure_pair(o, c).unwrap();
+        let carrier_after = first.export_packed_carrier_image();
+
+        assert!(matches!(
+            PackedExecutionView::from_parts(carrier_after, index_before),
+            Err(StoreError::PackedIncidenceIndexLengthMismatch { .. })
+                | Err(StoreError::InvalidPackedIncidenceIndex)
+        ));
+
+        let view = PackedExecutionView::from_carrier(carrier_before).unwrap();
+        assert_eq!(view.link_count(), 3);
     }
 
     #[test]
