@@ -2,6 +2,7 @@ mod memory_n;
 mod memory_word_n;
 mod memory32_n;
 mod architectural_state_n;
+mod instruction_fetch_n;
 mod flag_patch;
 mod flags_n;
 mod logic_n;
