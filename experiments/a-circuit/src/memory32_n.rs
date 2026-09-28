@@ -3,6 +3,11 @@ use super::{
         call, define_bundle_rule, index_rule_for, Fixture as FullFixture,
     },
     memory_n::RadixMemoryProgram,
+    proof_n::{
+        execute_to_quiescence, identical_rerun, load_runtime, loaded_handle,
+        prepare_stage, semantic_source, theory_admissions, visual_snapshot,
+        ProofRuntimeMemory, WebProofResultStage, WebStructuralProof,
+    },
 };
 use amemory_optimized_cpu_probe::{
     structural::{materialize_exact_sequence, read_exact_sequence},
@@ -1203,6 +1208,337 @@ fn decode_byte8(
     Some(out)
 }
 
+
+fn decode_byte8_store(
+    store: &OptimizedLinkStore,
+    zero: Handle,
+    one: Handle,
+    value: Handle,
+) -> Option<u8> {
+    let bits = read_exact_sequence(store, value).ok()?;
+    if bits.len() != OFFSET_BITS {
+        return None;
+    }
+    let mut out = 0u8;
+    for (index, bit) in bits.into_iter().enumerate() {
+        if bit == one {
+            out |= 1u8 << index;
+        } else if bit != zero {
+            return None;
+        }
+    }
+    Some(out)
+}
+
+fn runtime_read32(
+    memory: &mut ProofRuntimeMemory,
+    interpreter: Handle,
+    apply: Handle,
+    read: Handle,
+    read_result_tag: Handle,
+    caller: Handle,
+    root: Handle,
+    address: Handle,
+    zero: Handle,
+    one: Handle,
+) -> Option<u8> {
+    let args =
+        materialize_exact_sequence(&mut memory.store, &[root, address])
+            .ok()?;
+    let invocation =
+        call(&mut memory.store, apply, read, args);
+    let initial =
+        memory.store.ensure_pair(caller, invocation).ok()?;
+    let (engine, execute) = execute_to_quiescence(
+        memory,
+        interpreter,
+        initial,
+        32,
+        160,
+    )?;
+    if !execute.final_quiescent || engine.current().len() != 1 {
+        return None;
+    }
+    let final_link = engine.current()[0];
+    let (final_caller, envelope) =
+        memory.store.poles(final_link).ok()?;
+    if final_caller != caller {
+        return None;
+    }
+    let (tag, byte) = memory.store.poles(envelope).ok()?;
+    if tag != read_result_tag {
+        return None;
+    }
+    decode_byte8_store(&memory.store, zero, one, byte)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct WebMemory32Outcome {
+    pub(crate) address: u32,
+    pub(crate) page24: u32,
+    pub(crate) offset8: u32,
+    pub(crate) write_value: u32,
+    pub(crate) before_value: u32,
+    pub(crate) after_value: u32,
+    pub(crate) old_after_value: u32,
+    pub(crate) old_root_ref: u32,
+    pub(crate) new_root_ref: u32,
+    pub(crate) reactions: u32,
+    pub(crate) links_after_load: u32,
+    pub(crate) links_final: u32,
+    pub(crate) steady_link_delta: u32,
+    pub(crate) quiescent: u8,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct WebMemory32Execution {
+    pub(crate) outcome: WebMemory32Outcome,
+    pub(crate) proof: WebStructuralProof,
+}
+
+pub(crate) fn web_prove_memory32(
+    address_value: u32,
+    byte_value: u8,
+) -> Option<WebMemory32Execution> {
+    let mut compiler = FullFixture::new();
+    let program = Memory32Program::install(&mut compiler);
+    let address = address32(&mut compiler, address_value);
+    let byte = byte8(&mut compiler, byte_value);
+
+    let args = materialize_exact_sequence(
+        &mut compiler.store,
+        &[program.zero_root, address, byte],
+    )
+    .ok()?;
+    let invocation =
+        call(&mut compiler.store, compiler.apply, program.write, args);
+    let initial =
+        compiler.store.ensure_pair(compiler.k, invocation).ok()?;
+
+    let prepared_roots = vec![
+        semantic_source(
+            &compiler.store,
+            "function.memory32.read",
+            program.read,
+        ),
+        semantic_source(
+            &compiler.store,
+            "function.memory32.write",
+            program.write,
+        ),
+        semantic_source(
+            &compiler.store,
+            "memory32.zero_root",
+            program.zero_root,
+        ),
+        semantic_source(
+            &compiler.store,
+            "memory32.read_result_tag",
+            program.read_result_tag,
+        ),
+        semantic_source(
+            &compiler.store,
+            "memory32.write_result_tag",
+            program.write_result_tag,
+        ),
+        semantic_source(
+            &compiler.store,
+            "data.address32",
+            address,
+        ),
+        semantic_source(
+            &compiler.store,
+            "data.byte8",
+            byte,
+        ),
+        semantic_source(
+            &compiler.store,
+            "data.bit.zero",
+            compiler.zero,
+        ),
+        semantic_source(
+            &compiler.store,
+            "data.bit.one",
+            compiler.one,
+        ),
+        semantic_source(
+            &compiler.store,
+            "execution.interpreter",
+            compiler.interpreter,
+        ),
+        semantic_source(
+            &compiler.store,
+            "execution.theory",
+            compiler.theory,
+        ),
+        semantic_source(
+            &compiler.store,
+            "execution.apply",
+            compiler.apply,
+        ),
+        semantic_source(
+            &compiler.store,
+            "scope.initial",
+            initial,
+        ),
+        semantic_source(
+            &compiler.store,
+            "context.result",
+            compiler.k,
+        ),
+    ];
+
+    let admissions =
+        theory_admissions(&compiler.store, compiler.theory)?;
+    let prepare =
+        prepare_stage(&compiler.store, prepared_roots, admissions);
+    let (mut memory, load) = load_runtime(&prepare)?;
+
+    let interpreter =
+        loaded_handle(&load, "execution.interpreter")?;
+    let apply = loaded_handle(&load, "execution.apply")?;
+    let read = loaded_handle(&load, "function.memory32.read")?;
+    let initial = loaded_handle(&load, "scope.initial")?;
+    let old_root = loaded_handle(&load, "memory32.zero_root")?;
+    let address = loaded_handle(&load, "data.address32")?;
+    let read_result_tag =
+        loaded_handle(&load, "memory32.read_result_tag")?;
+    let write_result_tag =
+        loaded_handle(&load, "memory32.write_result_tag")?;
+    let zero = loaded_handle(&load, "data.bit.zero")?;
+    let one = loaded_handle(&load, "data.bit.one")?;
+    let result_context =
+        loaded_handle(&load, "context.result")?;
+
+    let before_value = runtime_read32(
+        &mut memory,
+        interpreter,
+        apply,
+        read,
+        read_result_tag,
+        result_context,
+        old_root,
+        address,
+        zero,
+        one,
+    )?;
+
+    let (mut engine, execute) = execute_to_quiescence(
+        &mut memory,
+        interpreter,
+        initial,
+        32,
+        192,
+    )?;
+    if !execute.final_quiescent || engine.current().len() != 1 {
+        return None;
+    }
+
+    let final_link = engine.current()[0];
+    let (caller, envelope) = memory.store.poles(final_link).ok()?;
+    if caller != result_context {
+        return None;
+    }
+    let (tag, new_root) = memory.store.poles(envelope).ok()?;
+    if tag != write_result_tag
+        || !memory.store.is_valid(old_root)
+        || !memory.store.is_valid(new_root)
+    {
+        return None;
+    }
+
+    let result_recursive_wire =
+        memory.store.export_anum(final_link).ok()?;
+    let result_sequence_anum =
+        memory.store.export_anum(address).ok()?;
+    let identical_rerun_link_delta = identical_rerun(
+        &mut memory,
+        &mut engine,
+        initial,
+        &result_recursive_wire,
+        192,
+    )?;
+
+    let after_value = runtime_read32(
+        &mut memory,
+        interpreter,
+        apply,
+        read,
+        read_result_tag,
+        result_context,
+        new_root,
+        address,
+        zero,
+        one,
+    )?;
+    let old_after_value = runtime_read32(
+        &mut memory,
+        interpreter,
+        apply,
+        read,
+        read_result_tag,
+        result_context,
+        old_root,
+        address,
+        zero,
+        one,
+    )?;
+
+    let oracle_matches =
+        before_value == 0
+            && after_value == byte_value
+            && old_after_value == 0
+            && old_root != new_root
+            && identical_rerun_link_delta == 0;
+
+    let visual_links =
+        visual_snapshot(&memory, &load.semantic_roots);
+    let proof = WebStructuralProof {
+        schema_version: 4,
+        block: "M6B_MEMORY32".to_owned(),
+        prepare,
+        load,
+        execute,
+        result: WebProofResultStage {
+            memory_instance_id: memory.id.clone(),
+            result_anum: result_recursive_wire,
+            // Address32 is a real ExactSequence and is retained as the
+            // sequence witness for this write-result proof. MemoryRoot' is an
+            // arbitrary recursive Link and therefore stays in the recursive
+            // wire field above rather than being mislabeled as an Anum.
+            result_sequence_anum,
+            decoded_value: u32::from(after_value),
+            decoded_value_hi: Some(u32::from(old_after_value)),
+            oracle_value: u32::from(byte_value),
+            oracle_value_hi: Some(0),
+            oracle_matches,
+            links_final: memory.store.link_count() as u32,
+            identical_rerun_link_delta,
+            visual_links,
+        },
+    };
+
+    Some(WebMemory32Execution {
+        outcome: WebMemory32Outcome {
+            address: address_value,
+            page24: address_value >> OFFSET_BITS,
+            offset8: address_value & 0xff,
+            write_value: u32::from(byte_value),
+            before_value: u32::from(before_value),
+            after_value: u32::from(after_value),
+            old_after_value: u32::from(old_after_value),
+            old_root_ref: old_root,
+            new_root_ref: new_root,
+            reactions: proof.execute.active_reaction_count,
+            links_after_load: proof.load.links_after_load,
+            links_final: proof.result.links_final,
+            steady_link_delta: proof.result.identical_rerun_link_delta,
+            quiescent: u8::from(proof.execute.final_quiescent),
+        },
+        proof,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1273,6 +1609,32 @@ mod tests {
             return None;
         }
         f.store.poles(children).ok()
+    }
+
+    #[test]
+    fn m6b_real_one_memory_proof_uses_address32_and_persists_old_root() {
+        let execution =
+            web_prove_memory32(0x0012_3425, 0xab).unwrap();
+        assert_eq!(execution.outcome.address, 0x0012_3425);
+        assert_eq!(execution.outcome.page24, 0x0012_34);
+        assert_eq!(execution.outcome.offset8, 0x25);
+        assert_eq!(execution.outcome.write_value, 0xab);
+        assert_eq!(execution.outcome.before_value, 0);
+        assert_eq!(execution.outcome.after_value, 0xab);
+        assert_eq!(execution.outcome.old_after_value, 0);
+        assert_ne!(
+            execution.outcome.old_root_ref,
+            execution.outcome.new_root_ref
+        );
+        assert_eq!(execution.outcome.steady_link_delta, 0);
+        assert_eq!(execution.outcome.quiescent, 1);
+        assert_eq!(execution.proof.block, "M6B_MEMORY32");
+        assert!(execution.proof.result.oracle_matches);
+        assert!(execution.proof.execute.active_reaction_count > 80);
+        assert_eq!(
+            execution.proof.load.memory_instance_id,
+            execution.proof.result.memory_instance_id
+        );
     }
 
     #[test]
