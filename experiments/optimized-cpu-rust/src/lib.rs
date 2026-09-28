@@ -10,6 +10,7 @@ pub type Handle = u32;
 pub const ROOT_HANDLE: Handle = 1;
 pub const PACKED_CARRIER_SCHEMA_VERSION: u32 = 1;
 pub const PACKED_INCIDENCE_INDEX_SCHEMA_VERSION: u32 = 1;
+pub const PACKED_BINARY_INCIDENCE_INDEX_SCHEMA_VERSION: u32 = 1;
 const NO_HANDLE: Handle = 0;
 static NEXT_STORE_INSTANCE_ID: AtomicU32 = AtomicU32::new(1);
 
@@ -71,6 +72,17 @@ pub enum StoreError {
         next_by_end: usize,
     },
     InvalidPackedIncidenceIndex,
+    UnsupportedPackedBinaryIncidenceIndexSchema(u32),
+    PackedBinaryIncidenceIndexLengthMismatch {
+        expected: usize,
+        start_root: usize,
+        end_root: usize,
+        start_left: usize,
+        start_right: usize,
+        end_left: usize,
+        end_right: usize,
+    },
+    InvalidPackedBinaryIncidenceIndex,
     InvalidPackedCarrierRoot {
         expected: Handle,
         actual: Handle,
@@ -382,6 +394,400 @@ impl PackedIncidenceIndexImage {
             || self.next_by_end != next_by_end
         {
             return Err(StoreError::InvalidPackedIncidenceIndex);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct BinaryIncidenceIter<'a> {
+    left: &'a [Handle],
+    right: &'a [Handle],
+    stack: Vec<Handle>,
+}
+
+impl<'a> BinaryIncidenceIter<'a> {
+    fn new(
+        root: Handle,
+        left: &'a [Handle],
+        right: &'a [Handle],
+    ) -> Self {
+        let mut iter = Self {
+            left,
+            right,
+            stack: Vec::new(),
+        };
+        iter.push_left(root);
+        iter
+    }
+
+    fn push_left(&mut self, mut current: Handle) {
+        while current != NO_HANDLE {
+            self.stack.push(current);
+            current = self.left[current as usize];
+        }
+    }
+}
+
+impl Iterator for BinaryIncidenceIter<'_> {
+    type Item = Handle;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let current = self.stack.pop()?;
+        self.push_left(self.right[current as usize]);
+        Some(current)
+    }
+}
+
+fn build_balanced_descending_tree(
+    current: &mut Handle,
+    count: usize,
+    next: &[Handle],
+    left: &mut [Handle],
+    right: &mut [Handle],
+) -> Result<Handle, StoreError> {
+    if count == 0 {
+        return Ok(NO_HANDLE);
+    }
+
+    // The temporary incidence chain is newest-first, therefore handles arrive
+    // in descending local-handle order. Keep that order directly: the left
+    // subtree contains larger handles and the right subtree smaller handles.
+    let left_count = count / 2;
+    let left_root = build_balanced_descending_tree(
+        current,
+        left_count,
+        next,
+        left,
+        right,
+    )?;
+
+    let root = *current;
+    if root == NO_HANDLE || root as usize >= next.len() {
+        return Err(StoreError::InvalidPackedBinaryIncidenceIndex);
+    }
+    *current = next[root as usize];
+
+    let right_root = build_balanced_descending_tree(
+        current,
+        count - left_count - 1,
+        next,
+        left,
+        right,
+    )?;
+
+    left[root as usize] = left_root;
+    right[root as usize] = right_root;
+    Ok(root)
+}
+
+fn derive_binary_incidence_side(
+    carrier: &PackedCarrierImage,
+    use_start: bool,
+) -> Result<(Vec<Handle>, Vec<Handle>, Vec<Handle>), StoreError> {
+    carrier.validate()?;
+    let len = carrier
+        .link_count()
+        .checked_add(1)
+        .ok_or(StoreError::CapacityExceeded)?;
+
+    // Temporary intrusive chains group handles by pole in O(n) without any
+    // HashMap or recursive-wire state. They are discarded after the balanced
+    // roots/children are built.
+    let mut head = vec![NO_HANDLE; len];
+    let mut next = vec![NO_HANDLE; len];
+    for raw_handle in 1..=carrier.link_count() {
+        let handle =
+            Handle::try_from(raw_handle).map_err(|_| StoreError::CapacityExceeded)?;
+        let (start, end) = carrier
+            .duplet(handle)
+            .ok_or(StoreError::InvalidPackedBinaryIncidenceIndex)?;
+        let pole = if use_start { start } else { end };
+        let pole_index = pole as usize;
+        if pole == NO_HANDLE || pole_index >= len {
+            return Err(StoreError::InvalidPackedBinaryIncidenceIndex);
+        }
+        next[handle as usize] = head[pole_index];
+        head[pole_index] = handle;
+    }
+
+    let mut roots = vec![NO_HANDLE; len];
+    let mut left = vec![NO_HANDLE; len];
+    let mut right = vec![NO_HANDLE; len];
+
+    for raw_pole in 1..=carrier.link_count() {
+        let pole = raw_pole as Handle;
+        let mut count = 0usize;
+        let mut cursor = head[pole as usize];
+        while cursor != NO_HANDLE {
+            count = count
+                .checked_add(1)
+                .ok_or(StoreError::CapacityExceeded)?;
+            cursor = next[cursor as usize];
+        }
+
+        let mut current = head[pole as usize];
+        roots[pole as usize] = build_balanced_descending_tree(
+            &mut current,
+            count,
+            &next,
+            &mut left,
+            &mut right,
+        )?;
+        if current != NO_HANDLE {
+            return Err(StoreError::InvalidPackedBinaryIncidenceIndex);
+        }
+    }
+
+    Ok((roots, left, right))
+}
+
+fn derive_packed_binary_incidence_arrays(
+    carrier: &PackedCarrierImage,
+) -> Result<
+    (
+        Vec<Handle>,
+        Vec<Handle>,
+        Vec<Handle>,
+        Vec<Handle>,
+        Vec<Handle>,
+        Vec<Handle>,
+    ),
+    StoreError,
+> {
+    let (start_root, start_left, start_right) =
+        derive_binary_incidence_side(carrier, true)?;
+    let (end_root, end_left, end_right) =
+        derive_binary_incidence_side(carrier, false)?;
+    Ok((
+        start_root,
+        end_root,
+        start_left,
+        start_right,
+        end_left,
+        end_right,
+    ))
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PackedBinaryIncidenceIndexImage {
+    schema_version: u32,
+    start_root: Vec<Handle>,
+    end_root: Vec<Handle>,
+    start_left: Vec<Handle>,
+    start_right: Vec<Handle>,
+    end_left: Vec<Handle>,
+    end_right: Vec<Handle>,
+}
+
+impl PackedBinaryIncidenceIndexImage {
+    pub fn from_carrier(
+        carrier: &PackedCarrierImage,
+    ) -> Result<Self, StoreError> {
+        let (
+            start_root,
+            end_root,
+            start_left,
+            start_right,
+            end_left,
+            end_right,
+        ) = derive_packed_binary_incidence_arrays(carrier)?;
+        Ok(Self {
+            schema_version: PACKED_BINARY_INCIDENCE_INDEX_SCHEMA_VERSION,
+            start_root,
+            end_root,
+            start_left,
+            start_right,
+            end_left,
+            end_right,
+        })
+    }
+
+    pub fn from_parts(
+        schema_version: u32,
+        carrier: &PackedCarrierImage,
+        start_root: Vec<Handle>,
+        end_root: Vec<Handle>,
+        start_left: Vec<Handle>,
+        start_right: Vec<Handle>,
+        end_left: Vec<Handle>,
+        end_right: Vec<Handle>,
+    ) -> Result<Self, StoreError> {
+        let image = Self {
+            schema_version,
+            start_root,
+            end_root,
+            start_left,
+            start_right,
+            end_left,
+            end_right,
+        };
+        image.validate_against(carrier)?;
+        Ok(image)
+    }
+
+    pub fn schema_version(&self) -> u32 {
+        self.schema_version
+    }
+
+    pub fn link_count(&self) -> usize {
+        self.start_root.len().saturating_sub(1)
+    }
+
+    pub fn start_roots(&self) -> &[Handle] {
+        &self.start_root
+    }
+
+    pub fn end_roots(&self) -> &[Handle] {
+        &self.end_root
+    }
+
+    pub fn start_left(&self) -> &[Handle] {
+        &self.start_left
+    }
+
+    pub fn start_right(&self) -> &[Handle] {
+        &self.start_right
+    }
+
+    pub fn end_left(&self) -> &[Handle] {
+        &self.end_left
+    }
+
+    pub fn end_right(&self) -> &[Handle] {
+        &self.end_right
+    }
+
+    pub fn start_root(&self, pole: Handle) -> Result<Handle, StoreError> {
+        if pole == NO_HANDLE || pole as usize >= self.start_root.len() {
+            return Err(StoreError::UnknownHandle(pole));
+        }
+        Ok(self.start_root[pole as usize])
+    }
+
+    pub fn end_root(&self, pole: Handle) -> Result<Handle, StoreError> {
+        if pole == NO_HANDLE || pole as usize >= self.end_root.len() {
+            return Err(StoreError::UnknownHandle(pole));
+        }
+        Ok(self.end_root[pole as usize])
+    }
+
+    pub fn start_incidence(
+        &self,
+        pole: Handle,
+    ) -> Result<BinaryIncidenceIter<'_>, StoreError> {
+        let root = self.start_root(pole)?;
+        Ok(BinaryIncidenceIter::new(
+            root,
+            &self.start_left,
+            &self.start_right,
+        ))
+    }
+
+    pub fn end_incidence(
+        &self,
+        pole: Handle,
+    ) -> Result<BinaryIncidenceIter<'_>, StoreError> {
+        let root = self.end_root(pole)?;
+        Ok(BinaryIncidenceIter::new(
+            root,
+            &self.end_left,
+            &self.end_right,
+        ))
+    }
+
+    fn tree_contains(
+        mut current: Handle,
+        target: Handle,
+        left: &[Handle],
+        right: &[Handle],
+    ) -> bool {
+        while current != NO_HANDLE {
+            if current == target {
+                return true;
+            }
+            current = if target > current {
+                left[current as usize]
+            } else {
+                right[current as usize]
+            };
+        }
+        false
+    }
+
+    pub fn start_contains(
+        &self,
+        pole: Handle,
+        target: Handle,
+    ) -> Result<bool, StoreError> {
+        if target == NO_HANDLE || target as usize > self.link_count() {
+            return Err(StoreError::UnknownHandle(target));
+        }
+        Ok(Self::tree_contains(
+            self.start_root(pole)?,
+            target,
+            &self.start_left,
+            &self.start_right,
+        ))
+    }
+
+    pub fn end_contains(
+        &self,
+        pole: Handle,
+        target: Handle,
+    ) -> Result<bool, StoreError> {
+        if target == NO_HANDLE || target as usize > self.link_count() {
+            return Err(StoreError::UnknownHandle(target));
+        }
+        Ok(Self::tree_contains(
+            self.end_root(pole)?,
+            target,
+            &self.end_left,
+            &self.end_right,
+        ))
+    }
+
+    pub fn validate_against(
+        &self,
+        carrier: &PackedCarrierImage,
+    ) -> Result<(), StoreError> {
+        if self.schema_version != PACKED_BINARY_INCIDENCE_INDEX_SCHEMA_VERSION {
+            return Err(StoreError::UnsupportedPackedBinaryIncidenceIndexSchema(
+                self.schema_version,
+            ));
+        }
+        carrier.validate()?;
+        let expected = carrier
+            .link_count()
+            .checked_add(1)
+            .ok_or(StoreError::CapacityExceeded)?;
+        if self.start_root.len() != expected
+            || self.end_root.len() != expected
+            || self.start_left.len() != expected
+            || self.start_right.len() != expected
+            || self.end_left.len() != expected
+            || self.end_right.len() != expected
+        {
+            return Err(StoreError::PackedBinaryIncidenceIndexLengthMismatch {
+                expected,
+                start_root: self.start_root.len(),
+                end_root: self.end_root.len(),
+                start_left: self.start_left.len(),
+                start_right: self.start_right.len(),
+                end_left: self.end_left.len(),
+                end_right: self.end_right.len(),
+            });
+        }
+
+        let expected_arrays = derive_packed_binary_incidence_arrays(carrier)?;
+        if self.start_root != expected_arrays.0
+            || self.end_root != expected_arrays.1
+            || self.start_left != expected_arrays.2
+            || self.start_right != expected_arrays.3
+            || self.end_left != expected_arrays.4
+            || self.end_right != expected_arrays.5
+        {
+            return Err(StoreError::InvalidPackedBinaryIncidenceIndex);
         }
         Ok(())
     }
@@ -1845,6 +2251,81 @@ mod tests {
         assert_eq!(
             wrong_chain.validate_against(&carrier),
             Err(StoreError::InvalidPackedIncidenceIndex)
+        );
+    }
+
+    #[test]
+    fn packed_binary_incidence_index_is_deterministic_and_exact() {
+        let mut store = OptimizedLinkStore::new();
+        let o = store.import_anum("98").unwrap();
+        let c = store.import_anum("68").unwrap();
+        let l = store.ensure_pair(o, c).unwrap();
+        let _u = store.ensure_pair(c, o).unwrap();
+        let _top = store.ensure_pair(ROOT_HANDLE, l).unwrap();
+
+        let carrier = store.export_packed_carrier_image();
+        let first = PackedBinaryIncidenceIndexImage::from_carrier(&carrier).unwrap();
+        let second = PackedBinaryIncidenceIndexImage::from_carrier(&carrier).unwrap();
+        assert_eq!(first, second);
+        assert_eq!(
+            first.schema_version(),
+            PACKED_BINARY_INCIDENCE_INDEX_SCHEMA_VERSION
+        );
+        assert_eq!(first.link_count(), carrier.link_count());
+
+        for raw_pole in 1..=carrier.link_count() {
+            let pole = raw_pole as Handle;
+
+            let baseline_start =
+                store.start_incidence(pole).unwrap().collect::<Vec<_>>();
+            let binary_start =
+                first.start_incidence(pole).unwrap().collect::<Vec<_>>();
+            assert_eq!(binary_start, baseline_start);
+            for handle in &baseline_start {
+                assert!(first.start_contains(pole, *handle).unwrap());
+            }
+
+            let baseline_end =
+                store.end_incidence(pole).unwrap().collect::<Vec<_>>();
+            let binary_end =
+                first.end_incidence(pole).unwrap().collect::<Vec<_>>();
+            assert_eq!(binary_end, baseline_end);
+            for handle in &baseline_end {
+                assert!(first.end_contains(pole, *handle).unwrap());
+            }
+        }
+    }
+
+    #[test]
+    fn packed_binary_incidence_index_rejects_malformed_transport() {
+        let mut store = OptimizedLinkStore::new();
+        let o = store.import_anum("98").unwrap();
+        let c = store.import_anum("68").unwrap();
+        let _pair = store.ensure_pair(o, c).unwrap();
+        let carrier = store.export_packed_carrier_image();
+        let index = PackedBinaryIncidenceIndexImage::from_carrier(&carrier).unwrap();
+
+        let mut wrong_schema = index.clone();
+        wrong_schema.schema_version += 1;
+        assert_eq!(
+            wrong_schema.validate_against(&carrier),
+            Err(StoreError::UnsupportedPackedBinaryIncidenceIndexSchema(
+                PACKED_BINARY_INCIDENCE_INDEX_SCHEMA_VERSION + 1
+            ))
+        );
+
+        let mut wrong_length = index.clone();
+        wrong_length.start_left.pop();
+        assert!(matches!(
+            wrong_length.validate_against(&carrier),
+            Err(StoreError::PackedBinaryIncidenceIndexLengthMismatch { .. })
+        ));
+
+        let mut wrong_tree = index;
+        wrong_tree.start_root[ROOT_HANDLE as usize] = NO_HANDLE;
+        assert_eq!(
+            wrong_tree.validate_against(&carrier),
+            Err(StoreError::InvalidPackedBinaryIncidenceIndex)
         );
     }
 
