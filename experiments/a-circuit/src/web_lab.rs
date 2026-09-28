@@ -1342,7 +1342,7 @@ pub extern "C" fn amemory_i386_fetch_run(
         return 0;
     }
     let out = execution.outcome;
-    let block = if out.seeded_write {
+    let block = if out.seeded_write != 0 {
         "M6D2_FETCH_SEEDED"
     } else {
         "M6D2_FETCH_ZERO"
