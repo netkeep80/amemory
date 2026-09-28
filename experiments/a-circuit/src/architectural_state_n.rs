@@ -50,23 +50,23 @@ pub(crate) struct ArchitecturalStateSchema {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct StateValue {
-    eax: u32,
-    ebx: u32,
-    edx: u32,
-    ecx: u32,
-    esi: u32,
-    edi: u32,
-    ebp: u32,
-    esp: u32,
-    eip: u32,
-    memory_root: Handle,
-    cf: Option<u8>,
-    pf: Option<u8>,
-    af: Option<u8>,
-    zf: Option<u8>,
-    sf: Option<u8>,
-    of: Option<u8>,
+pub(crate) struct StateValue {
+    pub(crate) eax: u32,
+    pub(crate) ebx: u32,
+    pub(crate) edx: u32,
+    pub(crate) ecx: u32,
+    pub(crate) esi: u32,
+    pub(crate) edi: u32,
+    pub(crate) ebp: u32,
+    pub(crate) esp: u32,
+    pub(crate) eip: u32,
+    pub(crate) memory_root: Handle,
+    pub(crate) cf: Option<u8>,
+    pub(crate) pf: Option<u8>,
+    pub(crate) af: Option<u8>,
+    pub(crate) zf: Option<u8>,
+    pub(crate) sf: Option<u8>,
+    pub(crate) of: Option<u8>,
 }
 
 struct AnchorGen {
@@ -110,7 +110,7 @@ fn binding(
     store.ensure_pair(id, value).unwrap()
 }
 
-fn state_link(
+pub(crate) fn state_link(
     store: &mut OptimizedLinkStore,
     schema: ArchitecturalStateSchema,
     eax: Handle,
@@ -897,7 +897,7 @@ fn decode_flag_in_store(
     }
 }
 
-fn decode_state_in_store(
+pub(crate) fn decode_state_in_store(
     store: &OptimizedLinkStore,
     schema: ArchitecturalStateSchema,
     state: Handle,
@@ -956,7 +956,7 @@ fn decode_state_in_store(
     })
 }
 
-fn state_from_value(
+pub(crate) fn state_from_value(
     f: &mut FullFixture,
     schema: ArchitecturalStateSchema,
     value: StateValue,
