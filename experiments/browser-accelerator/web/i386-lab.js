@@ -635,22 +635,10 @@ function setupM6dWitness(section, wasm) {
       if (wasm.amemory_i386_fetch_run(eip, byte, 1) !== 1) {
         throw new Error("M6d2 real WASM FETCH rejected the inputs");
       }
-      const observed = {
-        eipBefore: wasm.amemory_i386_fetch_eip_before() >>> 0,
-        eipAfter: wasm.amemory_i386_fetch_eip_after() >>> 0,
-        byte: wasm.amemory_i386_fetch_byte() >>> 0,
-        initialRoot: wasm.amemory_i386_fetch_initial_root_ref() >>> 0,
-        finalRoot: wasm.amemory_i386_fetch_final_root_ref() >>> 0,
-        seededWrite: wasm.amemory_i386_fetch_seeded_write() >>> 0,
-        statePreserved: wasm.amemory_i386_fetch_state_preserved() >>> 0,
-        oldStateRetained: wasm.amemory_i386_fetch_old_state_retained() >>> 0,
-        atomicScope: wasm.amemory_i386_fetch_atomic_scope() >>> 0,
-        reactions: wasm.amemory_i386_fetch_reactions() >>> 0,
-        linksAfterLoad: wasm.amemory_i386_fetch_links_after_load() >>> 0,
-        linksFinal: wasm.amemory_i386_fetch_links_final() >>> 0,
-        steadyDelta: wasm.amemory_i386_fetch_steady_link_delta() >>> 0,
-        quiescent: wasm.amemory_i386_fetch_quiescent() >>> 0,
-      };
+      const observed = collectWitnessPayload(wasm, "instruction-fetch");
+      if (observed.block !== "M6D2_FETCH_SEEDED") {
+        throw new Error("M6d2 structured FETCH block mismatch");
+      }
       const expectedEip = (eip + 1) >>> 0;
       const expectedRootChanged = byte !== 0;
       if (observed.eipBefore !== eip ||
@@ -734,22 +722,10 @@ function setupM6dWitness(section, wasm) {
       if (wasm.amemory_i386_stack_run(esp, value) !== 1) {
         throw new Error("M6d3 real WASM PUSH32→POP32 rejected the inputs");
       }
-      const observed = {
-        espBefore: wasm.amemory_i386_stack_esp_before() >>> 0,
-        espAfter: wasm.amemory_i386_stack_esp_after() >>> 0,
-        value: wasm.amemory_i386_stack_value() >>> 0,
-        initialRoot: wasm.amemory_i386_stack_initial_root_ref() >>> 0,
-        finalRoot: wasm.amemory_i386_stack_final_root_ref() >>> 0,
-        statePreserved: wasm.amemory_i386_stack_state_preserved() >>> 0,
-        oldStateRetained: wasm.amemory_i386_stack_old_state_retained() >>> 0,
-        oldMemoryRetained: wasm.amemory_i386_stack_old_memory_retained() >>> 0,
-        atomicScope: wasm.amemory_i386_stack_atomic_scope() >>> 0,
-        reactions: wasm.amemory_i386_stack_reactions() >>> 0,
-        linksAfterLoad: wasm.amemory_i386_stack_links_after_load() >>> 0,
-        linksFinal: wasm.amemory_i386_stack_links_final() >>> 0,
-        steadyDelta: wasm.amemory_i386_stack_steady_link_delta() >>> 0,
-        quiescent: wasm.amemory_i386_stack_quiescent() >>> 0,
-      };
+      const observed = collectWitnessPayload(wasm, "stack-roundtrip");
+      if (observed.block !== "M6D3_STACK_ROUNDTRIP") {
+        throw new Error("M6d3 structured STACK block mismatch");
+      }
       if (observed.espBefore !== esp ||
           observed.espAfter !== esp ||
           observed.value !== value ||

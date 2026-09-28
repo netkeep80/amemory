@@ -1330,6 +1330,7 @@ pub extern "C" fn amemory_i386_fetch_run(
         return 0;
     }
     clear_last_compact_proof();
+    clear_result_for_instance(DEFAULT_LAB_INSTANCE_ID);
     let Some(execution) = web_prove_instruction_fetch(
         eip,
         instruction_byte as u8,
@@ -1341,6 +1342,34 @@ pub extern "C" fn amemory_i386_fetch_run(
         return 0;
     }
     let out = execution.outcome;
+    let block = if out.seeded_write {
+        "M6D2_FETCH_SEEDED"
+    } else {
+        "M6D2_FETCH_ZERO"
+    };
+    if set_default_witness_result(
+        "instruction-fetch",
+        serde_json::json!({
+            "block": block,
+            "eipBefore": out.eip_before,
+            "eipAfter": out.eip_after,
+            "byte": out.fetched_byte,
+            "initialRoot": out.initial_memory_root_ref,
+            "finalRoot": out.final_memory_root_ref,
+            "seededWrite": u32::from(out.seeded_write),
+            "statePreserved": u32::from(out.state_preserved),
+            "oldStateRetained": u32::from(out.old_state_retained),
+            "atomicScope": u32::from(out.atomic_scope),
+            "reactions": out.reactions,
+            "linksAfterLoad": out.links_after_load,
+            "linksFinal": out.links_final,
+            "steadyDelta": out.steady_link_delta,
+            "quiescent": u32::from(out.quiescent)
+        }),
+    ).is_none() {
+        clear_last_compact_proof();
+        return 0;
+    }
     unsafe {
         M6D_FETCH_EIP_BEFORE = out.eip_before;
         M6D_FETCH_EIP_AFTER = out.eip_after;
@@ -1409,6 +1438,7 @@ pub extern "C" fn amemory_i386_stack_run(
     value: u32,
 ) -> u32 {
     clear_last_compact_proof();
+    clear_result_for_instance(DEFAULT_LAB_INSTANCE_ID);
     let Some(execution) = web_prove_stack_roundtrip(esp, value) else {
         return 0;
     };
@@ -1416,6 +1446,29 @@ pub extern "C" fn amemory_i386_stack_run(
         return 0;
     }
     let out = execution.outcome;
+    if set_default_witness_result(
+        "stack-roundtrip",
+        serde_json::json!({
+            "block": "M6D3_STACK_ROUNDTRIP",
+            "espBefore": out.esp_before,
+            "espAfter": out.esp_after,
+            "value": out.value,
+            "initialRoot": out.initial_memory_root_ref,
+            "finalRoot": out.final_memory_root_ref,
+            "statePreserved": u32::from(out.state_preserved),
+            "oldStateRetained": u32::from(out.old_state_retained),
+            "oldMemoryRetained": u32::from(out.old_memory_retained),
+            "atomicScope": u32::from(out.atomic_scope),
+            "reactions": out.reactions,
+            "linksAfterLoad": out.links_after_load,
+            "linksFinal": out.links_final,
+            "steadyDelta": out.steady_link_delta,
+            "quiescent": u32::from(out.quiescent)
+        }),
+    ).is_none() {
+        clear_last_compact_proof();
+        return 0;
+    }
     unsafe {
         M6D_STACK_ESP_BEFORE = out.esp_before;
         M6D_STACK_ESP_AFTER = out.esp_after;
