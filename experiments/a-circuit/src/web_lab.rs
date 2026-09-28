@@ -8,6 +8,7 @@ use crate::{
     logic_effect_n::{web_prove_logic, web_run_logic},
     memory_n::web_prove_radix_memory,
     memory32_n::web_prove_memory32,
+    memory_word_n::{web_prove_word16_memory, web_prove_word32_memory},
     mul32_n::web_prove_mul32,
     mul_effect_n::web_prove_mul_effect,
     mux_n::{web_prove_mux1, web_prove_mux32},
@@ -838,6 +839,131 @@ pub extern "C" fn amemory_i386_memory32_steady_link_delta() -> u32 {
 #[no_mangle]
 pub extern "C" fn amemory_i386_memory32_quiescent() -> u32 {
     unsafe { M6B_QUIESCENT }
+}
+
+
+static mut M6C_WIDTH: u32 = 0;
+static mut M6C_ADDRESS: u32 = 0;
+static mut M6C_WRITE_VALUE: u32 = 0;
+static mut M6C_BEFORE_VALUE: u32 = 0;
+static mut M6C_AFTER_VALUE: u32 = 0;
+static mut M6C_OLD_AFTER_VALUE: u32 = 0;
+static mut M6C_OLD_ROOT_REF: u32 = 0;
+static mut M6C_NEW_ROOT_REF: u32 = 0;
+static mut M6C_REACTIONS: u32 = 0;
+static mut M6C_LINKS_AFTER_LOAD: u32 = 0;
+static mut M6C_LINKS_FINAL: u32 = 0;
+static mut M6C_STEADY_LINK_DELTA: u32 = 0;
+static mut M6C_ATOMIC_SCOPE: u32 = 0;
+static mut M6C_CROSSES_PAGE: u32 = 0;
+static mut M6C_QUIESCENT: u32 = 0;
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_word_memory_probe() -> u32 {
+    0x0000_060c
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_word_memory_run(
+    width: u32,
+    address: u32,
+    value: u32,
+) -> u32 {
+    if width == 16 && value > 0xffff {
+        return 0;
+    }
+    clear_last_compact_proof();
+    let execution = match width {
+        16 => web_prove_word16_memory(address, value),
+        32 => web_prove_word32_memory(address, value),
+        _ => None,
+    };
+    let Some(execution) = execution else {
+        return 0;
+    };
+    if set_last_compact_proof(&execution.proof).is_none() {
+        return 0;
+    }
+    let out = execution.outcome;
+    unsafe {
+        M6C_WIDTH = out.width;
+        M6C_ADDRESS = out.address;
+        M6C_WRITE_VALUE = out.write_value;
+        M6C_BEFORE_VALUE = out.before_value;
+        M6C_AFTER_VALUE = out.after_value;
+        M6C_OLD_AFTER_VALUE = out.old_after_value;
+        M6C_OLD_ROOT_REF = out.old_root_ref;
+        M6C_NEW_ROOT_REF = out.new_root_ref;
+        M6C_REACTIONS = out.reactions;
+        M6C_LINKS_AFTER_LOAD = out.links_after_load;
+        M6C_LINKS_FINAL = out.links_final;
+        M6C_STEADY_LINK_DELTA = out.steady_link_delta;
+        M6C_ATOMIC_SCOPE = u32::from(out.atomic_scope);
+        M6C_CROSSES_PAGE = u32::from(out.crosses_page);
+        M6C_QUIESCENT = u32::from(out.quiescent);
+    }
+    1
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_word_memory_width() -> u32 {
+    unsafe { M6C_WIDTH }
+}
+#[no_mangle]
+pub extern "C" fn amemory_i386_word_memory_address() -> u32 {
+    unsafe { M6C_ADDRESS }
+}
+#[no_mangle]
+pub extern "C" fn amemory_i386_word_memory_write_value() -> u32 {
+    unsafe { M6C_WRITE_VALUE }
+}
+#[no_mangle]
+pub extern "C" fn amemory_i386_word_memory_before_value() -> u32 {
+    unsafe { M6C_BEFORE_VALUE }
+}
+#[no_mangle]
+pub extern "C" fn amemory_i386_word_memory_after_value() -> u32 {
+    unsafe { M6C_AFTER_VALUE }
+}
+#[no_mangle]
+pub extern "C" fn amemory_i386_word_memory_old_after_value() -> u32 {
+    unsafe { M6C_OLD_AFTER_VALUE }
+}
+#[no_mangle]
+pub extern "C" fn amemory_i386_word_memory_old_root_ref() -> u32 {
+    unsafe { M6C_OLD_ROOT_REF }
+}
+#[no_mangle]
+pub extern "C" fn amemory_i386_word_memory_new_root_ref() -> u32 {
+    unsafe { M6C_NEW_ROOT_REF }
+}
+#[no_mangle]
+pub extern "C" fn amemory_i386_word_memory_reactions() -> u32 {
+    unsafe { M6C_REACTIONS }
+}
+#[no_mangle]
+pub extern "C" fn amemory_i386_word_memory_links_after_load() -> u32 {
+    unsafe { M6C_LINKS_AFTER_LOAD }
+}
+#[no_mangle]
+pub extern "C" fn amemory_i386_word_memory_links_final() -> u32 {
+    unsafe { M6C_LINKS_FINAL }
+}
+#[no_mangle]
+pub extern "C" fn amemory_i386_word_memory_steady_link_delta() -> u32 {
+    unsafe { M6C_STEADY_LINK_DELTA }
+}
+#[no_mangle]
+pub extern "C" fn amemory_i386_word_memory_atomic_scope() -> u32 {
+    unsafe { M6C_ATOMIC_SCOPE }
+}
+#[no_mangle]
+pub extern "C" fn amemory_i386_word_memory_crosses_page() -> u32 {
+    unsafe { M6C_CROSSES_PAGE }
+}
+#[no_mangle]
+pub extern "C" fn amemory_i386_word_memory_quiescent() -> u32 {
+    unsafe { M6C_QUIESCENT }
 }
 
 #[no_mangle]
