@@ -175,8 +175,8 @@ export function assertR7Fixture() {
   must(secondCurrent.start === R1_FIXTURE.K && secondCurrent.end === R1_FIXTURE.B, "bad R7 second current");
   must(zeroB.start === R1_FIXTURE.B && zeroB.end === R3_FIXTURE.root, "bad R7 B->{} relation");
   must(fixed.start === R1_FIXTURE.A && fixed.end === R1_FIXTURE.A, "bad R7 A->A relation");
-  must(parseAnum(R7_FIXTURE.endContinuation).kind === "END", "bad R7 A♀ direct-gauge fixture");
-  must(parseAnum(R7_FIXTURE.startContinuation).kind === "START", "bad R7 ♂A direct-gauge fixture");
+  must(parseRecursiveWire(R7_FIXTURE.endContinuation).kind === "END", "bad R7 A♀ direct-gauge fixture");
+  must(parseRecursiveWire(R7_FIXTURE.startContinuation).kind === "START", "bad R7 ♂A direct-gauge fixture");
   must(relationEnd.start === R1_FIXTURE.A && relationEnd.end === R7_FIXTURE.endContinuation,
     "bad R7 A->A♀ relation");
   must(relationStart.start === R1_FIXTURE.A && relationStart.end === R7_FIXTURE.startContinuation,
@@ -194,7 +194,7 @@ export function assertR5Fixture() {
   const stateEnd = splitPairRecursiveWire(R5_FIXTURE.stateEnd);
   const relationStartEnd = splitPairRecursiveWire(R5_FIXTURE.relationStartEnd);
   const relationEndStart = splitPairRecursiveWire(R5_FIXTURE.relationEndStart);
-  const endNode = parseAnum(R5_FIXTURE.endValue);
+  const endNode = parseRecursiveWire(R5_FIXTURE.endValue);
 
   must(stateStart.start === R5_FIXTURE.context && stateStart.end === R5_FIXTURE.startValue, "bad R5 S_A");
   must(stateEnd.start === R5_FIXTURE.context && stateEnd.end === R5_FIXTURE.endValue, "bad R5 S_C");
@@ -215,7 +215,7 @@ export function assertR5Fixture() {
 }
 
 export function normalizeReactionState(anums) {
-  return [...new Set(anums.map(normalizeAnum))].sort();
+  return [...new Set(anums.map(normalizeRecursiveWire))].sort();
 }
 
 export function makePortableReactionResult(scope, matchedRelations, handoff, quiescent) {
@@ -1364,7 +1364,7 @@ export async function runReactionBrowser(wasm, device) {
       normalizeReactionState(gpuR5.states[1]).join("|") === normalizeReactionState(gpuR5.states[3]).join("|"),
       "R5 END-state recurrence missing",
     );
-    must(parseAnum(R5_FIXTURE.endValue).kind === "END", "R5 END fixture lost structural END aspect");
+    must(parseRecursiveWire(R5_FIXTURE.endValue).kind === "END", "R5 END fixture lost structural END aspect");
     must(
       cpuR5.states[1][0] === R5_FIXTURE.stateEnd && cpuR5.states[2][0] === R5_FIXTURE.stateStart &&
       gpuR5.states[1][0] === R5_FIXTURE.stateEnd && gpuR5.states[2][0] === R5_FIXTURE.stateStart,
