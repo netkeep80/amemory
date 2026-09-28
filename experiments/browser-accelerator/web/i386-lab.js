@@ -264,11 +264,12 @@ function buildLab(registry) {
       <div class="lab-state-head">
         <div>
           <h3>M5 architectural state witness</h3>
-          <p>This is not another opcode. Real structural ALU effects return into temporary state Contexts; the same A-memory then atomically publishes a complete EAX/EBX/EDX/EFLAGS successor.</p>
+          <p>This is not another opcode. Real structural ALU effects return into temporary state Contexts; the same A-memory atomically publishes a Full GPR + EIP + EFLAGS successor.</p>
         </div>
         <div class="lab-vector-actions">
-          <button class="lab-run" id="lab-run-state-add" type="button">Run ADD → State′</button>
+          <button class="lab-run" id="lab-run-state-add" type="button">Run ADD → EAX State′</button>
           <button class="lab-run" id="lab-run-state-mul" type="button">Run MUL → EDX:EAX State′</button>
+          <button class="lab-run" id="lab-run-state-ecx" type="button">Run ADD → ECX full State′</button>
         </div>
       </div>
       <div class="notice" id="lab-state-status">M5 state WASM witness ready check pending…</div>
@@ -306,59 +307,153 @@ function setupArchitecturalStateWitness(section, wasm) {
   const proofTarget = section.querySelector("#lab-state-proof");
   const runAdd = section.querySelector("#lab-run-state-add");
   const runMul = section.querySelector("#lab-run-state-mul");
+  const runEcx = section.querySelector("#lab-run-state-ecx");
 
-  if (!shell || !status || !result || !proofTarget || !runAdd || !runMul) {
+  if (!shell || !status || !result || !proofTarget ||
+      !runAdd || !runMul || !runEcx) {
     return;
   }
   if (wasm.amemory_i386_state_probe?.() !== 0x50a ||
       typeof wasm.amemory_i386_state_run_add32 !== "function") {
     status.textContent =
-      "M5a architectural-state ABI is missing; refusing to fake a UI result.";
+      "M5 architectural-state ABI is missing; refusing to fake a UI result.";
     status.className = "notice lab-error";
     runAdd.disabled = true;
     runMul.disabled = true;
+    runEcx.disabled = true;
     return;
   }
+
   const hasWide =
     wasm.amemory_i386_state_wide_probe?.() === 0x50b &&
     typeof wasm.amemory_i386_state_run_mul32 === "function";
+  const hasFull =
+    wasm.amemory_i386_state_full_probe?.() === 0x50c &&
+    typeof wasm.amemory_i386_state_run_add_ecx === "function";
   if (!hasWide) runMul.disabled = true;
+  if (!hasFull) runEcx.disabled = true;
 
-  status.textContent = hasWide
-    ? "M5a/M5b ready: single- and multi-destination structural state transitions."
-    : "M5a ready; M5b wide-state ABI is unavailable.";
+  status.textContent = hasWide && hasFull
+    ? "M5a/M5b/M5c ready: Full GPR + EIP structural state is executable."
+    : "M5 state partially available; unavailable witnesses are disabled.";
   status.className = "notice";
 
+  const readState = (suffix) => {
+    const value = (name) => {
+      const getter = wasm["amemory_i386_state_" + name + "_" + suffix];
+      if (typeof getter !== "function") {
+        throw new Error("missing state getter " + name + "_" + suffix);
+      }
+      return getter() >>> 0;
+    };
+    return {
+      eax: value("eax"),
+      ebx: value("ebx"),
+      ecx: value("ecx"),
+      edx: value("edx"),
+      esi: value("esi"),
+      edi: value("edi"),
+      ebp: value("ebp"),
+      esp: value("esp"),
+      eip: value("eip"),
+    };
+  };
+
+  const cases = {
+    add: {
+      run: () => wasm.amemory_i386_state_run_add32(),
+      label: "M5a",
+      block: "M5A_STATE_ADD32",
+      before: {
+        eax: 0xffff_ffff, ebx: 0x1122_3344, ecx: 0x0102_0304,
+        edx: 0x5566_7788, esi: 0x1111_2222, edi: 0x3333_4444,
+        ebp: 0x5555_6666, esp: 0x7777_8888, eip: 0x0040_1000,
+      },
+      after: {
+        eax: 0, ebx: 0x1122_3344, ecx: 0x0102_0304,
+        edx: 0x5566_7788, esi: 0x1111_2222, edi: 0x3333_4444,
+        ebp: 0x5555_6666, esp: 0x7777_8888, eip: 0x0040_1000,
+      },
+      flags: { defined: 0x0000_08d5, values: 0x0000_0055, undefined: 0 },
+      note: "real ADD effect → EAX",
+    },
+    mul: {
+      run: () => wasm.amemory_i386_state_run_mul32(),
+      label: "M5b",
+      block: "M5B_STATE_MUL32",
+      before: {
+        eax: 0xffff_ffff, ebx: 0x1122_3344, ecx: 0x0102_0304,
+        edx: 0xa5a5_5a5a, esi: 0x1111_2222, edi: 0x3333_4444,
+        ebp: 0x5555_6666, esp: 0x7777_8888, eip: 0x0040_1000,
+      },
+      after: {
+        eax: 0xffff_fffe, ebx: 0x1122_3344, ecx: 0x0102_0304,
+        edx: 0x0000_0001, esi: 0x1111_2222, edi: 0x3333_4444,
+        ebp: 0x5555_6666, esp: 0x7777_8888, eip: 0x0040_1000,
+      },
+      flags: {
+        defined: 0x0000_0801,
+        values: 0x0000_0801,
+        undefined: 0x0000_00d4,
+      },
+      note: "real MUL effect → EDX:EAX",
+    },
+    ecx: {
+      run: () => wasm.amemory_i386_state_run_add_ecx(),
+      label: "M5c",
+      block: "M5C_STATE_ADD_ECX",
+      before: {
+        eax: 0x1020_3040, ebx: 0x1122_3344, ecx: 0xffff_ffff,
+        edx: 0x5566_7788, esi: 0x1111_2222, edi: 0x3333_4444,
+        ebp: 0x5555_6666, esp: 0x7777_8888, eip: 0x0040_1000,
+      },
+      after: {
+        eax: 0x1020_3040, ebx: 0x1122_3344, ecx: 0,
+        edx: 0x5566_7788, esi: 0x1111_2222, edi: 0x3333_4444,
+        ebp: 0x5555_6666, esp: 0x7777_8888, eip: 0x0040_1000,
+      },
+      flags: { defined: 0x0000_08d5, values: 0x0000_0055, undefined: 0 },
+      note: "real ADD effect → ECX; EIP protected",
+    },
+  };
+
+  const assertSnapshot = (actual, expected, label) => {
+    for (const [name, value] of Object.entries(expected)) {
+      if (actual[name] !== (value >>> 0)) {
+        throw new Error(
+          label + " " + name.toUpperCase() + " mismatch"
+        );
+      }
+    }
+  };
+  const registerHtml = (snapshot, expected, phase) =>
+    ["eax", "ebx", "ecx", "edx", "esi", "edi", "ebp", "esp", "eip"]
+      .map((name) => {
+        const changed = expected &&
+          expected.before?.[name] !== expected.after?.[name];
+        const annotation = phase === "after" && changed ? " · updated" :
+          phase === "after" ? " · preserved" : "";
+        return `<code>${name.toUpperCase()} = ${hex32(snapshot[name])}${annotation}</code>`;
+      })
+      .join("");
+
   const executeStateWitness = async (kind) => {
-    const isWide = kind === "mul";
+    const spec = cases[kind];
     try {
-      status.textContent = isWide
-        ? "Executing one-memory MUL → EDX:EAX architectural transition…"
-        : "Executing one-memory ADD architectural transition…";
+      status.textContent =
+        "Executing one-memory " + spec.note + " architectural transition…";
       status.className = "notice";
       result.innerHTML = "";
       proofTarget.innerHTML = "";
 
-      const ok = isWide
-        ? wasm.amemory_i386_state_run_mul32()
-        : wasm.amemory_i386_state_run_add32();
-      if (ok !== 1) {
-        throw new Error(
-          (isWide ? "M5b" : "M5a") +
-          " A-Circuit WASM rejected the state witness"
-        );
+      if (spec.run() !== 1) {
+        throw new Error(spec.label + " A-Circuit WASM rejected the state witness");
       }
+      const before = readState("before");
+      const after = readState("after");
+      assertSnapshot(before, spec.before, spec.label + " before");
+      assertSnapshot(after, spec.after, spec.label + " after");
 
-      const before = {
-        eax: wasm.amemory_i386_state_eax_before() >>> 0,
-        ebx: wasm.amemory_i386_state_ebx_before() >>> 0,
-        edx: wasm.amemory_i386_state_edx_before() >>> 0,
-      };
-      const after = {
-        eax: wasm.amemory_i386_state_eax_after() >>> 0,
-        ebx: wasm.amemory_i386_state_ebx_after() >>> 0,
-        edx: wasm.amemory_i386_state_edx_after() >>> 0,
-      };
       const flags = {
         defined: wasm.amemory_i386_state_flags_defined_mask() >>> 0,
         flagValues: wasm.amemory_i386_state_flags_value_mask() >>> 0,
@@ -373,60 +468,14 @@ function setupArchitecturalStateWitness(section, wasm) {
         wasm.amemory_i386_state_steady_link_delta() >>> 0;
       const quiescent = wasm.amemory_i386_state_quiescent() >>> 0;
 
-      const expected = isWide
-        ? {
-            before: {
-              eax: 0xffff_ffff,
-              ebx: 0x1122_3344,
-              edx: 0xa5a5_5a5a,
-            },
-            after: {
-              eax: 0xffff_fffe,
-              ebx: 0x1122_3344,
-              edx: 0x0000_0001,
-            },
-            defined: 0x0000_0801,
-            values: 0x0000_0801,
-            undefined: 0x0000_00d4,
-            block: "M5B_STATE_MUL32",
-          }
-        : {
-            before: {
-              eax: 0xffff_ffff,
-              ebx: 0x1122_3344,
-              edx: 0x5566_7788,
-            },
-            after: {
-              eax: 0,
-              ebx: 0x1122_3344,
-              edx: 0x5566_7788,
-            },
-            defined: 0x0000_08d5,
-            values: 0x0000_0055,
-            undefined: 0,
-            block: "M5A_STATE_ADD32",
-          };
-
-      for (const key of ["eax", "ebx", "edx"]) {
-        if (before[key] !== expected.before[key] ||
-            after[key] !== expected.after[key]) {
-          throw new Error(
-            (isWide ? "M5b" : "M5a") +
-            " structural register-state transition mismatch"
-          );
-        }
-      }
-      if (flags.defined !== expected.defined ||
-          flags.flagValues !== expected.values ||
-          flags.undefined !== expected.undefined ||
+      if (flags.defined !== spec.flags.defined ||
+          flags.flagValues !== spec.flags.values ||
+          flags.undefined !== spec.flags.undefined ||
           oldStateRetained !== 1 ||
           atomicScope !== 1 ||
           steadyDelta !== 0 ||
           quiescent !== 1) {
-        throw new Error(
-          (isWide ? "M5b" : "M5a") +
-          " state/flags/atomicity witness failed"
-        );
+        throw new Error(spec.label + " state/flags/atomicity witness failed");
       }
 
       const flagHtml = FLAGS.map(([name, mask]) =>
@@ -439,18 +488,14 @@ function setupArchitecturalStateWitness(section, wasm) {
           <div class="lab-state-snapshot">
             <h4>Stateₜ · before</h4>
             <div class="lab-state-registers">
-              <code>EAX = ${hex32(before.eax)}</code>
-              <code>EDX = ${hex32(before.edx)}</code>
-              <code>EBX = ${hex32(before.ebx)}</code>
+              ${registerHtml(before, spec, "before")}
             </div>
             <p class="lab-state-note">Old State remains physically present; currentness moves by structural publication, not pole mutation.</p>
           </div>
           <div class="lab-state-snapshot">
             <h4>Stateₜ₊₁ · atomically published</h4>
             <div class="lab-state-registers">
-              <code>EAX = ${hex32(after.eax)}${isWide ? " · low half" : ""}</code>
-              <code>EDX = ${hex32(after.edx)}${isWide ? " · high half" : " · preserved"}</code>
-              <code>EBX = ${hex32(after.ebx)} · preserved</code>
+              ${registerHtml(after, spec, "after")}
             </div>
             <div class="lab-flags">${flagHtml}</div>
           </div>
@@ -464,16 +509,16 @@ function setupArchitecturalStateWitness(section, wasm) {
         </div>`;
 
       const { proof, transport } = collectBrowserProof(wasm);
-      if (!proof || proof.block !== expected.block) {
+      if (!proof || proof.block !== spec.block) {
         throw new Error(
-          (isWide ? "M5b" : "M5a") +
-          " compact proof did not reconstruct the state witness"
+          spec.label + " compact proof did not reconstruct the state witness"
         );
       }
       await renderProofPipeline(proofTarget, proof);
-      status.textContent = isWide
-        ? `M5b PASS: real MUL effect atomically published EDX:EAX + EFLAGS in one A-memory; ${transport} proof rendered below.`
-        : `M5a PASS: real ADD effect applied to architectural state in one A-memory; ${transport} proof rendered below.`;
+      status.textContent =
+        spec.label + " PASS: " + spec.note +
+        " atomically published a full State′ in one A-memory; " +
+        transport + " proof rendered below.";
       status.className = "notice lab-ok";
     } catch (error) {
       status.textContent = error.message;
@@ -483,6 +528,7 @@ function setupArchitecturalStateWitness(section, wasm) {
 
   runAdd.addEventListener("click", () => executeStateWitness("add"));
   runMul.addEventListener("click", () => executeStateWitness("mul"));
+  runEcx.addEventListener("click", () => executeStateWitness("ecx"));
 }
 
 function setupCatalog(section, registry, selectBlock) {
