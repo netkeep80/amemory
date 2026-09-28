@@ -193,6 +193,63 @@ jobs:
           console.log("browser syntax + one-output + Wide64 + four-stage proof rendering PASS");
           NODE
 
+      - name: Build identity consumer acceptance
+        run: |
+          set -euo pipefail
+          cp experiments/browser-accelerator/web/build-info.js /tmp/amemory-build-info.mjs
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          import { pathToFileURL } from "node:url";
+
+          const version = fs.readFileSync("VERSION", "utf8").trim();
+          const info = {
+            schemaVersion: 2,
+            version,
+            mainSha: "a".repeat(40),
+            acceptanceRunId: 1,
+            builtAt: "2026-01-01T00:00:00Z",
+          };
+          const nodes = new Map([
+            ["#amemory-version", { textContent: "", title: "" }],
+            ["#browser-lab-sha", { textContent: "", title: "" }],
+            ["#amemory-build", { textContent: "", title: "" }],
+          ]);
+          globalThis.document = {
+            querySelector(selector) {
+              const node = nodes.get(selector);
+              if (!node) throw new Error("unexpected selector " + selector);
+              return node;
+            },
+          };
+          globalThis.fetch = async (url, options) => {
+            if (url !== "./build-info.json" || options?.cache !== "no-store") {
+              throw new Error("unexpected build-info fetch contract");
+            }
+            return {
+              ok: true,
+              status: 200,
+              async json() {
+                return info;
+              },
+            };
+          };
+
+          await import(
+            pathToFileURL("/tmp/amemory-build-info.mjs").href +
+              "?acceptance=" + info.mainSha
+          );
+          await new Promise((resolve) => setTimeout(resolve, 0));
+
+          const versionText = nodes.get("#amemory-version").textContent;
+          const shaText = nodes.get("#browser-lab-sha").textContent;
+          if (versionText !== "v" + version ||
+              shaText !== info.mainSha.slice(0, 12) ||
+              /unavailable|unknown/i.test(versionText + " " + shaText)) {
+            throw new Error("schema-v2 build identity fell back in browser consumer");
+          }
+          console.log("schema-v2 build identity consumer PASS");
+          NODE
+
       - name: Native web-lab structural tests
         run: |
           cargo +1.98.1 test \

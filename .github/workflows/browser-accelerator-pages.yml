@@ -338,6 +338,62 @@ jobs:
           print(f"Pages exact payload PASS: v{expected_version} @ {expected_sha[:12]} / {len(registry['blocks'])} blocks / mts_visual {visual_lock['commit'][:12]}")
           PY
 
+          # Execute the browser build-identity consumer against the generated
+          # schema-v2 metadata. A valid artifact must never render fallback text.
+          cp _site/build-info.js /tmp/pages-build-info.mjs
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          import { pathToFileURL } from "node:url";
+
+          const info = JSON.parse(
+            fs.readFileSync("_site/build-info.json", "utf8")
+          );
+          const nodes = new Map([
+            ["#amemory-version", { textContent: "", title: "" }],
+            ["#browser-lab-sha", { textContent: "", title: "" }],
+            ["#amemory-build", { textContent: "", title: "" }],
+          ]);
+          globalThis.document = {
+            querySelector(selector) {
+              const node = nodes.get(selector);
+              if (!node) throw new Error("unexpected selector " + selector);
+              return node;
+            },
+          };
+          globalThis.fetch = async (url, options) => {
+            if (url !== "./build-info.json" || options?.cache !== "no-store") {
+              throw new Error("unexpected build-info fetch contract");
+            }
+            return {
+              ok: true,
+              status: 200,
+              async json() {
+                return info;
+              },
+            };
+          };
+
+          await import(
+            pathToFileURL("/tmp/pages-build-info.mjs").href +
+              "?acceptance=" + info.mainSha
+          );
+          await new Promise((resolve) => setTimeout(resolve, 0));
+
+          const versionText = nodes.get("#amemory-version").textContent;
+          const shaText = nodes.get("#browser-lab-sha").textContent;
+          if (versionText !== "v" + info.version ||
+              shaText !== info.mainSha.slice(0, 12) ||
+              /unavailable|unknown/i.test(versionText + " " + shaText)) {
+            throw new Error(
+              "browser build badge did not consume generated build-info.json"
+            );
+          }
+          console.log(
+            "Pages build-info consumer PASS: " +
+              versionText + " @ " + shaText
+          );
+          NODE
+
       - name: Cache-bust interactive lab modules
         run: |
           python3 - <<'PY'
@@ -437,6 +493,10 @@ jobs:
             and .proofCoveredOpcodes == .registryBlocks
             and .proofCoveredOpcodes >= 24
           ' /tmp/pages-live-smoke/exact-evidence.json >/dev/null
+          build_version="$(jq -r '.version' /tmp/pages-live-smoke/build-info.json)"
+          evidence_version="$(jq -r '.version' /tmp/pages-live-smoke/exact-evidence.json)"
+          test -n "${build_version}"
+          test "${build_version}" = "${evidence_version}"
           grep -F 'mts-visual-core.bundle.js' /tmp/pages-live-smoke/i386-proof-view.mjs
           grep -F 'mts-visual-three.bundle.js' /tmp/pages-live-smoke/i386-proof-view.mjs
           grep -F 'createOctahedralLivePhysics3D' /tmp/pages-live-smoke/i386-proof-view.mjs
