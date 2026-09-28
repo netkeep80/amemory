@@ -1,4 +1,4 @@
-use crate::{Handle, OptimizedLinkStore, StoreError, ROOT_HANDLE};
+use crate::{Handle, OptimizedLinkStore, PackedExecutionView, StoreError, ROOT_HANDLE};
 use std::{collections::{HashMap, HashSet}, time::Instant};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -118,10 +118,53 @@ struct CompiledRuleMetadata {
     grounded_checks: Vec<GroundedPathCheck>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct StructuralImage {
     output_bundle_template: Handle,
     bindings: Vec<StructuralRoleBinding>,
+}
+
+trait StructuralRead {
+    fn is_valid(&self, handle: Handle) -> bool;
+    fn poles(&self, handle: Handle) -> Result<(Handle, Handle), StoreError>;
+    fn start_incidence_handles(
+        &self,
+        start: Handle,
+    ) -> Result<Vec<Handle>, StoreError>;
+}
+
+impl StructuralRead for OptimizedLinkStore {
+    fn is_valid(&self, handle: Handle) -> bool {
+        OptimizedLinkStore::is_valid(self, handle)
+    }
+
+    fn poles(&self, handle: Handle) -> Result<(Handle, Handle), StoreError> {
+        OptimizedLinkStore::poles(self, handle)
+    }
+
+    fn start_incidence_handles(
+        &self,
+        start: Handle,
+    ) -> Result<Vec<Handle>, StoreError> {
+        Ok(OptimizedLinkStore::start_incidence(self, start)?.collect())
+    }
+}
+
+impl StructuralRead for PackedExecutionView {
+    fn is_valid(&self, handle: Handle) -> bool {
+        PackedExecutionView::is_valid(self, handle)
+    }
+
+    fn poles(&self, handle: Handle) -> Result<(Handle, Handle), StoreError> {
+        PackedExecutionView::poles(self, handle)
+    }
+
+    fn start_incidence_handles(
+        &self,
+        start: Handle,
+    ) -> Result<Vec<Handle>, StoreError> {
+        Ok(PackedExecutionView::start_incidence(self, start)?.collect())
+    }
 }
 
 pub fn materialize_exact_sequence(
@@ -139,8 +182,8 @@ pub fn materialize_exact_sequence(
     Ok(current)
 }
 
-pub fn read_exact_sequence(
-    store: &OptimizedLinkStore,
+fn read_exact_sequence_from<R: StructuralRead + ?Sized>(
+    store: &R,
     final_link: Handle,
 ) -> Result<Vec<Handle>, StructuralError> {
     if final_link == ROOT_HANDLE {
@@ -173,6 +216,13 @@ pub fn read_exact_sequence(
     Ok(reversed)
 }
 
+pub fn read_exact_sequence(
+    store: &OptimizedLinkStore,
+    final_link: Handle,
+) -> Result<Vec<Handle>, StructuralError> {
+    read_exact_sequence_from(store, final_link)
+}
+
 pub fn define_structural_role_dictionary(
     store: &mut OptimizedLinkStore,
     roles: &[Handle],
@@ -191,8 +241,8 @@ pub fn define_structural_role_dictionary(
     Ok(store.ensure_start_self_closed(sequence)?)
 }
 
-pub fn read_structural_role_dictionary(
-    store: &OptimizedLinkStore,
+fn read_structural_role_dictionary_from<R: StructuralRead + ?Sized>(
+    store: &R,
     dictionary: Handle,
 ) -> Result<Vec<Handle>, StructuralError> {
     let (start, end) = store.poles(dictionary)?;
@@ -200,7 +250,7 @@ pub fn read_structural_role_dictionary(
         return Err(StructuralError::InvalidRoleDictionary(dictionary));
     }
 
-    let roles = read_exact_sequence(store, end)?;
+    let roles = read_exact_sequence_from(store, end)?;
     let mut unique = HashSet::new();
     for role in &roles {
         if !unique.insert(*role) {
@@ -208,6 +258,13 @@ pub fn read_structural_role_dictionary(
         }
     }
     Ok(roles)
+}
+
+pub fn read_structural_role_dictionary(
+    store: &OptimizedLinkStore,
+    dictionary: Handle,
+) -> Result<Vec<Handle>, StructuralError> {
+    read_structural_role_dictionary_from(store, dictionary)
 }
 
 pub fn define_structural_rule(
@@ -264,8 +321,8 @@ pub fn read_structural_interpreter(
 
 const MAX_COMPILED_GROUNDED_CHECKS: usize = 32;
 
-fn compile_grounded_path_checks(
-    store: &OptimizedLinkStore,
+fn compile_grounded_path_checks<R: StructuralRead + ?Sized>(
+    store: &R,
     template: Handle,
     roles: &[Handle],
 ) -> Result<Vec<GroundedPathCheck>, StructuralError> {
@@ -349,8 +406,8 @@ fn compile_grounded_path_checks(
     Ok(checks)
 }
 
-fn compiled_grounded_paths_match(
-    store: &OptimizedLinkStore,
+fn compiled_grounded_paths_match<R: StructuralRead + ?Sized>(
+    store: &R,
     claimed: Handle,
     checks: &[GroundedPathCheck],
     profile: &mut Option<&mut StructuralRunProfile>,
@@ -379,8 +436,8 @@ fn compiled_grounded_paths_match(
 
 const STRUCTURAL_DISCRIMINATION_BUDGET: usize = 128;
 
-fn structural_discriminator_matches(
-    store: &OptimizedLinkStore,
+fn structural_discriminator_matches<R: StructuralRead + ?Sized>(
+    store: &R,
     template: Handle,
     claimed: Handle,
     roles: &[Handle],
@@ -436,8 +493,8 @@ fn structural_discriminator_matches(
     Ok(true)
 }
 
-fn unify_node(
-    store: &OptimizedLinkStore,
+fn unify_node<R: StructuralRead + ?Sized>(
+    store: &R,
     template: Handle,
     claimed: Handle,
     roles: &HashSet<Handle>,
@@ -491,8 +548,8 @@ fn unify_node(
     Ok(())
 }
 
-fn unify_structural_rule_template_internal(
-    store: &OptimizedLinkStore,
+fn unify_structural_rule_template_internal<R: StructuralRead + ?Sized>(
+    store: &R,
     template: Handle,
     claimed: Handle,
     roles: &[Handle],
@@ -643,8 +700,8 @@ pub fn instantiate_structural_template(
     instantiate_structural_template_internal(store, template, bindings, &mut profile)
 }
 
-fn discover_triggered_rule_images_internal(
-    store: &OptimizedLinkStore,
+fn discover_triggered_rule_images_internal<R: StructuralRead + ?Sized>(
+    store: &R,
     theory: Handle,
     active: Handle,
     metadata_cache: &mut HashMap<Handle, CompiledRuleMetadata>,
@@ -654,9 +711,7 @@ fn discover_triggered_rule_images_internal(
     let (_, endpoint) = store.poles(active)?;
     let (trigger_key, _) = store.poles(endpoint)?;
 
-    let triggers = store
-        .start_incidence(trigger_key)?
-        .collect::<Vec<_>>();
+    let triggers = store.start_incidence_handles(trigger_key)?;
 
     if let Some(profile) = profile.as_deref_mut() {
         profile.trigger_incidence_candidates += triggers.len() as u64;
@@ -712,7 +767,8 @@ fn discover_triggered_rule_images_internal(
             };
 
             let role_started = profile.as_ref().map(|_| Instant::now());
-            let roles_result = read_structural_role_dictionary(store, role_dictionary);
+            let roles_result =
+                read_structural_role_dictionary_from(store, role_dictionary);
             if let Some(profile) = profile.as_deref_mut() {
                 profile.role_dictionary_decodes += 1;
                 if let Some(started) = role_started {
@@ -1477,6 +1533,47 @@ mod tests {
         let images =
             discover_triggered_rule_images(&store, theory, active).unwrap();
         assert_eq!(images.len(), 1, "one discoverable structural image");
+
+        let execution_view = store.export_packed_execution_view();
+        assert_eq!(
+            read_structural_role_dictionary_from(
+                &execution_view,
+                role_dictionary,
+            )
+            .unwrap(),
+            vec![role],
+            "packed execution view role dictionary"
+        );
+
+        let mut view_profile = None;
+        let view_bindings = unify_structural_rule_template_internal(
+            &execution_view,
+            before,
+            active,
+            &[role],
+            &mut view_profile,
+        )
+        .unwrap();
+        assert_eq!(
+            view_bindings,
+            vec![StructuralRoleBinding { role, value: caller }],
+            "packed execution view unification"
+        );
+
+        let mut view_metadata_cache = HashMap::new();
+        let mut view_discovery_profile = None;
+        let view_images = discover_triggered_rule_images_internal(
+            &execution_view,
+            theory,
+            active,
+            &mut view_metadata_cache,
+            &mut view_discovery_profile,
+        )
+        .unwrap();
+        assert_eq!(
+            view_images, images,
+            "packed execution view changed structural discovery"
+        );
 
         let mut engine = OptimizedStructuralEngine::new(8);
         engine.set_interpreter(&store, interpreter).unwrap();
