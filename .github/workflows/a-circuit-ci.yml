@@ -3,12 +3,16 @@ name: A-Circuit consolidated CI
 on:
   pull_request:
     paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
       - "experiments/a-circuit/**"
       - "experiments/optimized-cpu-rust/**"
       - ".github/workflows/a-circuit-ci.yml"
   push:
     branches: [main]
     paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
       - "experiments/a-circuit/**"
       - "experiments/optimized-cpu-rust/**"
       - ".github/workflows/a-circuit-ci.yml"
@@ -35,6 +39,24 @@ jobs:
 
       - name: Install pinned Rust toolchain once
         run: rustup toolchain install 1.98.1 --profile minimal
+
+      - name: Workspace dependency direction and locked graph
+        run: |
+          set -euo pipefail
+          cargo +1.98.1 metadata --locked --format-version 1 --no-deps > /tmp/workspace-metadata.json
+          python3 - <<'PY'
+          import json
+          data = json.load(open("/tmp/workspace-metadata.json", "r", encoding="utf-8"))
+          packages = {p["name"]: p for p in data["packages"]}
+          expected = {"amemory-browser-probe", "amemory-optimized-cpu-probe", "amemory-a-circuit"}
+          assert expected.issubset(packages), packages.keys()
+          for owner in ("amemory-optimized-cpu-probe", "amemory-a-circuit"):
+              deps = {d["name"]: d.get("kind") for d in packages[owner]["dependencies"]}
+              assert deps.get("amemory-browser-probe") == "dev", (owner, deps)
+          print("WORKSPACE_DEPENDENCY_DIRECTION=PASS")
+          PY
+          cargo +1.98.1 test --workspace --locked --no-run
+          git diff --exit-code -- Cargo.lock
 
       - name: C0-C1 semantic witnesses
         run: |

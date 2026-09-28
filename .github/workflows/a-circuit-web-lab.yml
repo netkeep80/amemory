@@ -5,6 +5,8 @@ name: A-Circuit web 80386 interactive lab
 on:
   pull_request:
     paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
       - "experiments/a-circuit/**"
       - "experiments/browser-accelerator/web/**"
       - ".github/workflows/a-circuit-web-lab.yml"
@@ -318,6 +320,8 @@ jobs:
           fi
 
       - name: Build the real A-Circuit WASM
+        env:
+          CARGO_TARGET_DIR: experiments/a-circuit/target
         run: |
           cargo +1.98.1 build \
             --release \
@@ -336,6 +340,9 @@ jobs:
 
       - name: Build browser accelerator WASM for accepted Pages payload
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          CARGO_TARGET_DIR: experiments/browser-accelerator/rust/target
+          RUSTFLAGS: "-C panic=abort"
         run: |
           cargo +1.98.1 build \
             --manifest-path experiments/browser-accelerator/rust/Cargo.toml \
