@@ -885,8 +885,8 @@ export async function runRecursiveWireBoundaryBrowser(wasm, device) {
 
     for (const source of malformed) {
       const before = cpuPoolCount(wasm);
-      must(cpuImportTechnicalRecursiveWire(wasm, source) === null, `CPU accepted invalid Anum ${source}`);
-      must(cpuPoolCount(wasm) === before, `CPU partial publication on invalid Anum ${source}`);
+      must(cpuImportTechnicalRecursiveWire(wasm, source) === null, `CPU accepted invalid recursive Link wire ${source}`);
+      must(cpuPoolCount(wasm) === before, `CPU partial publication on invalid recursive Link wire ${source}`);
 
       const gpuBefore = await gpuPoolCount(device, gpuPool);
       let rejected = false;
@@ -896,9 +896,9 @@ export async function runRecursiveWireBoundaryBrowser(wasm, device) {
       } catch {
         rejected = true;
       }
-      must(rejected, `GPU accepted invalid Anum ${source}`);
+      must(rejected, `GPU accepted invalid recursive Link wire ${source}`);
       must(await gpuPoolCount(device, gpuPool) === gpuBefore,
-        `GPU partial publication on invalid Anum ${source}`);
+        `GPU partial publication on invalid recursive Link wire ${source}`);
     }
 
     let foreignRejected = false;
@@ -930,17 +930,17 @@ export async function runRecursiveWireBoundaryBrowser(wasm, device) {
     must(await gpuPoolCount(device, gpuPool) === gpuBeforeNegatives,
       "GPU negative witnesses changed semantic pool");
 
-    // Multi-Anum Aset load is atomic across the whole batch, not only per Anum.
+    // Multi-wire Aset load is atomic across the whole batch, not only per recursive Link wire.
     // First prove a malformed middle member cannot replace the published pool.
     const cpuBeforeBatchFailure = cpuPoolCount(wasm);
     const gpuBeforeBatchFailure = await gpuPoolCount(device, gpuPool);
     must(cpuImportTechnicalRecursiveWiresAtomic(wasm, ["98", "5", "68"]) === null,
-      "CPU accepted malformed multi-Anum Aset");
+      "CPU accepted malformed recursive-wire Aset");
     must(cpuPoolCount(wasm) === cpuBeforeBatchFailure,
       "CPU failed batch partially published Aset");
 
     const gpuFailedBatch = await gpuImportTechnicalRecursiveWiresAtomic(device, gpuPool, ["98", "5", "68"]);
-    must(gpuFailedBatch === null, "GPU accepted malformed multi-Anum Aset");
+    must(gpuFailedBatch === null, "GPU accepted malformed recursive-wire Aset");
     must(await gpuPoolCount(device, gpuPool) === gpuBeforeBatchFailure,
       "GPU failed batch partially published Aset");
 
@@ -949,7 +949,7 @@ export async function runRecursiveWireBoundaryBrowser(wasm, device) {
     const asetSources = ["98", "68", "19868"];
     const cpuBatchRefs = cpuImportTechnicalRecursiveWiresAtomic(wasm, asetSources);
     const gpuBatchRefs = await gpuImportTechnicalRecursiveWiresAtomic(device, gpuPool, asetSources);
-    must(cpuBatchRefs && gpuBatchRefs, "atomic multi-Anum Aset load failed");
+    must(cpuBatchRefs && gpuBatchRefs, "atomic recursive-wire Aset load failed");
     must(cpuPoolCount(wasm) === 4, "CPU Aset canonical Link count mismatch");
     must(await gpuPoolCount(device, gpuPool) === 4, "GPU Aset canonical Link count mismatch");
     for (let i = 0; i < asetSources.length; i += 1) {
@@ -1087,11 +1087,11 @@ export async function runRecursiveWireBoundaryBrowser(wasm, device) {
     logs.push("semantic.transport.cpu-gpu = GAUGE_INVARIANT");
     logs.push("semantic.transport.fail-closed = TRUE");
 
-    logs.push(`anum.sample.source = ${sample}`);
-    logs.push(`anum.sample.cpu.handle = ${cpuSample.value}`);
-    logs.push(`anum.sample.gpu.handle = ${gpuSample.value}`);
-    logs.push(`anum.sample.cpu.export = ${cpuExportTechnicalRecursiveWire(wasm, cpuSample)}`);
-    logs.push(`anum.sample.gpu.export = ${await gpuExportTechnicalRecursiveWire(device, gpuPool, gpuSample)}`);
+    logs.push(`recursiveWire.sample.source = ${sample}`);
+    logs.push(`recursiveWire.sample.cpu.handle = ${cpuSample.value}`);
+    logs.push(`recursiveWire.sample.gpu.handle = ${gpuSample.value}`);
+    logs.push(`recursiveWire.sample.cpu.export = ${cpuExportTechnicalRecursiveWire(wasm, cpuSample)}`);
+    logs.push(`recursiveWire.sample.gpu.export = ${await gpuExportTechnicalRecursiveWire(device, gpuPool, gpuSample)}`);
 
     return {
       cpuImport: true,
@@ -1123,5 +1123,11 @@ export async function runRecursiveWireBoundaryBrowser(wasm, device) {
   }
 }
 
-// Historical page entry point retained while UI terminology migrates in P5d3.
+// Canonical v0.14-facing aliases. The underlying *AnumPool names are retained
+// only because they are part of the historical browser/WASM compatibility ABI.
+export const createGpuRecursiveWirePool = createGpuAnumPool;
+export const destroyGpuRecursiveWirePool = destroyGpuAnumPool;
+
+// Historical page entry point retained for compatibility. It is deliberately
+// an alias; an arbitrary recursive Link wire is not thereby an Anum.
 export const runAnumBoundaryBrowser = runRecursiveWireBoundaryBrowser;

@@ -12,7 +12,7 @@ import {
   formatStatePairs,
   matrixToPairs,
 } from "./state-store.mjs";
-import { runAnumBoundaryBrowser } from "./anum-boundary.mjs";
+import { runRecursiveWireBoundaryBrowser } from "./anum-boundary.mjs";
 import { runReactionBrowser } from "./reaction.mjs";
 
 const ui = {
@@ -1006,32 +1006,32 @@ async function main() {
 
   if (wasm) {
     try {
-      const anum = await runAnumBoundaryBrowser(wasm, device);
-      report(ui.anumImportCpu, "PASS", anum.cpuImport);
-      report(ui.anumImportGpu, "PASS", anum.gpuImport);
-      report(ui.anumExportCpu, "PASS", anum.cpuExport);
-      report(ui.anumExportGpu, "PASS", anum.gpuExport);
-      report(ui.anumDiff, "PASS", anum.differential);
+      const wire = await runRecursiveWireBoundaryBrowser(wasm, device);
+      report(ui.anumImportCpu, "PASS", wire.cpuImport);
+      report(ui.anumImportGpu, "PASS", wire.gpuImport);
+      report(ui.anumExportCpu, "PASS", wire.cpuExport);
+      report(ui.anumExportGpu, "PASS", wire.gpuExport);
+      report(ui.anumDiff, "PASS", wire.differential);
       report(
         ui.asetAtomic,
-        "PASS (3 Anums → " + anum.atomicAsetLinkCount + " canonical Links; failed middle member published nothing)",
-        anum.atomicAsetLoad && anum.atomicAsetDifferential,
+        "PASS (3 recursive Link wires → " + wire.atomicAsetLinkCount + " canonical Links; failed middle member published nothing)",
+        wire.atomicAsetLoad && wire.atomicAsetDifferential,
       );
-      report(ui.flowInput, "3-Anum atomic-load witness PASS", anum.atomicAsetLoad);
-      report(ui.flowMemory, anum.atomicAsetLinkCount + " canonical Links (load witness)", true);
+      report(ui.flowInput, "3-wire atomic-load witness PASS", wire.atomicAsetLoad);
+      report(ui.flowMemory, wire.atomicAsetLinkCount + " canonical Links (load witness)", true);
       report(ui.overviewLifecycle, "READY (load witness)", true);
       report(
         ui.anumHandles,
-        `PASS (CPU ${anum.sample.cpuHandle} != GPU ${anum.sample.gpuHandle})`,
-        anum.handlesDiffer,
+        `PASS (CPU ${wire.sample.cpuHandle} != GPU ${wire.sample.gpuHandle})`,
+        wire.handlesDiffer,
       );
-      report(ui.anumReuse, "PASS", anum.canonicalReuse);
+      report(ui.anumReuse, "PASS", wire.canonicalReuse);
       report(
         ui.anumNegative,
         "PASS (malformed/truncated/trailing/foreign/capacity rejected)",
-        anum.negativeControls,
+        wire.negativeControls,
       );
-      for (const line of anum.logs) log(line);
+      for (const line of wire.logs) log(line);
     } catch (error) {
       report(ui.asetAtomic, "FAIL", false);
       report(ui.flowInput, "LOAD FAILED", false);
@@ -1043,7 +1043,7 @@ async function main() {
       ]) {
         if (element.textContent === "WAITING") report(element, "FAIL", false);
       }
-      log(`Anum-boundary error: ${error?.stack || error}`);
+      log(`Recursive-wire boundary error: ${error?.stack || error}`);
     }
   }
 
@@ -1052,13 +1052,13 @@ async function main() {
       const reaction = await runReactionBrowser(wasm, device);
       report(
         ui.asetAtomic,
-        "PASS end-to-end (" + reaction.lifecycleAsetSources.length + " Anums → " +
+        "PASS end-to-end (" + reaction.lifecycleAsetSources.length + " recursive Link wires → " +
           reaction.lifecycleLinkCountCpu + " Links → R1 result)",
         reaction.lifecycleDifferential && reaction.lifecycleSameLoadedAsetPath,
       );
       report(
         ui.flowInput,
-        reaction.lifecycleAsetSources.length + " Anums atomically committed",
+        reaction.lifecycleAsetSources.length + " recursive Link wires atomically committed",
         reaction.lifecycleSameLoadedAsetPath,
       );
       report(
