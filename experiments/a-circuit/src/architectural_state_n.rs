@@ -1605,6 +1605,95 @@ mod tests {
         )
     }
 
+    fn make_wide_mul_effect(
+        f: &mut FullFixture,
+        p: &ArchitecturalStateProgram,
+        lo: u32,
+        hi: u32,
+        cf: u8,
+        of: u8,
+    ) -> Handle {
+        let lo = word(f, lo);
+        let hi = word(f, hi);
+        let wide =
+            materialize_exact_sequence(&mut f.store, &[lo, hi]).unwrap();
+        let cf = bit(f, cf);
+        let of = bit(f, of);
+        let actions = [
+            set_flag_action(
+                &mut f.store,
+                p.schema.flags,
+                p.schema.flags.cf,
+                cf,
+            ),
+            undefined_flag_action(
+                &mut f.store,
+                p.schema.flags,
+                p.schema.flags.pf,
+            ),
+            undefined_flag_action(
+                &mut f.store,
+                p.schema.flags,
+                p.schema.flags.af,
+            ),
+            undefined_flag_action(
+                &mut f.store,
+                p.schema.flags,
+                p.schema.flags.zf,
+            ),
+            undefined_flag_action(
+                &mut f.store,
+                p.schema.flags,
+                p.schema.flags.sf,
+            ),
+            set_flag_action(
+                &mut f.store,
+                p.schema.flags,
+                p.schema.flags.of,
+                of,
+            ),
+        ];
+        let patch =
+            materialize_exact_sequence(&mut f.store, &actions).unwrap();
+        let payload =
+            materialize_exact_sequence(&mut f.store, &[wide, patch]).unwrap();
+        f.store
+            .ensure_pair(p.schema.wide_effect_result_tag, payload)
+            .unwrap()
+    }
+
+    fn wide_transition(
+        f: &mut FullFixture,
+        p: &ArchitecturalStateProgram,
+        state: Handle,
+        low_target: Handle,
+        high_target: Handle,
+        effect: Handle,
+    ) -> Option<Handle> {
+        let frame = state_apply_wide_frame(
+            &mut f.store,
+            p.schema,
+            state,
+            low_target,
+            high_target,
+        );
+        let initial = f.store.ensure_pair(frame, effect).unwrap();
+        f.engine.set_current(&f.store, &[initial]).unwrap();
+        let reaction = f.engine.run(&mut f.store).unwrap();
+        if reaction.quiescent {
+            return None;
+        }
+        assert_eq!(reaction.raw_rule_matches, 1);
+        assert_eq!(reaction.transitioned_members, 1);
+        assert_eq!(reaction.handoff_count, 1);
+        assert_eq!(reaction.next_members.len(), 1);
+        let final_member = f.engine.current()[0];
+        let (caller, successor) = f.store.poles(final_member).unwrap();
+        assert_eq!(caller, f.k);
+        assert!(f.store.is_valid(state));
+        Some(successor)
+    }
+
     fn transition(
         f: &mut FullFixture,
         p: &ArchitecturalStateProgram,
@@ -1664,6 +1753,117 @@ mod tests {
             sf: Some(1),
             of: Some(0),
         }
+    }
+
+    #[test]
+    fn m5b_direct_wide_applier_updates_two_registers_in_one_state() {
+        let mut f = FullFixture::new();
+        let p = ArchitecturalStateProgram::install(&mut f);
+        let old_value = initial();
+        let old = make_state(&mut f, &p, old_value);
+        let effect = make_wide_mul_effect(
+            &mut f,
+            &p,
+            0xffff_fffe,
+            0x0000_0001,
+            1,
+            1,
+        );
+
+        let next = wide_transition(
+            &mut f,
+            &p,
+            old,
+            p.schema.eax,
+            p.schema.edx,
+            effect,
+        )
+        .unwrap();
+        assert_eq!(
+            decode_state(&f, p.schema, next).unwrap(),
+            StateValue {
+                eax: 0xffff_fffe,
+                ebx: old_value.ebx,
+                edx: 0x0000_0001,
+                cf: Some(1),
+                pf: None,
+                af: None,
+                zf: None,
+                sf: None,
+                of: Some(1),
+            }
+        );
+    }
+
+    #[test]
+    fn m5b_repeated_targets_and_malformed_patch_fail_closed() {
+        let mut f = FullFixture::new();
+        let p = ArchitecturalStateProgram::install(&mut f);
+        let old = make_state(&mut f, &p, initial());
+        let effect = make_wide_mul_effect(
+            &mut f,
+            &p,
+            0xffff_fffe,
+            1,
+            1,
+            1,
+        );
+
+        assert!(
+            wide_transition(
+                &mut f,
+                &p,
+                old,
+                p.schema.eax,
+                p.schema.eax,
+                effect,
+            )
+            .is_none(),
+            "repeated wide destination id must fail closed"
+        );
+
+        let lo = word(&mut f, 0xffff_fffe);
+        let hi = word(&mut f, 1);
+        let wide =
+            materialize_exact_sequence(&mut f.store, &[lo, hi]).unwrap();
+        let set_cf_zero = set_flag_action(
+            &mut f.store,
+            p.schema.flags,
+            p.schema.flags.cf,
+            f.zero,
+        );
+        let set_cf_one = set_flag_action(
+            &mut f.store,
+            p.schema.flags,
+            p.schema.flags.cf,
+            f.one,
+        );
+        let bad_patch =
+            materialize_exact_sequence(
+                &mut f.store,
+                &[set_cf_zero, set_cf_one],
+            )
+            .unwrap();
+        let bad_payload =
+            materialize_exact_sequence(&mut f.store, &[wide, bad_patch])
+                .unwrap();
+        let bad_effect = f
+            .store
+            .ensure_pair(p.schema.wide_effect_result_tag, bad_payload)
+            .unwrap();
+
+        assert!(
+            wide_transition(
+                &mut f,
+                &p,
+                old,
+                p.schema.eax,
+                p.schema.edx,
+                bad_effect,
+            )
+            .is_none(),
+            "malformed/conflicting wide patch must fail closed"
+        );
     }
 
     #[test]
