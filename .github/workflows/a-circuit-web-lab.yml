@@ -5,6 +5,8 @@ name: A-Circuit web 80386 interactive lab
 on:
   pull_request:
     paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
       - "experiments/a-circuit/**"
       - "experiments/browser-accelerator/web/**"
       - ".github/workflows/a-circuit-web-lab.yml"
