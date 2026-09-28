@@ -1,9 +1,10 @@
 use super::{
     arithmetic_effect_n::prepare_arithmetic_effect_call,
     flag_patch::{
-        install_alu_effect_result_tag, set_flag_action, undefined_flag_action,
-        FlagPatchSchema,
+        install_alu_effect_result_tag, install_wide_alu_effect_result_tag,
+        set_flag_action, undefined_flag_action, FlagPatchSchema,
     },
+    mul_effect_n::prepare_mul_effect_call,
     full_adder::{
         define_bundle_rule, index_rule_for, Fixture as FullFixture,
     },
@@ -30,17 +31,21 @@ enum PatchShape {
 pub(crate) struct ArchitecturalStateSchema {
     pub(crate) state_tag: Handle,
     pub(crate) apply_state: Handle,
+    pub(crate) apply_wide_state: Handle,
     pub(crate) eax: Handle,
     pub(crate) ebx: Handle,
+    pub(crate) edx: Handle,
     pub(crate) undefined: Handle,
     pub(crate) flags: FlagPatchSchema,
     pub(crate) effect_result_tag: Handle,
+    pub(crate) wide_effect_result_tag: Handle,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct StateValue {
     eax: u32,
     ebx: u32,
+    edx: u32,
     cf: Option<u8>,
     pf: Option<u8>,
     af: Option<u8>,
@@ -95,6 +100,7 @@ fn state_link(
     schema: ArchitecturalStateSchema,
     eax: Handle,
     ebx: Handle,
+    edx: Handle,
     cf: Handle,
     pf: Handle,
     af: Handle,
@@ -105,6 +111,7 @@ fn state_link(
     let fields = [
         binding(store, schema.eax, eax),
         binding(store, schema.ebx, ebx),
+        binding(store, schema.edx, edx),
         binding(store, schema.flags.cf, cf),
         binding(store, schema.flags.pf, pf),
         binding(store, schema.flags.af, af),
@@ -126,6 +133,24 @@ fn state_apply_frame(
         materialize_exact_sequence(store, &[state, target]).unwrap();
     let descriptor = store
         .ensure_pair(schema.apply_state, payload)
+        .unwrap();
+    store.ensure_start_self_closed(descriptor).unwrap()
+}
+
+fn state_apply_wide_frame(
+    store: &mut OptimizedLinkStore,
+    schema: ArchitecturalStateSchema,
+    state: Handle,
+    low_target: Handle,
+    high_target: Handle,
+) -> Handle {
+    let payload = materialize_exact_sequence(
+        store,
+        &[state, low_target, high_target],
+    )
+    .unwrap();
+    let descriptor = store
+        .ensure_pair(schema.apply_wide_state, payload)
         .unwrap();
     store.ensure_start_self_closed(descriptor).unwrap()
 }
@@ -207,6 +232,7 @@ fn install_case(
 ) {
     let old_eax = anchors.next(&mut f.store);
     let old_ebx = anchors.next(&mut f.store);
+    let old_edx = anchors.next(&mut f.store);
     let old_cf = anchors.next(&mut f.store);
     let old_pf = anchors.next(&mut f.store);
     let old_af = anchors.next(&mut f.store);
@@ -226,6 +252,7 @@ fn install_case(
         schema,
         old_eax,
         old_ebx,
+        old_edx,
         old_cf,
         old_pf,
         old_af,
@@ -288,6 +315,7 @@ fn install_case(
         schema,
         next_eax,
         next_ebx,
+        old_edx,
         next_cf,
         next_pf,
         next_af,
@@ -298,8 +326,8 @@ fn install_case(
     let after = f.store.ensure_pair(f.k, after_state).unwrap();
 
     let mut roles = vec![
-        old_eax, old_ebx, old_cf, old_pf, old_af, old_zf, old_sf,
-        old_of, word,
+        old_eax, old_ebx, old_edx, old_cf, old_pf, old_af, old_zf,
+        old_sf, old_of, word,
     ];
     match shape {
         PatchShape::FullSet6 => {
@@ -332,6 +360,107 @@ fn install_case(
     );
 }
 
+fn install_wide_mul_case(
+    f: &mut FullFixture,
+    anchors: &mut AnchorGen,
+    schema: ArchitecturalStateSchema,
+    new_cf: Handle,
+    new_of: Handle,
+) {
+    let old_eax = anchors.next(&mut f.store);
+    let old_ebx = anchors.next(&mut f.store);
+    let old_edx = anchors.next(&mut f.store);
+    let old_cf = anchors.next(&mut f.store);
+    let old_pf = anchors.next(&mut f.store);
+    let old_af = anchors.next(&mut f.store);
+    let old_zf = anchors.next(&mut f.store);
+    let old_sf = anchors.next(&mut f.store);
+    let old_of = anchors.next(&mut f.store);
+    let lo = anchors.next(&mut f.store);
+    let hi = anchors.next(&mut f.store);
+
+    let before_state = state_link(
+        &mut f.store,
+        schema,
+        old_eax,
+        old_ebx,
+        old_edx,
+        old_cf,
+        old_pf,
+        old_af,
+        old_zf,
+        old_sf,
+        old_of,
+    );
+    let wide =
+        materialize_exact_sequence(&mut f.store, &[lo, hi]).unwrap();
+
+    let set_cf =
+        set_flag_action(&mut f.store, schema.flags, schema.flags.cf, new_cf);
+    let undef_pf =
+        undefined_flag_action(&mut f.store, schema.flags, schema.flags.pf);
+    let undef_af =
+        undefined_flag_action(&mut f.store, schema.flags, schema.flags.af);
+    let undef_zf =
+        undefined_flag_action(&mut f.store, schema.flags, schema.flags.zf);
+    let undef_sf =
+        undefined_flag_action(&mut f.store, schema.flags, schema.flags.sf);
+    let set_of =
+        set_flag_action(&mut f.store, schema.flags, schema.flags.of, new_of);
+    let patch = materialize_exact_sequence(
+        &mut f.store,
+        &[set_cf, undef_pf, undef_af, undef_zf, undef_sf, set_of],
+    )
+    .unwrap();
+    let payload =
+        materialize_exact_sequence(&mut f.store, &[wide, patch]).unwrap();
+    let effect = f
+        .store
+        .ensure_pair(schema.wide_effect_result_tag, payload)
+        .unwrap();
+
+    let frame = state_apply_wide_frame(
+        &mut f.store,
+        schema,
+        before_state,
+        schema.eax,
+        schema.edx,
+    );
+    let before = f.store.ensure_pair(frame, effect).unwrap();
+
+    let after_state = state_link(
+        &mut f.store,
+        schema,
+        lo,
+        old_ebx,
+        hi,
+        new_cf,
+        schema.undefined,
+        schema.undefined,
+        schema.undefined,
+        schema.undefined,
+        new_of,
+    );
+    let after = f.store.ensure_pair(f.k, after_state).unwrap();
+
+    let roles = [
+        old_eax, old_ebx, old_edx, old_cf, old_pf, old_af, old_zf,
+        old_sf, old_of, lo, hi,
+    ];
+    let (_, admission) = define_bundle_rule(
+        &mut f.store,
+        f.theory,
+        &roles,
+        before,
+        &[after],
+    );
+    index_rule_for(
+        &mut f.store,
+        &[schema.wide_effect_result_tag],
+        admission,
+    );
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ArchitecturalStateProgram {
     pub(crate) schema: ArchitecturalStateSchema,
@@ -344,26 +473,37 @@ impl ArchitecturalStateProgram {
             FlagPatchSchema::install(&mut f.store, shared, f.o, f.c);
         let effect_result_tag =
             install_alu_effect_result_tag(&mut f.store, shared, f.o, f.c);
+        let wide_effect_result_tag =
+            install_wide_alu_effect_result_tag(&mut f.store, shared, f.o, f.c);
 
+        let result_tags = f
+            .store
+            .ensure_pair(effect_result_tag, wide_effect_result_tag)
+            .unwrap();
         let seed = f
             .store
-            .ensure_pair(f.interpreter, effect_result_tag)
+            .ensure_pair(f.interpreter, result_tags)
             .unwrap();
         let mut anchors = AnchorGen::new(&mut f.store, seed, f.o, f.c);
         let state_tag = anchors.next(&mut f.store);
         let apply_state = anchors.next(&mut f.store);
+        let apply_wide_state = anchors.next(&mut f.store);
         let eax = anchors.next(&mut f.store);
         let ebx = anchors.next(&mut f.store);
+        let edx = anchors.next(&mut f.store);
         let undefined = anchors.next(&mut f.store);
 
         let schema = ArchitecturalStateSchema {
             state_tag,
             apply_state,
+            apply_wide_state,
             eax,
             ebx,
+            edx,
             undefined,
             flags,
             effect_result_tag,
+            wide_effect_result_tag,
         };
 
         for target in [schema.eax, schema.ebx] {
@@ -383,6 +523,17 @@ impl ArchitecturalStateProgram {
                         shape,
                     );
                 }
+            }
+        }
+        for new_cf in [f.zero, f.one] {
+            for new_of in [f.zero, f.one] {
+                install_wide_mul_case(
+                    f,
+                    &mut anchors,
+                    schema,
+                    new_cf,
+                    new_of,
+                );
             }
         }
 
@@ -470,7 +621,7 @@ fn decode_state(
         return None;
     }
     let fields = read_exact_sequence(&f.store, payload).ok()?;
-    if fields.len() != 8 {
+    if fields.len() != 9 {
         return None;
     }
 
@@ -482,40 +633,45 @@ fn decode_state(
         f,
         decode_binding(&f.store, fields[1], schema.ebx)?,
     )?;
+    let edx = decode_word(
+        f,
+        decode_binding(&f.store, fields[2], schema.edx)?,
+    )?;
     let cf = decode_flag(
         f,
         schema,
-        decode_binding(&f.store, fields[2], schema.flags.cf)?,
+        decode_binding(&f.store, fields[3], schema.flags.cf)?,
     )?;
     let pf = decode_flag(
         f,
         schema,
-        decode_binding(&f.store, fields[3], schema.flags.pf)?,
+        decode_binding(&f.store, fields[4], schema.flags.pf)?,
     )?;
     let af = decode_flag(
         f,
         schema,
-        decode_binding(&f.store, fields[4], schema.flags.af)?,
+        decode_binding(&f.store, fields[5], schema.flags.af)?,
     )?;
     let zf = decode_flag(
         f,
         schema,
-        decode_binding(&f.store, fields[5], schema.flags.zf)?,
+        decode_binding(&f.store, fields[6], schema.flags.zf)?,
     )?;
     let sf = decode_flag(
         f,
         schema,
-        decode_binding(&f.store, fields[6], schema.flags.sf)?,
+        decode_binding(&f.store, fields[7], schema.flags.sf)?,
     )?;
     let of = decode_flag(
         f,
         schema,
-        decode_binding(&f.store, fields[7], schema.flags.of)?,
+        decode_binding(&f.store, fields[8], schema.flags.of)?,
     )?;
 
     Some(StateValue {
         eax,
         ebx,
+        edx,
         cf,
         pf,
         af,
@@ -588,7 +744,7 @@ fn decode_state_in_store(
         return None;
     }
     let fields = read_exact_sequence(store, payload).ok()?;
-    if fields.len() != 8 {
+    if fields.len() != 9 {
         return None;
     }
 
@@ -597,6 +753,7 @@ fn decode_state_in_store(
         .zip([
             schema.eax,
             schema.ebx,
+            schema.edx,
             schema.flags.cf,
             schema.flags.pf,
             schema.flags.af,
@@ -610,12 +767,13 @@ fn decode_state_in_store(
     Some(StateValue {
         eax: decode_word_in_store(store, zero, one, values[0])?,
         ebx: decode_word_in_store(store, zero, one, values[1])?,
-        cf: decode_flag_in_store(values[2], zero, one, schema.undefined)?,
-        pf: decode_flag_in_store(values[3], zero, one, schema.undefined)?,
-        af: decode_flag_in_store(values[4], zero, one, schema.undefined)?,
-        zf: decode_flag_in_store(values[5], zero, one, schema.undefined)?,
-        sf: decode_flag_in_store(values[6], zero, one, schema.undefined)?,
-        of: decode_flag_in_store(values[7], zero, one, schema.undefined)?,
+        edx: decode_word_in_store(store, zero, one, values[2])?,
+        cf: decode_flag_in_store(values[3], zero, one, schema.undefined)?,
+        pf: decode_flag_in_store(values[4], zero, one, schema.undefined)?,
+        af: decode_flag_in_store(values[5], zero, one, schema.undefined)?,
+        zf: decode_flag_in_store(values[6], zero, one, schema.undefined)?,
+        sf: decode_flag_in_store(values[7], zero, one, schema.undefined)?,
+        of: decode_flag_in_store(values[8], zero, one, schema.undefined)?,
     })
 }
 
@@ -626,6 +784,7 @@ fn state_from_value(
 ) -> Option<Handle> {
     let eax = word_in_store(&mut f.store, f.zero, f.one, value.eax)?;
     let ebx = word_in_store(&mut f.store, f.zero, f.one, value.ebx)?;
+    let edx = word_in_store(&mut f.store, f.zero, f.one, value.edx)?;
     let flag = |value: Option<u8>| -> Option<Handle> {
         match value {
             Some(0) => Some(f.zero),
@@ -639,6 +798,7 @@ fn state_from_value(
         schema,
         eax,
         ebx,
+        edx,
         flag(value.cf)?,
         flag(value.pf)?,
         flag(value.af)?,
@@ -683,8 +843,10 @@ pub(crate) struct WebArchitecturalStateExecution {
 pub(crate) struct WebArchitecturalStateOutcome {
     pub(crate) eax_before: u32,
     pub(crate) ebx_before: u32,
+    pub(crate) edx_before: u32,
     pub(crate) eax_after: u32,
     pub(crate) ebx_after: u32,
+    pub(crate) edx_after: u32,
     pub(crate) flags_defined_mask: u32,
     pub(crate) flags_value_mask: u32,
     pub(crate) flags_undefined_mask: u32,
@@ -723,6 +885,7 @@ pub(crate) fn web_prove_architectural_state_add(
     let before_value = StateValue {
         eax: 0xffff_ffff,
         ebx: 0x1122_3344,
+        edx: 0x5566_7788,
         cf: Some(0),
         pf: Some(0),
         af: Some(0),
@@ -733,6 +896,7 @@ pub(crate) fn web_prove_architectural_state_add(
     let expected = StateValue {
         eax: 0,
         ebx: before_value.ebx,
+        edx: before_value.edx,
         cf: Some(1),
         pf: Some(1),
         af: Some(1),
@@ -782,6 +946,11 @@ pub(crate) fn web_prove_architectural_state_add(
             &compiler.store,
             "state.register.ebx",
             program.schema.ebx,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.register.edx",
+            program.schema.edx,
         ),
         semantic_source(
             &compiler.store,
@@ -862,6 +1031,7 @@ pub(crate) fn web_prove_architectural_state_add(
         loaded_handle(&load, "state.apply.frame_tag")?;
     let eax = loaded_handle(&load, "state.register.eax")?;
     let ebx = loaded_handle(&load, "state.register.ebx")?;
+    let edx = loaded_handle(&load, "state.register.edx")?;
     let undefined =
         loaded_handle(&load, "state.flag.undefined")?;
     let effect_result_tag =
@@ -877,11 +1047,15 @@ pub(crate) fn web_prove_architectural_state_add(
         (handle >= 1 && handle <= load.links_after_load)
             .then_some(handle)
     };
+    let wide_effect_result_tag =
+        loaded(program.schema.wide_effect_result_tag)?;
     let runtime_schema = ArchitecturalStateSchema {
         state_tag,
         apply_state,
+        apply_wide_state: loaded(program.schema.apply_wide_state)?,
         eax,
         ebx,
+        edx,
         undefined,
         flags: FlagPatchSchema {
             set_tag: loaded(program.schema.flags.set_tag)?,
@@ -894,6 +1068,7 @@ pub(crate) fn web_prove_architectural_state_add(
             of: loaded(program.schema.flags.of)?,
         },
         effect_result_tag,
+        wide_effect_result_tag,
     };
 
     let max_steps = alu.active_steps as u32 + 3;
@@ -984,8 +1159,311 @@ pub(crate) fn web_prove_architectural_state_add(
         outcome: WebArchitecturalStateOutcome {
             eax_before: before_value.eax,
             ebx_before: before_value.ebx,
+            edx_before: before_value.edx,
             eax_after: actual.eax,
             ebx_after: actual.ebx,
+            edx_after: actual.edx,
+            flags_defined_mask: defined,
+            flags_value_mask: values,
+            flags_undefined_mask: undefined_mask,
+            reactions: proof.execute.active_reaction_count,
+            old_state_retained: 1,
+            atomic_scope: 1,
+            steady_link_delta: proof.result.identical_rerun_link_delta,
+            quiescent: u8::from(proof.execute.final_quiescent),
+        },
+        proof,
+    })
+}
+
+
+/// Real one-memory M5b integration witness:
+///
+/// State(EAX=0xffff_ffff, EDX=old, EBX=preserved)
+///   -> actual structural MUL effect (*2)
+///   -> atomic successor State(EAX=0xffff_fffe, EDX=1, EBX preserved)
+///
+/// Operand fetch is intentionally outside M5b; this slice proves that the
+/// existing wide ALU effect composes into one indivisible architectural-state
+/// publication without host construction of the successor.
+pub(crate) fn web_prove_architectural_state_mul(
+) -> Option<WebArchitecturalStateExecution> {
+    let mut compiler = FullFixture::new();
+
+    let alu = prepare_mul_effect_call(
+        &mut compiler,
+        0xffff_ffff,
+        2,
+    )?;
+    let program = ArchitecturalStateProgram::install(&mut compiler);
+    if alu.result_tag != program.schema.wide_effect_result_tag {
+        return None;
+    }
+
+    let before_value = StateValue {
+        eax: 0xffff_ffff,
+        ebx: 0x1122_3344,
+        edx: 0xa5a5_5a5a,
+        cf: Some(0),
+        pf: Some(0),
+        af: Some(1),
+        zf: Some(1),
+        sf: Some(1),
+        of: Some(0),
+    };
+    let expected = StateValue {
+        eax: 0xffff_fffe,
+        ebx: before_value.ebx,
+        edx: 0x0000_0001,
+        cf: Some(1),
+        pf: None,
+        af: None,
+        zf: None,
+        sf: None,
+        of: Some(1),
+    };
+
+    let before_state =
+        state_from_value(&mut compiler, program.schema, before_value)?;
+    let frame = state_apply_wide_frame(
+        &mut compiler.store,
+        program.schema,
+        before_state,
+        program.schema.eax,
+        program.schema.edx,
+    );
+    let initial = compiler
+        .store
+        .ensure_pair(frame, alu.invocation)
+        .ok()?;
+
+    let prepared_roots = vec![
+        semantic_source(
+            &compiler.store,
+            "function.effect.mul",
+            alu.function,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.schema.tag",
+            program.schema.state_tag,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.apply.wide_frame_tag",
+            program.schema.apply_wide_state,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.register.eax",
+            program.schema.eax,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.register.ebx",
+            program.schema.ebx,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.register.edx",
+            program.schema.edx,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.flag.undefined",
+            program.schema.undefined,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.before",
+            before_state,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.low_target",
+            program.schema.eax,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.high_target",
+            program.schema.edx,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.continuation",
+            frame,
+        ),
+        semantic_source(
+            &compiler.store,
+            "result.wide_alu_effect_tag",
+            program.schema.wide_effect_result_tag,
+        ),
+        semantic_source(
+            &compiler.store,
+            "data.bit.zero",
+            compiler.zero,
+        ),
+        semantic_source(
+            &compiler.store,
+            "data.bit.one",
+            compiler.one,
+        ),
+        semantic_source(
+            &compiler.store,
+            "execution.interpreter",
+            compiler.interpreter,
+        ),
+        semantic_source(
+            &compiler.store,
+            "execution.theory",
+            compiler.theory,
+        ),
+        semantic_source(
+            &compiler.store,
+            "execution.apply",
+            compiler.apply,
+        ),
+        semantic_source(
+            &compiler.store,
+            "scope.initial",
+            initial,
+        ),
+        semantic_source(
+            &compiler.store,
+            "context.result",
+            compiler.k,
+        ),
+    ];
+
+    let admissions =
+        theory_admissions(&compiler.store, compiler.theory)?;
+    let prepare =
+        prepare_stage(&compiler.store, prepared_roots, admissions);
+    let (mut memory, load) = load_runtime(&prepare)?;
+
+    let interpreter =
+        loaded_handle(&load, "execution.interpreter")?;
+    let initial = loaded_handle(&load, "scope.initial")?;
+    let before_state =
+        loaded_handle(&load, "state.before")?;
+    let result_context =
+        loaded_handle(&load, "context.result")?;
+    let zero = loaded_handle(&load, "data.bit.zero")?;
+    let one = loaded_handle(&load, "data.bit.one")?;
+
+    let loaded = |handle: Handle| -> Option<Handle> {
+        (handle >= 1 && handle <= load.links_after_load)
+            .then_some(handle)
+    };
+    let runtime_schema = ArchitecturalStateSchema {
+        state_tag: loaded(program.schema.state_tag)?,
+        apply_state: loaded(program.schema.apply_state)?,
+        apply_wide_state: loaded(program.schema.apply_wide_state)?,
+        eax: loaded(program.schema.eax)?,
+        ebx: loaded(program.schema.ebx)?,
+        edx: loaded(program.schema.edx)?,
+        undefined: loaded(program.schema.undefined)?,
+        flags: FlagPatchSchema {
+            set_tag: loaded(program.schema.flags.set_tag)?,
+            undefined_tag: loaded(program.schema.flags.undefined_tag)?,
+            cf: loaded(program.schema.flags.cf)?,
+            pf: loaded(program.schema.flags.pf)?,
+            af: loaded(program.schema.flags.af)?,
+            zf: loaded(program.schema.flags.zf)?,
+            sf: loaded(program.schema.flags.sf)?,
+            of: loaded(program.schema.flags.of)?,
+        },
+        effect_result_tag: loaded(program.schema.effect_result_tag)?,
+        wide_effect_result_tag:
+            loaded(program.schema.wide_effect_result_tag)?,
+    };
+
+    let max_steps = alu.active_steps as u32 + 3;
+    let (mut engine, execute) = execute_to_quiescence(
+        &mut memory,
+        interpreter,
+        initial,
+        32,
+        max_steps,
+    )?;
+    if execute.active_reaction_count != alu.active_steps as u32 + 1
+        || engine.current().len() != 1
+    {
+        return None;
+    }
+
+    let atomic_scope = execute.reactions.iter().all(|step| {
+        step.scope_before.len() == 1 && step.scope_after.len() == 1
+    });
+    if !atomic_scope {
+        return None;
+    }
+
+    let final_link = engine.current()[0];
+    let (caller, successor) = memory.store.poles(final_link).ok()?;
+    if caller != result_context {
+        return None;
+    }
+    let actual = decode_state_in_store(
+        &memory.store,
+        runtime_schema,
+        successor,
+        zero,
+        one,
+    )?;
+    if actual != expected || !memory.store.is_valid(before_state) {
+        return None;
+    }
+
+    let (state_tag_check, result_sequence) =
+        memory.store.poles(successor).ok()?;
+    if state_tag_check != runtime_schema.state_tag {
+        return None;
+    }
+    let result_recursive_wire =
+        memory.store.export_anum(final_link).ok()?;
+    let result_sequence_anum =
+        memory.store.export_anum(result_sequence).ok()?;
+    let identical_rerun_link_delta = identical_rerun(
+        &mut memory,
+        &mut engine,
+        initial,
+        &result_recursive_wire,
+        max_steps,
+    )?;
+    let visual_links = visual_snapshot(&memory, &load.semantic_roots);
+
+    let result = WebProofResultStage {
+        memory_instance_id: memory.id.clone(),
+        result_anum: result_recursive_wire,
+        result_sequence_anum,
+        decoded_value: actual.eax,
+        decoded_value_hi: Some(actual.edx),
+        oracle_value: expected.eax,
+        oracle_value_hi: Some(expected.edx),
+        oracle_matches: actual == expected,
+        links_final: memory.store.link_count() as u32,
+        identical_rerun_link_delta,
+        visual_links,
+    };
+    let proof = WebStructuralProof {
+        schema_version: 4,
+        block: "M5B_STATE_MUL32".to_owned(),
+        prepare,
+        load,
+        execute,
+        result,
+    };
+
+    let (defined, values, undefined_mask) = flags_to_masks(actual);
+    Some(WebArchitecturalStateExecution {
+        outcome: WebArchitecturalStateOutcome {
+            eax_before: before_value.eax,
+            ebx_before: before_value.ebx,
+            edx_before: before_value.edx,
+            eax_after: actual.eax,
+            ebx_after: actual.ebx,
+            edx_after: actual.edx,
             flags_defined_mask: defined,
             flags_value_mask: values,
             flags_undefined_mask: undefined_mask,
@@ -1026,6 +1504,7 @@ mod tests {
     ) -> Handle {
         let eax = word(f, value.eax);
         let ebx = word(f, value.ebx);
+        let edx = word(f, value.edx);
         let cf = flag_value(f, p, value.cf);
         let pf = flag_value(f, p, value.pf);
         let af = flag_value(f, p, value.af);
@@ -1037,6 +1516,7 @@ mod tests {
             p.schema,
             eax,
             ebx,
+            edx,
             cf,
             pf,
             af,
@@ -1135,6 +1615,95 @@ mod tests {
         )
     }
 
+    fn make_wide_mul_effect(
+        f: &mut FullFixture,
+        p: &ArchitecturalStateProgram,
+        lo: u32,
+        hi: u32,
+        cf: u8,
+        of: u8,
+    ) -> Handle {
+        let lo = word(f, lo);
+        let hi = word(f, hi);
+        let wide =
+            materialize_exact_sequence(&mut f.store, &[lo, hi]).unwrap();
+        let cf = bit(f, cf);
+        let of = bit(f, of);
+        let actions = [
+            set_flag_action(
+                &mut f.store,
+                p.schema.flags,
+                p.schema.flags.cf,
+                cf,
+            ),
+            undefined_flag_action(
+                &mut f.store,
+                p.schema.flags,
+                p.schema.flags.pf,
+            ),
+            undefined_flag_action(
+                &mut f.store,
+                p.schema.flags,
+                p.schema.flags.af,
+            ),
+            undefined_flag_action(
+                &mut f.store,
+                p.schema.flags,
+                p.schema.flags.zf,
+            ),
+            undefined_flag_action(
+                &mut f.store,
+                p.schema.flags,
+                p.schema.flags.sf,
+            ),
+            set_flag_action(
+                &mut f.store,
+                p.schema.flags,
+                p.schema.flags.of,
+                of,
+            ),
+        ];
+        let patch =
+            materialize_exact_sequence(&mut f.store, &actions).unwrap();
+        let payload =
+            materialize_exact_sequence(&mut f.store, &[wide, patch]).unwrap();
+        f.store
+            .ensure_pair(p.schema.wide_effect_result_tag, payload)
+            .unwrap()
+    }
+
+    fn wide_transition(
+        f: &mut FullFixture,
+        p: &ArchitecturalStateProgram,
+        state: Handle,
+        low_target: Handle,
+        high_target: Handle,
+        effect: Handle,
+    ) -> Option<Handle> {
+        let frame = state_apply_wide_frame(
+            &mut f.store,
+            p.schema,
+            state,
+            low_target,
+            high_target,
+        );
+        let initial = f.store.ensure_pair(frame, effect).unwrap();
+        f.engine.set_current(&f.store, &[initial]).unwrap();
+        let reaction = f.engine.run(&mut f.store).unwrap();
+        if reaction.quiescent {
+            return None;
+        }
+        assert_eq!(reaction.raw_rule_matches, 1);
+        assert_eq!(reaction.transitioned_members, 1);
+        assert_eq!(reaction.handoff_count, 1);
+        assert_eq!(reaction.next_members.len(), 1);
+        let final_member = f.engine.current()[0];
+        let (caller, successor) = f.store.poles(final_member).unwrap();
+        assert_eq!(caller, f.k);
+        assert!(f.store.is_valid(state));
+        Some(successor)
+    }
+
     fn transition(
         f: &mut FullFixture,
         p: &ArchitecturalStateProgram,
@@ -1186,6 +1755,7 @@ mod tests {
         StateValue {
             eax: 0x1122_3344,
             ebx: 0xaabb_ccdd,
+            edx: 0x5566_7788,
             cf: Some(1),
             pf: Some(0),
             af: Some(1),
@@ -1196,12 +1766,214 @@ mod tests {
     }
 
     #[test]
+    fn m5b_direct_wide_applier_updates_two_registers_in_one_state() {
+        let mut f = FullFixture::new();
+        let p = ArchitecturalStateProgram::install(&mut f);
+        let old_value = initial();
+        let old = make_state(&mut f, &p, old_value);
+        let effect = make_wide_mul_effect(
+            &mut f,
+            &p,
+            0xffff_fffe,
+            0x0000_0001,
+            1,
+            1,
+        );
+
+        let next = wide_transition(
+            &mut f,
+            &p,
+            old,
+            p.schema.eax,
+            p.schema.edx,
+            effect,
+        )
+        .unwrap();
+        assert_eq!(
+            decode_state(&f, p.schema, next).unwrap(),
+            StateValue {
+                eax: 0xffff_fffe,
+                ebx: old_value.ebx,
+                edx: 0x0000_0001,
+                cf: Some(1),
+                pf: None,
+                af: None,
+                zf: None,
+                sf: None,
+                of: Some(1),
+            }
+        );
+    }
+
+    #[test]
+    fn m5b_repeated_targets_and_malformed_patch_fail_closed() {
+        let mut f = FullFixture::new();
+        let p = ArchitecturalStateProgram::install(&mut f);
+        let old = make_state(&mut f, &p, initial());
+        let effect = make_wide_mul_effect(
+            &mut f,
+            &p,
+            0xffff_fffe,
+            1,
+            1,
+            1,
+        );
+
+        assert!(
+            wide_transition(
+                &mut f,
+                &p,
+                old,
+                p.schema.eax,
+                p.schema.eax,
+                effect,
+            )
+            .is_none(),
+            "repeated wide destination id must fail closed"
+        );
+
+        let lo = word(&mut f, 0xffff_fffe);
+        let hi = word(&mut f, 1);
+        let wide =
+            materialize_exact_sequence(&mut f.store, &[lo, hi]).unwrap();
+        let set_cf_zero = set_flag_action(
+            &mut f.store,
+            p.schema.flags,
+            p.schema.flags.cf,
+            f.zero,
+        );
+        let set_cf_one = set_flag_action(
+            &mut f.store,
+            p.schema.flags,
+            p.schema.flags.cf,
+            f.one,
+        );
+        let bad_patch =
+            materialize_exact_sequence(
+                &mut f.store,
+                &[set_cf_zero, set_cf_one],
+            )
+            .unwrap();
+        let bad_payload =
+            materialize_exact_sequence(&mut f.store, &[wide, bad_patch])
+                .unwrap();
+        let bad_effect = f
+            .store
+            .ensure_pair(p.schema.wide_effect_result_tag, bad_payload)
+            .unwrap();
+
+        assert!(
+            wide_transition(
+                &mut f,
+                &p,
+                old,
+                p.schema.eax,
+                p.schema.edx,
+                bad_effect,
+            )
+            .is_none(),
+            "malformed/conflicting wide patch must fail closed"
+        );
+        let non_bit = f
+            .store
+            .ensure_pair(p.schema.eax, p.schema.edx)
+            .unwrap();
+        let bad_cf = set_flag_action(
+            &mut f.store,
+            p.schema.flags,
+            p.schema.flags.cf,
+            non_bit,
+        );
+        let undef_pf = undefined_flag_action(
+            &mut f.store,
+            p.schema.flags,
+            p.schema.flags.pf,
+        );
+        let undef_af = undefined_flag_action(
+            &mut f.store,
+            p.schema.flags,
+            p.schema.flags.af,
+        );
+        let undef_zf = undefined_flag_action(
+            &mut f.store,
+            p.schema.flags,
+            p.schema.flags.zf,
+        );
+        let undef_sf = undefined_flag_action(
+            &mut f.store,
+            p.schema.flags,
+            p.schema.flags.sf,
+        );
+        let set_of = set_flag_action(
+            &mut f.store,
+            p.schema.flags,
+            p.schema.flags.of,
+            f.one,
+        );
+        let bad_flag_patch = materialize_exact_sequence(
+            &mut f.store,
+            &[bad_cf, undef_pf, undef_af, undef_zf, undef_sf, set_of],
+        )
+        .unwrap();
+        let bad_flag_payload = materialize_exact_sequence(
+            &mut f.store,
+            &[wide, bad_flag_patch],
+        )
+        .unwrap();
+        let bad_flag_effect = f
+            .store
+            .ensure_pair(
+                p.schema.wide_effect_result_tag,
+                bad_flag_payload,
+            )
+            .unwrap();
+        assert!(
+            wide_transition(
+                &mut f,
+                &p,
+                old,
+                p.schema.eax,
+                p.schema.edx,
+                bad_flag_effect,
+            )
+            .is_none(),
+            "non-bit CF/OF value must fail closed"
+        );
+    }
+
+    #[test]
+    fn m5b_real_mul_pipeline_updates_edx_eax_and_flags_atomically() {
+        let execution = web_prove_architectural_state_mul().unwrap();
+        assert_eq!(execution.outcome.eax_before, 0xffff_ffff);
+        assert_eq!(execution.outcome.edx_before, 0xa5a5_5a5a);
+        assert_eq!(execution.outcome.ebx_before, 0x1122_3344);
+        assert_eq!(execution.outcome.eax_after, 0xffff_fffe);
+        assert_eq!(execution.outcome.edx_after, 0x0000_0001);
+        assert_eq!(execution.outcome.ebx_after, 0x1122_3344);
+        assert_eq!(execution.outcome.flags_defined_mask, 0x0000_0801);
+        assert_eq!(execution.outcome.flags_value_mask, 0x0000_0801);
+        assert_eq!(execution.outcome.flags_undefined_mask, 0x0000_00d4);
+        assert_eq!(execution.outcome.old_state_retained, 1);
+        assert_eq!(execution.outcome.atomic_scope, 1);
+        assert_eq!(execution.outcome.steady_link_delta, 0);
+        assert_eq!(execution.outcome.quiescent, 1);
+        assert_eq!(execution.proof.block, "M5B_STATE_MUL32");
+        assert!(execution.proof.result.oracle_matches);
+        assert!(execution.proof.execute.active_reaction_count > 2);
+        assert!(execution.proof.execute.reactions.iter().all(|step| {
+            step.scope_before.len() == 1 && step.scope_after.len() == 1
+        }));
+    }
+
+    #[test]
     fn m5a_real_add_pipeline_composes_into_atomic_state() {
         let execution = web_prove_architectural_state_add().unwrap();
         assert_eq!(execution.outcome.eax_before, 0xffff_ffff);
         assert_eq!(execution.outcome.eax_after, 0);
         assert_eq!(execution.outcome.ebx_before, 0x1122_3344);
         assert_eq!(execution.outcome.ebx_after, 0x1122_3344);
+        assert_eq!(execution.outcome.edx_before, 0x5566_7788);
+        assert_eq!(execution.outcome.edx_after, 0x5566_7788);
         assert_eq!(execution.outcome.flags_defined_mask, 0x0000_08d5);
         assert_eq!(execution.outcome.flags_value_mask, 0x0000_0055);
         assert_eq!(execution.outcome.flags_undefined_mask, 0);
@@ -1236,6 +2008,7 @@ mod tests {
             StateValue {
                 eax: 0x5566_7788,
                 ebx: 0xaabb_ccdd,
+                edx: 0x5566_7788,
                 cf: Some(0),
                 pf: Some(1),
                 af: Some(0),

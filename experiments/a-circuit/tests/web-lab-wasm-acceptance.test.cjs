@@ -17,10 +17,12 @@ for (const required of [
   "M5 architectural state witness",
   "setupArchitecturalStateWitness",
   "amemory_i386_state_run_add32",
+  "amemory_i386_state_run_mul32",
+  "EDX:EAX",
   "Stateₜ₊₁",
 ]) {
   if (!labPageSource.includes(required)) {
-    throw new Error("M5a Pages witness wiring missing: " + required);
+    throw new Error("M5 Pages witness wiring missing: " + required);
   }
 }
 const bytes = fs.readFileSync(wasmPath);
@@ -735,8 +737,10 @@ Promise.all([
   }
   if ((w.amemory_i386_state_eax_before() >>> 0) !== 0xffffffff ||
       (w.amemory_i386_state_ebx_before() >>> 0) !== 0x11223344 ||
+      (w.amemory_i386_state_edx_before() >>> 0) !== 0x55667788 ||
       (w.amemory_i386_state_eax_after() >>> 0) !== 0 ||
-      (w.amemory_i386_state_ebx_after() >>> 0) !== 0x11223344) {
+      (w.amemory_i386_state_ebx_after() >>> 0) !== 0x11223344 ||
+      (w.amemory_i386_state_edx_after() >>> 0) !== 0x55667788) {
     throw new Error("M5a structural register-state transition mismatch");
   }
   if ((w.amemory_i386_state_flags_defined_mask() >>> 0) !== 0x000008d5 ||
@@ -790,6 +794,7 @@ Promise.all([
     "state.apply.frame_tag",
     "state.register.eax",
     "state.register.ebx",
+    "state.register.edx",
     "state.flag.undefined",
     "state.before",
     "state.target",
@@ -836,6 +841,129 @@ Promise.all([
     : 0;
   if (finalStateHandle <= stateProof.load.linksAfterLoad) {
     throw new Error("M5a successor was not structurally materialized at runtime");
+  }
+
+  // M5b: the existing real MUL32 effect must publish EDX:EAX + flags
+  // as one architectural successor. It is not a new opcode.
+  if (typeof w.amemory_i386_state_wide_probe !== "function" ||
+      w.amemory_i386_state_wide_probe() !== 0x50b) {
+    throw new Error("M5b wide-state WASM probe missing");
+  }
+  if (w.amemory_i386_state_run_mul32() !== 1) {
+    throw new Error("M5b real MUL32 state transition rejected");
+  }
+  if ((w.amemory_i386_state_eax_before() >>> 0) !== 0xffffffff ||
+      (w.amemory_i386_state_edx_before() >>> 0) !== 0xa5a55a5a ||
+      (w.amemory_i386_state_ebx_before() >>> 0) !== 0x11223344 ||
+      (w.amemory_i386_state_eax_after() >>> 0) !== 0xfffffffe ||
+      (w.amemory_i386_state_edx_after() >>> 0) !== 0x00000001 ||
+      (w.amemory_i386_state_ebx_after() >>> 0) !== 0x11223344) {
+    throw new Error("M5b EDX:EAX structural state transition mismatch");
+  }
+  if ((w.amemory_i386_state_flags_defined_mask() >>> 0) !== 0x00000801 ||
+      (w.amemory_i386_state_flags_value_mask() >>> 0) !== 0x00000801 ||
+      (w.amemory_i386_state_flags_undefined_mask() >>> 0) !== 0x000000d4) {
+    throw new Error("M5b MUL EFLAGS successor mismatch");
+  }
+  if (w.amemory_i386_state_old_state_retained() !== 1 ||
+      w.amemory_i386_state_atomic_scope() !== 1 ||
+      w.amemory_i386_state_steady_link_delta() !== 0 ||
+      w.amemory_i386_state_quiescent() !== 1 ||
+      w.amemory_i386_state_reactions() <= 2) {
+    throw new Error("M5b atomic/currentness/rerun witness failed");
+  }
+
+  const wideStateProof =
+    inflateCompactProof(readCurrentCompactProof("M5B_STATE_MUL32"));
+  if (wideStateProof.block !== "M5B_STATE_MUL32" ||
+      wideStateProof.schemaVersion !== 4 ||
+      !wideStateProof.result.oracleMatches ||
+      (wideStateProof.result.decodedValue >>> 0) !== 0xfffffffe ||
+      (wideStateProof.result.decodedValueHi >>> 0) !== 0x00000001 ||
+      wideStateProof.result.identicalRerunLinkDelta !== 0) {
+    throw new Error("M5b compact structural proof result mismatch");
+  }
+  const wideMemoryId = wideStateProof.load.memoryInstanceId;
+  if (!wideMemoryId ||
+      wideStateProof.execute.memoryInstanceId !== wideMemoryId ||
+      wideStateProof.result.memoryInstanceId !== wideMemoryId ||
+      !wideStateProof.execute.reactions.every(
+        (step) => step.memoryInstanceId === wideMemoryId
+      )) {
+    throw new Error("M5b transition used more than one runtime A-memory");
+  }
+  if (wideStateProof.prepare.runtimeMemoryExists !== false ||
+      !wideStateProof.load.carrierRoundTrip ||
+      wideStateProof.load.linksBeforeLoad !== 1 ||
+      wideStateProof.load.linksAfterLoad !==
+        wideStateProof.prepare.compiledLinks ||
+      wideStateProof.result.linksFinal <= wideStateProof.load.linksAfterLoad ||
+      !wideStateProof.execute.finalQuiescent ||
+      wideStateProof.execute.activeReactionCount !==
+        (w.amemory_i386_state_reactions() >>> 0)) {
+    throw new Error("M5b PREPARE/LOAD/EXECUTE pipeline mismatch");
+  }
+  const wideRoles = new Map(
+    wideStateProof.prepare.semanticRoots.map((root) => [root.role, root])
+  );
+  for (const role of [
+    "function.effect.mul",
+    "state.schema.tag",
+    "state.apply.wide_frame_tag",
+    "state.register.eax",
+    "state.register.ebx",
+    "state.register.edx",
+    "state.flag.undefined",
+    "state.before",
+    "state.low_target",
+    "state.high_target",
+    "state.continuation",
+    "result.wide_alu_effect_tag",
+    "data.bit.zero",
+    "data.bit.one",
+    "execution.interpreter",
+    "execution.theory",
+    "execution.apply",
+    "scope.initial",
+    "context.result",
+  ]) {
+    if (!wideRoles.has(role)) {
+      throw new Error("M5b prepared Aset missing semantic root " + role);
+    }
+  }
+  if (wideRoles.has("state.after")) {
+    throw new Error("M5b host/preparation injected a successor state");
+  }
+  if (wideRoles.get("state.low_target").carrierRef !==
+        wideRoles.get("state.register.eax").carrierRef ||
+      wideRoles.get("state.high_target").carrierRef !==
+        wideRoles.get("state.register.edx").carrierRef ||
+      wideRoles.get("state.low_target").carrierRef ===
+        wideRoles.get("state.high_target").carrierRef) {
+    throw new Error("M5b wide targets are not distinct structural EAX/EDX");
+  }
+  if (!wideStateProof.execute.reactions.every(
+    (step) => step.scopeBefore.length === 1 && step.scopeAfter.length === 1
+  )) {
+    throw new Error("M5b exposed a partial multi-destination state");
+  }
+  const wideBeforeRef = wideRoles.get("state.before").carrierRef;
+  if (!wideStateProof.result.visualLinks.some(
+    (link) => link.key === wideMemoryId + ":L" + wideBeforeRef
+  )) {
+    throw new Error("M5b old state was not retained physically");
+  }
+  const wideActive = wideStateProof.execute.reactions.filter(
+    (step) => !step.quiescent
+  );
+  const wideFinalScope =
+    wideActive[wideActive.length - 1]?.scopeAfter?.[0];
+  const wideFinalHandle = typeof wideFinalScope === "string" &&
+      /^L\d+$/.test(wideFinalScope)
+    ? Number(wideFinalScope.slice(1))
+    : 0;
+  if (wideFinalHandle <= wideStateProof.load.linksAfterLoad) {
+    throw new Error("M5b successor was not materialized at runtime");
   }
 
   // Real WASM execution smoke: composed structural MUX1.

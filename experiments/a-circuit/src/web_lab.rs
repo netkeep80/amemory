@@ -1,5 +1,8 @@
 use crate::{
-    architectural_state_n::web_prove_architectural_state_add,
+    architectural_state_n::{
+        web_prove_architectural_state_add,
+        web_prove_architectural_state_mul,
+    },
     arithmetic_effect_n::{web_prove_arithmetic, web_run_arithmetic},
     logic_effect_n::{web_prove_logic, web_run_logic},
     mul32_n::web_prove_mul32,
@@ -400,8 +403,10 @@ static mut LAST_QUIESCENT: u32 = 0;
 
 static mut M5A_EAX_BEFORE: u32 = 0;
 static mut M5A_EBX_BEFORE: u32 = 0;
+static mut M5A_EDX_BEFORE: u32 = 0;
 static mut M5A_EAX_AFTER: u32 = 0;
 static mut M5A_EBX_AFTER: u32 = 0;
+static mut M5A_EDX_AFTER: u32 = 0;
 static mut M5A_FLAGS_DEFINED_MASK: u32 = 0;
 static mut M5A_FLAGS_VALUE_MASK: u32 = 0;
 static mut M5A_FLAGS_UNDEFINED_MASK: u32 = 0;
@@ -416,21 +421,16 @@ pub extern "C" fn amemory_i386_state_probe() -> u32 {
     0x0000_050a
 }
 
-#[no_mangle]
-pub extern "C" fn amemory_i386_state_run_add32() -> u32 {
-    clear_last_compact_proof();
-    let Some(execution) = web_prove_architectural_state_add() else {
-        return 0;
-    };
-    if set_last_compact_proof(&execution.proof).is_none() {
-        return 0;
-    }
-    let out = execution.outcome;
+fn store_state_outcome(
+    out: crate::architectural_state_n::WebArchitecturalStateOutcome,
+) {
     unsafe {
         M5A_EAX_BEFORE = out.eax_before;
         M5A_EBX_BEFORE = out.ebx_before;
+        M5A_EDX_BEFORE = out.edx_before;
         M5A_EAX_AFTER = out.eax_after;
         M5A_EBX_AFTER = out.ebx_after;
+        M5A_EDX_AFTER = out.edx_after;
         M5A_FLAGS_DEFINED_MASK = out.flags_defined_mask;
         M5A_FLAGS_VALUE_MASK = out.flags_value_mask;
         M5A_FLAGS_UNDEFINED_MASK = out.flags_undefined_mask;
@@ -440,6 +440,36 @@ pub extern "C" fn amemory_i386_state_run_add32() -> u32 {
         M5A_STEADY_LINK_DELTA = out.steady_link_delta;
         M5A_QUIESCENT = u32::from(out.quiescent);
     }
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_state_run_add32() -> u32 {
+    clear_last_compact_proof();
+    let Some(execution) = web_prove_architectural_state_add() else {
+        return 0;
+    };
+    if set_last_compact_proof(&execution.proof).is_none() {
+        return 0;
+    }
+    store_state_outcome(execution.outcome);
+    1
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_state_wide_probe() -> u32 {
+    0x0000_050b
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_state_run_mul32() -> u32 {
+    clear_last_compact_proof();
+    let Some(execution) = web_prove_architectural_state_mul() else {
+        return 0;
+    };
+    if set_last_compact_proof(&execution.proof).is_none() {
+        return 0;
+    }
+    store_state_outcome(execution.outcome);
     1
 }
 
@@ -452,12 +482,20 @@ pub extern "C" fn amemory_i386_state_ebx_before() -> u32 {
     unsafe { M5A_EBX_BEFORE }
 }
 #[no_mangle]
+pub extern "C" fn amemory_i386_state_edx_before() -> u32 {
+    unsafe { M5A_EDX_BEFORE }
+}
+#[no_mangle]
 pub extern "C" fn amemory_i386_state_eax_after() -> u32 {
     unsafe { M5A_EAX_AFTER }
 }
 #[no_mangle]
 pub extern "C" fn amemory_i386_state_ebx_after() -> u32 {
     unsafe { M5A_EBX_AFTER }
+}
+#[no_mangle]
+pub extern "C" fn amemory_i386_state_edx_after() -> u32 {
+    unsafe { M5A_EDX_AFTER }
 }
 #[no_mangle]
 pub extern "C" fn amemory_i386_state_flags_defined_mask() -> u32 {
