@@ -306,6 +306,27 @@ function buildLab(registry) {
       <div id="lab-memory-result"></div>
       <div id="lab-memory-proof"></div>
     </div>
+    <div class="lab-state-shell" id="lab-m6d-witness">
+      <div class="lab-state-head">
+        <div>
+          <h3>M6d State + MemoryRoot fetch / stack witness</h3>
+          <p>Real State owns MemoryRoot. FETCH reads Byte8 at EIP and advances EIP structurally; PUSH32/POP32 changes ESP and immutable MemoryRoot through the accepted Word32 memory path. Both render the same compact one-A-memory proof pipeline.</p>
+        </div>
+        <div class="lab-vector-actions">
+          <button class="lab-run" id="lab-run-fetch" type="button">Run FETCH</button>
+          <button class="lab-run" id="lab-run-stack" type="button">Run PUSH32 → POP32</button>
+        </div>
+      </div>
+      <div class="lab-state-grid">
+        <label class="lab-state-snapshot"><strong>FETCH EIP</strong><input id="lab-fetch-eip" type="text" value="0x000000ff"></label>
+        <label class="lab-state-snapshot"><strong>Instruction Byte8</strong><input id="lab-fetch-byte" type="text" value="0x90"></label>
+        <label class="lab-state-snapshot"><strong>STACK ESP</strong><input id="lab-stack-esp" type="text" value="0x00000103"></label>
+        <label class="lab-state-snapshot"><strong>STACK Word32</strong><input id="lab-stack-value" type="text" value="0x12345678"></label>
+      </div>
+      <div class="notice" id="lab-m6d-status">M6d WASM witness ready check pending…</div>
+      <div id="lab-m6d-result"></div>
+      <div id="lab-m6d-proof"></div>
+    </div>
     <div class="lab-layout">
       <aside class="lab-catalog-shell">
         <div class="lab-catalog-head"><h3>Block catalog</h3><small id="lab-count">${registry.blocks.length} blocks</small></div>
