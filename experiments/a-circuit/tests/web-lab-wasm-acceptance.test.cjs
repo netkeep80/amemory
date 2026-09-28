@@ -1744,6 +1744,90 @@ Promise.all([
       throw new Error("visual topology has foreign/missing pole");
     }
   }
+  // B2: bounded instance table must preserve independent result/proof transports.
+  if (typeof w.amemory_i386_lab_instance_create !== "function" ||
+      typeof w.amemory_i386_lab_instance_run !== "function" ||
+      typeof w.amemory_i386_lab_instance_destroy !== "function" ||
+      (w.amemory_i386_lab_instance_capacity() >>> 0) < 3) {
+    throw new Error("B2 instance runtime ABI missing");
+  }
+  const instanceA = w.amemory_i386_lab_instance_create() >>> 0;
+  const instanceB = w.amemory_i386_lab_instance_create() >>> 0;
+  if (!instanceA || !instanceB ||
+      instanceA === 0xffffffff || instanceB === 0xffffffff ||
+      instanceA === instanceB) {
+    throw new Error("B2 could not allocate two independent instances");
+  }
+
+  const readInstanceText = (instanceId, kind) => {
+    const prefix = kind === "result"
+      ? "amemory_i386_lab_instance_result_"
+      : "amemory_i386_lab_instance_compact_proof_";
+    const available = w[prefix + "available"];
+    const length = w[prefix + "json_len"];
+    const pointer = w[prefix + "json_ptr"];
+    if (available(instanceId) !== 1) {
+      throw new Error("B2 " + kind + " unavailable for instance " + instanceId);
+    }
+    const len = length(instanceId) >>> 0;
+    const ptr = pointer(instanceId) >>> 0;
+    if (!len || ptr + len > w.memory.buffer.byteLength) {
+      throw new Error("B2 " + kind + " pointer/length invalid");
+    }
+    return Buffer.from(w.memory.buffer, ptr, len).toString("utf8");
+  };
+
+  if (w.amemory_i386_lab_instance_run(instanceA, 12, 1, 0, 1) !== 1) {
+    throw new Error("B2 instance A MUX1 run rejected");
+  }
+  const aResultBefore = readInstanceText(instanceA, "result");
+  const aProofBefore = readInstanceText(instanceA, "proof");
+  const aResult = JSON.parse(aResultBefore);
+  if (aResult.instanceId !== instanceA ||
+      aResult.operation.opcode !== 12 ||
+      (aResult.outcome.value >>> 0) !== 0 ||
+      aResult.compactProofAvailable !== true) {
+    throw new Error("B2 instance A structured result mismatch");
+  }
+
+  if (w.amemory_i386_lab_instance_run(instanceB, 12, 1, 0, 0) !== 1) {
+    throw new Error("B2 instance B MUX1 run rejected");
+  }
+  const bResultBefore = readInstanceText(instanceB, "result");
+  const bProofBefore = readInstanceText(instanceB, "proof");
+  const bResult = JSON.parse(bResultBefore);
+  if (bResult.instanceId !== instanceB ||
+      bResult.operation.opcode !== 12 ||
+      (bResult.outcome.value >>> 0) !== 1 ||
+      aResultBefore === bResultBefore) {
+    throw new Error("B2 instance B structured result mismatch");
+  }
+
+  if (readInstanceText(instanceA, "result") !== aResultBefore ||
+      readInstanceText(instanceA, "proof") !== aProofBefore) {
+    throw new Error("B2 instance B overwrote instance A evidence");
+  }
+  if ((w.amemory_i386_lab_value() >>> 0) !== 0) {
+    throw new Error("B2 non-default instance mutated compatibility scalar state");
+  }
+
+  if (w.amemory_i386_lab_instance_destroy(instanceA) !== 1 ||
+      w.amemory_i386_lab_instance_result_available(instanceA) !== 0 ||
+      w.amemory_i386_lab_instance_compact_proof_available(instanceA) !== 0 ||
+      w.amemory_i386_lab_instance_run(instanceA, 12, 1, 0, 1) !== 0) {
+    throw new Error("B2 destroyed instance did not fail closed");
+  }
+  if (readInstanceText(instanceB, "result") !== bResultBefore ||
+      readInstanceText(instanceB, "proof") !== bProofBefore ||
+      w.amemory_i386_lab_instance_run(instanceB, 12, 1, 0, 0) !== 1) {
+    throw new Error("B2 destroying A disturbed live instance B");
+  }
+  if (w.amemory_i386_lab_instance_destroy(instanceB) !== 1 ||
+      w.amemory_i386_lab_instance_destroy(instanceB) !== 0 ||
+      w.amemory_i386_lab_instance_destroy(0) !== 0) {
+    throw new Error("B2 instance destruction controls failed");
+  }
+
   const run = (op, a, b, flag, expected, label) => {
     if (w.amemory_i386_lab_run(op, a, b, flag) !== 1) {
       throw new Error(label + " WASM execution rejected");
