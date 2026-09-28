@@ -364,6 +364,8 @@ fn install_wide_mul_case(
     f: &mut FullFixture,
     anchors: &mut AnchorGen,
     schema: ArchitecturalStateSchema,
+    new_cf: Handle,
+    new_of: Handle,
 ) {
     let old_eax = anchors.next(&mut f.store);
     let old_ebx = anchors.next(&mut f.store);
@@ -376,8 +378,6 @@ fn install_wide_mul_case(
     let old_of = anchors.next(&mut f.store);
     let lo = anchors.next(&mut f.store);
     let hi = anchors.next(&mut f.store);
-    let new_cf = anchors.next(&mut f.store);
-    let new_of = anchors.next(&mut f.store);
 
     let before_state = state_link(
         &mut f.store,
@@ -445,7 +445,7 @@ fn install_wide_mul_case(
 
     let roles = [
         old_eax, old_ebx, old_edx, old_cf, old_pf, old_af, old_zf,
-        old_sf, old_of, lo, hi, new_cf, new_of,
+        old_sf, old_of, lo, hi,
     ];
     let (_, admission) = define_bundle_rule(
         &mut f.store,
@@ -525,7 +525,17 @@ impl ArchitecturalStateProgram {
                 }
             }
         }
-        install_wide_mul_case(f, &mut anchors, schema);
+        for new_cf in [f.zero, f.one] {
+            for new_of in [f.zero, f.one] {
+                install_wide_mul_case(
+                    f,
+                    &mut anchors,
+                    schema,
+                    new_cf,
+                    new_of,
+                );
+            }
+        }
 
         Self { schema }
     }
