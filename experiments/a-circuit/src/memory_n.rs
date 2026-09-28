@@ -1,5 +1,12 @@
-use super::full_adder::{
-    call, define_bundle_rule, index_rule_for, Fixture as FullFixture,
+use super::{
+    full_adder::{
+        call, define_bundle_rule, index_rule_for, Fixture as FullFixture,
+    },
+    proof_n::{
+        execute_to_quiescence, identical_rerun, load_runtime, loaded_handle,
+        prepare_stage, semantic_source, theory_admissions, visual_snapshot,
+        WebProofResultStage, WebStructuralProof,
+    },
 };
 use amemory_optimized_cpu_probe::{
     structural::{materialize_exact_sequence, read_exact_sequence},
@@ -106,8 +113,11 @@ fn path_with_entry(
 pub(crate) struct RadixMemoryProgram {
     pub(crate) read: Handle,
     pub(crate) write: Handle,
+    pub(crate) witness: Handle,
+    pub(crate) result_tag: Handle,
     pub(crate) zero_root: Handle,
     leaf_tag: Handle,
+    witness_stage: Vec<Handle>,
     zero: Vec<Handle>,
     branch_tag: Vec<Handle>,
     read_tag: Vec<Handle>,
@@ -134,7 +144,17 @@ impl RadixMemoryProgram {
         let write_right = anchors.next(&mut f.store);
         let write = f.store.ensure_pair(write_left, write_right).unwrap();
 
+        let witness_left = anchors.next(&mut f.store);
+        let witness_right = anchors.next(&mut f.store);
+        let witness =
+            f.store.ensure_pair(witness_left, witness_right).unwrap();
+        let result_tag = anchors.next(&mut f.store);
         let leaf_tag = anchors.next(&mut f.store);
+
+        let mut witness_stage = Vec::with_capacity(4);
+        for _ in 0..4 {
+            witness_stage.push(anchors.next(&mut f.store));
+        }
 
         let mut zero = Vec::with_capacity(WIDTH + 1);
         let mut branch_tag = vec![ROOT_HANDLE; WIDTH + 1];
@@ -171,8 +191,11 @@ impl RadixMemoryProgram {
         let program = Self {
             read,
             write,
+            witness,
+            result_tag,
             zero_root: zero[WIDTH],
             leaf_tag,
+            witness_stage,
             zero,
             branch_tag,
             read_tag,
@@ -184,6 +207,7 @@ impl RadixMemoryProgram {
 
         program.install_read_rules(f, &mut anchors);
         program.install_write_rules(f, &mut anchors);
+        program.install_witness_rules(f, &mut anchors);
         program
     }
 
@@ -864,6 +888,271 @@ impl RadixMemoryProgram {
                     admission,
                 );
             }
+        }
+    }
+
+    fn install_witness_rules(
+        &self,
+        f: &mut FullFixture,
+        anchors: &mut AnchorGen,
+    ) {
+        // K -> Call(WITNESS,[oldRoot,offset,byte])
+        // => Stage0(K,oldRoot,offset,byte) -> Call(READ,[oldRoot,offset])
+        {
+            let k = anchors.next(&mut f.store);
+            let root = anchors.next(&mut f.store);
+            let offset = anchors.next(&mut f.store);
+            let byte = anchors.next(&mut f.store);
+            let args = materialize_exact_sequence(
+                &mut f.store,
+                &[root, offset, byte],
+            )
+            .unwrap();
+            let invocation =
+                call(&mut f.store, f.apply, self.witness, args);
+            let before = f.store.ensure_pair(k, invocation).unwrap();
+
+            let caller = frame(
+                &mut f.store,
+                self.witness_stage[0],
+                &[k, root, offset, byte],
+            );
+            let read_args = materialize_exact_sequence(
+                &mut f.store,
+                &[root, offset],
+            )
+            .unwrap();
+            let read_call =
+                call(&mut f.store, f.apply, self.read, read_args);
+            let after =
+                f.store.ensure_pair(caller, read_call).unwrap();
+
+            let (_, admission) = define_bundle_rule(
+                &mut f.store,
+                f.theory,
+                &[k, root, offset, byte],
+                before,
+                &[after],
+            );
+            index_rule_for(&mut f.store, &[f.o], admission);
+        }
+
+        // Stage0 -> beforeByte; continue with WRITE.
+        {
+            let k = anchors.next(&mut f.store);
+            let root = anchors.next(&mut f.store);
+            let offset = anchors.next(&mut f.store);
+            let byte = anchors.next(&mut f.store);
+            let before_byte = anchors.next(&mut f.store);
+            let caller = frame(
+                &mut f.store,
+                self.witness_stage[0],
+                &[k, root, offset, byte],
+            );
+            let before =
+                f.store.ensure_pair(caller, before_byte).unwrap();
+
+            let next = frame(
+                &mut f.store,
+                self.witness_stage[1],
+                &[k, root, offset, byte, before_byte],
+            );
+            let write_args = materialize_exact_sequence(
+                &mut f.store,
+                &[root, offset, byte],
+            )
+            .unwrap();
+            let write_call =
+                call(&mut f.store, f.apply, self.write, write_args);
+            let after =
+                f.store.ensure_pair(next, write_call).unwrap();
+
+            let (_, admission) = define_bundle_rule(
+                &mut f.store,
+                f.theory,
+                &[k, root, offset, byte, before_byte],
+                before,
+                &[after],
+            );
+            index_rule_for(
+                &mut f.store,
+                &[self.witness_stage[0]],
+                admission,
+            );
+        }
+
+        // Stage1 -> newRoot; read from the new root.
+        {
+            let k = anchors.next(&mut f.store);
+            let root = anchors.next(&mut f.store);
+            let offset = anchors.next(&mut f.store);
+            let byte = anchors.next(&mut f.store);
+            let before_byte = anchors.next(&mut f.store);
+            let new_root = anchors.next(&mut f.store);
+            let caller = frame(
+                &mut f.store,
+                self.witness_stage[1],
+                &[k, root, offset, byte, before_byte],
+            );
+            let before =
+                f.store.ensure_pair(caller, new_root).unwrap();
+
+            let next = frame(
+                &mut f.store,
+                self.witness_stage[2],
+                &[k, root, offset, byte, before_byte, new_root],
+            );
+            let read_args = materialize_exact_sequence(
+                &mut f.store,
+                &[new_root, offset],
+            )
+            .unwrap();
+            let read_call =
+                call(&mut f.store, f.apply, self.read, read_args);
+            let after =
+                f.store.ensure_pair(next, read_call).unwrap();
+
+            let (_, admission) = define_bundle_rule(
+                &mut f.store,
+                f.theory,
+                &[k, root, offset, byte, before_byte, new_root],
+                before,
+                &[after],
+            );
+            index_rule_for(
+                &mut f.store,
+                &[self.witness_stage[1]],
+                admission,
+            );
+        }
+
+        // Stage2 -> afterByte; re-read the old root after the write.
+        {
+            let k = anchors.next(&mut f.store);
+            let root = anchors.next(&mut f.store);
+            let offset = anchors.next(&mut f.store);
+            let byte = anchors.next(&mut f.store);
+            let before_byte = anchors.next(&mut f.store);
+            let new_root = anchors.next(&mut f.store);
+            let after_byte = anchors.next(&mut f.store);
+            let caller = frame(
+                &mut f.store,
+                self.witness_stage[2],
+                &[k, root, offset, byte, before_byte, new_root],
+            );
+            let before =
+                f.store.ensure_pair(caller, after_byte).unwrap();
+
+            let next = frame(
+                &mut f.store,
+                self.witness_stage[3],
+                &[
+                    k,
+                    root,
+                    offset,
+                    byte,
+                    before_byte,
+                    new_root,
+                    after_byte,
+                ],
+            );
+            let old_read_args = materialize_exact_sequence(
+                &mut f.store,
+                &[root, offset],
+            )
+            .unwrap();
+            let old_read =
+                call(&mut f.store, f.apply, self.read, old_read_args);
+            let after =
+                f.store.ensure_pair(next, old_read).unwrap();
+
+            let (_, admission) = define_bundle_rule(
+                &mut f.store,
+                f.theory,
+                &[
+                    k,
+                    root,
+                    offset,
+                    byte,
+                    before_byte,
+                    new_root,
+                    after_byte,
+                ],
+                before,
+                &[after],
+            );
+            index_rule_for(
+                &mut f.store,
+                &[self.witness_stage[2]],
+                admission,
+            );
+        }
+
+        // Final persistence result:
+        // RESULT([oldRoot,newRoot,before,after,oldAfter]).
+        {
+            let k = anchors.next(&mut f.store);
+            let root = anchors.next(&mut f.store);
+            let offset = anchors.next(&mut f.store);
+            let byte = anchors.next(&mut f.store);
+            let before_byte = anchors.next(&mut f.store);
+            let new_root = anchors.next(&mut f.store);
+            let after_byte = anchors.next(&mut f.store);
+            let old_after = anchors.next(&mut f.store);
+            let caller = frame(
+                &mut f.store,
+                self.witness_stage[3],
+                &[
+                    k,
+                    root,
+                    offset,
+                    byte,
+                    before_byte,
+                    new_root,
+                    after_byte,
+                ],
+            );
+            let before =
+                f.store.ensure_pair(caller, old_after).unwrap();
+
+            let result_sequence = materialize_exact_sequence(
+                &mut f.store,
+                &[
+                    root,
+                    new_root,
+                    before_byte,
+                    after_byte,
+                    old_after,
+                ],
+            )
+            .unwrap();
+            let result = f
+                .store
+                .ensure_pair(self.result_tag, result_sequence)
+                .unwrap();
+            let after = f.store.ensure_pair(k, result).unwrap();
+
+            let (_, admission) = define_bundle_rule(
+                &mut f.store,
+                f.theory,
+                &[
+                    k,
+                    root,
+                    offset,
+                    byte,
+                    before_byte,
+                    new_root,
+                    after_byte,
+                    old_after,
+                ],
+                before,
+                &[after],
+            );
+            index_rule_for(
+                &mut f.store,
+                &[self.witness_stage[3]],
+                admission,
+            );
         }
     }
 }
