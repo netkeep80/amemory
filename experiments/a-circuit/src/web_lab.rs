@@ -859,21 +859,6 @@ pub extern "C" fn amemory_i386_word_memory_run(
     1
 }
 
-static mut M6D_FETCH_EIP_BEFORE: u32 = 0;
-static mut M6D_FETCH_EIP_AFTER: u32 = 0;
-static mut M6D_FETCH_BYTE: u32 = 0;
-static mut M6D_FETCH_INITIAL_ROOT: u32 = 0;
-static mut M6D_FETCH_FINAL_ROOT: u32 = 0;
-static mut M6D_FETCH_SEEDED_WRITE: u32 = 0;
-static mut M6D_FETCH_STATE_PRESERVED: u32 = 0;
-static mut M6D_FETCH_OLD_STATE_RETAINED: u32 = 0;
-static mut M6D_FETCH_ATOMIC_SCOPE: u32 = 0;
-static mut M6D_FETCH_REACTIONS: u32 = 0;
-static mut M6D_FETCH_LINKS_AFTER_LOAD: u32 = 0;
-static mut M6D_FETCH_LINKS_FINAL: u32 = 0;
-static mut M6D_FETCH_STEADY_LINK_DELTA: u32 = 0;
-static mut M6D_FETCH_QUIESCENT: u32 = 0;
-
 #[no_mangle]
 pub extern "C" fn amemory_i386_fetch_probe() -> u32 {
     0x0000_060d
@@ -929,62 +914,8 @@ pub extern "C" fn amemory_i386_fetch_run(
         clear_last_compact_proof();
         return 0;
     }
-    unsafe {
-        M6D_FETCH_EIP_BEFORE = out.eip_before;
-        M6D_FETCH_EIP_AFTER = out.eip_after;
-        M6D_FETCH_BYTE = out.fetched_byte;
-        M6D_FETCH_INITIAL_ROOT = out.initial_memory_root_ref;
-        M6D_FETCH_FINAL_ROOT = out.final_memory_root_ref;
-        M6D_FETCH_SEEDED_WRITE = u32::from(out.seeded_write);
-        M6D_FETCH_STATE_PRESERVED = u32::from(out.state_preserved);
-        M6D_FETCH_OLD_STATE_RETAINED = u32::from(out.old_state_retained);
-        M6D_FETCH_ATOMIC_SCOPE = u32::from(out.atomic_scope);
-        M6D_FETCH_REACTIONS = out.reactions;
-        M6D_FETCH_LINKS_AFTER_LOAD = out.links_after_load;
-        M6D_FETCH_LINKS_FINAL = out.links_final;
-        M6D_FETCH_STEADY_LINK_DELTA = out.steady_link_delta;
-        M6D_FETCH_QUIESCENT = u32::from(out.quiescent);
-    }
     1
 }
-
-macro_rules! m6d_fetch_getter {
-    ($name:ident, $slot:ident) => {
-        #[no_mangle]
-        pub extern "C" fn $name() -> u32 {
-            unsafe { $slot }
-        }
-    };
-}
-m6d_fetch_getter!(amemory_i386_fetch_eip_before, M6D_FETCH_EIP_BEFORE);
-m6d_fetch_getter!(amemory_i386_fetch_eip_after, M6D_FETCH_EIP_AFTER);
-m6d_fetch_getter!(amemory_i386_fetch_byte, M6D_FETCH_BYTE);
-m6d_fetch_getter!(amemory_i386_fetch_initial_root_ref, M6D_FETCH_INITIAL_ROOT);
-m6d_fetch_getter!(amemory_i386_fetch_final_root_ref, M6D_FETCH_FINAL_ROOT);
-m6d_fetch_getter!(amemory_i386_fetch_seeded_write, M6D_FETCH_SEEDED_WRITE);
-m6d_fetch_getter!(amemory_i386_fetch_state_preserved, M6D_FETCH_STATE_PRESERVED);
-m6d_fetch_getter!(amemory_i386_fetch_old_state_retained, M6D_FETCH_OLD_STATE_RETAINED);
-m6d_fetch_getter!(amemory_i386_fetch_atomic_scope, M6D_FETCH_ATOMIC_SCOPE);
-m6d_fetch_getter!(amemory_i386_fetch_reactions, M6D_FETCH_REACTIONS);
-m6d_fetch_getter!(amemory_i386_fetch_links_after_load, M6D_FETCH_LINKS_AFTER_LOAD);
-m6d_fetch_getter!(amemory_i386_fetch_links_final, M6D_FETCH_LINKS_FINAL);
-m6d_fetch_getter!(amemory_i386_fetch_steady_link_delta, M6D_FETCH_STEADY_LINK_DELTA);
-m6d_fetch_getter!(amemory_i386_fetch_quiescent, M6D_FETCH_QUIESCENT);
-
-static mut M6D_STACK_ESP_BEFORE: u32 = 0;
-static mut M6D_STACK_ESP_AFTER: u32 = 0;
-static mut M6D_STACK_VALUE: u32 = 0;
-static mut M6D_STACK_INITIAL_ROOT: u32 = 0;
-static mut M6D_STACK_FINAL_ROOT: u32 = 0;
-static mut M6D_STACK_STATE_PRESERVED: u32 = 0;
-static mut M6D_STACK_OLD_STATE_RETAINED: u32 = 0;
-static mut M6D_STACK_OLD_MEMORY_RETAINED: u32 = 0;
-static mut M6D_STACK_ATOMIC_SCOPE: u32 = 0;
-static mut M6D_STACK_REACTIONS: u32 = 0;
-static mut M6D_STACK_LINKS_AFTER_LOAD: u32 = 0;
-static mut M6D_STACK_LINKS_FINAL: u32 = 0;
-static mut M6D_STACK_STEADY_LINK_DELTA: u32 = 0;
-static mut M6D_STACK_QUIESCENT: u32 = 0;
 
 #[no_mangle]
 pub extern "C" fn amemory_i386_stack_probe() -> u32 {
@@ -1028,47 +959,8 @@ pub extern "C" fn amemory_i386_stack_run(
         clear_last_compact_proof();
         return 0;
     }
-    unsafe {
-        M6D_STACK_ESP_BEFORE = out.esp_before;
-        M6D_STACK_ESP_AFTER = out.esp_after;
-        M6D_STACK_VALUE = out.value;
-        M6D_STACK_INITIAL_ROOT = out.initial_memory_root_ref;
-        M6D_STACK_FINAL_ROOT = out.final_memory_root_ref;
-        M6D_STACK_STATE_PRESERVED = u32::from(out.state_preserved);
-        M6D_STACK_OLD_STATE_RETAINED = u32::from(out.old_state_retained);
-        M6D_STACK_OLD_MEMORY_RETAINED = u32::from(out.old_memory_retained);
-        M6D_STACK_ATOMIC_SCOPE = u32::from(out.atomic_scope);
-        M6D_STACK_REACTIONS = out.reactions;
-        M6D_STACK_LINKS_AFTER_LOAD = out.links_after_load;
-        M6D_STACK_LINKS_FINAL = out.links_final;
-        M6D_STACK_STEADY_LINK_DELTA = out.steady_link_delta;
-        M6D_STACK_QUIESCENT = u32::from(out.quiescent);
-    }
     1
 }
-
-macro_rules! m6d_stack_getter {
-    ($name:ident, $slot:ident) => {
-        #[no_mangle]
-        pub extern "C" fn $name() -> u32 {
-            unsafe { $slot }
-        }
-    };
-}
-m6d_stack_getter!(amemory_i386_stack_esp_before, M6D_STACK_ESP_BEFORE);
-m6d_stack_getter!(amemory_i386_stack_esp_after, M6D_STACK_ESP_AFTER);
-m6d_stack_getter!(amemory_i386_stack_value, M6D_STACK_VALUE);
-m6d_stack_getter!(amemory_i386_stack_initial_root_ref, M6D_STACK_INITIAL_ROOT);
-m6d_stack_getter!(amemory_i386_stack_final_root_ref, M6D_STACK_FINAL_ROOT);
-m6d_stack_getter!(amemory_i386_stack_state_preserved, M6D_STACK_STATE_PRESERVED);
-m6d_stack_getter!(amemory_i386_stack_old_state_retained, M6D_STACK_OLD_STATE_RETAINED);
-m6d_stack_getter!(amemory_i386_stack_old_memory_retained, M6D_STACK_OLD_MEMORY_RETAINED);
-m6d_stack_getter!(amemory_i386_stack_atomic_scope, M6D_STACK_ATOMIC_SCOPE);
-m6d_stack_getter!(amemory_i386_stack_reactions, M6D_STACK_REACTIONS);
-m6d_stack_getter!(amemory_i386_stack_links_after_load, M6D_STACK_LINKS_AFTER_LOAD);
-m6d_stack_getter!(amemory_i386_stack_links_final, M6D_STACK_LINKS_FINAL);
-m6d_stack_getter!(amemory_i386_stack_steady_link_delta, M6D_STACK_STEADY_LINK_DELTA);
-m6d_stack_getter!(amemory_i386_stack_quiescent, M6D_STACK_QUIESCENT);
 
 #[no_mangle]
 pub extern "C" fn amemory_i386_lab_probe() -> u32 {
