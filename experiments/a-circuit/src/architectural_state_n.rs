@@ -1056,6 +1056,12 @@ pub(crate) fn web_prove_architectural_state_add(
         eax: 0xffff_ffff,
         ebx: 0x1122_3344,
         edx: 0x5566_7788,
+        ecx: 0x0102_0304,
+        esi: 0x1111_2222,
+        edi: 0x3333_4444,
+        ebp: 0x5555_6666,
+        esp: 0x7777_8888,
+        eip: 0x0040_1000,
         cf: Some(0),
         pf: Some(0),
         af: Some(0),
@@ -1067,6 +1073,12 @@ pub(crate) fn web_prove_architectural_state_add(
         eax: 0,
         ebx: before_value.ebx,
         edx: before_value.edx,
+        ecx: before_value.ecx,
+        esi: before_value.esi,
+        edi: before_value.edi,
+        ebp: before_value.ebp,
+        esp: before_value.esp,
+        eip: before_value.eip,
         cf: Some(1),
         pf: Some(1),
         af: Some(1),
@@ -1226,6 +1238,12 @@ pub(crate) fn web_prove_architectural_state_add(
         eax,
         ebx,
         edx,
+        ecx: loaded(program.schema.ecx)?,
+        esi: loaded(program.schema.esi)?,
+        edi: loaded(program.schema.edi)?,
+        ebp: loaded(program.schema.ebp)?,
+        esp: loaded(program.schema.esp)?,
+        eip: loaded(program.schema.eip)?,
         undefined,
         flags: FlagPatchSchema {
             set_tag: loaded(program.schema.flags.set_tag)?,
@@ -1374,6 +1392,12 @@ pub(crate) fn web_prove_architectural_state_mul(
         eax: 0xffff_ffff,
         ebx: 0x1122_3344,
         edx: 0xa5a5_5a5a,
+        ecx: 0x0102_0304,
+        esi: 0x1111_2222,
+        edi: 0x3333_4444,
+        ebp: 0x5555_6666,
+        esp: 0x7777_8888,
+        eip: 0x0040_1000,
         cf: Some(0),
         pf: Some(0),
         af: Some(1),
@@ -1385,6 +1409,12 @@ pub(crate) fn web_prove_architectural_state_mul(
         eax: 0xffff_fffe,
         ebx: before_value.ebx,
         edx: 0x0000_0001,
+        ecx: before_value.ecx,
+        esi: before_value.esi,
+        edi: before_value.edi,
+        ebp: before_value.ebp,
+        esp: before_value.esp,
+        eip: before_value.eip,
         cf: Some(1),
         pf: None,
         af: None,
@@ -1532,6 +1562,12 @@ pub(crate) fn web_prove_architectural_state_mul(
         eax: loaded(program.schema.eax)?,
         ebx: loaded(program.schema.ebx)?,
         edx: loaded(program.schema.edx)?,
+        ecx: loaded(program.schema.ecx)?,
+        esi: loaded(program.schema.esi)?,
+        edi: loaded(program.schema.edi)?,
+        ebp: loaded(program.schema.ebp)?,
+        esp: loaded(program.schema.esp)?,
+        eip: loaded(program.schema.eip)?,
         undefined: loaded(program.schema.undefined)?,
         flags: FlagPatchSchema {
             set_tag: loaded(program.schema.flags.set_tag)?,
@@ -1675,6 +1711,12 @@ mod tests {
         let eax = word(f, value.eax);
         let ebx = word(f, value.ebx);
         let edx = word(f, value.edx);
+        let ecx = word(f, value.ecx);
+        let esi = word(f, value.esi);
+        let edi = word(f, value.edi);
+        let ebp = word(f, value.ebp);
+        let esp = word(f, value.esp);
+        let eip = word(f, value.eip);
         let cf = flag_value(f, p, value.cf);
         let pf = flag_value(f, p, value.pf);
         let af = flag_value(f, p, value.af);
@@ -1693,6 +1735,12 @@ mod tests {
             zf,
             sf,
             of,
+            ecx,
+            esi,
+            edi,
+            ebp,
+            esp,
+            eip,
         )
     }
 
@@ -1926,6 +1974,12 @@ mod tests {
             eax: 0x1122_3344,
             ebx: 0xaabb_ccdd,
             edx: 0x5566_7788,
+            ecx: 0x0102_0304,
+            esi: 0x1111_2222,
+            edi: 0x3333_4444,
+            ebp: 0x5555_6666,
+            esp: 0x7777_8888,
+            eip: 0x0040_1000,
             cf: Some(1),
             pf: Some(0),
             af: Some(1),
@@ -1965,6 +2019,12 @@ mod tests {
                 eax: 0xffff_fffe,
                 ebx: old_value.ebx,
                 edx: 0x0000_0001,
+                ecx: old_value.ecx,
+                esi: old_value.esi,
+                edi: old_value.edi,
+                ebp: old_value.ebp,
+                esp: old_value.esp,
+                eip: old_value.eip,
                 cf: Some(1),
                 pf: None,
                 af: None,
@@ -2179,6 +2239,12 @@ mod tests {
                 eax: 0x5566_7788,
                 ebx: 0xaabb_ccdd,
                 edx: 0x5566_7788,
+                ecx: 0x0102_0304,
+                esi: 0x1111_2222,
+                edi: 0x3333_4444,
+                ebp: 0x5555_6666,
+                esp: 0x7777_8888,
+                eip: 0x0040_1000,
                 cf: Some(0),
                 pf: Some(1),
                 af: Some(0),
