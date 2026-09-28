@@ -3,11 +3,15 @@ name: Optimized CPU scale ladder
 on:
   pull_request:
     paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
       - "experiments/optimized-cpu-rust/**"
       - ".github/workflows/optimized-cpu-scale.yml"
   push:
     branches: [main]
     paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
       - "experiments/optimized-cpu-rust/**"
       - ".github/workflows/optimized-cpu-scale.yml"
   workflow_dispatch:
