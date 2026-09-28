@@ -574,69 +574,9 @@ fn execute(op: u32, a: u32, b: u32, input_flag: u32) -> Option<LabOutcome> {
     execute_for_instance(DEFAULT_LAB_INSTANCE_ID, op, a, b, input_flag)
 }
 
-static mut M5A_EAX_BEFORE: u32 = 0;
-static mut M5A_EBX_BEFORE: u32 = 0;
-static mut M5A_EDX_BEFORE: u32 = 0;
-static mut M5A_ECX_BEFORE: u32 = 0;
-static mut M5A_ESI_BEFORE: u32 = 0;
-static mut M5A_EDI_BEFORE: u32 = 0;
-static mut M5A_EBP_BEFORE: u32 = 0;
-static mut M5A_ESP_BEFORE: u32 = 0;
-static mut M5A_EIP_BEFORE: u32 = 0;
-static mut M5A_EAX_AFTER: u32 = 0;
-static mut M5A_EBX_AFTER: u32 = 0;
-static mut M5A_EDX_AFTER: u32 = 0;
-static mut M5A_ECX_AFTER: u32 = 0;
-static mut M5A_ESI_AFTER: u32 = 0;
-static mut M5A_EDI_AFTER: u32 = 0;
-static mut M5A_EBP_AFTER: u32 = 0;
-static mut M5A_ESP_AFTER: u32 = 0;
-static mut M5A_EIP_AFTER: u32 = 0;
-static mut M5A_FLAGS_DEFINED_MASK: u32 = 0;
-static mut M5A_FLAGS_VALUE_MASK: u32 = 0;
-static mut M5A_FLAGS_UNDEFINED_MASK: u32 = 0;
-static mut M5A_REACTIONS: u32 = 0;
-static mut M5A_OLD_STATE_RETAINED: u32 = 0;
-static mut M5A_ATOMIC_SCOPE: u32 = 0;
-static mut M5A_STEADY_LINK_DELTA: u32 = 0;
-static mut M5A_QUIESCENT: u32 = 0;
-
 #[no_mangle]
 pub extern "C" fn amemory_i386_state_probe() -> u32 {
     0x0000_050a
-}
-
-fn store_state_outcome(
-    out: crate::architectural_state_n::WebArchitecturalStateOutcome,
-) {
-    unsafe {
-        M5A_EAX_BEFORE = out.eax_before;
-        M5A_EBX_BEFORE = out.ebx_before;
-        M5A_EDX_BEFORE = out.edx_before;
-        M5A_ECX_BEFORE = out.ecx_before;
-        M5A_ESI_BEFORE = out.esi_before;
-        M5A_EDI_BEFORE = out.edi_before;
-        M5A_EBP_BEFORE = out.ebp_before;
-        M5A_ESP_BEFORE = out.esp_before;
-        M5A_EIP_BEFORE = out.eip_before;
-        M5A_EAX_AFTER = out.eax_after;
-        M5A_EBX_AFTER = out.ebx_after;
-        M5A_EDX_AFTER = out.edx_after;
-        M5A_ECX_AFTER = out.ecx_after;
-        M5A_ESI_AFTER = out.esi_after;
-        M5A_EDI_AFTER = out.edi_after;
-        M5A_EBP_AFTER = out.ebp_after;
-        M5A_ESP_AFTER = out.esp_after;
-        M5A_EIP_AFTER = out.eip_after;
-        M5A_FLAGS_DEFINED_MASK = out.flags_defined_mask;
-        M5A_FLAGS_VALUE_MASK = out.flags_value_mask;
-        M5A_FLAGS_UNDEFINED_MASK = out.flags_undefined_mask;
-        M5A_REACTIONS = out.reactions;
-        M5A_OLD_STATE_RETAINED = u32::from(out.old_state_retained);
-        M5A_ATOMIC_SCOPE = u32::from(out.atomic_scope);
-        M5A_STEADY_LINK_DELTA = out.steady_link_delta;
-        M5A_QUIESCENT = u32::from(out.quiescent);
-    }
 }
 
 fn state_witness_payload(
@@ -699,7 +639,6 @@ pub extern "C" fn amemory_i386_state_run_add32() -> u32 {
         clear_last_compact_proof();
         return 0;
     }
-    store_state_outcome(out);
     1
 }
 
@@ -726,7 +665,6 @@ pub extern "C" fn amemory_i386_state_run_mul32() -> u32 {
         clear_last_compact_proof();
         return 0;
     }
-    store_state_outcome(out);
     1
 }
 
@@ -753,113 +691,7 @@ pub extern "C" fn amemory_i386_state_run_add_ecx() -> u32 {
         clear_last_compact_proof();
         return 0;
     }
-    store_state_outcome(out);
     1
-}
-
-#[no_mangle]
-pub extern "C" fn amemory_i386_state_eax_before() -> u32 {
-    unsafe { M5A_EAX_BEFORE }
-}
-#[no_mangle]
-pub extern "C" fn amemory_i386_state_ebx_before() -> u32 {
-    unsafe { M5A_EBX_BEFORE }
-}
-#[no_mangle]
-pub extern "C" fn amemory_i386_state_edx_before() -> u32 {
-    unsafe { M5A_EDX_BEFORE }
-}
-#[no_mangle]
-pub extern "C" fn amemory_i386_state_ecx_before() -> u32 {
-    unsafe { M5A_ECX_BEFORE }
-}
-#[no_mangle]
-pub extern "C" fn amemory_i386_state_esi_before() -> u32 {
-    unsafe { M5A_ESI_BEFORE }
-}
-#[no_mangle]
-pub extern "C" fn amemory_i386_state_edi_before() -> u32 {
-    unsafe { M5A_EDI_BEFORE }
-}
-#[no_mangle]
-pub extern "C" fn amemory_i386_state_ebp_before() -> u32 {
-    unsafe { M5A_EBP_BEFORE }
-}
-#[no_mangle]
-pub extern "C" fn amemory_i386_state_esp_before() -> u32 {
-    unsafe { M5A_ESP_BEFORE }
-}
-#[no_mangle]
-pub extern "C" fn amemory_i386_state_eip_before() -> u32 {
-    unsafe { M5A_EIP_BEFORE }
-}
-#[no_mangle]
-pub extern "C" fn amemory_i386_state_eax_after() -> u32 {
-    unsafe { M5A_EAX_AFTER }
-}
-#[no_mangle]
-pub extern "C" fn amemory_i386_state_ebx_after() -> u32 {
-    unsafe { M5A_EBX_AFTER }
-}
-#[no_mangle]
-pub extern "C" fn amemory_i386_state_edx_after() -> u32 {
-    unsafe { M5A_EDX_AFTER }
-}
-#[no_mangle]
-pub extern "C" fn amemory_i386_state_ecx_after() -> u32 {
-    unsafe { M5A_ECX_AFTER }
-}
-#[no_mangle]
-pub extern "C" fn amemory_i386_state_esi_after() -> u32 {
-    unsafe { M5A_ESI_AFTER }
-}
-#[no_mangle]
-pub extern "C" fn amemory_i386_state_edi_after() -> u32 {
-    unsafe { M5A_EDI_AFTER }
-}
-#[no_mangle]
-pub extern "C" fn amemory_i386_state_ebp_after() -> u32 {
-    unsafe { M5A_EBP_AFTER }
-}
-#[no_mangle]
-pub extern "C" fn amemory_i386_state_esp_after() -> u32 {
-    unsafe { M5A_ESP_AFTER }
-}
-#[no_mangle]
-pub extern "C" fn amemory_i386_state_eip_after() -> u32 {
-    unsafe { M5A_EIP_AFTER }
-}
-#[no_mangle]
-pub extern "C" fn amemory_i386_state_flags_defined_mask() -> u32 {
-    unsafe { M5A_FLAGS_DEFINED_MASK }
-}
-#[no_mangle]
-pub extern "C" fn amemory_i386_state_flags_value_mask() -> u32 {
-    unsafe { M5A_FLAGS_VALUE_MASK }
-}
-#[no_mangle]
-pub extern "C" fn amemory_i386_state_flags_undefined_mask() -> u32 {
-    unsafe { M5A_FLAGS_UNDEFINED_MASK }
-}
-#[no_mangle]
-pub extern "C" fn amemory_i386_state_reactions() -> u32 {
-    unsafe { M5A_REACTIONS }
-}
-#[no_mangle]
-pub extern "C" fn amemory_i386_state_old_state_retained() -> u32 {
-    unsafe { M5A_OLD_STATE_RETAINED }
-}
-#[no_mangle]
-pub extern "C" fn amemory_i386_state_atomic_scope() -> u32 {
-    unsafe { M5A_ATOMIC_SCOPE }
-}
-#[no_mangle]
-pub extern "C" fn amemory_i386_state_steady_link_delta() -> u32 {
-    unsafe { M5A_STEADY_LINK_DELTA }
-}
-#[no_mangle]
-pub extern "C" fn amemory_i386_state_quiescent() -> u32 {
-    unsafe { M5A_QUIESCENT }
 }
 
 static mut M6A_OFFSET: u32 = 0;

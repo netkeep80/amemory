@@ -97,6 +97,32 @@ Promise.all([
     "amemory_i386_lab_links_after_first",
     "amemory_i386_lab_steady_link_delta",
     "amemory_i386_lab_quiescent",
+    "amemory_i386_state_eax_before",
+    "amemory_i386_state_ebx_before",
+    "amemory_i386_state_ecx_before",
+    "amemory_i386_state_edx_before",
+    "amemory_i386_state_esi_before",
+    "amemory_i386_state_edi_before",
+    "amemory_i386_state_ebp_before",
+    "amemory_i386_state_esp_before",
+    "amemory_i386_state_eip_before",
+    "amemory_i386_state_eax_after",
+    "amemory_i386_state_ebx_after",
+    "amemory_i386_state_ecx_after",
+    "amemory_i386_state_edx_after",
+    "amemory_i386_state_esi_after",
+    "amemory_i386_state_edi_after",
+    "amemory_i386_state_ebp_after",
+    "amemory_i386_state_esp_after",
+    "amemory_i386_state_eip_after",
+    "amemory_i386_state_flags_defined_mask",
+    "amemory_i386_state_flags_value_mask",
+    "amemory_i386_state_flags_undefined_mask",
+    "amemory_i386_state_reactions",
+    "amemory_i386_state_old_state_retained",
+    "amemory_i386_state_atomic_scope",
+    "amemory_i386_state_steady_link_delta",
+    "amemory_i386_state_quiescent",
   ]) {
     if (typeof w[retired] !== "undefined") {
       throw new Error("retired schema-v3 browser ABI still exported: " + retired);
@@ -833,26 +859,6 @@ Promise.all([
       proofMetrics(proof, registryBlock)
     );
   };
-  const readArchitecturalState = (suffix) => {
-    const call = (name) => {
-      const fn = w["amemory_i386_state_" + name + "_" + suffix];
-      if (typeof fn !== "function") {
-        throw new Error("missing M5 state getter " + name + "_" + suffix);
-      }
-      return fn() >>> 0;
-    };
-    return {
-      eax: call("eax"),
-      ebx: call("ebx"),
-      ecx: call("ecx"),
-      edx: call("edx"),
-      esi: call("esi"),
-      edi: call("edi"),
-      ebp: call("ebp"),
-      esp: call("esp"),
-      eip: call("eip"),
-    };
-  };
   const assertStateEquals = (actual, expected, label) => {
     for (const [name, value] of Object.entries(expected)) {
       if ((actual[name] >>> 0) !== (value >>> 0)) {
@@ -880,7 +886,7 @@ Promise.all([
   if (statePayloadM5a.block !== "M5A_STATE_ADD32") {
     throw new Error("M5a structured state block mismatch");
   }
-  assertStateEquals(readArchitecturalState("before"), {
+  assertStateEquals(statePayloadM5a.before, {
     eax: 0xffffffff,
     ebx: 0x11223344,
     ecx: 0x01020304,
@@ -891,7 +897,7 @@ Promise.all([
     esp: 0x77778888,
     eip: 0x00401000,
   }, "M5a before");
-  assertStateEquals(readArchitecturalState("after"), {
+  assertStateEquals(statePayloadM5a.after, {
     eax: 0,
     ebx: 0x11223344,
     ecx: 0x01020304,
@@ -902,16 +908,16 @@ Promise.all([
     esp: 0x77778888,
     eip: 0x00401000,
   }, "M5a after");
-  if ((w.amemory_i386_state_flags_defined_mask() >>> 0) !== 0x000008d5 ||
-      (w.amemory_i386_state_flags_value_mask() >>> 0) !== 0x00000055 ||
-      (w.amemory_i386_state_flags_undefined_mask() >>> 0) !== 0) {
+  if ((statePayloadM5a.flags.defined >>> 0) !== 0x000008d5 ||
+      (statePayloadM5a.flags.flagValues >>> 0) !== 0x00000055 ||
+      (statePayloadM5a.flags.undefined >>> 0) !== 0) {
     throw new Error("M5a structural EFLAGS successor mismatch");
   }
-  if (w.amemory_i386_state_old_state_retained() !== 1 ||
-      w.amemory_i386_state_atomic_scope() !== 1 ||
-      w.amemory_i386_state_steady_link_delta() !== 0 ||
-      w.amemory_i386_state_quiescent() !== 1 ||
-      w.amemory_i386_state_reactions() <= 1) {
+  if ((statePayloadM5a.oldStateRetained >>> 0) !== 1 ||
+      (statePayloadM5a.atomicScope >>> 0) !== 1 ||
+      (statePayloadM5a.steadyDelta >>> 0) !== 0 ||
+      (statePayloadM5a.quiescent >>> 0) !== 1 ||
+      (statePayloadM5a.reactions >>> 0) <= 1) {
     throw new Error("M5a atomic/currentness/rerun witness failed");
   }
 
@@ -941,7 +947,7 @@ Promise.all([
       stateProof.result.linksFinal <= stateProof.load.linksAfterLoad ||
       !stateProof.execute.finalQuiescent ||
       stateProof.execute.activeReactionCount !==
-        (w.amemory_i386_state_reactions() >>> 0)) {
+        (statePayloadM5a.reactions >>> 0)) {
     throw new Error("M5a PREPARE/LOAD/EXECUTE pipeline mismatch");
   }
   const stateRoles = new Map(
@@ -1016,7 +1022,7 @@ Promise.all([
   if (statePayloadM5b.block !== "M5B_STATE_MUL32") {
     throw new Error("M5b structured state block mismatch");
   }
-  assertStateEquals(readArchitecturalState("before"), {
+  assertStateEquals(statePayloadM5b.before, {
     eax: 0xffffffff,
     ebx: 0x11223344,
     ecx: 0x01020304,
@@ -1027,7 +1033,7 @@ Promise.all([
     esp: 0x77778888,
     eip: 0x00401000,
   }, "M5b before");
-  assertStateEquals(readArchitecturalState("after"), {
+  assertStateEquals(statePayloadM5b.after, {
     eax: 0xfffffffe,
     ebx: 0x11223344,
     ecx: 0x01020304,
@@ -1038,16 +1044,16 @@ Promise.all([
     esp: 0x77778888,
     eip: 0x00401000,
   }, "M5b after");
-  if ((w.amemory_i386_state_flags_defined_mask() >>> 0) !== 0x00000801 ||
-      (w.amemory_i386_state_flags_value_mask() >>> 0) !== 0x00000801 ||
-      (w.amemory_i386_state_flags_undefined_mask() >>> 0) !== 0x000000d4) {
+  if ((statePayloadM5b.flags.defined >>> 0) !== 0x00000801 ||
+      (statePayloadM5b.flags.flagValues >>> 0) !== 0x00000801 ||
+      (statePayloadM5b.flags.undefined >>> 0) !== 0x000000d4) {
     throw new Error("M5b MUL EFLAGS successor mismatch");
   }
-  if (w.amemory_i386_state_old_state_retained() !== 1 ||
-      w.amemory_i386_state_atomic_scope() !== 1 ||
-      w.amemory_i386_state_steady_link_delta() !== 0 ||
-      w.amemory_i386_state_quiescent() !== 1 ||
-      w.amemory_i386_state_reactions() <= 2) {
+  if ((statePayloadM5b.oldStateRetained >>> 0) !== 1 ||
+      (statePayloadM5b.atomicScope >>> 0) !== 1 ||
+      (statePayloadM5b.steadyDelta >>> 0) !== 0 ||
+      (statePayloadM5b.quiescent >>> 0) !== 1 ||
+      (statePayloadM5b.reactions >>> 0) <= 2) {
     throw new Error("M5b atomic/currentness/rerun witness failed");
   }
 
@@ -1078,7 +1084,7 @@ Promise.all([
       wideStateProof.result.linksFinal <= wideStateProof.load.linksAfterLoad ||
       !wideStateProof.execute.finalQuiescent ||
       wideStateProof.execute.activeReactionCount !==
-        (w.amemory_i386_state_reactions() >>> 0)) {
+        (statePayloadM5b.reactions >>> 0)) {
     throw new Error("M5b PREPARE/LOAD/EXECUTE pipeline mismatch");
   }
   const wideRoles = new Map(
@@ -1158,33 +1164,7 @@ Promise.all([
   if (statePayloadM5c.block !== "M5C_STATE_ADD_ECX") {
     throw new Error("M5c structured state block mismatch");
   }
-  assertStateEquals(
-    statePayloadM5c.before,
-    readArchitecturalState("before"),
-    "M5c structured/compat before"
-  );
-  assertStateEquals(
-    statePayloadM5c.after,
-    readArchitecturalState("after"),
-    "M5c structured/compat after"
-  );
-  if ((statePayloadM5c.flags.defined >>> 0) !==
-        (w.amemory_i386_state_flags_defined_mask() >>> 0) ||
-      (statePayloadM5c.flags.flagValues >>> 0) !==
-        (w.amemory_i386_state_flags_value_mask() >>> 0) ||
-      (statePayloadM5c.flags.undefined >>> 0) !==
-        (w.amemory_i386_state_flags_undefined_mask() >>> 0) ||
-      (statePayloadM5c.oldStateRetained >>> 0) !==
-        (w.amemory_i386_state_old_state_retained() >>> 0) ||
-      (statePayloadM5c.atomicScope >>> 0) !==
-        (w.amemory_i386_state_atomic_scope() >>> 0) ||
-      (statePayloadM5c.steadyDelta >>> 0) !==
-        (w.amemory_i386_state_steady_link_delta() >>> 0) ||
-      (statePayloadM5c.quiescent >>> 0) !==
-        (w.amemory_i386_state_quiescent() >>> 0)) {
-    throw new Error("M5c structured/getter compatibility mismatch");
-  }
-  assertStateEquals(readArchitecturalState("before"), {
+  assertStateEquals(statePayloadM5c.before, {
     eax: 0x10203040,
     ebx: 0x11223344,
     ecx: 0xffffffff,
@@ -1195,7 +1175,7 @@ Promise.all([
     esp: 0x77778888,
     eip: 0x00401000,
   }, "M5c before");
-  assertStateEquals(readArchitecturalState("after"), {
+  assertStateEquals(statePayloadM5c.after, {
     eax: 0x10203040,
     ebx: 0x11223344,
     ecx: 0,
@@ -1206,13 +1186,13 @@ Promise.all([
     esp: 0x77778888,
     eip: 0x00401000,
   }, "M5c after");
-  if ((w.amemory_i386_state_flags_defined_mask() >>> 0) !== 0x000008d5 ||
-      (w.amemory_i386_state_flags_value_mask() >>> 0) !== 0x00000055 ||
-      (w.amemory_i386_state_flags_undefined_mask() >>> 0) !== 0 ||
-      w.amemory_i386_state_old_state_retained() !== 1 ||
-      w.amemory_i386_state_atomic_scope() !== 1 ||
-      w.amemory_i386_state_steady_link_delta() !== 0 ||
-      w.amemory_i386_state_quiescent() !== 1) {
+  if ((statePayloadM5c.flags.defined >>> 0) !== 0x000008d5 ||
+      (statePayloadM5c.flags.flagValues >>> 0) !== 0x00000055 ||
+      (statePayloadM5c.flags.undefined >>> 0) !== 0 ||
+      (statePayloadM5c.oldStateRetained >>> 0) !== 1 ||
+      (statePayloadM5c.atomicScope >>> 0) !== 1 ||
+      (statePayloadM5c.steadyDelta >>> 0) !== 0 ||
+      (statePayloadM5c.quiescent >>> 0) !== 1) {
     throw new Error("M5c flags/currentness/atomicity witness failed");
   }
 
