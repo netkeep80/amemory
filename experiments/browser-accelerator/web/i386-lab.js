@@ -276,6 +276,28 @@ function buildLab(registry) {
       <div id="lab-state-result"></div>
       <div id="lab-state-proof"></div>
     </div>
+    <div class="lab-state-shell" id="lab-memory-witness">
+      <div class="lab-state-head">
+        <div>
+          <h3>M6 structural radix memory witness</h3>
+          <p>Immutable 256-byte structural page: READ old root → WRITE one Byte8 → READ new root → READ old root again. JavaScript supplies only Offset8/Byte8 inputs and renders the compact proof.</p>
+        </div>
+        <button class="lab-run" id="lab-run-memory" type="button">Run structural memory</button>
+      </div>
+      <div class="lab-state-grid">
+        <label class="lab-state-snapshot">
+          <strong>Offset8</strong>
+          <input id="lab-memory-offset" type="number" min="0" max="255" step="1" value="37">
+        </label>
+        <label class="lab-state-snapshot">
+          <strong>Byte8 value</strong>
+          <input id="lab-memory-value" type="number" min="0" max="255" step="1" value="171">
+        </label>
+      </div>
+      <div class="notice" id="lab-memory-status">M6a WASM witness ready check pending…</div>
+      <div id="lab-memory-result"></div>
+      <div id="lab-memory-proof"></div>
+    </div>
     <div class="lab-layout">
       <aside class="lab-catalog-shell">
         <div class="lab-catalog-head"><h3>Block catalog</h3><small id="lab-count">${registry.blocks.length} blocks</small></div>
@@ -529,6 +551,120 @@ function setupArchitecturalStateWitness(section, wasm) {
   runAdd.addEventListener("click", () => executeStateWitness("add"));
   runMul.addEventListener("click", () => executeStateWitness("mul"));
   runEcx.addEventListener("click", () => executeStateWitness("ecx"));
+}
+
+function setupMemoryWitness(section, wasm) {
+  const shell = section.querySelector("#lab-memory-witness");
+  const status = section.querySelector("#lab-memory-status");
+  const result = section.querySelector("#lab-memory-result");
+  const proofTarget = section.querySelector("#lab-memory-proof");
+  const run = section.querySelector("#lab-run-memory");
+  const offsetInput = section.querySelector("#lab-memory-offset");
+  const valueInput = section.querySelector("#lab-memory-value");
+
+  if (!shell || !status || !result || !proofTarget ||
+      !run || !offsetInput || !valueInput) {
+    return;
+  }
+  if (wasm.amemory_i386_memory_probe?.() !== 0x60a ||
+      typeof wasm.amemory_i386_memory_run !== "function") {
+    status.textContent =
+      "M6a structural-memory ABI is missing; refusing to fake memory.";
+    status.className = "notice lab-error";
+    run.disabled = true;
+    return;
+  }
+  status.textContent =
+    "M6a ready: immutable structural radix page, no host semantic RAM.";
+  status.className = "notice";
+
+  const byteInput = (input, label) => {
+    const value = Number(input.value);
+    if (!Number.isInteger(value) || value < 0 || value > 255) {
+      throw new Error(label + " must be an integer 0..255");
+    }
+    return value;
+  };
+
+  run.addEventListener("click", async () => {
+    try {
+      const offset = byteInput(offsetInput, "Offset8");
+      const value = byteInput(valueInput, "Byte8");
+      status.textContent =
+        "Executing structural READ → WRITE → READ → persistence check…";
+      status.className = "notice";
+      result.innerHTML = "";
+      proofTarget.innerHTML = "";
+
+      if (wasm.amemory_i386_memory_run(offset, value) !== 1) {
+        throw new Error("M6a A-Circuit WASM rejected memory inputs");
+      }
+      const observed = {
+        offset: wasm.amemory_i386_memory_offset() >>> 0,
+        write: wasm.amemory_i386_memory_write_value() >>> 0,
+        before: wasm.amemory_i386_memory_before_value() >>> 0,
+        after: wasm.amemory_i386_memory_after_value() >>> 0,
+        oldAfter: wasm.amemory_i386_memory_old_after_value() >>> 0,
+        oldRoot: wasm.amemory_i386_memory_old_root_ref() >>> 0,
+        newRoot: wasm.amemory_i386_memory_new_root_ref() >>> 0,
+        reactions: wasm.amemory_i386_memory_reactions() >>> 0,
+        linksAfterLoad: wasm.amemory_i386_memory_links_after_load() >>> 0,
+        linksFinal: wasm.amemory_i386_memory_links_final() >>> 0,
+        steadyDelta: wasm.amemory_i386_memory_steady_link_delta() >>> 0,
+        quiescent: wasm.amemory_i386_memory_quiescent() >>> 0,
+      };
+      if (observed.offset !== offset ||
+          observed.write !== value ||
+          observed.before !== 0 ||
+          observed.after !== value ||
+          observed.oldAfter !== 0 ||
+          observed.oldRoot === observed.newRoot ||
+          observed.steadyDelta !== 0 ||
+          observed.quiescent !== 1) {
+        throw new Error("M6a structural memory persistence check failed");
+      }
+
+      const { proof, transport } = collectBrowserProof(wasm);
+      if (!proof || proof.block !== "M6A_RADIX_PAGE") {
+        throw new Error("M6a compact proof did not reconstruct memory witness");
+      }
+      const memoryId = proof.load.memoryInstanceId;
+      result.innerHTML = `
+        <div class="lab-state-grid">
+          <div class="lab-state-snapshot">
+            <h4>Old page root</h4>
+            <div class="lab-state-registers">
+              <code>${escapeHtml(memoryId)}:L${observed.oldRoot}</code>
+              <code>READ[${hex32(offset)}] = 0x${observed.before.toString(16).padStart(2,"0")}</code>
+              <code>READ old root after WRITE = 0x${observed.oldAfter.toString(16).padStart(2,"0")}</code>
+            </div>
+          </div>
+          <div class="lab-state-snapshot">
+            <h4>New immutable page root</h4>
+            <div class="lab-state-registers">
+              <code>${escapeHtml(memoryId)}:L${observed.newRoot}</code>
+              <code>WRITE[${hex32(offset)}] = 0x${observed.write.toString(16).padStart(2,"0")}</code>
+              <code>READ new root = 0x${observed.after.toString(16).padStart(2,"0")}</code>
+            </div>
+          </div>
+        </div>
+        <div class="lab-metrics">
+          <div class="lab-metric"><small>Structural reactions</small><strong>${observed.reactions}</strong></div>
+          <div class="lab-metric"><small>Links after LOAD</small><strong>${observed.linksAfterLoad}</strong></div>
+          <div class="lab-metric"><small>Links final</small><strong>${observed.linksFinal}</strong></div>
+          <div class="lab-metric"><small>Old root preserved</small><strong>YES</strong></div>
+          <div class="lab-metric"><small>Identical rerun Link growth</small><strong>${observed.steadyDelta}</strong></div>
+        </div>`;
+      await renderProofPipeline(proofTarget, proof);
+      status.textContent =
+        "M6a PASS: structural radix memory persisted old/new roots in one A-memory; " +
+        transport + " proof rendered below.";
+      status.className = "notice lab-ok";
+    } catch (error) {
+      status.textContent = error.message;
+      status.className = "notice lab-error";
+    }
+  });
 }
 
 function setupCatalog(section, registry, selectBlock) {
@@ -896,6 +1032,7 @@ async function bootLab() {
   const section = buildLab(registry);
   if (!section) return;
   setupArchitecturalStateWitness(section, wasm);
+  setupMemoryWitness(section, wasm);
   const byId = new Map(registry.blocks.map((block) => [block.id, block]));
   const selectBlock = (id) => {
     const block = byId.get(id);
