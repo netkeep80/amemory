@@ -888,32 +888,6 @@ Promise.all([
     esp: 0x77778888,
     eip: 0x00401000,
   }, "M5a after");
-  assertStateEquals(
-    statePayloadM5c.before,
-    readArchitecturalState("before"),
-    "M5c structured/compat before"
-  );
-  assertStateEquals(
-    statePayloadM5c.after,
-    readArchitecturalState("after"),
-    "M5c structured/compat after"
-  );
-  if ((statePayloadM5c.flags.defined >>> 0) !==
-        (w.amemory_i386_state_flags_defined_mask() >>> 0) ||
-      (statePayloadM5c.flags.flagValues >>> 0) !==
-        (w.amemory_i386_state_flags_value_mask() >>> 0) ||
-      (statePayloadM5c.flags.undefined >>> 0) !==
-        (w.amemory_i386_state_flags_undefined_mask() >>> 0) ||
-      (statePayloadM5c.oldStateRetained >>> 0) !==
-        (w.amemory_i386_state_old_state_retained() >>> 0) ||
-      (statePayloadM5c.atomicScope >>> 0) !==
-        (w.amemory_i386_state_atomic_scope() >>> 0) ||
-      (statePayloadM5c.steadyDelta >>> 0) !==
-        (w.amemory_i386_state_steady_link_delta() >>> 0) ||
-      (statePayloadM5c.quiescent >>> 0) !==
-        (w.amemory_i386_state_quiescent() >>> 0)) {
-    throw new Error("M5c structured/getter compatibility mismatch");
-  }
   if ((w.amemory_i386_state_flags_defined_mask() >>> 0) !== 0x000008d5 ||
       (w.amemory_i386_state_flags_value_mask() >>> 0) !== 0x00000055 ||
       (w.amemory_i386_state_flags_undefined_mask() >>> 0) !== 0) {
@@ -1169,6 +1143,32 @@ Promise.all([
     readCurrentWitnessPayload("M5c", "architectural-state");
   if (statePayloadM5c.block !== "M5C_STATE_ADD_ECX") {
     throw new Error("M5c structured state block mismatch");
+  }
+  assertStateEquals(
+    statePayloadM5c.before,
+    readArchitecturalState("before"),
+    "M5c structured/compat before"
+  );
+  assertStateEquals(
+    statePayloadM5c.after,
+    readArchitecturalState("after"),
+    "M5c structured/compat after"
+  );
+  if ((statePayloadM5c.flags.defined >>> 0) !==
+        (w.amemory_i386_state_flags_defined_mask() >>> 0) ||
+      (statePayloadM5c.flags.flagValues >>> 0) !==
+        (w.amemory_i386_state_flags_value_mask() >>> 0) ||
+      (statePayloadM5c.flags.undefined >>> 0) !==
+        (w.amemory_i386_state_flags_undefined_mask() >>> 0) ||
+      (statePayloadM5c.oldStateRetained >>> 0) !==
+        (w.amemory_i386_state_old_state_retained() >>> 0) ||
+      (statePayloadM5c.atomicScope >>> 0) !==
+        (w.amemory_i386_state_atomic_scope() >>> 0) ||
+      (statePayloadM5c.steadyDelta >>> 0) !==
+        (w.amemory_i386_state_steady_link_delta() >>> 0) ||
+      (statePayloadM5c.quiescent >>> 0) !==
+        (w.amemory_i386_state_quiescent() >>> 0)) {
+    throw new Error("M5c structured/getter compatibility mismatch");
   }
   assertStateEquals(readArchitecturalState("before"), {
     eax: 0x10203040,
