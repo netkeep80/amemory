@@ -182,6 +182,13 @@ function styleLab() {
     .proof-root { display:grid; grid-template-columns:minmax(130px,.6fr) minmax(0,2fr); gap:6px 10px; padding:8px 10px; border:1px solid var(--line); border-radius:9px; background:var(--surface); }
     .proof-root > span { color:var(--muted); font-size:.78rem; }
     .proof-root code { grid-column:2; overflow-wrap:anywhere; }
+    .proof-recursive-structure { grid-column:2; min-width:0; border:1px solid var(--line); border-radius:8px; background:var(--surface-2); }
+    .proof-recursive-structure > summary { cursor:pointer; display:flex; justify-content:space-between; gap:12px; align-items:center; padding:6px 8px; color:var(--muted); font-size:.78rem; user-select:none; }
+    .proof-recursive-structure > summary small { color:var(--muted); white-space:nowrap; }
+    .proof-recursive-action::after { content:"show"; font-weight:700; color:var(--text); }
+    .proof-recursive-structure[open] .proof-recursive-action::after { content:"hide"; }
+    .proof-recursive-structure > code { display:block; margin:0 8px 8px; max-height:340px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; }
+    .proof-result-anums .proof-recursive-structure { grid-column:auto; }
     .proof-aset { max-height:340px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; padding:10px; background:var(--surface); border:1px solid var(--line); border-radius:9px; font-size:.72rem; }
     .proof-reaction-table code { max-width:360px; display:inline-block; overflow-wrap:anywhere; }
     .proof-result-anums { display:grid; gap:8px; margin:10px 0; }
@@ -201,7 +208,7 @@ function styleLab() {
     .proof-visual-three canvas { display:block; width:100% !important; height:100% !important; }
     .lab-hidden { display:none !important; }
     @media(max-width:1050px){ .lab-layout{grid-template-columns:1fr;} .lab-catalog-shell{position:static;max-height:none;} .lab-catalog{grid-template-columns:repeat(3,minmax(0,1fr));} }
-    @media(max-width:820px){ .lab-state-head{flex-direction:column;} .lab-state-grid{grid-template-columns:1fr;} .lab-catalog{grid-template-columns:repeat(2,minmax(0,1fr));} .lab-constructor{grid-template-columns:1fr;} .lab-chip::before,.lab-chip::after,.lab-input-port::after,.lab-output-port::before{display:none;} .lab-evidence-io,.lab-spec-grid,.lab-metrics{grid-template-columns:1fr 1fr;} .proof-title{flex-direction:column;} .proof-memory{min-width:0;width:100%;box-sizing:border-box;} .proof-root{grid-template-columns:1fr;} .proof-root code{grid-column:1;} }
+    @media(max-width:820px){ .lab-state-head{flex-direction:column;} .lab-state-grid{grid-template-columns:1fr;} .lab-catalog{grid-template-columns:repeat(2,minmax(0,1fr));} .lab-constructor{grid-template-columns:1fr;} .lab-chip::before,.lab-chip::after,.lab-input-port::after,.lab-output-port::before{display:none;} .lab-evidence-io,.lab-spec-grid,.lab-metrics{grid-template-columns:1fr 1fr;} .proof-title{flex-direction:column;} .proof-memory{min-width:0;width:100%;box-sizing:border-box;} .proof-root{grid-template-columns:1fr;} .proof-root code,.proof-root .proof-recursive-structure{grid-column:1;} }
     @media(max-width:560px){ .lab-catalog{grid-template-columns:1fr;} .lab-evidence-io,.lab-spec-grid,.lab-metrics{grid-template-columns:1fr;} .lab-modebar{align-items:flex-start;flex-direction:column;} }
   `;
   document.head.append(style);

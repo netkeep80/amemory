@@ -67,6 +67,19 @@ for (const [label, pattern] of [
     throw new Error("browser still depends on " + label);
   }
 }
+const proofViewSource = fs.readFileSync(
+  "experiments/browser-accelerator/web/i386-proof-view.mjs",
+  "utf8"
+);
+for (const required of [
+  "recursiveStructureHtml(root.source)",
+  "recursiveStructureHtml(resultRecursiveWire)",
+  'class="proof-recursive-structure"',
+]) {
+  if (!proofViewSource.includes(required)) {
+    throw new Error("recursive-structure collapse wiring missing: " + required);
+  }
+}
 const bytes = fs.readFileSync(wasmPath);
 const sourceSha =
   process.env.AMEMORY_SOURCE_SHA || process.env.GITHUB_SHA || null;
@@ -78,8 +91,21 @@ if (!version) throw new Error("VERSION is empty");
 Promise.all([
   WebAssembly.instantiate(bytes, {}),
   import("../../browser-accelerator/web/i386-proof-transport.mjs"),
-]).then(([{instance}, { inflateCompactProof }]) => {
+  import("../../browser-accelerator/web/i386-proof-view.mjs"),
+]).then(([{instance}, { inflateCompactProof }, { recursiveStructureHtml }]) => {
   const w = instance.exports;
+  const recursiveUiSample = "8916<>&".repeat(256);
+  const recursiveUiHtml = recursiveStructureHtml(recursiveUiSample);
+  if (!recursiveUiHtml.includes('class="proof-recursive-structure"') ||
+      recursiveUiHtml.includes("<details class=\"proof-recursive-structure\" open") ||
+      !recursiveUiHtml.includes(
+        'data-recursive-length="' + recursiveUiSample.length + '"'
+      ) ||
+      !recursiveUiHtml.includes(recursiveUiSample.length + " symbols") ||
+      !recursiveUiHtml.includes("&lt;&gt;&amp;") ||
+      recursiveUiHtml.includes("8916<>&")) {
+    throw new Error("recursive structure UI is not default-collapsed / exact-safe");
+  }
   for (const retired of [
     "amemory_i386_lab_proof_available",
     "amemory_i386_lab_proof_json_len",

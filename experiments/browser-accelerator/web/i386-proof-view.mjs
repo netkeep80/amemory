@@ -4,6 +4,17 @@ function code(value) {
   return `<code>${escapeHtml(value)}</code>`;
 }
 
+export function recursiveStructureHtml(value) {
+  const text = String(value ?? "");
+  return `<details class="proof-recursive-structure" data-recursive-length="${text.length}">
+    <summary>
+      <span>recursive structure</span>
+      <small>${text.length} symbols · <span class="proof-recursive-action"></span></small>
+    </summary>
+    <code>${escapeHtml(text)}</code>
+  </details>`;
+}
+
 function hex32(value) {
   return `0x${(value >>> 0).toString(16).padStart(8, "0")}`;
 }
@@ -13,7 +24,7 @@ function semanticRootsHtml(roots, loaded = false) {
     <div class="proof-root">
       <strong>${escapeHtml(root.role)}</strong>
       ${loaded ? `<span>local handle ${root.localHandle} · substrate-only</span>` : ""}
-      ${code(root.source)}
+      ${recursiveStructureHtml(root.source)}
     </div>`).join("")}</div>`;
 }
 
@@ -173,7 +184,7 @@ export function proofPipelineHtml(proof) {
               <span><small>Identical rerun ΔLinks</small><strong>${proof.result.identicalRerunLinkDelta}</strong></span>
             </div>
             <div class="proof-result-anums">
-              <div><strong>Result recursive Link wire</strong>${code(resultRecursiveWire)}</div>
+              <div><strong>Result recursive Link wire</strong>${recursiveStructureHtml(resultRecursiveWire)}</div>
               <div><strong>Result sequence Anum</strong>${code(proof.result.resultSequenceAnum)}</div>
             </div>
             <div class="proof-visual-toolbar">
