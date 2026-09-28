@@ -1047,7 +1047,14 @@ pub(crate) struct WebArchitecturalStateOutcome {
 ///
 /// The host chooses fixture inputs and independently decodes/checks the final
 /// state. It never constructs or injects the successor state.
-pub(crate) fn web_prove_architectural_state_add(
+#[derive(Clone, Copy, Debug)]
+enum AddStateTarget {
+    Eax,
+    Ecx,
+}
+
+fn web_prove_architectural_state_add_target(
+    target: AddStateTarget,
 ) -> Option<WebArchitecturalStateExecution> {
     let mut compiler = FullFixture::new();
 
@@ -1064,8 +1071,8 @@ pub(crate) fn web_prove_architectural_state_add(
         return None;
     }
 
-    let before_value = StateValue {
-        eax: 0xffff_ffff,
+    let mut before_value = StateValue {
+        eax: 0x1020_3040,
         ebx: 0x1122_3344,
         edx: 0x5566_7788,
         ecx: 0x0102_0304,
@@ -1081,23 +1088,27 @@ pub(crate) fn web_prove_architectural_state_add(
         sf: Some(1),
         of: Some(1),
     };
-    let expected = StateValue {
-        eax: 0,
-        ebx: before_value.ebx,
-        edx: before_value.edx,
-        ecx: before_value.ecx,
-        esi: before_value.esi,
-        edi: before_value.edi,
-        ebp: before_value.ebp,
-        esp: before_value.esp,
-        eip: before_value.eip,
-        cf: Some(1),
-        pf: Some(1),
-        af: Some(1),
-        zf: Some(1),
-        sf: Some(0),
-        of: Some(0),
+    let (target_handle, block) = match target {
+        AddStateTarget::Eax => {
+            before_value.eax = 0xffff_ffff;
+            (program.schema.eax, "M5A_STATE_ADD32")
+        }
+        AddStateTarget::Ecx => {
+            before_value.ecx = 0xffff_ffff;
+            (program.schema.ecx, "M5C_STATE_ADD_ECX")
+        }
     };
+    let mut expected = before_value;
+    match target {
+        AddStateTarget::Eax => expected.eax = 0,
+        AddStateTarget::Ecx => expected.ecx = 0,
+    }
+    expected.cf = Some(1);
+    expected.pf = Some(1);
+    expected.af = Some(1);
+    expected.zf = Some(1);
+    expected.sf = Some(0);
+    expected.of = Some(0);
 
     let before_state =
         state_from_value(&mut compiler, program.schema, before_value)?;
@@ -1105,11 +1116,8 @@ pub(crate) fn web_prove_architectural_state_add(
         &mut compiler.store,
         program.schema,
         before_state,
-        program.schema.eax,
+        target_handle,
     );
-    // The real arithmetic program sees the continuation frame as its caller.
-    // Its final generic rule therefore produces frame -> ALU_EFFECT_RESULT,
-    // which is the exact trigger consumed by the state applier.
     let initial = compiler
         .store
         .ensure_pair(frame, alu.invocation)
@@ -1189,7 +1197,7 @@ pub(crate) fn web_prove_architectural_state_add(
         semantic_source(
             &compiler.store,
             "state.target",
-            program.schema.eax,
+            target_handle,
         ),
         semantic_source(
             &compiler.store,
@@ -1249,44 +1257,29 @@ pub(crate) fn web_prove_architectural_state_add(
     let initial = loaded_handle(&load, "scope.initial")?;
     let before_state =
         loaded_handle(&load, "state.before")?;
-    let state_tag =
-        loaded_handle(&load, "state.schema.tag")?;
-    let apply_state =
-        loaded_handle(&load, "state.apply.frame_tag")?;
-    let eax = loaded_handle(&load, "state.register.eax")?;
-    let ebx = loaded_handle(&load, "state.register.ebx")?;
-    let edx = loaded_handle(&load, "state.register.edx")?;
-    let undefined =
-        loaded_handle(&load, "state.flag.undefined")?;
-    let effect_result_tag =
-        loaded_handle(&load, "result.alu_effect_tag")?;
-    let zero = loaded_handle(&load, "data.bit.zero")?;
-    let one = loaded_handle(&load, "data.bit.one")?;
     let result_context =
         loaded_handle(&load, "context.result")?;
+    let zero = loaded_handle(&load, "data.bit.zero")?;
+    let one = loaded_handle(&load, "data.bit.one")?;
 
-    // Flag ids are canonical components of the same shared schema; locate
-    // them by the loaded carrier refs from the compiler schema.
     let loaded = |handle: Handle| -> Option<Handle> {
         (handle >= 1 && handle <= load.links_after_load)
             .then_some(handle)
     };
-    let wide_effect_result_tag =
-        loaded(program.schema.wide_effect_result_tag)?;
     let runtime_schema = ArchitecturalStateSchema {
-        state_tag,
-        apply_state,
+        state_tag: loaded(program.schema.state_tag)?,
+        apply_state: loaded(program.schema.apply_state)?,
         apply_wide_state: loaded(program.schema.apply_wide_state)?,
-        eax,
-        ebx,
-        edx,
+        eax: loaded(program.schema.eax)?,
+        ebx: loaded(program.schema.ebx)?,
+        edx: loaded(program.schema.edx)?,
         ecx: loaded(program.schema.ecx)?,
         esi: loaded(program.schema.esi)?,
         edi: loaded(program.schema.edi)?,
         ebp: loaded(program.schema.ebp)?,
         esp: loaded(program.schema.esp)?,
         eip: loaded(program.schema.eip)?,
-        undefined,
+        undefined: loaded(program.schema.undefined)?,
         flags: FlagPatchSchema {
             set_tag: loaded(program.schema.flags.set_tag)?,
             undefined_tag: loaded(program.schema.flags.undefined_tag)?,
@@ -1297,8 +1290,9 @@ pub(crate) fn web_prove_architectural_state_add(
             sf: loaded(program.schema.flags.sf)?,
             of: loaded(program.schema.flags.of)?,
         },
-        effect_result_tag,
-        wide_effect_result_tag,
+        effect_result_tag: loaded(program.schema.effect_result_tag)?,
+        wide_effect_result_tag:
+            loaded(program.schema.wide_effect_result_tag)?,
     };
 
     let max_steps = alu.active_steps as u32 + 3;
@@ -1315,9 +1309,6 @@ pub(crate) fn web_prove_architectural_state_add(
         return None;
     }
 
-    // Atomicity witness: every reaction keeps a one-member Scope. No
-    // architectural state is published during the ALU pipeline; the final
-    // active reaction publishes the complete successor in one handoff.
     let atomic_scope = execute.reactions.iter().all(|step| {
         step.scope_before.len() == 1 && step.scope_after.len() == 1
     });
@@ -1346,9 +1337,6 @@ pub(crate) fn web_prove_architectural_state_add(
     if state_tag_check != runtime_schema.state_tag {
         return None;
     }
-    // The arbitrary final Link is recursive Link wire. The state payload is
-    // a real ExactSequence and therefore legitimately supplies
-    // resultSequenceAnum.
     let result_recursive_wire =
         memory.store.export_anum(final_link).ok()?;
     let result_sequence_anum =
@@ -1362,14 +1350,31 @@ pub(crate) fn web_prove_architectural_state_add(
     )?;
     let visual_links = visual_snapshot(&memory, &load.semantic_roots);
 
+    let decoded_value = match target {
+        AddStateTarget::Eax => actual.eax,
+        AddStateTarget::Ecx => actual.ecx,
+    };
+    let decoded_value_hi = match target {
+        AddStateTarget::Eax => actual.ebx,
+        AddStateTarget::Ecx => actual.eip,
+    };
+    let oracle_value = match target {
+        AddStateTarget::Eax => expected.eax,
+        AddStateTarget::Ecx => expected.ecx,
+    };
+    let oracle_value_hi = match target {
+        AddStateTarget::Eax => expected.ebx,
+        AddStateTarget::Ecx => expected.eip,
+    };
+
     let result = WebProofResultStage {
         memory_instance_id: memory.id.clone(),
         result_anum: result_recursive_wire,
         result_sequence_anum,
-        decoded_value: actual.eax,
-        decoded_value_hi: Some(actual.ebx),
-        oracle_value: expected.eax,
-        oracle_value_hi: Some(expected.ebx),
+        decoded_value,
+        decoded_value_hi: Some(decoded_value_hi),
+        oracle_value,
+        oracle_value_hi: Some(oracle_value_hi),
         oracle_matches: actual == expected,
         links_final: memory.store.link_count() as u32,
         identical_rerun_link_delta,
@@ -1377,7 +1382,7 @@ pub(crate) fn web_prove_architectural_state_add(
     };
     let proof = WebStructuralProof {
         schema_version: 4,
-        block: "M5A_STATE_ADD32".to_owned(),
+        block: block.to_owned(),
         prepare,
         load,
         execute,
@@ -1416,6 +1421,16 @@ pub(crate) fn web_prove_architectural_state_add(
         },
         proof,
     })
+}
+
+pub(crate) fn web_prove_architectural_state_add(
+) -> Option<WebArchitecturalStateExecution> {
+    web_prove_architectural_state_add_target(AddStateTarget::Eax)
+}
+
+pub(crate) fn web_prove_architectural_state_add_ecx(
+) -> Option<WebArchitecturalStateExecution> {
+    web_prove_architectural_state_add_target(AddStateTarget::Ecx)
 }
 
 
