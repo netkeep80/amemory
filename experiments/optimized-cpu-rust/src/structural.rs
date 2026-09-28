@@ -1,4 +1,7 @@
-use crate::{Handle, OptimizedLinkStore, PackedExecutionView, StoreError, ROOT_HANDLE};
+use crate::{
+    Handle, OptimizedLinkStore, PackedExecutionRef, PackedExecutionView,
+    StoreError, ROOT_HANDLE,
+};
 use std::{collections::{HashMap, HashSet}, time::Instant};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -167,6 +170,23 @@ impl StructuralRead for PackedExecutionView {
     }
 }
 
+impl StructuralRead for PackedExecutionRef<'_> {
+    fn is_valid(&self, handle: Handle) -> bool {
+        PackedExecutionRef::is_valid(self, handle)
+    }
+
+    fn poles(&self, handle: Handle) -> Result<(Handle, Handle), StoreError> {
+        PackedExecutionRef::poles(self, handle)
+    }
+
+    fn start_incidence_handles(
+        &self,
+        start: Handle,
+    ) -> Result<Vec<Handle>, StoreError> {
+        Ok(PackedExecutionRef::start_incidence(self, start)?.collect())
+    }
+}
+
 pub fn materialize_exact_sequence(
     store: &mut OptimizedLinkStore,
     values: &[Handle],
@@ -301,8 +321,8 @@ pub fn define_structural_interpreter(
     Ok(store.ensure_pair(dictionary, grammar_theory)?)
 }
 
-pub fn read_structural_interpreter(
-    store: &OptimizedLinkStore,
+fn read_structural_interpreter_from<R: StructuralRead + ?Sized>(
+    store: &R,
     interpreter: Handle,
 ) -> Result<StructuralInterpreter, StructuralError> {
     let (dictionary, grammar_theory) = store
@@ -317,6 +337,13 @@ pub fn read_structural_interpreter(
         grammar,
         theory,
     })
+}
+
+pub fn read_structural_interpreter(
+    store: &OptimizedLinkStore,
+    interpreter: Handle,
+) -> Result<StructuralInterpreter, StructuralError> {
+    read_structural_interpreter_from(store, interpreter)
 }
 
 const MAX_COMPILED_GROUNDED_CHECKS: usize = 32;
@@ -1007,7 +1034,6 @@ impl OptimizedStructuralEngine {
         }
 
         let interpreter = self.interpreter.ok_or(StructuralError::MissingInterpreter)?;
-        let authority = read_structural_interpreter(store, interpreter)?;
         let old_members = self.scope_banks[self.current_bank].clone();
 
         if old_members.len() > self.cap {
@@ -1017,6 +1043,31 @@ impl OptimizedStructuralEngine {
             });
         }
 
+        // Phase 1 is read-only. Borrow only dense carrier/index slices, not
+        // canonical HashMaps, and discover every old Scope member before any
+        // publication mutates the store. This makes reaction observation
+        // atomic without cloning the whole carrier on every run().
+        let discovered = {
+            let execution_view = store.packed_execution_ref();
+            let authority =
+                read_structural_interpreter_from(&execution_view, interpreter)?;
+            let mut discovered = Vec::with_capacity(old_members.len());
+            for active in old_members.iter().copied() {
+                let images = discover_triggered_rule_images_internal(
+                    &execution_view,
+                    authority.theory,
+                    active,
+                    &mut self.rule_metadata_cache,
+                    profile,
+                )?;
+                discovered.push((active, images));
+            }
+            discovered
+        };
+
+        // Phase 2 is the explicit mutation/publication boundary. The borrowed
+        // execution view is gone, so constructor/canonicalization writes are
+        // impossible during discovery and legal only from this point onward.
         let mut next_members = Vec::new();
         let mut next_seen = HashSet::new();
         let mut raw_rule_matches = 0u32;
@@ -1035,15 +1086,7 @@ impl OptimizedStructuralEngine {
             Ok(())
         };
 
-        for active in old_members.iter().copied() {
-            let images = discover_triggered_rule_images_internal(
-                store,
-                authority.theory,
-                active,
-                &mut self.rule_metadata_cache,
-                profile,
-            )?;
-
+        for (active, images) in discovered {
             if images.is_empty() {
                 let publication_started = profile.as_ref().map(|_| Instant::now());
                 add_next(active)?;
@@ -1536,6 +1579,16 @@ mod tests {
 
         let execution_view = store.export_packed_execution_view();
         assert_eq!(
+            read_structural_interpreter_from(&execution_view, interpreter)
+                .unwrap(),
+            StructuralInterpreter {
+                dictionary: authority_dictionary,
+                grammar,
+                theory,
+            },
+            "packed execution view interpreter"
+        );
+        assert_eq!(
             read_structural_role_dictionary_from(
                 &execution_view,
                 role_dictionary,
@@ -1600,6 +1653,11 @@ mod tests {
         assert_eq!(reaction.raw_rule_matches, 1);
         assert_eq!(reaction.transitioned_members, 1);
         assert_eq!(reaction.handoff_count, 1);
+        assert_eq!(
+            engine.current(),
+            &[expected],
+            "snapshot discovery must preserve publication result"
+        );
         assert!(!reaction.quiescent);
         assert_eq!(engine.current(), &[expected]);
 

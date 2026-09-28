@@ -451,6 +451,99 @@ impl PackedExecutionView {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct PackedExecutionRef<'a> {
+    starts: &'a [Handle],
+    ends: &'a [Handle],
+    start_head: &'a [Handle],
+    end_head: &'a [Handle],
+    next_by_start: &'a [Handle],
+    next_by_end: &'a [Handle],
+}
+
+impl<'a> PackedExecutionRef<'a> {
+    fn from_slices(
+        starts: &'a [Handle],
+        ends: &'a [Handle],
+        start_head: &'a [Handle],
+        end_head: &'a [Handle],
+        next_by_start: &'a [Handle],
+        next_by_end: &'a [Handle],
+    ) -> Self {
+        debug_assert_eq!(starts.len(), ends.len());
+        debug_assert_eq!(start_head.len(), starts.len() + 1);
+        debug_assert_eq!(end_head.len(), starts.len() + 1);
+        debug_assert_eq!(next_by_start.len(), starts.len() + 1);
+        debug_assert_eq!(next_by_end.len(), starts.len() + 1);
+        Self {
+            starts,
+            ends,
+            start_head,
+            end_head,
+            next_by_start,
+            next_by_end,
+        }
+    }
+
+    pub fn link_count(&self) -> usize {
+        self.starts.len()
+    }
+
+    pub fn is_valid(&self, handle: Handle) -> bool {
+        handle > 0 && (handle as usize) <= self.link_count()
+    }
+
+    pub fn poles(
+        &self,
+        handle: Handle,
+    ) -> Result<(Handle, Handle), StoreError> {
+        if !self.is_valid(handle) {
+            return Err(StoreError::UnknownHandle(handle));
+        }
+        let index = (handle - 1) as usize;
+        Ok((self.starts[index], self.ends[index]))
+    }
+
+    pub fn start_incidence(
+        &self,
+        start: Handle,
+    ) -> Result<IncidenceIter<'_>, StoreError> {
+        if !self.is_valid(start) {
+            return Err(StoreError::UnknownHandle(start));
+        }
+        Ok(IncidenceIter {
+            next: self.next_by_start,
+            current: self.start_head[start as usize],
+        })
+    }
+
+    pub fn end_incidence(
+        &self,
+        end: Handle,
+    ) -> Result<IncidenceIter<'_>, StoreError> {
+        if !self.is_valid(end) {
+            return Err(StoreError::UnknownHandle(end));
+        }
+        Ok(IncidenceIter {
+            next: self.next_by_end,
+            current: self.end_head[end as usize],
+        })
+    }
+}
+
+impl PackedExecutionView {
+    pub fn as_ref(&self) -> PackedExecutionRef<'_> {
+        PackedExecutionRef::from_slices(
+            self.carrier.starts(),
+            self.carrier.ends(),
+            self.incidence.start_heads(),
+            self.incidence.end_heads(),
+            self.incidence.next_by_start(),
+            self.incidence.next_by_end(),
+        )
+    }
+}
+
 #[derive(Debug)]
 pub struct OptimizedLinkStore {
     // Non-semantic runtime identity used only to scope executor caches. It is
@@ -660,6 +753,20 @@ impl OptimizedLinkStore {
     pub fn export_packed_execution_view(&self) -> PackedExecutionView {
         PackedExecutionView::from_carrier(self.export_packed_carrier_image())
             .expect("canonical store must always export a valid execution view")
+    }
+
+    /// Zero-copy read-only execution projection over the canonical store's
+    /// dense carrier/index slices. Canonical HashMaps are intentionally not
+    /// exposed through this view.
+    pub fn packed_execution_ref(&self) -> PackedExecutionRef<'_> {
+        PackedExecutionRef::from_slices(
+            &self.starts[1..],
+            &self.ends[1..],
+            &self.start_head,
+            &self.end_head,
+            &self.next_by_start,
+            &self.next_by_end,
+        )
     }
 
     /// Atomically loads a typed packed carrier image without parsing recursive
@@ -1779,6 +1886,34 @@ mod tests {
             view.poles(NO_HANDLE),
             Err(StoreError::UnknownHandle(NO_HANDLE))
         );
+    }
+
+    #[test]
+    fn packed_execution_ref_matches_owned_view_and_store() {
+        let mut store = OptimizedLinkStore::new();
+        let o = store.import_anum("98").unwrap();
+        let c = store.import_anum("68").unwrap();
+        let _pair = store.ensure_pair(o, c).unwrap();
+
+        let owned = store.export_packed_execution_view();
+        let owned_ref = owned.as_ref();
+        let borrowed = store.packed_execution_ref();
+
+        assert_eq!(borrowed.link_count(), store.link_count());
+        assert_eq!(owned_ref.link_count(), borrowed.link_count());
+        for raw_handle in 1..=store.link_count() {
+            let handle = raw_handle as Handle;
+            assert_eq!(borrowed.poles(handle), store.poles(handle));
+            assert_eq!(borrowed.poles(handle), owned_ref.poles(handle));
+            assert_eq!(
+                borrowed.start_incidence(handle).unwrap().collect::<Vec<_>>(),
+                owned_ref.start_incidence(handle).unwrap().collect::<Vec<_>>()
+            );
+            assert_eq!(
+                borrowed.end_incidence(handle).unwrap().collect::<Vec<_>>(),
+                owned_ref.end_incidence(handle).unwrap().collect::<Vec<_>>()
+            );
+        }
     }
 
     #[test]
