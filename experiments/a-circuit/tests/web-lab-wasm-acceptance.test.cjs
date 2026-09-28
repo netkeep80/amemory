@@ -17,10 +17,12 @@ for (const required of [
   "M5 architectural state witness",
   "setupArchitecturalStateWitness",
   "amemory_i386_state_run_add32",
+  "amemory_i386_state_run_mul32",
+  "EDX:EAX",
   "Stateₜ₊₁",
 ]) {
   if (!labPageSource.includes(required)) {
-    throw new Error("M5a Pages witness wiring missing: " + required);
+    throw new Error("M5 Pages witness wiring missing: " + required);
   }
 }
 const bytes = fs.readFileSync(wasmPath);
