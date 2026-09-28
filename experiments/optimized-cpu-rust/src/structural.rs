@@ -301,8 +301,8 @@ pub fn define_structural_interpreter(
     Ok(store.ensure_pair(dictionary, grammar_theory)?)
 }
 
-pub fn read_structural_interpreter(
-    store: &OptimizedLinkStore,
+fn read_structural_interpreter_from<R: StructuralRead + ?Sized>(
+    store: &R,
     interpreter: Handle,
 ) -> Result<StructuralInterpreter, StructuralError> {
     let (dictionary, grammar_theory) = store
@@ -317,6 +317,13 @@ pub fn read_structural_interpreter(
         grammar,
         theory,
     })
+}
+
+pub fn read_structural_interpreter(
+    store: &OptimizedLinkStore,
+    interpreter: Handle,
+) -> Result<StructuralInterpreter, StructuralError> {
+    read_structural_interpreter_from(store, interpreter)
 }
 
 const MAX_COMPILED_GROUNDED_CHECKS: usize = 32;
@@ -1007,7 +1014,15 @@ impl OptimizedStructuralEngine {
         }
 
         let interpreter = self.interpreter.ok_or(StructuralError::MissingInterpreter)?;
-        let authority = read_structural_interpreter(store, interpreter)?;
+
+        // Freeze the complete read-side execution topology once per reaction
+        // step, before any template instantiation/publication mutates the
+        // canonical store. Every old Scope member therefore observes the same
+        // pre-publication carrier. Newly published Links become discoverable
+        // only when the next run() projects a fresh snapshot.
+        let execution_view = store.export_packed_execution_view();
+        let authority =
+            read_structural_interpreter_from(&execution_view, interpreter)?;
         let old_members = self.scope_banks[self.current_bank].clone();
 
         if old_members.len() > self.cap {
@@ -1037,7 +1052,7 @@ impl OptimizedStructuralEngine {
 
         for active in old_members.iter().copied() {
             let images = discover_triggered_rule_images_internal(
-                store,
+                &execution_view,
                 authority.theory,
                 active,
                 &mut self.rule_metadata_cache,
@@ -1536,6 +1551,16 @@ mod tests {
 
         let execution_view = store.export_packed_execution_view();
         assert_eq!(
+            read_structural_interpreter_from(&execution_view, interpreter)
+                .unwrap(),
+            StructuralInterpreter {
+                dictionary: authority_dictionary,
+                grammar,
+                theory,
+            },
+            "packed execution view interpreter"
+        );
+        assert_eq!(
             read_structural_role_dictionary_from(
                 &execution_view,
                 role_dictionary,
@@ -1600,6 +1625,11 @@ mod tests {
         assert_eq!(reaction.raw_rule_matches, 1);
         assert_eq!(reaction.transitioned_members, 1);
         assert_eq!(reaction.handoff_count, 1);
+        assert_eq!(
+            engine.current(),
+            &[expected],
+            "snapshot discovery must preserve publication result"
+        );
         assert!(!reaction.quiescent);
         assert_eq!(engine.current(), &[expected]);
 
