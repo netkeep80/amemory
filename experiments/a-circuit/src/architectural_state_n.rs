@@ -35,6 +35,12 @@ pub(crate) struct ArchitecturalStateSchema {
     pub(crate) eax: Handle,
     pub(crate) ebx: Handle,
     pub(crate) edx: Handle,
+    pub(crate) ecx: Handle,
+    pub(crate) esi: Handle,
+    pub(crate) edi: Handle,
+    pub(crate) ebp: Handle,
+    pub(crate) esp: Handle,
+    pub(crate) eip: Handle,
     pub(crate) undefined: Handle,
     pub(crate) flags: FlagPatchSchema,
     pub(crate) effect_result_tag: Handle,
@@ -46,6 +52,12 @@ struct StateValue {
     eax: u32,
     ebx: u32,
     edx: u32,
+    ecx: u32,
+    esi: u32,
+    edi: u32,
+    ebp: u32,
+    esp: u32,
+    eip: u32,
     cf: Option<u8>,
     pf: Option<u8>,
     af: Option<u8>,
@@ -107,7 +119,16 @@ fn state_link(
     zf: Handle,
     sf: Handle,
     of: Handle,
+    ecx: Handle,
+    esi: Handle,
+    edi: Handle,
+    ebp: Handle,
+    esp: Handle,
+    eip: Handle,
 ) -> Handle {
+    // Stable M5 prefix MUST NOT be reordered:
+    // [EAX, EBX, EDX, CF, PF, AF, ZF, SF, OF].
+    // M5c extends the record append-only.
     let fields = [
         binding(store, schema.eax, eax),
         binding(store, schema.ebx, ebx),
@@ -118,6 +139,12 @@ fn state_link(
         binding(store, schema.flags.zf, zf),
         binding(store, schema.flags.sf, sf),
         binding(store, schema.flags.of, of),
+        binding(store, schema.ecx, ecx),
+        binding(store, schema.esi, esi),
+        binding(store, schema.edi, edi),
+        binding(store, schema.ebp, ebp),
+        binding(store, schema.esp, esp),
+        binding(store, schema.eip, eip),
     ];
     let payload = materialize_exact_sequence(store, &fields).unwrap();
     store.ensure_pair(schema.state_tag, payload).unwrap()
@@ -233,6 +260,12 @@ fn install_case(
     let old_eax = anchors.next(&mut f.store);
     let old_ebx = anchors.next(&mut f.store);
     let old_edx = anchors.next(&mut f.store);
+    let old_ecx = anchors.next(&mut f.store);
+    let old_esi = anchors.next(&mut f.store);
+    let old_edi = anchors.next(&mut f.store);
+    let old_ebp = anchors.next(&mut f.store);
+    let old_esp = anchors.next(&mut f.store);
+    let old_eip = anchors.next(&mut f.store);
     let old_cf = anchors.next(&mut f.store);
     let old_pf = anchors.next(&mut f.store);
     let old_af = anchors.next(&mut f.store);
@@ -259,6 +292,12 @@ fn install_case(
         old_zf,
         old_sf,
         old_of,
+        old_ecx,
+        old_esi,
+        old_edi,
+        old_ebp,
+        old_esp,
+        old_eip,
     );
     let before_effect = effect_template(
         &mut f.store,
@@ -294,6 +333,36 @@ fn install_case(
     } else {
         old_ebx
     };
+    let next_edx = if write && target == schema.edx {
+        word
+    } else {
+        old_edx
+    };
+    let next_ecx = if write && target == schema.ecx {
+        word
+    } else {
+        old_ecx
+    };
+    let next_esi = if write && target == schema.esi {
+        word
+    } else {
+        old_esi
+    };
+    let next_edi = if write && target == schema.edi {
+        word
+    } else {
+        old_edi
+    };
+    let next_ebp = if write && target == schema.ebp {
+        word
+    } else {
+        old_ebp
+    };
+    let next_esp = if write && target == schema.esp {
+        word
+    } else {
+        old_esp
+    };
     let (next_cf, next_pf, next_af, next_zf, next_sf, next_of) =
         match shape {
             PatchShape::FullSet6 => {
@@ -315,18 +384,25 @@ fn install_case(
         schema,
         next_eax,
         next_ebx,
-        old_edx,
+        next_edx,
         next_cf,
         next_pf,
         next_af,
         next_zf,
         next_sf,
         next_of,
+        next_ecx,
+        next_esi,
+        next_edi,
+        next_ebp,
+        next_esp,
+        old_eip,
     );
     let after = f.store.ensure_pair(f.k, after_state).unwrap();
 
     let mut roles = vec![
-        old_eax, old_ebx, old_edx, old_cf, old_pf, old_af, old_zf,
+        old_eax, old_ebx, old_edx, old_ecx, old_esi, old_edi,
+        old_ebp, old_esp, old_eip, old_cf, old_pf, old_af, old_zf,
         old_sf, old_of, word,
     ];
     match shape {
@@ -370,6 +446,12 @@ fn install_wide_mul_case(
     let old_eax = anchors.next(&mut f.store);
     let old_ebx = anchors.next(&mut f.store);
     let old_edx = anchors.next(&mut f.store);
+    let old_ecx = anchors.next(&mut f.store);
+    let old_esi = anchors.next(&mut f.store);
+    let old_edi = anchors.next(&mut f.store);
+    let old_ebp = anchors.next(&mut f.store);
+    let old_esp = anchors.next(&mut f.store);
+    let old_eip = anchors.next(&mut f.store);
     let old_cf = anchors.next(&mut f.store);
     let old_pf = anchors.next(&mut f.store);
     let old_af = anchors.next(&mut f.store);
@@ -391,6 +473,12 @@ fn install_wide_mul_case(
         old_zf,
         old_sf,
         old_of,
+        old_ecx,
+        old_esi,
+        old_edi,
+        old_ebp,
+        old_esp,
+        old_eip,
     );
     let wide =
         materialize_exact_sequence(&mut f.store, &[lo, hi]).unwrap();
@@ -440,11 +528,18 @@ fn install_wide_mul_case(
         schema.undefined,
         schema.undefined,
         new_of,
+        old_ecx,
+        old_esi,
+        old_edi,
+        old_ebp,
+        old_esp,
+        old_eip,
     );
     let after = f.store.ensure_pair(f.k, after_state).unwrap();
 
     let roles = [
-        old_eax, old_ebx, old_edx, old_cf, old_pf, old_af, old_zf,
+        old_eax, old_ebx, old_edx, old_ecx, old_esi, old_edi,
+        old_ebp, old_esp, old_eip, old_cf, old_pf, old_af, old_zf,
         old_sf, old_of, lo, hi,
     ];
     let (_, admission) = define_bundle_rule(
@@ -491,6 +586,12 @@ impl ArchitecturalStateProgram {
         let eax = anchors.next(&mut f.store);
         let ebx = anchors.next(&mut f.store);
         let edx = anchors.next(&mut f.store);
+        let ecx = anchors.next(&mut f.store);
+        let esi = anchors.next(&mut f.store);
+        let edi = anchors.next(&mut f.store);
+        let ebp = anchors.next(&mut f.store);
+        let esp = anchors.next(&mut f.store);
+        let eip = anchors.next(&mut f.store);
         let undefined = anchors.next(&mut f.store);
 
         let schema = ArchitecturalStateSchema {
@@ -500,13 +601,28 @@ impl ArchitecturalStateProgram {
             eax,
             ebx,
             edx,
+            ecx,
+            esi,
+            edi,
+            ebp,
+            esp,
+            eip,
             undefined,
             flags,
             effect_result_tag,
             wide_effect_result_tag,
         };
 
-        for target in [schema.eax, schema.ebx] {
+        for target in [
+            schema.eax,
+            schema.ebx,
+            schema.ecx,
+            schema.edx,
+            schema.esi,
+            schema.edi,
+            schema.ebp,
+            schema.esp,
+        ] {
             for writeback in [f.zero, f.one] {
                 for shape in [
                     PatchShape::FullSet6,
@@ -621,7 +737,7 @@ fn decode_state(
         return None;
     }
     let fields = read_exact_sequence(&f.store, payload).ok()?;
-    if fields.len() != 9 {
+    if fields.len() != 15 {
         return None;
     }
 
@@ -667,11 +783,41 @@ fn decode_state(
         schema,
         decode_binding(&f.store, fields[8], schema.flags.of)?,
     )?;
+    let ecx = decode_word(
+        f,
+        decode_binding(&f.store, fields[9], schema.ecx)?,
+    )?;
+    let esi = decode_word(
+        f,
+        decode_binding(&f.store, fields[10], schema.esi)?,
+    )?;
+    let edi = decode_word(
+        f,
+        decode_binding(&f.store, fields[11], schema.edi)?,
+    )?;
+    let ebp = decode_word(
+        f,
+        decode_binding(&f.store, fields[12], schema.ebp)?,
+    )?;
+    let esp = decode_word(
+        f,
+        decode_binding(&f.store, fields[13], schema.esp)?,
+    )?;
+    let eip = decode_word(
+        f,
+        decode_binding(&f.store, fields[14], schema.eip)?,
+    )?;
 
     Some(StateValue {
         eax,
         ebx,
         edx,
+        ecx,
+        esi,
+        edi,
+        ebp,
+        esp,
+        eip,
         cf,
         pf,
         af,
@@ -744,7 +890,7 @@ fn decode_state_in_store(
         return None;
     }
     let fields = read_exact_sequence(store, payload).ok()?;
-    if fields.len() != 9 {
+    if fields.len() != 15 {
         return None;
     }
 
@@ -760,6 +906,12 @@ fn decode_state_in_store(
             schema.flags.zf,
             schema.flags.sf,
             schema.flags.of,
+            schema.ecx,
+            schema.esi,
+            schema.edi,
+            schema.ebp,
+            schema.esp,
+            schema.eip,
         ])
         .map(|(field, expected)| decode_binding(store, field, expected))
         .collect::<Option<Vec<_>>>()?;
@@ -774,6 +926,12 @@ fn decode_state_in_store(
         zf: decode_flag_in_store(values[6], zero, one, schema.undefined)?,
         sf: decode_flag_in_store(values[7], zero, one, schema.undefined)?,
         of: decode_flag_in_store(values[8], zero, one, schema.undefined)?,
+        ecx: decode_word_in_store(store, zero, one, values[9])?,
+        esi: decode_word_in_store(store, zero, one, values[10])?,
+        edi: decode_word_in_store(store, zero, one, values[11])?,
+        ebp: decode_word_in_store(store, zero, one, values[12])?,
+        esp: decode_word_in_store(store, zero, one, values[13])?,
+        eip: decode_word_in_store(store, zero, one, values[14])?,
     })
 }
 
@@ -785,6 +943,12 @@ fn state_from_value(
     let eax = word_in_store(&mut f.store, f.zero, f.one, value.eax)?;
     let ebx = word_in_store(&mut f.store, f.zero, f.one, value.ebx)?;
     let edx = word_in_store(&mut f.store, f.zero, f.one, value.edx)?;
+    let ecx = word_in_store(&mut f.store, f.zero, f.one, value.ecx)?;
+    let esi = word_in_store(&mut f.store, f.zero, f.one, value.esi)?;
+    let edi = word_in_store(&mut f.store, f.zero, f.one, value.edi)?;
+    let ebp = word_in_store(&mut f.store, f.zero, f.one, value.ebp)?;
+    let esp = word_in_store(&mut f.store, f.zero, f.one, value.esp)?;
+    let eip = word_in_store(&mut f.store, f.zero, f.one, value.eip)?;
     let flag = |value: Option<u8>| -> Option<Handle> {
         match value {
             Some(0) => Some(f.zero),
@@ -805,6 +969,12 @@ fn state_from_value(
         flag(value.zf)?,
         flag(value.sf)?,
         flag(value.of)?,
+        ecx,
+        esi,
+        edi,
+        ebp,
+        esp,
+        eip,
     ))
 }
 
@@ -844,9 +1014,21 @@ pub(crate) struct WebArchitecturalStateOutcome {
     pub(crate) eax_before: u32,
     pub(crate) ebx_before: u32,
     pub(crate) edx_before: u32,
+    pub(crate) ecx_before: u32,
+    pub(crate) esi_before: u32,
+    pub(crate) edi_before: u32,
+    pub(crate) ebp_before: u32,
+    pub(crate) esp_before: u32,
+    pub(crate) eip_before: u32,
     pub(crate) eax_after: u32,
     pub(crate) ebx_after: u32,
     pub(crate) edx_after: u32,
+    pub(crate) ecx_after: u32,
+    pub(crate) esi_after: u32,
+    pub(crate) edi_after: u32,
+    pub(crate) ebp_after: u32,
+    pub(crate) esp_after: u32,
+    pub(crate) eip_after: u32,
     pub(crate) flags_defined_mask: u32,
     pub(crate) flags_value_mask: u32,
     pub(crate) flags_undefined_mask: u32,
@@ -865,7 +1047,14 @@ pub(crate) struct WebArchitecturalStateOutcome {
 ///
 /// The host chooses fixture inputs and independently decodes/checks the final
 /// state. It never constructs or injects the successor state.
-pub(crate) fn web_prove_architectural_state_add(
+#[derive(Clone, Copy, Debug)]
+enum AddStateTarget {
+    Eax,
+    Ecx,
+}
+
+fn web_prove_architectural_state_add_target(
+    target: AddStateTarget,
 ) -> Option<WebArchitecturalStateExecution> {
     let mut compiler = FullFixture::new();
 
@@ -882,10 +1071,16 @@ pub(crate) fn web_prove_architectural_state_add(
         return None;
     }
 
-    let before_value = StateValue {
-        eax: 0xffff_ffff,
+    let mut before_value = StateValue {
+        eax: 0x1020_3040,
         ebx: 0x1122_3344,
         edx: 0x5566_7788,
+        ecx: 0x0102_0304,
+        esi: 0x1111_2222,
+        edi: 0x3333_4444,
+        ebp: 0x5555_6666,
+        esp: 0x7777_8888,
+        eip: 0x0040_1000,
         cf: Some(0),
         pf: Some(0),
         af: Some(0),
@@ -893,17 +1088,27 @@ pub(crate) fn web_prove_architectural_state_add(
         sf: Some(1),
         of: Some(1),
     };
-    let expected = StateValue {
-        eax: 0,
-        ebx: before_value.ebx,
-        edx: before_value.edx,
-        cf: Some(1),
-        pf: Some(1),
-        af: Some(1),
-        zf: Some(1),
-        sf: Some(0),
-        of: Some(0),
+    let (target_handle, block) = match target {
+        AddStateTarget::Eax => {
+            before_value.eax = 0xffff_ffff;
+            (program.schema.eax, "M5A_STATE_ADD32")
+        }
+        AddStateTarget::Ecx => {
+            before_value.ecx = 0xffff_ffff;
+            (program.schema.ecx, "M5C_STATE_ADD_ECX")
+        }
     };
+    let mut expected = before_value;
+    match target {
+        AddStateTarget::Eax => expected.eax = 0,
+        AddStateTarget::Ecx => expected.ecx = 0,
+    }
+    expected.cf = Some(1);
+    expected.pf = Some(1);
+    expected.af = Some(1);
+    expected.zf = Some(1);
+    expected.sf = Some(0);
+    expected.of = Some(0);
 
     let before_state =
         state_from_value(&mut compiler, program.schema, before_value)?;
@@ -911,11 +1116,8 @@ pub(crate) fn web_prove_architectural_state_add(
         &mut compiler.store,
         program.schema,
         before_state,
-        program.schema.eax,
+        target_handle,
     );
-    // The real arithmetic program sees the continuation frame as its caller.
-    // Its final generic rule therefore produces frame -> ALU_EFFECT_RESULT,
-    // which is the exact trigger consumed by the state applier.
     let initial = compiler
         .store
         .ensure_pair(frame, alu.invocation)
@@ -954,6 +1156,36 @@ pub(crate) fn web_prove_architectural_state_add(
         ),
         semantic_source(
             &compiler.store,
+            "state.register.ecx",
+            program.schema.ecx,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.register.esi",
+            program.schema.esi,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.register.edi",
+            program.schema.edi,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.register.ebp",
+            program.schema.ebp,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.register.esp",
+            program.schema.esp,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.eip",
+            program.schema.eip,
+        ),
+        semantic_source(
+            &compiler.store,
             "state.flag.undefined",
             program.schema.undefined,
         ),
@@ -965,7 +1197,7 @@ pub(crate) fn web_prove_architectural_state_add(
         semantic_source(
             &compiler.store,
             "state.target",
-            program.schema.eax,
+            target_handle,
         ),
         semantic_source(
             &compiler.store,
@@ -1025,38 +1257,29 @@ pub(crate) fn web_prove_architectural_state_add(
     let initial = loaded_handle(&load, "scope.initial")?;
     let before_state =
         loaded_handle(&load, "state.before")?;
-    let state_tag =
-        loaded_handle(&load, "state.schema.tag")?;
-    let apply_state =
-        loaded_handle(&load, "state.apply.frame_tag")?;
-    let eax = loaded_handle(&load, "state.register.eax")?;
-    let ebx = loaded_handle(&load, "state.register.ebx")?;
-    let edx = loaded_handle(&load, "state.register.edx")?;
-    let undefined =
-        loaded_handle(&load, "state.flag.undefined")?;
-    let effect_result_tag =
-        loaded_handle(&load, "result.alu_effect_tag")?;
-    let zero = loaded_handle(&load, "data.bit.zero")?;
-    let one = loaded_handle(&load, "data.bit.one")?;
     let result_context =
         loaded_handle(&load, "context.result")?;
+    let zero = loaded_handle(&load, "data.bit.zero")?;
+    let one = loaded_handle(&load, "data.bit.one")?;
 
-    // Flag ids are canonical components of the same shared schema; locate
-    // them by the loaded carrier refs from the compiler schema.
     let loaded = |handle: Handle| -> Option<Handle> {
         (handle >= 1 && handle <= load.links_after_load)
             .then_some(handle)
     };
-    let wide_effect_result_tag =
-        loaded(program.schema.wide_effect_result_tag)?;
     let runtime_schema = ArchitecturalStateSchema {
-        state_tag,
-        apply_state,
+        state_tag: loaded(program.schema.state_tag)?,
+        apply_state: loaded(program.schema.apply_state)?,
         apply_wide_state: loaded(program.schema.apply_wide_state)?,
-        eax,
-        ebx,
-        edx,
-        undefined,
+        eax: loaded(program.schema.eax)?,
+        ebx: loaded(program.schema.ebx)?,
+        edx: loaded(program.schema.edx)?,
+        ecx: loaded(program.schema.ecx)?,
+        esi: loaded(program.schema.esi)?,
+        edi: loaded(program.schema.edi)?,
+        ebp: loaded(program.schema.ebp)?,
+        esp: loaded(program.schema.esp)?,
+        eip: loaded(program.schema.eip)?,
+        undefined: loaded(program.schema.undefined)?,
         flags: FlagPatchSchema {
             set_tag: loaded(program.schema.flags.set_tag)?,
             undefined_tag: loaded(program.schema.flags.undefined_tag)?,
@@ -1067,8 +1290,9 @@ pub(crate) fn web_prove_architectural_state_add(
             sf: loaded(program.schema.flags.sf)?,
             of: loaded(program.schema.flags.of)?,
         },
-        effect_result_tag,
-        wide_effect_result_tag,
+        effect_result_tag: loaded(program.schema.effect_result_tag)?,
+        wide_effect_result_tag:
+            loaded(program.schema.wide_effect_result_tag)?,
     };
 
     let max_steps = alu.active_steps as u32 + 3;
@@ -1085,9 +1309,6 @@ pub(crate) fn web_prove_architectural_state_add(
         return None;
     }
 
-    // Atomicity witness: every reaction keeps a one-member Scope. No
-    // architectural state is published during the ALU pipeline; the final
-    // active reaction publishes the complete successor in one handoff.
     let atomic_scope = execute.reactions.iter().all(|step| {
         step.scope_before.len() == 1 && step.scope_after.len() == 1
     });
@@ -1116,9 +1337,6 @@ pub(crate) fn web_prove_architectural_state_add(
     if state_tag_check != runtime_schema.state_tag {
         return None;
     }
-    // The arbitrary final Link is recursive Link wire. The state payload is
-    // a real ExactSequence and therefore legitimately supplies
-    // resultSequenceAnum.
     let result_recursive_wire =
         memory.store.export_anum(final_link).ok()?;
     let result_sequence_anum =
@@ -1132,14 +1350,31 @@ pub(crate) fn web_prove_architectural_state_add(
     )?;
     let visual_links = visual_snapshot(&memory, &load.semantic_roots);
 
+    let decoded_value = match target {
+        AddStateTarget::Eax => actual.eax,
+        AddStateTarget::Ecx => actual.ecx,
+    };
+    let decoded_value_hi = match target {
+        AddStateTarget::Eax => actual.ebx,
+        AddStateTarget::Ecx => actual.eip,
+    };
+    let oracle_value = match target {
+        AddStateTarget::Eax => expected.eax,
+        AddStateTarget::Ecx => expected.ecx,
+    };
+    let oracle_value_hi = match target {
+        AddStateTarget::Eax => expected.ebx,
+        AddStateTarget::Ecx => expected.eip,
+    };
+
     let result = WebProofResultStage {
         memory_instance_id: memory.id.clone(),
         result_anum: result_recursive_wire,
         result_sequence_anum,
-        decoded_value: actual.eax,
-        decoded_value_hi: Some(actual.ebx),
-        oracle_value: expected.eax,
-        oracle_value_hi: Some(expected.ebx),
+        decoded_value,
+        decoded_value_hi: Some(decoded_value_hi),
+        oracle_value,
+        oracle_value_hi: Some(oracle_value_hi),
         oracle_matches: actual == expected,
         links_final: memory.store.link_count() as u32,
         identical_rerun_link_delta,
@@ -1147,7 +1382,7 @@ pub(crate) fn web_prove_architectural_state_add(
     };
     let proof = WebStructuralProof {
         schema_version: 4,
-        block: "M5A_STATE_ADD32".to_owned(),
+        block: block.to_owned(),
         prepare,
         load,
         execute,
@@ -1160,9 +1395,21 @@ pub(crate) fn web_prove_architectural_state_add(
             eax_before: before_value.eax,
             ebx_before: before_value.ebx,
             edx_before: before_value.edx,
+            ecx_before: before_value.ecx,
+            esi_before: before_value.esi,
+            edi_before: before_value.edi,
+            ebp_before: before_value.ebp,
+            esp_before: before_value.esp,
+            eip_before: before_value.eip,
             eax_after: actual.eax,
             ebx_after: actual.ebx,
             edx_after: actual.edx,
+            ecx_after: actual.ecx,
+            esi_after: actual.esi,
+            edi_after: actual.edi,
+            ebp_after: actual.ebp,
+            esp_after: actual.esp,
+            eip_after: actual.eip,
             flags_defined_mask: defined,
             flags_value_mask: values,
             flags_undefined_mask: undefined_mask,
@@ -1174,6 +1421,16 @@ pub(crate) fn web_prove_architectural_state_add(
         },
         proof,
     })
+}
+
+pub(crate) fn web_prove_architectural_state_add(
+) -> Option<WebArchitecturalStateExecution> {
+    web_prove_architectural_state_add_target(AddStateTarget::Eax)
+}
+
+pub(crate) fn web_prove_architectural_state_add_ecx(
+) -> Option<WebArchitecturalStateExecution> {
+    web_prove_architectural_state_add_target(AddStateTarget::Ecx)
 }
 
 
@@ -1204,6 +1461,12 @@ pub(crate) fn web_prove_architectural_state_mul(
         eax: 0xffff_ffff,
         ebx: 0x1122_3344,
         edx: 0xa5a5_5a5a,
+        ecx: 0x0102_0304,
+        esi: 0x1111_2222,
+        edi: 0x3333_4444,
+        ebp: 0x5555_6666,
+        esp: 0x7777_8888,
+        eip: 0x0040_1000,
         cf: Some(0),
         pf: Some(0),
         af: Some(1),
@@ -1215,6 +1478,12 @@ pub(crate) fn web_prove_architectural_state_mul(
         eax: 0xffff_fffe,
         ebx: before_value.ebx,
         edx: 0x0000_0001,
+        ecx: before_value.ecx,
+        esi: before_value.esi,
+        edi: before_value.edi,
+        ebp: before_value.ebp,
+        esp: before_value.esp,
+        eip: before_value.eip,
         cf: Some(1),
         pf: None,
         af: None,
@@ -1267,6 +1536,36 @@ pub(crate) fn web_prove_architectural_state_mul(
             &compiler.store,
             "state.register.edx",
             program.schema.edx,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.register.ecx",
+            program.schema.ecx,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.register.esi",
+            program.schema.esi,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.register.edi",
+            program.schema.edi,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.register.ebp",
+            program.schema.ebp,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.register.esp",
+            program.schema.esp,
+        ),
+        semantic_source(
+            &compiler.store,
+            "state.eip",
+            program.schema.eip,
         ),
         semantic_source(
             &compiler.store,
@@ -1362,6 +1661,12 @@ pub(crate) fn web_prove_architectural_state_mul(
         eax: loaded(program.schema.eax)?,
         ebx: loaded(program.schema.ebx)?,
         edx: loaded(program.schema.edx)?,
+        ecx: loaded(program.schema.ecx)?,
+        esi: loaded(program.schema.esi)?,
+        edi: loaded(program.schema.edi)?,
+        ebp: loaded(program.schema.ebp)?,
+        esp: loaded(program.schema.esp)?,
+        eip: loaded(program.schema.eip)?,
         undefined: loaded(program.schema.undefined)?,
         flags: FlagPatchSchema {
             set_tag: loaded(program.schema.flags.set_tag)?,
@@ -1461,9 +1766,21 @@ pub(crate) fn web_prove_architectural_state_mul(
             eax_before: before_value.eax,
             ebx_before: before_value.ebx,
             edx_before: before_value.edx,
+            ecx_before: before_value.ecx,
+            esi_before: before_value.esi,
+            edi_before: before_value.edi,
+            ebp_before: before_value.ebp,
+            esp_before: before_value.esp,
+            eip_before: before_value.eip,
             eax_after: actual.eax,
             ebx_after: actual.ebx,
             edx_after: actual.edx,
+            ecx_after: actual.ecx,
+            esi_after: actual.esi,
+            edi_after: actual.edi,
+            ebp_after: actual.ebp,
+            esp_after: actual.esp,
+            eip_after: actual.eip,
             flags_defined_mask: defined,
             flags_value_mask: values,
             flags_undefined_mask: undefined_mask,
@@ -1505,6 +1822,12 @@ mod tests {
         let eax = word(f, value.eax);
         let ebx = word(f, value.ebx);
         let edx = word(f, value.edx);
+        let ecx = word(f, value.ecx);
+        let esi = word(f, value.esi);
+        let edi = word(f, value.edi);
+        let ebp = word(f, value.ebp);
+        let esp = word(f, value.esp);
+        let eip = word(f, value.eip);
         let cf = flag_value(f, p, value.cf);
         let pf = flag_value(f, p, value.pf);
         let af = flag_value(f, p, value.af);
@@ -1523,6 +1846,12 @@ mod tests {
             zf,
             sf,
             of,
+            ecx,
+            esi,
+            edi,
+            ebp,
+            esp,
+            eip,
         )
     }
 
@@ -1756,6 +2085,12 @@ mod tests {
             eax: 0x1122_3344,
             ebx: 0xaabb_ccdd,
             edx: 0x5566_7788,
+            ecx: 0x0102_0304,
+            esi: 0x1111_2222,
+            edi: 0x3333_4444,
+            ebp: 0x5555_6666,
+            esp: 0x7777_8888,
+            eip: 0x0040_1000,
             cf: Some(1),
             pf: Some(0),
             af: Some(1),
@@ -1763,6 +2098,152 @@ mod tests {
             sf: Some(1),
             of: Some(0),
         }
+    }
+
+    #[test]
+    fn m5c_real_add_pipeline_updates_ecx_and_preserves_full_state() {
+        let execution = web_prove_architectural_state_add_ecx().unwrap();
+        assert_eq!(execution.outcome.ecx_before, 0xffff_ffff);
+        assert_eq!(execution.outcome.ecx_after, 0);
+        assert_eq!(execution.outcome.eax_before, 0x1020_3040);
+        assert_eq!(execution.outcome.eax_after, execution.outcome.eax_before);
+        assert_eq!(execution.outcome.ebx_after, execution.outcome.ebx_before);
+        assert_eq!(execution.outcome.edx_after, execution.outcome.edx_before);
+        assert_eq!(execution.outcome.esi_after, execution.outcome.esi_before);
+        assert_eq!(execution.outcome.edi_after, execution.outcome.edi_before);
+        assert_eq!(execution.outcome.ebp_after, execution.outcome.ebp_before);
+        assert_eq!(execution.outcome.esp_after, execution.outcome.esp_before);
+        assert_eq!(execution.outcome.eip_after, execution.outcome.eip_before);
+        assert_eq!(execution.outcome.flags_defined_mask, 0x0000_08d5);
+        assert_eq!(execution.outcome.flags_value_mask, 0x0000_0055);
+        assert_eq!(execution.outcome.flags_undefined_mask, 0);
+        assert_eq!(execution.outcome.old_state_retained, 1);
+        assert_eq!(execution.outcome.atomic_scope, 1);
+        assert_eq!(execution.outcome.steady_link_delta, 0);
+        assert_eq!(execution.outcome.quiescent, 1);
+        assert_eq!(execution.proof.block, "M5C_STATE_ADD_ECX");
+        assert!(execution.proof.result.oracle_matches);
+        assert_eq!(execution.proof.result.decoded_value, 0);
+        assert_eq!(
+            execution.proof.result.decoded_value_hi,
+            Some(execution.outcome.eip_after)
+        );
+        assert!(execution.proof.execute.reactions.iter().all(|step| {
+            step.scope_before.len() == 1 && step.scope_after.len() == 1
+        }));
+    }
+
+    #[test]
+    fn m5c_state_payload_preserves_m5_prefix_and_appends_new_slots() {
+        let mut f = FullFixture::new();
+        let p = ArchitecturalStateProgram::install(&mut f);
+        let state = make_state(&mut f, &p, initial());
+        let (tag, payload) = f.store.poles(state).unwrap();
+        assert_eq!(tag, p.schema.state_tag);
+        let fields = read_exact_sequence(&f.store, payload).unwrap();
+        assert_eq!(fields.len(), 15);
+
+        let expected_ids = [
+            p.schema.eax,
+            p.schema.ebx,
+            p.schema.edx,
+            p.schema.flags.cf,
+            p.schema.flags.pf,
+            p.schema.flags.af,
+            p.schema.flags.zf,
+            p.schema.flags.sf,
+            p.schema.flags.of,
+            p.schema.ecx,
+            p.schema.esi,
+            p.schema.edi,
+            p.schema.ebp,
+            p.schema.esp,
+            p.schema.eip,
+        ];
+        for (field, expected_id) in fields.into_iter().zip(expected_ids) {
+            let (id, _value) = f.store.poles(field).unwrap();
+            assert_eq!(id, expected_id);
+        }
+    }
+
+    #[test]
+    fn m5c_single_effect_targets_all_gprs_but_not_eip() {
+        let targets = |p: &ArchitecturalStateProgram| [
+            p.schema.eax,
+            p.schema.ebx,
+            p.schema.ecx,
+            p.schema.edx,
+            p.schema.esi,
+            p.schema.edi,
+            p.schema.ebp,
+            p.schema.esp,
+        ];
+
+        for target_index in 0..8 {
+            let mut f = FullFixture::new();
+            let p = ArchitecturalStateProgram::install(&mut f);
+            let old_value = initial();
+            let old = make_state(&mut f, &p, old_value);
+            let effect = make_full_effect(
+                &mut f,
+                &p,
+                1,
+                0xdead_beef,
+                [0, 1, 0, 1, 0, 1],
+            );
+            let target = targets(&p)[target_index];
+            let next =
+                transition(&mut f, &p, old, target, effect).unwrap();
+            let actual = decode_state(&f, p.schema, next).unwrap();
+
+            let expected_registers = [
+                actual.eax,
+                actual.ebx,
+                actual.ecx,
+                actual.edx,
+                actual.esi,
+                actual.edi,
+                actual.ebp,
+                actual.esp,
+            ];
+            let old_registers = [
+                old_value.eax,
+                old_value.ebx,
+                old_value.ecx,
+                old_value.edx,
+                old_value.esi,
+                old_value.edi,
+                old_value.ebp,
+                old_value.esp,
+            ];
+            for (index, value) in expected_registers.into_iter().enumerate() {
+                assert_eq!(
+                    value,
+                    if index == target_index {
+                        0xdead_beef
+                    } else {
+                        old_registers[index]
+                    },
+                    "target index {target_index}, register index {index}"
+                );
+            }
+            assert_eq!(actual.eip, old_value.eip);
+        }
+
+        let mut f = FullFixture::new();
+        let p = ArchitecturalStateProgram::install(&mut f);
+        let old = make_state(&mut f, &p, initial());
+        let effect = make_full_effect(
+            &mut f,
+            &p,
+            1,
+            0xdead_beef,
+            [0, 1, 0, 1, 0, 1],
+        );
+        assert!(
+            transition(&mut f, &p, old, p.schema.eip, effect).is_none(),
+            "EIP is structural state but not an ordinary ALU destination"
+        );
     }
 
     #[test]
@@ -1795,6 +2276,12 @@ mod tests {
                 eax: 0xffff_fffe,
                 ebx: old_value.ebx,
                 edx: 0x0000_0001,
+                ecx: old_value.ecx,
+                esi: old_value.esi,
+                edi: old_value.edi,
+                ebp: old_value.ebp,
+                esp: old_value.esp,
+                eip: old_value.eip,
                 cf: Some(1),
                 pf: None,
                 af: None,
@@ -1947,9 +2434,13 @@ mod tests {
         assert_eq!(execution.outcome.eax_before, 0xffff_ffff);
         assert_eq!(execution.outcome.edx_before, 0xa5a5_5a5a);
         assert_eq!(execution.outcome.ebx_before, 0x1122_3344);
+        assert_eq!(execution.outcome.ecx_before, 0x0102_0304);
+        assert_eq!(execution.outcome.eip_before, 0x0040_1000);
         assert_eq!(execution.outcome.eax_after, 0xffff_fffe);
         assert_eq!(execution.outcome.edx_after, 0x0000_0001);
         assert_eq!(execution.outcome.ebx_after, 0x1122_3344);
+        assert_eq!(execution.outcome.ecx_after, execution.outcome.ecx_before);
+        assert_eq!(execution.outcome.eip_after, execution.outcome.eip_before);
         assert_eq!(execution.outcome.flags_defined_mask, 0x0000_0801);
         assert_eq!(execution.outcome.flags_value_mask, 0x0000_0801);
         assert_eq!(execution.outcome.flags_undefined_mask, 0x0000_00d4);
@@ -1974,6 +2465,10 @@ mod tests {
         assert_eq!(execution.outcome.ebx_after, 0x1122_3344);
         assert_eq!(execution.outcome.edx_before, 0x5566_7788);
         assert_eq!(execution.outcome.edx_after, 0x5566_7788);
+        assert_eq!(execution.outcome.ecx_before, 0x0102_0304);
+        assert_eq!(execution.outcome.ecx_after, execution.outcome.ecx_before);
+        assert_eq!(execution.outcome.eip_before, 0x0040_1000);
+        assert_eq!(execution.outcome.eip_after, execution.outcome.eip_before);
         assert_eq!(execution.outcome.flags_defined_mask, 0x0000_08d5);
         assert_eq!(execution.outcome.flags_value_mask, 0x0000_0055);
         assert_eq!(execution.outcome.flags_undefined_mask, 0);
@@ -2009,6 +2504,12 @@ mod tests {
                 eax: 0x5566_7788,
                 ebx: 0xaabb_ccdd,
                 edx: 0x5566_7788,
+                ecx: 0x0102_0304,
+                esi: 0x1111_2222,
+                edi: 0x3333_4444,
+                ebp: 0x5555_6666,
+                esp: 0x7777_8888,
+                eip: 0x0040_1000,
                 cf: Some(0),
                 pf: Some(1),
                 af: Some(0),
