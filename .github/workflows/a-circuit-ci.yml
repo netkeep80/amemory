@@ -3,12 +3,16 @@ name: A-Circuit consolidated CI
 on:
   pull_request:
     paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
       - "experiments/a-circuit/**"
       - "experiments/optimized-cpu-rust/**"
       - ".github/workflows/a-circuit-ci.yml"
   push:
     branches: [main]
     paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
       - "experiments/a-circuit/**"
       - "experiments/optimized-cpu-rust/**"
       - ".github/workflows/a-circuit-ci.yml"
