@@ -11,6 +11,9 @@ pub const ROOT_HANDLE: Handle = 1;
 pub const PACKED_CARRIER_SCHEMA_VERSION: u32 = 1;
 pub const PACKED_INCIDENCE_INDEX_SCHEMA_VERSION: u32 = 1;
 pub const PACKED_BINARY_INCIDENCE_INDEX_SCHEMA_VERSION: u32 = 1;
+pub const PACKED_GPU_CARRIER_SCHEMA_VERSION: u32 = 1;
+pub const PACKED_GPU_CARRIER_MAGIC: u32 = 0x414D_4750;
+const PACKED_GPU_CARRIER_HEADER_WORDS: usize = 16;
 const NO_HANDLE: Handle = 0;
 static NEXT_STORE_INSTANCE_ID: AtomicU32 = AtomicU32::new(1);
 
@@ -83,6 +86,20 @@ pub enum StoreError {
         end_right: usize,
     },
     InvalidPackedBinaryIncidenceIndex,
+    PackedGpuCarrierTooShort {
+        minimum: usize,
+        actual: usize,
+    },
+    InvalidPackedGpuCarrierMagic {
+        expected: u32,
+        actual: u32,
+    },
+    UnsupportedPackedGpuCarrierSchema(u32),
+    PackedGpuCarrierLengthMismatch {
+        expected: usize,
+        actual: usize,
+    },
+    InvalidPackedGpuCarrierLayout,
     InvalidPackedCarrierRoot {
         expected: Handle,
         actual: Handle,
@@ -396,6 +413,337 @@ impl PackedIncidenceIndexImage {
             return Err(StoreError::InvalidPackedIncidenceIndex);
         }
         Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PackedGpuCarrierLayout {
+    link_count: usize,
+    starts_offset: usize,
+    ends_offset: usize,
+    start_head_offset: usize,
+    end_head_offset: usize,
+    next_by_start_offset: usize,
+    next_by_end_offset: usize,
+    total_words: usize,
+}
+
+impl PackedGpuCarrierLayout {
+    fn for_link_count(link_count: usize) -> Result<Self, StoreError> {
+        let starts_offset = PACKED_GPU_CARRIER_HEADER_WORDS;
+        let ends_offset = starts_offset
+            .checked_add(link_count)
+            .ok_or(StoreError::CapacityExceeded)?;
+        let index_len = link_count
+            .checked_add(1)
+            .ok_or(StoreError::CapacityExceeded)?;
+        let start_head_offset = ends_offset
+            .checked_add(link_count)
+            .ok_or(StoreError::CapacityExceeded)?;
+        let end_head_offset = start_head_offset
+            .checked_add(index_len)
+            .ok_or(StoreError::CapacityExceeded)?;
+        let next_by_start_offset = end_head_offset
+            .checked_add(index_len)
+            .ok_or(StoreError::CapacityExceeded)?;
+        let next_by_end_offset = next_by_start_offset
+            .checked_add(index_len)
+            .ok_or(StoreError::CapacityExceeded)?;
+        let total_words = next_by_end_offset
+            .checked_add(index_len)
+            .ok_or(StoreError::CapacityExceeded)?;
+
+        for value in [
+            link_count,
+            starts_offset,
+            ends_offset,
+            start_head_offset,
+            end_head_offset,
+            next_by_start_offset,
+            next_by_end_offset,
+            total_words,
+        ] {
+            u32::try_from(value).map_err(|_| StoreError::CapacityExceeded)?;
+        }
+
+        Ok(Self {
+            link_count,
+            starts_offset,
+            ends_offset,
+            start_head_offset,
+            end_head_offset,
+            next_by_start_offset,
+            next_by_end_offset,
+            total_words,
+        })
+    }
+
+    pub fn link_count(&self) -> usize {
+        self.link_count
+    }
+
+    pub fn starts_offset(&self) -> usize {
+        self.starts_offset
+    }
+
+    pub fn ends_offset(&self) -> usize {
+        self.ends_offset
+    }
+
+    pub fn start_head_offset(&self) -> usize {
+        self.start_head_offset
+    }
+
+    pub fn end_head_offset(&self) -> usize {
+        self.end_head_offset
+    }
+
+    pub fn next_by_start_offset(&self) -> usize {
+        self.next_by_start_offset
+    }
+
+    pub fn next_by_end_offset(&self) -> usize {
+        self.next_by_end_offset
+    }
+
+    pub fn total_words(&self) -> usize {
+        self.total_words
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PackedGpuCarrierImage {
+    words: Vec<u32>,
+}
+
+impl PackedGpuCarrierImage {
+    fn from_slices(
+        starts: &[Handle],
+        ends: &[Handle],
+        start_head: &[Handle],
+        end_head: &[Handle],
+        next_by_start: &[Handle],
+        next_by_end: &[Handle],
+    ) -> Result<Self, StoreError> {
+        if starts.len() != ends.len() {
+            return Err(StoreError::PackedCarrierLengthMismatch {
+                starts: starts.len(),
+                ends: ends.len(),
+            });
+        }
+        let layout = PackedGpuCarrierLayout::for_link_count(starts.len())?;
+        let index_len = starts
+            .len()
+            .checked_add(1)
+            .ok_or(StoreError::CapacityExceeded)?;
+        if start_head.len() != index_len
+            || end_head.len() != index_len
+            || next_by_start.len() != index_len
+            || next_by_end.len() != index_len
+        {
+            return Err(StoreError::PackedIncidenceIndexLengthMismatch {
+                expected: index_len,
+                start_head: start_head.len(),
+                end_head: end_head.len(),
+                next_by_start: next_by_start.len(),
+                next_by_end: next_by_end.len(),
+            });
+        }
+
+        let mut words = vec![0u32; layout.total_words];
+        words[0] = PACKED_GPU_CARRIER_MAGIC;
+        words[1] = PACKED_GPU_CARRIER_SCHEMA_VERSION;
+        words[2] = PACKED_CARRIER_SCHEMA_VERSION;
+        words[3] = PACKED_INCIDENCE_INDEX_SCHEMA_VERSION;
+        words[4] = layout.link_count as u32;
+        words[5] = ROOT_HANDLE;
+        words[6] = layout.starts_offset as u32;
+        words[7] = layout.ends_offset as u32;
+        words[8] = layout.start_head_offset as u32;
+        words[9] = layout.end_head_offset as u32;
+        words[10] = layout.next_by_start_offset as u32;
+        words[11] = layout.next_by_end_offset as u32;
+        words[12] = layout.total_words as u32;
+        words[13] = 0; // flags
+        words[14] = 0; // reserved
+        words[15] = 0; // reserved
+
+        words[layout.starts_offset..layout.ends_offset]
+            .copy_from_slice(starts);
+        words[layout.ends_offset..layout.start_head_offset]
+            .copy_from_slice(ends);
+        words[layout.start_head_offset..layout.end_head_offset]
+            .copy_from_slice(start_head);
+        words[layout.end_head_offset..layout.next_by_start_offset]
+            .copy_from_slice(end_head);
+        words[layout.next_by_start_offset..layout.next_by_end_offset]
+            .copy_from_slice(next_by_start);
+        words[layout.next_by_end_offset..layout.total_words]
+            .copy_from_slice(next_by_end);
+
+        // Callers reaching this private constructor have already supplied
+        // a validated execution projection/component pair. Do not decode the
+        // just-built word buffer back into fresh Vecs here: C4a's purpose is
+        // one final contiguous CPU projection before upload, not a second
+        // topology reconstruction pass.
+        Ok(Self { words })
+    }
+
+    pub fn from_execution_ref(
+        view: PackedExecutionRef<'_>,
+    ) -> Result<Self, StoreError> {
+        Self::from_slices(
+            view.starts,
+            view.ends,
+            view.start_head,
+            view.end_head,
+            view.next_by_start,
+            view.next_by_end,
+        )
+    }
+
+    pub fn from_components(
+        carrier: &PackedCarrierImage,
+        incidence: &PackedIncidenceIndexImage,
+    ) -> Result<Self, StoreError> {
+        carrier.validate()?;
+        incidence.validate_against(carrier)?;
+        Self::from_slices(
+            carrier.starts(),
+            carrier.ends(),
+            incidence.start_heads(),
+            incidence.end_heads(),
+            incidence.next_by_start(),
+            incidence.next_by_end(),
+        )
+    }
+
+    pub fn from_carrier(
+        carrier: &PackedCarrierImage,
+    ) -> Result<Self, StoreError> {
+        let incidence = PackedIncidenceIndexImage::from_carrier(carrier)?;
+        Self::from_components(carrier, &incidence)
+    }
+
+    pub fn from_words(words: Vec<u32>) -> Result<Self, StoreError> {
+        let image = Self { words };
+        image.validate()?;
+        Ok(image)
+    }
+
+    pub fn words(&self) -> &[u32] {
+        &self.words
+    }
+
+    pub fn word_len(&self) -> usize {
+        self.words.len()
+    }
+
+    pub fn byte_len(&self) -> usize {
+        self.words.len().saturating_mul(std::mem::size_of::<u32>())
+    }
+
+    pub fn layout(&self) -> Result<PackedGpuCarrierLayout, StoreError> {
+        self.validate_header()
+    }
+
+    fn validate_header(&self) -> Result<PackedGpuCarrierLayout, StoreError> {
+        if self.words.len() < PACKED_GPU_CARRIER_HEADER_WORDS {
+            return Err(StoreError::PackedGpuCarrierTooShort {
+                minimum: PACKED_GPU_CARRIER_HEADER_WORDS,
+                actual: self.words.len(),
+            });
+        }
+        if self.words[0] != PACKED_GPU_CARRIER_MAGIC {
+            return Err(StoreError::InvalidPackedGpuCarrierMagic {
+                expected: PACKED_GPU_CARRIER_MAGIC,
+                actual: self.words[0],
+            });
+        }
+        if self.words[1] != PACKED_GPU_CARRIER_SCHEMA_VERSION {
+            return Err(StoreError::UnsupportedPackedGpuCarrierSchema(
+                self.words[1],
+            ));
+        }
+        if self.words[2] != PACKED_CARRIER_SCHEMA_VERSION {
+            return Err(StoreError::UnsupportedPackedCarrierSchema(
+                self.words[2],
+            ));
+        }
+        if self.words[3] != PACKED_INCIDENCE_INDEX_SCHEMA_VERSION {
+            return Err(StoreError::UnsupportedPackedIncidenceIndexSchema(
+                self.words[3],
+            ));
+        }
+        if self.words[5] != ROOT_HANDLE {
+            return Err(StoreError::InvalidPackedCarrierRoot {
+                expected: ROOT_HANDLE,
+                actual: self.words[5],
+            });
+        }
+        if self.words[13] != 0 || self.words[14] != 0 || self.words[15] != 0 {
+            return Err(StoreError::InvalidPackedGpuCarrierLayout);
+        }
+
+        let link_count = self.words[4] as usize;
+        let layout = PackedGpuCarrierLayout::for_link_count(link_count)?;
+        let encoded = [
+            self.words[6] as usize,
+            self.words[7] as usize,
+            self.words[8] as usize,
+            self.words[9] as usize,
+            self.words[10] as usize,
+            self.words[11] as usize,
+            self.words[12] as usize,
+        ];
+        let expected = [
+            layout.starts_offset,
+            layout.ends_offset,
+            layout.start_head_offset,
+            layout.end_head_offset,
+            layout.next_by_start_offset,
+            layout.next_by_end_offset,
+            layout.total_words,
+        ];
+        if encoded != expected {
+            return Err(StoreError::InvalidPackedGpuCarrierLayout);
+        }
+        if self.words.len() != layout.total_words {
+            return Err(StoreError::PackedGpuCarrierLengthMismatch {
+                expected: layout.total_words,
+                actual: self.words.len(),
+            });
+        }
+        Ok(layout)
+    }
+
+    pub fn decode_components(
+        &self,
+    ) -> Result<(PackedCarrierImage, PackedIncidenceIndexImage), StoreError> {
+        let layout = self.validate_header()?;
+        let starts = self.words[layout.starts_offset..layout.ends_offset].to_vec();
+        let ends = self.words[layout.ends_offset..layout.start_head_offset].to_vec();
+
+        let carrier = PackedCarrierImage::from_parts(
+            PACKED_CARRIER_SCHEMA_VERSION,
+            ROOT_HANDLE,
+            starts,
+            ends,
+        )?;
+
+        let incidence = PackedIncidenceIndexImage::from_parts(
+            PACKED_INCIDENCE_INDEX_SCHEMA_VERSION,
+            &carrier,
+            self.words[layout.start_head_offset..layout.end_head_offset].to_vec(),
+            self.words[layout.end_head_offset..layout.next_by_start_offset].to_vec(),
+            self.words[layout.next_by_start_offset..layout.next_by_end_offset].to_vec(),
+            self.words[layout.next_by_end_offset..layout.total_words].to_vec(),
+        )?;
+        Ok((carrier, incidence))
+    }
+
+    pub fn validate(&self) -> Result<(), StoreError> {
+        self.decode_components().map(|_| ())
     }
 }
 
@@ -1173,6 +1521,15 @@ impl OptimizedLinkStore {
             &self.next_by_start,
             &self.next_by_end,
         )
+    }
+
+    /// Flattens the current dense execution topology into the C4a contiguous
+    /// GPU u32-word ABI in one final CPU-side projection.
+    pub fn export_packed_gpu_carrier_image(
+        &self,
+    ) -> PackedGpuCarrierImage {
+        PackedGpuCarrierImage::from_execution_ref(self.packed_execution_ref())
+            .expect("canonical store must always export a valid GPU carrier")
     }
 
     /// Atomically loads a typed packed carrier image without parsing recursive
@@ -2250,6 +2607,86 @@ mod tests {
         wrong_chain.start_head[ROOT_HANDLE as usize] = NO_HANDLE;
         assert_eq!(
             wrong_chain.validate_against(&carrier),
+            Err(StoreError::InvalidPackedIncidenceIndex)
+        );
+    }
+
+    #[test]
+    fn packed_gpu_carrier_word_abi_round_trips_exact_components() {
+        let mut store = OptimizedLinkStore::new();
+        let o = store.import_anum("98").unwrap();
+        let c = store.import_anum("68").unwrap();
+        let l = store.ensure_pair(o, c).unwrap();
+        let _top = store.ensure_pair(ROOT_HANDLE, l).unwrap();
+
+        let direct = store.export_packed_gpu_carrier_image();
+        let carrier = store.export_packed_carrier_image();
+        let incidence = store.export_packed_incidence_index_image();
+        let composed =
+            PackedGpuCarrierImage::from_components(&carrier, &incidence).unwrap();
+
+        assert_eq!(direct, composed);
+        direct.validate().unwrap();
+
+        let layout = direct.layout().unwrap();
+        assert_eq!(layout.link_count(), store.link_count());
+        assert_eq!(layout.starts_offset(), PACKED_GPU_CARRIER_HEADER_WORDS);
+        assert_eq!(layout.total_words(), direct.word_len());
+        assert_eq!(direct.byte_len(), direct.word_len() * 4);
+
+        let reparsed =
+            PackedGpuCarrierImage::from_words(direct.words().to_vec()).unwrap();
+        assert_eq!(reparsed, direct);
+
+        let (decoded_carrier, decoded_incidence) =
+            reparsed.decode_components().unwrap();
+        assert_eq!(decoded_carrier, carrier);
+        assert_eq!(decoded_incidence, incidence);
+    }
+
+    #[test]
+    fn packed_gpu_carrier_word_abi_fails_closed_on_header_or_payload_corruption() {
+        let mut store = OptimizedLinkStore::new();
+        let o = store.import_anum("98").unwrap();
+        let c = store.import_anum("68").unwrap();
+        let _pair = store.ensure_pair(o, c).unwrap();
+        let image = store.export_packed_gpu_carrier_image();
+
+        let mut bad_magic = image.words().to_vec();
+        bad_magic[0] ^= 1;
+        assert!(matches!(
+            PackedGpuCarrierImage::from_words(bad_magic),
+            Err(StoreError::InvalidPackedGpuCarrierMagic { .. })
+        ));
+
+        let mut bad_schema = image.words().to_vec();
+        bad_schema[1] += 1;
+        assert_eq!(
+            PackedGpuCarrierImage::from_words(bad_schema),
+            Err(StoreError::UnsupportedPackedGpuCarrierSchema(
+                PACKED_GPU_CARRIER_SCHEMA_VERSION + 1
+            ))
+        );
+
+        let mut bad_offset = image.words().to_vec();
+        bad_offset[7] += 1;
+        assert_eq!(
+            PackedGpuCarrierImage::from_words(bad_offset),
+            Err(StoreError::InvalidPackedGpuCarrierLayout)
+        );
+
+        let layout = image.layout().unwrap();
+        let mut bad_topology = image.words().to_vec();
+        bad_topology[layout.starts_offset() + 1] = u32::MAX;
+        assert!(matches!(
+            PackedGpuCarrierImage::from_words(bad_topology),
+            Err(StoreError::InvalidPackedCarrier { .. })
+        ));
+
+        let mut bad_index = image.words().to_vec();
+        bad_index[layout.start_head_offset() + ROOT_HANDLE as usize] = NO_HANDLE;
+        assert_eq!(
+            PackedGpuCarrierImage::from_words(bad_index),
             Err(StoreError::InvalidPackedIncidenceIndex)
         );
     }

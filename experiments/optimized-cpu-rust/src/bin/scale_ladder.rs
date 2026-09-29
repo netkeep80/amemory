@@ -1,6 +1,7 @@
 use amemory_optimized_cpu_probe::{
     OptimizedLinkStore, OptimizedReactionEngine,
-    PackedBinaryIncidenceIndexImage, PackedIncidenceIndexImage, ROOT_HANDLE,
+    PackedBinaryIncidenceIndexImage, PackedGpuCarrierImage,
+    PackedIncidenceIndexImage, ROOT_HANDLE,
 };
 use std::hint::black_box;
 use std::time::Instant;
@@ -165,6 +166,14 @@ fn storage_scale(size: usize, probes: usize) {
         + binary.start_right().len()
         + binary.end_left().len()
         + binary.end_right().len();
+    drop(binary);
+
+    let gpu_carrier_started = Instant::now();
+    let gpu_carrier = store.export_packed_gpu_carrier_image();
+    let gpu_carrier_elapsed = gpu_carrier_started.elapsed();
+    let parsed_gpu_carrier =
+        PackedGpuCarrierImage::from_words(gpu_carrier.words().to_vec()).unwrap();
+    assert_eq!(parsed_gpu_carrier.word_len(), gpu_carrier.word_len());
 
     println!("OPT_CPU_SCALE_MODE=storage");
     println!("OPT_CPU_SCALE_LINKS={}", store.link_count());
@@ -220,6 +229,18 @@ fn storage_scale(size: usize, probes: usize) {
     );
     println!("OPT_CPU_SCALE_INTRUSIVE_INDEX_WORDS={intrusive_words}");
     println!("OPT_CPU_SCALE_BINARY_INDEX_WORDS={binary_words}");
+    println!(
+        "OPT_CPU_SCALE_GPU_CARRIER_BUILD_NS_PER_LINK={}",
+        gpu_carrier_elapsed.as_nanos() / store.link_count().max(1) as u128
+    );
+    println!(
+        "OPT_CPU_SCALE_GPU_CARRIER_WORDS={}",
+        gpu_carrier.word_len()
+    );
+    println!(
+        "OPT_CPU_SCALE_GPU_CARRIER_BYTES={}",
+        gpu_carrier.byte_len()
+    );
     if let Some(rss) = linux_memory_kb("VmRSS:") {
         println!("OPT_CPU_SCALE_RSS_KB={rss}");
     }
