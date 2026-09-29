@@ -9,14 +9,92 @@ use super::{
     },
 };
 use serde::{Deserialize, Serialize};
-use std::sync::Mutex;
+use std::{
+    io::{self, Write},
+    sync::Mutex,
+};
 
 const SCENARIO_TRANSPORT_SCHEMA_VERSION: u32 = 1;
 const MAX_SCENARIO_MANIFEST_BYTES: usize = 1024 * 1024;
+const MAX_SCENARIO_REPORT_BYTES: usize = 8 * 1024 * 1024;
+const MAX_SCENARIO_ERROR_BYTES: usize = 512 * 1024;
+const SCENARIO_LIMITS_JSON: &str =
+    "{\"schemaVersion\":1,\"maxManifestBytes\":1048576,\"maxSingleReportBytes\":8388608,\"maxErrorBytes\":524288,\"maxRetainedReports\":1,\"maxRetainedErrors\":1,\"retentionMode\":\"LATEST\",\"liveSessionRetained\":false}";
+const FALLBACK_ERROR_LIMIT_JSON: &str =
+    "{\"code\":\"ERROR_LIMIT\",\"schemaVersion\":1,\"maxBytes\":524288}";
 
 static SCENARIO_MANIFEST_BYTES: Mutex<Vec<u8>> = Mutex::new(Vec::new());
 static SCENARIO_REPORT_JSON: Mutex<String> = Mutex::new(String::new());
 static SCENARIO_ERROR_JSON: Mutex<String> = Mutex::new(String::new());
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ScenarioTransportLimitsV1 {
+    schema_version: u32,
+    max_manifest_bytes: u32,
+    max_single_report_bytes: u32,
+    max_error_bytes: u32,
+    max_retained_reports: u32,
+    max_retained_errors: u32,
+    retention_mode: String,
+    live_session_retained: bool,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum BoundedJsonError {
+    Limit,
+    Serialize(String),
+    Utf8(String),
+}
+
+struct BoundedJsonWriter {
+    bytes: Vec<u8>,
+    max_bytes: usize,
+    limit_exceeded: bool,
+}
+
+impl BoundedJsonWriter {
+    fn new(max_bytes: usize) -> Self {
+        Self {
+            bytes: Vec::new(),
+            max_bytes,
+            limit_exceeded: false,
+        }
+    }
+}
+
+impl Write for BoundedJsonWriter {
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        let Some(next_len) = self.bytes.len().checked_add(buffer.len()) else {
+            self.limit_exceeded = true;
+            return Err(io::Error::other("JSON byte limit exceeded"));
+        };
+        if next_len > self.max_bytes {
+            self.limit_exceeded = true;
+            return Err(io::Error::other("JSON byte limit exceeded"));
+        }
+        self.bytes.extend_from_slice(buffer);
+        Ok(buffer.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+fn serialize_bounded<T: Serialize>(
+    value: &T,
+    max_bytes: usize,
+) -> Result<String, BoundedJsonError> {
+    let mut writer = BoundedJsonWriter::new(max_bytes);
+    let result = serde_json::to_writer(&mut writer, value);
+    if writer.limit_exceeded {
+        return Err(BoundedJsonError::Limit);
+    }
+    result.map_err(|error| BoundedJsonError::Serialize(error.to_string()))?;
+    String::from_utf8(writer.bytes)
+        .map_err(|error| BoundedJsonError::Utf8(error.to_string()))
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "code", rename_all = "SCREAMING_SNAKE_CASE")]
@@ -42,6 +120,14 @@ enum ScenarioTransportErrorV1 {
     Runner {
         schema_version: u32,
         error: ScenarioRunnerErrorV1,
+    },
+    ReportLimit {
+        schema_version: u32,
+        max_bytes: u32,
+    },
+    ErrorLimit {
+        schema_version: u32,
+        max_bytes: u32,
     },
     Serialize {
         schema_version: u32,
@@ -70,17 +156,55 @@ fn clear_report_and_error() {
 }
 
 fn store_error(error: ScenarioTransportErrorV1) {
-    let json = serde_json::to_string(&error)
-        .unwrap_or_else(|serialization_error| {
-            format!(
-                "{{\"code\":\"SERIALIZE\",\"schemaVersion\":{},\"message\":{:?}}}",
-                SCENARIO_TRANSPORT_SCHEMA_VERSION,
-                serialization_error.to_string()
-            )
-        });
+    let json = match serialize_bounded(&error, MAX_SCENARIO_ERROR_BYTES) {
+        Ok(json) => json,
+        Err(BoundedJsonError::Limit) => {
+            let limit = ScenarioTransportErrorV1::ErrorLimit {
+                schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+                max_bytes: MAX_SCENARIO_ERROR_BYTES as u32,
+            };
+            serialize_bounded(&limit, MAX_SCENARIO_ERROR_BYTES)
+                .unwrap_or_else(|_| FALLBACK_ERROR_LIMIT_JSON.to_owned())
+        }
+        Err(error) => {
+            let serialization = ScenarioTransportErrorV1::Serialize {
+                schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+                message: format!("{error:?}"),
+            };
+            serialize_bounded(&serialization, MAX_SCENARIO_ERROR_BYTES)
+                .unwrap_or_else(|_| FALLBACK_ERROR_LIMIT_JSON.to_owned())
+        }
+    };
     *SCENARIO_ERROR_JSON
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = json;
+}
+
+fn serialize_report_bounded(
+    report: &ScenarioExecutionReportV1,
+    max_bytes: usize,
+) -> Result<String, ScenarioTransportErrorV1> {
+    serialize_bounded(report, max_bytes).map_err(|error| match error {
+        BoundedJsonError::Limit => ScenarioTransportErrorV1::ReportLimit {
+            schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+            max_bytes: max_bytes.min(u32::MAX as usize) as u32,
+        },
+        error => ScenarioTransportErrorV1::Serialize {
+            schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+            message: format!("{error:?}"),
+        },
+    })
+}
+
+fn store_report_bounded(
+    report: &ScenarioExecutionReportV1,
+    max_bytes: usize,
+) -> Result<(), ScenarioTransportErrorV1> {
+    let json = serialize_report_bounded(report, max_bytes)?;
+    *SCENARIO_REPORT_JSON
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = json;
+    Ok(())
 }
 
 fn execute_manifest_bytes(
@@ -168,18 +292,13 @@ pub extern "C" fn amemory_scenario_execute_json(
     clear_report_and_error();
 
     match execute_manifest_bytes(length, backend_code) {
-        Ok(report) => match serde_json::to_string(&report) {
-            Ok(json) => {
-                *SCENARIO_REPORT_JSON
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = json;
-                1
-            }
+        Ok(report) => match store_report_bounded(
+            &report,
+            MAX_SCENARIO_REPORT_BYTES,
+        ) {
+            Ok(()) => 1,
             Err(error) => {
-                store_error(ScenarioTransportErrorV1::Serialize {
-                    schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
-                    message: error.to_string(),
-                });
+                store_error(error);
                 0
             }
         },
@@ -188,6 +307,38 @@ pub extern "C" fn amemory_scenario_execute_json(
             0
         }
     }
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_transport_clear_output() {
+    clear_report_and_error();
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_transport_limits_available() -> u32 {
+    1
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_transport_limits_json_len() -> u32 {
+    SCENARIO_LIMITS_JSON.len() as u32
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_transport_limits_json_ptr() -> u32 {
+    SCENARIO_LIMITS_JSON.as_ptr() as usize as u32
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_transport_limits_json_byte(
+    index: u32,
+) -> u32 {
+    SCENARIO_LIMITS_JSON
+        .as_bytes()
+        .get(index as usize)
+        .copied()
+        .map(u32::from)
+        .unwrap_or(u32::MAX)
 }
 
 fn string_available(buffer: &Mutex<String>) -> u32 {
@@ -291,6 +442,119 @@ mod tests {
             output.push(value as u8);
         }
         String::from_utf8(output).unwrap()
+    }
+
+    #[test]
+    fn transport_limits_json_matches_bounded_latest_policy() {
+        let limits: ScenarioTransportLimitsV1 =
+            serde_json::from_str(SCENARIO_LIMITS_JSON).unwrap();
+        assert_eq!(limits.schema_version, SCENARIO_TRANSPORT_SCHEMA_VERSION);
+        assert_eq!(
+            limits.max_manifest_bytes,
+            MAX_SCENARIO_MANIFEST_BYTES as u32
+        );
+        assert_eq!(
+            limits.max_single_report_bytes,
+            MAX_SCENARIO_REPORT_BYTES as u32
+        );
+        assert_eq!(limits.max_error_bytes, MAX_SCENARIO_ERROR_BYTES as u32);
+        assert_eq!(limits.max_retained_reports, 1);
+        assert_eq!(limits.max_retained_errors, 1);
+        assert_eq!(limits.retention_mode, "LATEST");
+        assert!(!limits.live_session_retained);
+    }
+
+    #[test]
+    fn bounded_report_overflow_is_explicit_and_never_partially_stored() {
+        load_manifest(MUX1_LIFECYCLE);
+        let report = execute_manifest_bytes(
+            MUX1_LIFECYCLE.len() as u32,
+            0,
+        )
+        .unwrap();
+
+        clear_report_and_error();
+        let error = store_report_bounded(&report, 64).unwrap_err();
+        assert!(matches!(
+            error,
+            ScenarioTransportErrorV1::ReportLimit {
+                schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+                max_bytes: 64,
+            }
+        ));
+        assert_eq!(amemory_scenario_report_available(), 0);
+
+        store_error(error);
+        assert_eq!(amemory_scenario_error_available(), 1);
+        let error_json = read_buffer(
+            amemory_scenario_error_json_len,
+            amemory_scenario_error_json_byte,
+        );
+        assert!(error_json.contains("\"code\":\"REPORT_LIMIT\""));
+        assert!(!error_json.contains("structuralFacts"));
+    }
+
+    #[test]
+    fn output_clear_preserves_manifest_for_semantically_equal_rerun() {
+        load_manifest(MUX1_LIFECYCLE);
+        assert_eq!(
+            amemory_scenario_execute_json(
+                MUX1_LIFECYCLE.len() as u32,
+                0,
+            ),
+            1
+        );
+        let first_json = read_buffer(
+            amemory_scenario_report_json_len,
+            amemory_scenario_report_json_byte,
+        );
+        let first: ScenarioExecutionReportV1 =
+            serde_json::from_str(&first_json).unwrap();
+
+        amemory_scenario_transport_clear_output();
+        assert_eq!(amemory_scenario_report_available(), 0);
+        assert_eq!(amemory_scenario_error_available(), 0);
+
+        // Output cleanup does not clear the manifest input buffer.
+        assert_eq!(
+            amemory_scenario_execute_json(
+                MUX1_LIFECYCLE.len() as u32,
+                0,
+            ),
+            1
+        );
+        let second_json = read_buffer(
+            amemory_scenario_report_json_len,
+            amemory_scenario_report_json_byte,
+        );
+        let second: ScenarioExecutionReportV1 =
+            serde_json::from_str(&second_json).unwrap();
+
+        assert!(first.overall_pass && second.overall_pass);
+        assert_eq!(first.runs.len(), second.runs.len());
+        for (left, right) in first.runs.iter().zip(&second.runs) {
+            assert_eq!(left.inputs, right.inputs);
+            assert_eq!(left.result, right.result);
+            assert_eq!(left.assertion_results, right.assertion_results);
+            assert_eq!(left.observed.active_reaction_count, 7);
+            assert_eq!(right.observed.active_reaction_count, 7);
+        }
+
+        amemory_scenario_manifest_clear();
+        assert_eq!(amemory_scenario_report_available(), 0);
+        assert_eq!(amemory_scenario_error_available(), 0);
+        assert_eq!(
+            amemory_scenario_execute_json(
+                MUX1_LIFECYCLE.len() as u32,
+                0,
+            ),
+            0
+        );
+        let error_json = read_buffer(
+            amemory_scenario_error_json_len,
+            amemory_scenario_error_json_byte,
+        );
+        assert!(error_json.contains("\"code\":\"MANIFEST_LENGTH\""));
     }
 
     #[test]
