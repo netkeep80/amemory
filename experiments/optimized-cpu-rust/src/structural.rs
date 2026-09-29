@@ -705,62 +705,105 @@ fn instantiate_node(
     memo: &mut HashMap<Handle, Handle>,
     profile: &mut Option<&mut StructuralRunProfile>,
 ) -> Result<Handle, StructuralError> {
-    if let Some(profile) = profile.as_deref_mut() {
-        profile.instantiation_nodes_visited += 1;
-    }
-    if let Some(bound) = bindings.get(&source) {
-        return Ok(*bound);
-    }
-    if let Some(value) = memo.get(&source) {
-        return Ok(*value);
+    #[derive(Clone, Copy)]
+    enum Frame {
+        Enter(Handle),
+        FinishStart { source: Handle, child: Handle },
+        FinishEnd { source: Handle, child: Handle },
+        FinishPair { source: Handle, start: Handle, end: Handle },
     }
 
-    let (start, end) = store.poles(source)?;
+    fn resolved(
+        source: Handle,
+        bindings: &HashMap<Handle, Handle>,
+        memo: &HashMap<Handle, Handle>,
+    ) -> Result<Handle, StructuralError> {
+        bindings
+            .get(&source)
+            .copied()
+            .or_else(|| memo.get(&source).copied())
+            .ok_or(StructuralError::TemplateMismatch)
+    }
 
-    let value = if start == source && end == source {
-        ROOT_HANDLE
-    } else if start == source {
-        let child = instantiate_node(store, end, bindings, visiting, memo, profile)?;
-        let before = store.link_count();
-        let value = store.ensure_start_self_closed(child)?;
+    fn record_constructor(
+        profile: &mut Option<&mut StructuralRunProfile>,
+        before: usize,
+        after: usize,
+    ) {
         if let Some(profile) = profile.as_deref_mut() {
             profile.instantiation_constructor_attempts += 1;
-            let delta = store.link_count() - before;
+            let delta = after - before;
             profile.instantiation_new_links += delta as u64;
-            if delta == 0 { profile.instantiation_canonical_hits += 1; }
+            if delta == 0 {
+                profile.instantiation_canonical_hits += 1;
+            }
         }
-        value
-    } else if end == source {
-        let child = instantiate_node(store, start, bindings, visiting, memo, profile)?;
-        let before = store.link_count();
-        let value = store.ensure_end_self_closed(child)?;
-        if let Some(profile) = profile.as_deref_mut() {
-            profile.instantiation_constructor_attempts += 1;
-            let delta = store.link_count() - before;
-            profile.instantiation_new_links += delta as u64;
-            if delta == 0 { profile.instantiation_canonical_hits += 1; }
-        }
-        value
-    } else {
-        if !visiting.insert(source) {
-            return Err(StructuralError::UnsupportedCycle(source));
-        }
-        let new_start = instantiate_node(store, start, bindings, visiting, memo, profile)?;
-        let new_end = instantiate_node(store, end, bindings, visiting, memo, profile)?;
-        visiting.remove(&source);
-        let before = store.link_count();
-        let value = store.ensure_pair(new_start, new_end)?;
-        if let Some(profile) = profile.as_deref_mut() {
-            profile.instantiation_constructor_attempts += 1;
-            let delta = store.link_count() - before;
-            profile.instantiation_new_links += delta as u64;
-            if delta == 0 { profile.instantiation_canonical_hits += 1; }
-        }
-        value
-    };
+    }
 
-    memo.insert(source, value);
-    Ok(value)
+    // Structural depth belongs to A-memory data, not the host call stack.
+    let mut pending = vec![Frame::Enter(source)];
+
+    while let Some(frame) = pending.pop() {
+        match frame {
+            Frame::Enter(source) => {
+                if let Some(profile) = profile.as_deref_mut() {
+                    profile.instantiation_nodes_visited += 1;
+                }
+                if bindings.contains_key(&source) || memo.contains_key(&source) {
+                    continue;
+                }
+
+                let (start, end) = store.poles(source)?;
+                if start == source && end == source {
+                    memo.insert(source, ROOT_HANDLE);
+                    continue;
+                }
+
+                if !visiting.insert(source) {
+                    return Err(StructuralError::UnsupportedCycle(source));
+                }
+
+                if start == source {
+                    pending.push(Frame::FinishStart { source, child: end });
+                    pending.push(Frame::Enter(end));
+                } else if end == source {
+                    pending.push(Frame::FinishEnd { source, child: start });
+                    pending.push(Frame::Enter(start));
+                } else {
+                    pending.push(Frame::FinishPair { source, start, end });
+                    pending.push(Frame::Enter(end));
+                    pending.push(Frame::Enter(start));
+                }
+            }
+            Frame::FinishStart { source, child } => {
+                let child = resolved(child, bindings, memo)?;
+                let before = store.link_count();
+                let value = store.ensure_start_self_closed(child)?;
+                record_constructor(profile, before, store.link_count());
+                visiting.remove(&source);
+                memo.insert(source, value);
+            }
+            Frame::FinishEnd { source, child } => {
+                let child = resolved(child, bindings, memo)?;
+                let before = store.link_count();
+                let value = store.ensure_end_self_closed(child)?;
+                record_constructor(profile, before, store.link_count());
+                visiting.remove(&source);
+                memo.insert(source, value);
+            }
+            Frame::FinishPair { source, start, end } => {
+                let new_start = resolved(start, bindings, memo)?;
+                let new_end = resolved(end, bindings, memo)?;
+                let before = store.link_count();
+                let value = store.ensure_pair(new_start, new_end)?;
+                record_constructor(profile, before, store.link_count());
+                visiting.remove(&source);
+                memo.insert(source, value);
+            }
+        }
+    }
+
+    resolved(source, bindings, memo)
 }
 
 fn instantiate_structural_template_internal(
@@ -2157,5 +2200,51 @@ mod tests {
         assert_eq!(reaction.handoff_count, 1);
         assert_eq!(engine.current(), &[expected]);
     }
+
+    #[test]
+    fn deep_structural_template_instantiation_is_stack_safe() {
+        let mut store = OptimizedLinkStore::new();
+        let depth = 50_000usize;
+        let mut template = ROOT_HANDLE;
+
+        for _ in 0..depth {
+            template = store.ensure_start_self_closed(template).unwrap();
+        }
+
+        let links_before = store.link_count();
+        let instantiated =
+            instantiate_structural_template(&mut store, template, &[]).unwrap();
+
+        assert_eq!(instantiated, template);
+        assert_eq!(
+            store.link_count(),
+            links_before,
+            "canonical deep instantiation must not grow the carrier"
+        );
+    }
+
+
+    #[test]
+    fn deep_structural_template_instantiation_is_stack_safe() {
+        let mut store = OptimizedLinkStore::new();
+        let depth = 50_000usize;
+        let mut template = ROOT_HANDLE;
+
+        for _ in 0..depth {
+            template = store.ensure_start_self_closed(template).unwrap();
+        }
+
+        let links_before = store.link_count();
+        let instantiated =
+            instantiate_structural_template(&mut store, template, &[]).unwrap();
+
+        assert_eq!(instantiated, template);
+        assert_eq!(
+            store.link_count(),
+            links_before,
+            "canonical deep instantiation must not grow the carrier"
+        );
+    }
+
 
 }
