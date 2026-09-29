@@ -1526,7 +1526,7 @@ mod tests {
             ProofRuntimeSessionState::Configured,
         );
 
-        let mut evidence = Vec::new();
+        let mut evidence: Vec<SessionReactionEvidenceV1> = Vec::new();
         loop {
             let step = live.session.step(observation_level).unwrap();
             assert_eq!(step.evidence.session_id, opened.session_id);
