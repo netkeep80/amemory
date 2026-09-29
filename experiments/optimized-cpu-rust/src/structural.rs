@@ -104,6 +104,43 @@ impl StructuralRunProfile {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum StructuralTraceEvent {
+    DiscoveryComplete {
+        active: Handle,
+        matched_rules: u32,
+    },
+    RuleMatched {
+        active: Handle,
+        rule: Handle,
+        output_bundle_template: Handle,
+        bindings: Vec<StructuralRoleBinding>,
+    },
+    Instantiated {
+        active: Handle,
+        rule: Handle,
+        output_bundle_template: Handle,
+        grounded_bundle: Handle,
+    },
+    Published {
+        active: Handle,
+        rule: Option<Handle>,
+        outputs: Vec<Handle>,
+        preserved: bool,
+    },
+    ScopeCommitted {
+        old_members: Vec<Handle>,
+        next_members: Vec<Handle>,
+        quiescent: bool,
+        handoff_count: u32,
+    },
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct StructuralRunTrace {
+    pub events: Vec<StructuralTraceEvent>,
+}
+
 #[derive(Clone, Debug)]
 struct GroundedPathCheck {
     // false = START, true = END
@@ -123,6 +160,7 @@ struct CompiledRuleMetadata {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct StructuralImage {
+    rule: Handle,
     output_bundle_template: Handle,
     bindings: Vec<StructuralRoleBinding>,
 }
@@ -902,6 +940,7 @@ fn discover_triggered_rule_images_internal<R: StructuralRead + ?Sized>(
         }
 
         images.push(StructuralImage {
+            rule,
             output_bundle_template: metadata.output_bundle_template,
             bindings,
         });
@@ -1003,7 +1042,8 @@ impl OptimizedStructuralEngine {
         store: &mut OptimizedLinkStore,
     ) -> Result<StructuralReactionResult, StructuralError> {
         let mut profile = None;
-        self.run_internal(store, &mut profile)
+        let mut trace = None;
+        self.run_internal(store, &mut profile, &mut trace)
     }
 
     pub fn run_profiled(
@@ -1014,16 +1054,41 @@ impl OptimizedStructuralEngine {
         let mut owned = StructuralRunProfile::default();
         let result = {
             let mut profile = Some(&mut owned);
-            self.run_internal(store, &mut profile)?
+            let mut trace = None;
+            self.run_internal(store, &mut profile, &mut trace)?
         };
         owned.total_ns = started.elapsed().as_nanos();
         Ok((result, owned))
+    }
+
+    pub fn run_traced(
+        &mut self,
+        store: &mut OptimizedLinkStore,
+    ) -> Result<
+        (
+            StructuralReactionResult,
+            StructuralRunProfile,
+            StructuralRunTrace,
+        ),
+        StructuralError,
+    > {
+        let started = Instant::now();
+        let mut owned_profile = StructuralRunProfile::default();
+        let mut owned_trace = StructuralRunTrace::default();
+        let result = {
+            let mut profile = Some(&mut owned_profile);
+            let mut trace = Some(&mut owned_trace);
+            self.run_internal(store, &mut profile, &mut trace)?
+        };
+        owned_profile.total_ns = started.elapsed().as_nanos();
+        Ok((result, owned_profile, owned_trace))
     }
 
     fn run_internal(
         &mut self,
         store: &mut OptimizedLinkStore,
         profile: &mut Option<&mut StructuralRunProfile>,
+        trace: &mut Option<&mut StructuralRunTrace>,
     ) -> Result<StructuralReactionResult, StructuralError> {
         self.quiescent = false;
 
@@ -1060,6 +1125,21 @@ impl OptimizedStructuralEngine {
                     &mut self.rule_metadata_cache,
                     profile,
                 )?;
+                if let Some(trace) = trace.as_deref_mut() {
+                    trace.events.push(StructuralTraceEvent::DiscoveryComplete {
+                        active,
+                        matched_rules: images.len() as u32,
+                    });
+                    for image in &images {
+                        trace.events.push(StructuralTraceEvent::RuleMatched {
+                            active,
+                            rule: image.rule,
+                            output_bundle_template:
+                                image.output_bundle_template,
+                            bindings: image.bindings.clone(),
+                        });
+                    }
+                }
                 discovered.push((active, images));
             }
             discovered
@@ -1090,6 +1170,14 @@ impl OptimizedStructuralEngine {
             if images.is_empty() {
                 let publication_started = profile.as_ref().map(|_| Instant::now());
                 add_next(active)?;
+                if let Some(trace) = trace.as_deref_mut() {
+                    trace.events.push(StructuralTraceEvent::Published {
+                        active,
+                        rule: None,
+                        outputs: vec![active],
+                        preserved: true,
+                    });
+                }
                 if let Some(profile) = profile.as_deref_mut() {
                     profile.publication_outputs += 1;
                     if let Some(started) = publication_started {
@@ -1111,6 +1199,15 @@ impl OptimizedStructuralEngine {
                     &image.bindings,
                     profile,
                 )?;
+                if let Some(trace) = trace.as_deref_mut() {
+                    trace.events.push(StructuralTraceEvent::Instantiated {
+                        active,
+                        rule: image.rule,
+                        output_bundle_template:
+                            image.output_bundle_template,
+                        grounded_bundle,
+                    });
+                }
                 if let Some(profile) = profile.as_deref_mut() {
                     if let Some(started) = instantiation_started {
                         profile.instantiation_ns += started.elapsed().as_nanos();
@@ -1122,8 +1219,16 @@ impl OptimizedStructuralEngine {
                 if let Some(profile) = profile.as_deref_mut() {
                     profile.publication_outputs += outputs.len() as u64;
                 }
-                for successor in outputs {
+                for successor in outputs.iter().copied() {
                     add_next(successor)?;
+                }
+                if let Some(trace) = trace.as_deref_mut() {
+                    trace.events.push(StructuralTraceEvent::Published {
+                        active,
+                        rule: Some(image.rule),
+                        outputs,
+                        preserved: false,
+                    });
                 }
                 if let Some(profile) = profile.as_deref_mut() {
                     if let Some(started) = publication_started {
@@ -1139,6 +1244,14 @@ impl OptimizedStructuralEngine {
 
         if raw_rule_matches == 0 {
             self.quiescent = true;
+            if let Some(trace) = trace.as_deref_mut() {
+                trace.events.push(StructuralTraceEvent::ScopeCommitted {
+                    old_members: old_members.clone(),
+                    next_members: old_members.clone(),
+                    quiescent: true,
+                    handoff_count: 0,
+                });
+            }
             return Ok(StructuralReactionResult {
                 old_members: old_members.clone(),
                 next_members: old_members,
@@ -1153,6 +1266,15 @@ impl OptimizedStructuralEngine {
         self.scope_banks[target_bank] = next_members.clone();
         self.current_bank = target_bank;
         self.handoff_count = 1;
+
+        if let Some(trace) = trace.as_deref_mut() {
+            trace.events.push(StructuralTraceEvent::ScopeCommitted {
+                old_members: old_members.clone(),
+                next_members: next_members.clone(),
+                quiescent: false,
+                handoff_count: 1,
+            });
+        }
 
         Ok(StructuralReactionResult {
             old_members,
@@ -1634,6 +1756,8 @@ mod tests {
 
         let mut profiled_store = store.clone();
         let mut profiled_engine = engine.clone();
+        let mut traced_store = store.clone();
+        let mut traced_engine = engine.clone();
 
         let reaction = engine.run(&mut store).unwrap();
         let expected = store.ensure_pair(caller, output).unwrap();
@@ -1643,12 +1767,97 @@ mod tests {
         let profiled_expected =
             profiled_store.ensure_pair(caller, output).unwrap();
 
-        assert_eq!(profiled_reaction, reaction, "profiled path changed reaction semantics");
+        let (traced_reaction, traced_profile, trace) =
+            traced_engine.run_traced(&mut traced_store).unwrap();
+        let traced_expected =
+            traced_store.ensure_pair(caller, output).unwrap();
+
+        assert_eq!(
+            profiled_reaction, reaction,
+            "profiled path changed reaction semantics"
+        );
+        assert_eq!(
+            traced_reaction, reaction,
+            "traced path changed reaction semantics"
+        );
         assert_eq!(profiled_engine.current(), &[profiled_expected]);
+        assert_eq!(traced_engine.current(), &[traced_expected]);
         assert!(profile.trigger_incidence_candidates > 0);
         assert!(profile.unification_attempts > 0);
         assert_eq!(profile.unification_successes, 1);
         assert!(profile.total_ns > 0);
+        assert_eq!(
+            traced_profile.unification_successes,
+            profile.unification_successes,
+        );
+        assert!(traced_profile.total_ns > 0);
+
+        assert!(trace.events.iter().any(|event| matches!(
+            event,
+            StructuralTraceEvent::DiscoveryComplete {
+                active: traced_active,
+                matched_rules: 1,
+            } if *traced_active == active
+        )));
+        assert!(trace.events.iter().any(|event| matches!(
+            event,
+            StructuralTraceEvent::RuleMatched {
+                active: traced_active,
+                rule: traced_rule,
+                output_bundle_template,
+                bindings,
+            } if *traced_active == active
+                && *traced_rule == rule
+                && *output_bundle_template == bundle
+                && bindings
+                    == &vec![StructuralRoleBinding {
+                        role,
+                        value: caller,
+                    }]
+        )));
+        let grounded_bundle = trace
+            .events
+            .iter()
+            .find_map(|event| match event {
+                StructuralTraceEvent::Instantiated {
+                    active: traced_active,
+                    rule: traced_rule,
+                    output_bundle_template,
+                    grounded_bundle,
+                } if *traced_active == active
+                    && *traced_rule == rule
+                    && *output_bundle_template == bundle =>
+                {
+                    Some(*grounded_bundle)
+                }
+                _ => None,
+            })
+            .expect("real grounded bundle trace");
+        assert_eq!(
+            read_exact_sequence(&traced_store, grounded_bundle).unwrap(),
+            vec![traced_expected],
+        );
+        assert!(trace.events.iter().any(|event| matches!(
+            event,
+            StructuralTraceEvent::Published {
+                active: traced_active,
+                rule: Some(traced_rule),
+                outputs,
+                preserved: false,
+            } if *traced_active == active
+                && *traced_rule == rule
+                && outputs == &vec![traced_expected]
+        )));
+        assert!(trace.events.iter().any(|event| matches!(
+            event,
+            StructuralTraceEvent::ScopeCommitted {
+                old_members,
+                next_members,
+                quiescent: false,
+                handoff_count: 1,
+            } if old_members == &vec![active]
+                && next_members == &vec![traced_expected]
+        )));
 
         assert_eq!(reaction.raw_rule_matches, 1);
         assert_eq!(reaction.transitioned_members, 1);
@@ -1667,6 +1876,40 @@ mod tests {
         assert_eq!(quiescent.handoff_count, 0);
         assert_eq!(engine.current_bank(), stable);
         assert_eq!(engine.current(), &[expected]);
+
+        let traced_stable = traced_engine.current_bank();
+        let (traced_quiescent, _quiescent_profile, quiescent_trace) =
+            traced_engine.run_traced(&mut traced_store).unwrap();
+        assert_eq!(traced_quiescent, quiescent);
+        assert_eq!(traced_engine.current_bank(), traced_stable);
+        assert_eq!(traced_engine.current(), &[traced_expected]);
+        assert!(quiescent_trace.events.iter().any(|event| matches!(
+            event,
+            StructuralTraceEvent::DiscoveryComplete {
+                active: traced_active,
+                matched_rules: 0,
+            } if *traced_active == traced_expected
+        )));
+        assert!(quiescent_trace.events.iter().any(|event| matches!(
+            event,
+            StructuralTraceEvent::Published {
+                active: traced_active,
+                rule: None,
+                outputs,
+                preserved: true,
+            } if *traced_active == traced_expected
+                && outputs == &vec![traced_expected]
+        )));
+        assert!(quiescent_trace.events.iter().any(|event| matches!(
+            event,
+            StructuralTraceEvent::ScopeCommitted {
+                old_members,
+                next_members,
+                quiescent: true,
+                handoff_count: 0,
+            } if old_members == &vec![traced_expected]
+                && next_members == &vec![traced_expected]
+        )));
     }
 
     #[test]
