@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "scenarioId": "mul32-lifecycle",
+  "scenarioVersion": "1.0.0",
+  "title": "MUL32: Wide64 result in one persistent A-memory",
+  "description": "One raw MUL32 Aset is loaded once; A/B inputs are published as Links for four runs in one persistent Session, including a non-zero high 32-bit product.",
+  "programProfile": {
+    "profileId": "a-circuit:mul32",
+    "family": "mul",
+    "programId": "mul32",
+    "asetSource": "builtin:a-circuit/mul32"
+  },
+  "inputSchema": [
+    {
+      "key": "A",
+      "type": "WORD32",
+      "description": "32-bit unsigned multiplicand",
+      "default": "0x00000000"
+    },
+    {
+      "key": "B",
+      "type": "WORD32",
+      "description": "32-bit unsigned multiplier",
+      "default": "0x00000000"
+    }
+  ],
+  "initialInputs": {
+    "A": "0x00000000",
+    "B": "0x00000000"
+  },
+  "runSequence": [
+    {
+      "runId": "run-1-zero",
+      "inputs": {
+        "A": "0x00000000",
+        "B": "0x00000000"
+      },
+      "executionMode": "TO_QUIESCENCE",
+      "maxReactions": 2048,
+      "assertions": [
+        {"kind":"RESULT_FIELD_EQUALS","field":"lo","expected":"0x00000000"},
+        {"kind":"RESULT_FIELD_EQUALS","field":"hi","expected":"0x00000000"},
+        {"kind":"QUIESCENT_EQUALS","expected":true},
+        {"kind":"REACTION_COUNT_EQUALS","expected":33}
+      ]
+    },
+    {
+      "runId": "run-2-identity",
+      "inputs": {
+        "A": "0x12345678",
+        "B": "0x00000001"
+      },
+      "executionMode": "TO_QUIESCENCE",
+      "maxReactions": 2048,
+      "assertions": [
+        {"kind":"RESULT_FIELD_EQUALS","field":"lo","expected":"0x12345678"},
+        {"kind":"RESULT_FIELD_EQUALS","field":"hi","expected":"0x00000000"},
+        {"kind":"QUIESCENT_EQUALS","expected":true},
+        {"kind":"REACTION_COUNT_EQUALS","expected":1071}
+      ]
+    },
+    {
+      "runId": "run-3-high-half",
+      "inputs": {
+        "A": "0x80000000",
+        "B": "0x00000002"
+      },
+      "executionMode": "TO_QUIESCENCE",
+      "maxReactions": 2048,
+      "assertions": [
+        {"kind":"RESULT_FIELD_EQUALS","field":"lo","expected":"0x00000000"},
+        {"kind":"RESULT_FIELD_EQUALS","field":"hi","expected":"0x00000001"},
+        {"kind":"QUIESCENT_EQUALS","expected":true},
+        {"kind":"REACTION_COUNT_EQUALS","expected":1071}
+      ]
+    },
+    {
+      "runId": "run-4-return-zero",
+      "inputs": {
+        "A": "0x00000000",
+        "B": "0x00000000"
+      },
+      "executionMode": "TO_QUIESCENCE",
+      "maxReactions": 2048,
+      "assertions": [
+        {"kind":"RESULT_FIELD_EQUALS","field":"lo","expected":"0x00000000"},
+        {"kind":"RESULT_FIELD_EQUALS","field":"hi","expected":"0x00000000"},
+        {"kind":"QUIESCENT_EQUALS","expected":true},
+        {"kind":"REACTION_COUNT_EQUALS","expected":33}
+      ]
+    }
+  ],
+  "supportedBackends": ["optimized-cpu"],
+  "oraclePolicy": "FRESH_INSTANCE",
+  "invariants": [
+    "prepare-once",
+    "load-once",
+    "same-session",
+    "link-only-reconfiguration",
+    "wide64-result",
+    "return-to-first-configuration"
+  ],
+  "observationLevel": "PROFILE",
+  "profilingPolicy": "FULL",
+  "visualizationProfile": "engineering"
+}
