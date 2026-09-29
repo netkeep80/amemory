@@ -515,6 +515,10 @@ mod tests {
         assert!(json.contains("\"schemaVersion\":1"));
         assert!(json.contains("\"observationLevel\":\"TRACE\""));
         assert!(json.contains("\"stage\":\"EXECUTE\""));
+        assert!(json.contains(&format!(
+            "\"timingAvailable\":{}",
+            OBSERVABILITY_TIMING_AVAILABLE
+        )));
         let decoded: ObservedRunV1 = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded, run);
     }
@@ -536,7 +540,10 @@ mod tests {
             active_reaction_count: 7,
             execute_ns: 100,
             trace_projection_ns: 9,
-            structural: StructuralProfileV1::default(),
+            structural: StructuralProfileV1 {
+                timing_available: STRUCTURAL_PROFILE_TIMING_AVAILABLE,
+                ..StructuralProfileV1::default()
+            },
         };
         let observed = ObservedRunV1 {
             schema_version: RUN_OBSERVABILITY_SCHEMA_VERSION,
@@ -613,6 +620,28 @@ mod tests {
         let json = serde_json::to_string(&fact).unwrap();
         assert!(json.contains("\"kind\":\"RULE_MATCHED\""));
         assert!(json.contains("\"rule\":12"));
+    }
+
+    #[test]
+    fn timing_availability_matches_target_clock_capability() {
+        assert_eq!(
+            OBSERVABILITY_TIMING_AVAILABLE,
+            !cfg!(target_family = "wasm"),
+        );
+        assert_eq!(
+            STRUCTURAL_PROFILE_TIMING_AVAILABLE,
+            OBSERVABILITY_TIMING_AVAILABLE,
+        );
+
+        let timer = ObservationTimer::start();
+        let elapsed = timer.elapsed_ns();
+        if OBSERVABILITY_TIMING_AVAILABLE {
+            // A monotonic clock can legitimately report 0 for a very short
+            // interval; availability is the truth bit, not the magnitude.
+            assert!(elapsed <= u128::MAX);
+        } else {
+            assert_eq!(elapsed, 0);
+        }
     }
 
     #[test]
