@@ -13,7 +13,7 @@ for (const removedUiPath of [
   "experiments/browser-accelerator/web/app.js",
   "experiments/browser-accelerator/web/i386-lab.js",
   "experiments/browser-accelerator/web/i386-lab-view.mjs",
-  "experiments/browser-accelerator/web/proof-view.mjs",
+  "experiments/browser-accelerator/web/i386-proof-view.mjs",
 ]) {
   if (fs.existsSync(removedUiPath)) {
     throw new Error("obsolete parallel UI file still exists: " + removedUiPath);
