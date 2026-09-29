@@ -13,6 +13,7 @@ use amemory_optimized_cpu_probe::{
     structural::{
         define_structural_interpreter, define_structural_role_dictionary,
         materialize_exact_sequence, read_exact_sequence,
+        OptimizedStructuralEngine,
     },
     Handle, OptimizedLinkStore, ROOT_HANDLE,
 };
@@ -1338,6 +1339,190 @@ pub(crate) fn web_prove_mux1(
         execute,
         result,
     })
+}
+
+#[test]
+fn web_mux1_lifecycle_reconfigures_four_runs_in_one_loaded_memory() {
+    // PREPARE the static program/Theory only. No concrete invocation/current
+    // Link is part of the packed image: every input configuration below is
+    // published after LOAD into this one runtime store.
+    let compiler = build_proof_mux_fixture();
+    let prepared_roots = vec![
+        semantic_source(&compiler.store, "function.mux1", compiler.mux1),
+        semantic_source(&compiler.store, "data.zero", compiler.zero),
+        semantic_source(&compiler.store, "data.one", compiler.one),
+        semantic_source(
+            &compiler.store,
+            "execution.interpreter",
+            compiler.interpreter,
+        ),
+        semantic_source(
+            &compiler.store,
+            "execution.theory",
+            compiler.theory,
+        ),
+        semantic_source(
+            &compiler.store,
+            "execution.apply",
+            compiler.apply,
+        ),
+        semantic_source(&compiler.store, "context.caller", compiler.k),
+        semantic_source(
+            &compiler.store,
+            "result.tag",
+            compiler.bit_result_tag,
+        ),
+    ];
+    let admissions =
+        theory_admissions(&compiler.store, compiler.theory).unwrap();
+    let prepare =
+        prepare_stage(&compiler.store, prepared_roots, admissions);
+
+    // LOAD exactly once.
+    let (mut memory, load) = load_runtime(&prepare).unwrap();
+    let runtime_id = memory.id.clone();
+    let store_address =
+        std::ptr::addr_of!(memory.store) as usize;
+    let loaded_link_count = memory.store.link_count();
+    let loaded_prefix = memory.store.export_packed_duplets();
+    assert_eq!(loaded_prefix.len(), loaded_link_count);
+
+    let interpreter =
+        loaded_handle(&load, "execution.interpreter").unwrap();
+    let mux1 = loaded_handle(&load, "function.mux1").unwrap();
+    let apply = loaded_handle(&load, "execution.apply").unwrap();
+    let caller = loaded_handle(&load, "context.caller").unwrap();
+    let result_tag = loaded_handle(&load, "result.tag").unwrap();
+    let zero = loaded_handle(&load, "data.zero").unwrap();
+    let one = loaded_handle(&load, "data.one").unwrap();
+    let bits = [zero, one];
+
+    // One engine for the complete lifecycle. In particular, its inactive
+    // scope bank and metadata cache survive between the four runs.
+    let mut engine = OptimizedStructuralEngine::new(32);
+    engine
+        .set_interpreter(&memory.store, interpreter)
+        .unwrap();
+
+    let vectors = [
+        (0usize, 0usize, 1usize, 0u32),
+        (1usize, 0usize, 1usize, 1u32),
+        (0usize, 1usize, 0usize, 1u32),
+        (0usize, 0usize, 1usize, 0u32),
+    ];
+    let mut first_initial = None;
+    let mut first_result_wire = None;
+
+    for (run_index, &(select, a, b, expected)) in
+        vectors.iter().enumerate()
+    {
+        assert_eq!(memory.id, runtime_id);
+        assert_eq!(
+            std::ptr::addr_of!(memory.store) as usize,
+            store_address,
+            "run {run_index} replaced the runtime store object",
+        );
+
+        // Publish this run's configuration as normal immutable Links in the
+        // already-loaded A-memory. No old Link is rewritten.
+        let before_config = memory.store.link_count();
+        let args = materialize_exact_sequence(
+            &mut memory.store,
+            &[bits[select], bits[a], bits[b]],
+        )
+        .unwrap();
+        let invocation =
+            call(&mut memory.store, apply, mux1, args);
+        let initial =
+            memory.store.ensure_pair(caller, invocation).unwrap();
+        let after_config = memory.store.link_count();
+
+        if run_index < 3 {
+            assert!(
+                after_config > before_config,
+                "new input vector must publish runtime Links after LOAD",
+            );
+        } else {
+            assert_eq!(
+                Some(initial),
+                first_initial,
+                "returning to the first input must reuse its canonical Link",
+            );
+        }
+        if run_index == 0 {
+            first_initial = Some(initial);
+        }
+
+        // set_current selects the Link that was just published; all input data
+        // remains structural. Execution itself is only engine.run().
+        engine.set_current(&memory.store, &[initial]).unwrap();
+        let mut active_reactions = 0u32;
+        for _ in 0..64 {
+            let reaction = engine.run(&mut memory.store).unwrap();
+            if reaction.quiescent {
+                break;
+            }
+            active_reactions += 1;
+        }
+        assert!(engine.quiescent(), "run {run_index} did not quiesce");
+        assert_eq!(
+            active_reactions, 7,
+            "run {run_index} changed the proven MUX1 reaction count",
+        );
+        assert_eq!(engine.current().len(), 1);
+
+        let final_link = engine.current()[0];
+        let (final_caller, endpoint) =
+            memory.store.poles(final_link).unwrap();
+        assert_eq!(final_caller, caller);
+        let (tag, payload) = memory.store.poles(endpoint).unwrap();
+        assert_eq!(tag, result_tag);
+        let values = read_exact_sequence(&memory.store, payload).unwrap();
+        assert_eq!(values.len(), 1);
+        let decoded = if values[0] == one {
+            1
+        } else if values[0] == zero {
+            0
+        } else {
+            panic!("run {run_index} returned a non-bit MUX1 result");
+        };
+        assert_eq!(decoded, expected);
+
+        // Fresh-instance execution is an oracle only. It cannot influence
+        // this runtime's input, matching or result.
+        let fresh = web_prove_mux1(
+            select as u32,
+            a as u32,
+            b as u32,
+        )
+        .unwrap();
+        assert_ne!(fresh.load.memory_instance_id, runtime_id);
+        assert_eq!(fresh.result.decoded_value, decoded);
+
+        let carrier = memory.store.export_packed_duplets();
+        assert_eq!(
+            &carrier[..loaded_link_count],
+            loaded_prefix.as_slice(),
+            "run {run_index} mutated the originally loaded Aset prefix",
+        );
+        assert_eq!(memory.id, runtime_id);
+        assert_eq!(
+            std::ptr::addr_of!(memory.store) as usize,
+            store_address,
+            "run {run_index} replaced the runtime store object",
+        );
+
+        let result_wire = memory.store.export_anum(final_link).unwrap();
+        if run_index == 0 {
+            first_result_wire = Some(result_wire);
+        } else if run_index == 3 {
+            assert_eq!(
+                Some(result_wire),
+                first_result_wire,
+                "returning to the first configuration changed its semantic result",
+            );
+        }
+    }
 }
 
 #[test]
