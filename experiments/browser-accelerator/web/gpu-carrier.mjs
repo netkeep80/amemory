@@ -841,13 +841,12 @@ function discoverCarrierRule(parsed, rule, active) {
   const body = carrierPoles(parsed, rulePoles.end, "rule body");
   const bindings = unifyCarrierTemplate(parsed, body.start, active, roles);
   if (!bindings) return null;
-  const outputs = readCarrierExactSequence(parsed, body.end, 2);
-  if (outputs.length !== 1) return null;
+  requireLookupHandle(parsed, body.end, "output bundle template");
   return Object.freeze({
     rule,
     roles,
     bindings,
-    outputTemplate: outputs[0],
+    outputBundleTemplate: body.end,
   });
 }
 
@@ -908,7 +907,7 @@ function discoverCarrierReaction(
     admissionHandle: match.admission,
     ruleHandle: match.rule,
     rawRuleMatches: 1,
-    outputTemplate: match.outputTemplate,
+    outputBundleTemplate: match.outputBundleTemplate,
     roleBindings: match.roles.map(
       (role) => Object.freeze({
         role,
@@ -931,6 +930,40 @@ function virtualPair(store, handle) {
   const index = handle - store.baseCount - 1;
   if (index < 0 || index >= store.starts.length) return null;
   return { start: store.starts[index], end: store.ends[index] };
+}
+
+function virtualPoles(parsed, store, handle) {
+  if (handle >= 1 && handle <= store.baseCount) {
+    return carrierPoles(parsed, handle, "virtual base handle");
+  }
+  const pair = virtualPair(store, handle);
+  if (!pair) {
+    throw new Error("virtual overlay handle out of range: " + handle);
+  }
+  return pair;
+}
+
+function readVirtualExactSequence(parsed, store, finalHandle, cap = 2) {
+  const root = parsed.layout.rootHandle;
+  if (finalHandle === root) return [];
+  const reversed = [];
+  const seen = new Set();
+  let current = finalHandle;
+  while (current !== root) {
+    if (reversed.length >= cap || seen.has(current)) {
+      throw new Error("bounded virtual exact-sequence decode failed");
+    }
+    seen.add(current);
+    const cell = virtualPoles(parsed, store, current);
+    if (cell.start !== current || cell.end === current) {
+      throw new Error("invalid virtual exact-sequence cell");
+    }
+    const payload = virtualPoles(parsed, store, cell.end);
+    reversed.push(payload.end);
+    current = payload.start;
+  }
+  reversed.reverse();
+  return reversed;
 }
 
 function virtualFindPair(parsed, store, start, end) {
@@ -1067,18 +1100,26 @@ function publishCarrierReaction(
     discovery.roleBindings.map(({ role, value }) => [role, value]),
   );
   const store = createVirtualOverlay(parsed);
-  const candidateHandle = instantiateVirtualTemplate(
+  const groundedBundle = instantiateVirtualTemplate(
     parsed,
-    discovery.outputTemplate,
+    discovery.outputBundleTemplate,
     bindings,
     store,
     maxAppend,
   );
-  if (!candidateHandle) {
-    throw new Error("bounded C4c3 publication failed");
+  if (!groundedBundle) {
+    throw new Error("bounded C4c3 bundle instantiation failed");
+  }
+  const outputs = readVirtualExactSequence(parsed, store, groundedBundle, 2);
+  if (outputs.length !== 1) {
+    throw new Error(
+      "bounded C4c3 publication requires exactly one output; got " +
+      outputs.length,
+    );
   }
   return Object.freeze({
-    candidateHandle,
+    candidateHandle: outputs[0],
+    groundedBundle,
     appendCount: store.starts.length,
     appendStarts: Object.freeze([...store.starts]),
     appendEnds: Object.freeze([...store.ends]),
