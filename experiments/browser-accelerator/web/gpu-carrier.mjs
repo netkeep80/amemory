@@ -1354,6 +1354,8 @@ export function gpuCarrierReactionShaderSource(
   throw new Error("unsupported GPU carrier reaction mode: " + mode);
 }
 
+// Truth boundary: this executor accepts only carrier + current/interpreter handles.
+// Proof traces and expected successors are deliberately unavailable until readback.
 export async function runGpuCarrierReaction(
   device,
   parsed,
