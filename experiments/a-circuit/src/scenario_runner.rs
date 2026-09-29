@@ -224,6 +224,68 @@ pub(crate) enum ScenarioRunnerErrorV1 {
     },
 }
 
+const PREPARED_ASET_FINGERPRINT_ID: &str =
+    "prepared-aset-fnv1a64-v1";
+const FNV1A64_OFFSET: u64 = 0xcbf29ce484222325;
+const FNV1A64_PRIME: u64 = 0x00000100000001b3;
+
+fn fingerprint_mix_bytes(hash: &mut u64, bytes: &[u8]) {
+    for byte in (bytes.len() as u64).to_le_bytes() {
+        *hash ^= u64::from(byte);
+        *hash = hash.wrapping_mul(FNV1A64_PRIME);
+    }
+    for byte in bytes {
+        *hash ^= u64::from(*byte);
+        *hash = hash.wrapping_mul(FNV1A64_PRIME);
+    }
+}
+
+fn fingerprint_mix_u32(hash: &mut u64, value: u32) {
+    fingerprint_mix_bytes(hash, &value.to_le_bytes());
+}
+
+/// Deterministic structural identity for the exact static PREPARE image.
+///
+/// This is a versioned reproducibility fingerprint, not a cryptographic
+/// signature. Source identity remains the exact build SHA in provenance.
+fn prepared_aset_fingerprint_v1(
+    prepare: &WebProofPrepareStage,
+) -> String {
+    let mut hash = FNV1A64_OFFSET;
+    fingerprint_mix_bytes(
+        &mut hash,
+        PREPARED_ASET_FINGERPRINT_ID.as_bytes(),
+    );
+    fingerprint_mix_u32(&mut hash, prepare.compiled_links);
+
+    for duplet in &prepare.carrier_duplets {
+        fingerprint_mix_u32(&mut hash, duplet.start);
+        fingerprint_mix_u32(&mut hash, duplet.end);
+    }
+
+    // Semantic root vector order is host presentation, not program identity.
+    // Canonicalize the mapping before hashing it.
+    let mut roots = prepare.semantic_roots.iter().collect::<Vec<_>>();
+    roots.sort_by(|left, right| {
+        left.role
+            .cmp(&right.role)
+            .then(left.carrier_ref.cmp(&right.carrier_ref))
+    });
+    for root in roots {
+        fingerprint_mix_bytes(&mut hash, root.role.as_bytes());
+        fingerprint_mix_u32(&mut hash, root.carrier_ref);
+        fingerprint_mix_bytes(&mut hash, root.source.as_bytes());
+    }
+
+    let mut admissions = prepare.theory_admissions.iter().collect::<Vec<_>>();
+    admissions.sort();
+    for admission in admissions {
+        fingerprint_mix_bytes(&mut hash, admission.as_bytes());
+    }
+
+    format!("{PREPARED_ASET_FINGERPRINT_ID}:{hash:016x}")
+}
+
 pub(crate) fn run_scenario_manifest_v1(
     manifest: &ScenarioManifestV1,
     backend: ScenarioBackendV1,
@@ -253,6 +315,7 @@ pub(crate) fn run_scenario_manifest_v1(
         profile_id: manifest.program_profile.profile_id.clone(),
     })?;
     let prepared_links = prepare.compiled_links;
+    let program_fingerprint = prepared_aset_fingerprint_v1(&prepare);
 
     let (loaded, load_ns) =
         time_stage(|| load_runtime_session(&prepare, 32));
@@ -413,14 +476,13 @@ pub(crate) fn run_scenario_manifest_v1(
             amemory_version: include_str!("../../../VERSION")
                 .trim()
                 .to_owned(),
-            build_sha: option_env!("AMEMORY_BUILD_SHA")
+            build_sha: option_env!("AMEMORY_SOURCE_SHA")
+                .or(option_env!("AMEMORY_BUILD_SHA"))
                 .or(option_env!("GITHUB_SHA"))
                 .map(str::to_owned),
             scenario_version: manifest.scenario_version.clone(),
             program_profile_id: manifest.program_profile.profile_id.clone(),
-            // Current prepare DTO has no stable cryptographic program digest.
-            // Do not invent one; a later pipeline slice will expose it.
-            program_fingerprint: None,
+            program_fingerprint: Some(program_fingerprint),
         },
     })
 }
@@ -845,6 +907,32 @@ mod tests {
         include_str!("../scenarios/mul32-lifecycle-v1.json");
 
     #[test]
+    fn prepared_aset_fingerprint_is_stable_and_program_specific() {
+        let mux_a = prepare_mux1_session_program().unwrap();
+        let mux_b = prepare_mux1_session_program().unwrap();
+        let xor = prepare_xor32_session_program().unwrap();
+
+        let mux_fingerprint = prepared_aset_fingerprint_v1(&mux_a);
+        assert_eq!(
+            mux_fingerprint,
+            prepared_aset_fingerprint_v1(&mux_b),
+            "same static program must have stable fingerprint",
+        );
+        assert_ne!(
+            mux_fingerprint,
+            prepared_aset_fingerprint_v1(&xor),
+            "different prepared programs must not share the same fingerprint",
+        );
+        assert!(mux_fingerprint.starts_with(
+            "prepared-aset-fnv1a64-v1:"
+        ));
+        assert_eq!(
+            mux_fingerprint.len(),
+            "prepared-aset-fnv1a64-v1:".len() + 16,
+        );
+    }
+
+    #[test]
     fn canonical_mux1_manifest_runs_four_times_on_one_session() {
         let manifest =
             parse_and_validate_manifest_v1(MUX1_LIFECYCLE).unwrap();
@@ -898,6 +986,13 @@ mod tests {
         let decoded: ScenarioExecutionReportV1 =
             serde_json::from_str(&json).unwrap();
         assert_eq!(decoded, report);
+        let expected_fingerprint = prepared_aset_fingerprint_v1(
+            &prepare_mux1_session_program().unwrap(),
+        );
+        assert_eq!(
+            report.provenance.program_fingerprint.as_deref(),
+            Some(expected_fingerprint.as_str()),
+        );
     }
 
     #[test]
