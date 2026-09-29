@@ -581,9 +581,12 @@ impl PackedGpuCarrierImage {
         words[layout.next_by_end_offset..layout.total_words]
             .copy_from_slice(next_by_end);
 
-        let image = Self { words };
-        image.validate()?;
-        Ok(image)
+        // Callers reaching this private constructor have already supplied
+        // a validated execution projection/component pair. Do not decode the
+        // just-built word buffer back into fresh Vecs here: C4a's purpose is
+        // one final contiguous CPU projection before upload, not a second
+        // topology reconstruction pass.
+        Ok(Self { words })
     }
 
     pub fn from_execution_ref(
