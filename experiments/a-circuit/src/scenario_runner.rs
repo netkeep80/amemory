@@ -19,6 +19,10 @@ use super::{
         execute_session_observed_to_quiescence, load_runtime_session,
         ProofRuntimeSession, WebProofLoadStage, WebProofPrepareStage,
     },
+    shift32_n::{
+        configure_shl32_session, prepare_shl32_session_program,
+        project_shl32_session_result, web_prove_shift32,
+    },
     scenario::{
         validate_manifest_v1, ScenarioAssertionV1, ScenarioBackendV1,
         ScenarioExecutionModeV1, ScenarioManifestV1, ScenarioOraclePolicyV1,
@@ -83,6 +87,13 @@ const CPU_SCENARIO_ADAPTERS: &[CpuScenarioAdapter] = &[
         configure: configure_add32_from_inputs,
         project: project_add32_result,
         oracle: oracle_add32_result,
+    },
+    CpuScenarioAdapter {
+        profile_id: "a-circuit:shift-shl32",
+        prepare: prepare_shl32_session_program,
+        configure: configure_shl32_from_inputs,
+        project: project_shl32_result,
+        oracle: oracle_shl32_result,
     },
 ];
 
@@ -670,6 +681,70 @@ fn oracle_add32_result(
     ))
 }
 
+fn count8_input(
+    inputs: &BTreeMap<String, Value>,
+    key: &str,
+) -> Result<u8, String> {
+    let value = inputs
+        .get(key)
+        .and_then(Value::as_u64)
+        .ok_or_else(|| format!("missing COUNT8 input {key}"))?;
+    u8::try_from(value)
+        .map_err(|_| format!("COUNT8 input {key} outside 0..255"))
+}
+
+fn configure_shl32_from_inputs(
+    session: &mut ProofRuntimeSession,
+    load: &WebProofLoadStage,
+    inputs: &BTreeMap<String, Value>,
+) -> Result<ConfiguredRun, String> {
+    let value = word32_input(inputs, "VALUE")?;
+    let count = count8_input(inputs, "COUNT")?;
+    let (initial, before, after) =
+        configure_shl32_session(session, load, value, count)
+            .ok_or_else(|| "SHL32 configuration failed".to_owned())?;
+    Ok(ConfiguredRun {
+        initial,
+        links_before: before as u32,
+        links_after: after as u32,
+    })
+}
+
+fn project_shl32_result(
+    session: &ProofRuntimeSession,
+    load: &WebProofLoadStage,
+) -> Result<ScenarioNormalizedResultV1, String> {
+    let projected = project_shl32_session_result(session, load)
+        .ok_or_else(|| "SHL32 result projection failed".to_owned())?;
+    Ok(effect32_normalized(
+        projected.value,
+        projected.writeback,
+        projected.defined_mask,
+        projected.value_mask,
+        projected.undefined_mask,
+        projected.preserve_mask,
+        projected.result_recursive_wire,
+    ))
+}
+
+fn oracle_shl32_result(
+    inputs: &BTreeMap<String, Value>,
+) -> Result<ScenarioNormalizedResultV1, String> {
+    let value = word32_input(inputs, "VALUE")?;
+    let count = count8_input(inputs, "COUNT")?;
+    let proof = web_prove_shift32(13, value, u32::from(count))
+        .ok_or_else(|| "fresh SHL32 oracle failed".to_owned())?;
+    Ok(effect32_normalized(
+        proof.outcome.value,
+        proof.outcome.writeback,
+        proof.outcome.defined_mask,
+        proof.outcome.value_mask,
+        proof.outcome.undefined_mask,
+        proof.outcome.preserve_mask,
+        proof.proof.result.result_anum,
+    ))
+}
+
 fn bit_input(
     inputs: &BTreeMap<String, Value>,
     key: &str,
@@ -695,6 +770,8 @@ mod tests {
         include_str!("../scenarios/xor32-lifecycle-v1.json");
     const ADD32_LIFECYCLE: &str =
         include_str!("../scenarios/add32-lifecycle-v1.json");
+    const SHL32_LIFECYCLE: &str =
+        include_str!("../scenarios/shl32-lifecycle-v1.json");
 
     #[test]
     fn canonical_mux1_manifest_runs_four_times_on_one_session() {
@@ -823,6 +900,49 @@ mod tests {
         assert!(
             report.runs[3].configuration_reused,
             "returning to first ADD32 inputs must reuse canonical Links",
+        );
+    }
+
+    #[test]
+    fn canonical_shl32_manifest_proves_count_masking_in_one_session() {
+        let manifest =
+            parse_and_validate_manifest_v1(SHL32_LIFECYCLE).unwrap();
+        let report = run_scenario_manifest_v1(
+            &manifest,
+            ScenarioBackendV1::OptimizedCpu,
+        )
+        .unwrap();
+
+        assert!(report.overall_pass);
+        assert_eq!(report.runs.len(), 5);
+        assert!(report.runs.iter().all(|run| {
+            run.observed.session_id == report.session_id
+        }));
+        assert_eq!(
+            report
+                .runs
+                .iter()
+                .map(|run| run.observed.active_reaction_count)
+                .collect::<Vec<_>>(),
+            vec![1, 84, 82, 84, 1],
+        );
+        assert!(report.runs.iter().all(|run| {
+            run.observed.final_quiescent
+                && run.oracle_matches == Some(true)
+        }));
+        assert_eq!(
+            report.runs[1].result,
+            report.runs[3].result,
+            "COUNT=33 must mask to COUNT=1 semantically",
+        );
+        assert!(
+            !report.runs[3].configuration_reused,
+            "COUNT=33 is a distinct structural input even though it masks to 1",
+        );
+        assert_eq!(report.runs[0].result, report.runs[4].result);
+        assert!(
+            report.runs[4].configuration_reused,
+            "returning to COUNT=0 must reuse canonical configuration Links",
         );
     }
 
