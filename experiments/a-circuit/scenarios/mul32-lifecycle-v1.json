@@ -38,24 +38,10 @@
       "executionMode": "TO_QUIESCENCE",
       "maxReactions": 2048,
       "assertions": [
-        {
-          "kind": "RESULT_FIELD_EQUALS",
-          "field": "lo",
-          "expected": "0x00000000"
-        },
-        {
-          "kind": "RESULT_FIELD_EQUALS",
-          "field": "hi",
-          "expected": "0x00000000"
-        },
-        {
-          "kind": "QUIESCENT_EQUALS",
-          "expected": true
-        },
-        {
-          "kind": "REACTION_COUNT_EQUALS",
-          "expected": 33
-        }
+        {"kind":"RESULT_FIELD_EQUALS","field":"lo","expected":"0x00000000"},
+        {"kind":"RESULT_FIELD_EQUALS","field":"hi","expected":"0x00000000"},
+        {"kind":"QUIESCENT_EQUALS","expected":true},
+        {"kind":"REACTION_COUNT_EQUALS","expected":33}
       ]
     },
     {
@@ -67,24 +53,10 @@
       "executionMode": "TO_QUIESCENCE",
       "maxReactions": 2048,
       "assertions": [
-        {
-          "kind": "RESULT_FIELD_EQUALS",
-          "field": "lo",
-          "expected": "0x12345678"
-        },
-        {
-          "kind": "RESULT_FIELD_EQUALS",
-          "field": "hi",
-          "expected": "0x00000000"
-        },
-        {
-          "kind": "QUIESCENT_EQUALS",
-          "expected": true
-        },
-        {
-          "kind": "REACTION_COUNT_EQUALS",
-          "expected": 1071
-        }
+        {"kind":"RESULT_FIELD_EQUALS","field":"lo","expected":"0x12345678"},
+        {"kind":"RESULT_FIELD_EQUALS","field":"hi","expected":"0x00000000"},
+        {"kind":"QUIESCENT_EQUALS","expected":true},
+        {"kind":"REACTION_COUNT_EQUALS","expected":1071}
       ]
     },
     {
@@ -96,24 +68,10 @@
       "executionMode": "TO_QUIESCENCE",
       "maxReactions": 2048,
       "assertions": [
-        {
-          "kind": "RESULT_FIELD_EQUALS",
-          "field": "lo",
-          "expected": "0x00000000"
-        },
-        {
-          "kind": "RESULT_FIELD_EQUALS",
-          "field": "hi",
-          "expected": "0x00000001"
-        },
-        {
-          "kind": "QUIESCENT_EQUALS",
-          "expected": true
-        },
-        {
-          "kind": "REACTION_COUNT_EQUALS",
-          "expected": 1071
-        }
+        {"kind":"RESULT_FIELD_EQUALS","field":"lo","expected":"0x00000000"},
+        {"kind":"RESULT_FIELD_EQUALS","field":"hi","expected":"0x00000001"},
+        {"kind":"QUIESCENT_EQUALS","expected":true},
+        {"kind":"REACTION_COUNT_EQUALS","expected":1071}
       ]
     },
     {
@@ -125,30 +83,14 @@
       "executionMode": "TO_QUIESCENCE",
       "maxReactions": 2048,
       "assertions": [
-        {
-          "kind": "RESULT_FIELD_EQUALS",
-          "field": "lo",
-          "expected": "0x00000000"
-        },
-        {
-          "kind": "RESULT_FIELD_EQUALS",
-          "field": "hi",
-          "expected": "0x00000000"
-        },
-        {
-          "kind": "QUIESCENT_EQUALS",
-          "expected": true
-        },
-        {
-          "kind": "REACTION_COUNT_EQUALS",
-          "expected": 33
-        }
+        {"kind":"RESULT_FIELD_EQUALS","field":"lo","expected":"0x00000000"},
+        {"kind":"RESULT_FIELD_EQUALS","field":"hi","expected":"0x00000000"},
+        {"kind":"QUIESCENT_EQUALS","expected":true},
+        {"kind":"REACTION_COUNT_EQUALS","expected":33}
       ]
     }
   ],
-  "supportedBackends": [
-    "optimized-cpu"
-  ],
+  "supportedBackends": ["optimized-cpu"],
   "oraclePolicy": "FRESH_INSTANCE",
   "invariants": [
     "prepare-once",
