@@ -205,6 +205,20 @@ Promise.all([
     throw new Error("R2e scenario transport limits/policy mismatch");
   }
 
+  const oversizedManifest =
+    "x".repeat(scenarioLimits.maxManifestBytes + 1);
+  let oversizedRejected = false;
+  try {
+    writeScenarioManifest(w, oversizedManifest);
+  } catch (error) {
+    oversizedRejected =
+      String(error).includes("exceeds") &&
+      String(error).includes(String(scenarioLimits.maxManifestBytes));
+  }
+  if (!oversizedRejected) {
+    throw new Error("R2e oversized manifest was not rejected client-side");
+  }
+
   const scenarioManifestLength =
     writeScenarioManifest(w, scenarioManifest);
   const scenarioCpu = executeLoadedScenarioManifest(
@@ -312,6 +326,8 @@ Promise.all([
     throw new Error("R2e output cleanup leaked into semantic/legacy state");
   }
 
+  // A rejected oversized manifest must not have overwritten the valid
+  // manifest that was already loaded before observer-output cleanup.
   const scenarioCpuRerun = executeLoadedScenarioManifest(
     w,
     scenarioManifestLength,
