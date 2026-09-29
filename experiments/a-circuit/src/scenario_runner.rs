@@ -1148,6 +1148,77 @@ mod tests {
     }
 
     #[test]
+    fn built_in_program_descriptor_is_resolved_as_one_exact_registry_tuple() {
+        let canonical =
+            parse_and_validate_manifest_v1(MUX1_LIFECYCLE).unwrap();
+
+        for (field, mutate) in [
+            ("family", 0u8),
+            ("programId", 1u8),
+            ("asetSource", 2u8),
+        ] {
+            let mut manifest = canonical.clone();
+            match mutate {
+                0 => manifest.program_profile.family = "not-mux".to_owned(),
+                1 => manifest.program_profile.program_id = "not-mux1".to_owned(),
+                2 => manifest.program_profile.aset_source =
+                    "audit:unknown-program".to_owned(),
+                _ => unreachable!(),
+            }
+
+            let error = match open_cpu_scenario_session_v1(&manifest) {
+                Err(error) => error,
+                Ok(_) => panic!("{field} mismatch unexpectedly opened Session"),
+            };
+            match error {
+                ScenarioRunnerErrorV1::ProgramProfileMismatch {
+                    requested,
+                    canonical: actual,
+                } => {
+                    assert_eq!(requested, manifest.program_profile);
+                    assert_eq!(actual, canonical.program_profile);
+                }
+                other => panic!(
+                    "{field} mismatch returned wrong error: {other:?}"
+                ),
+            }
+        }
+
+        let mut unknown = canonical;
+        unknown.program_profile.profile_id =
+            "a-circuit:does-not-exist".to_owned();
+        assert!(matches!(
+            open_cpu_scenario_session_v1(&unknown),
+            Err(ScenarioRunnerErrorV1::UnsupportedProgramProfile { .. })
+        ));
+    }
+
+    #[test]
+    fn invalid_live_run_is_rejected_before_configure_without_link_delta() {
+        let manifest =
+            parse_and_validate_manifest_v1(MUX1_LIFECYCLE).unwrap();
+        let mut live = open_cpu_scenario_session_v1(&manifest).unwrap();
+        let before = live.status_v1();
+
+        let mut invalid = manifest.run_sequence[0].clone();
+        invalid.run_id = "invalid-prefix-input".to_owned();
+        invalid
+            .inputs
+            .insert("S".to_owned(), Value::String("12garbage".to_owned()));
+
+        let error =
+            run_cpu_scenario_session_once_v1(&mut live, &invalid).unwrap_err();
+        assert!(matches!(error, ScenarioRunnerErrorV1::Validation { .. }));
+
+        let after = live.status_v1();
+        assert_eq!(after.session_id, before.session_id);
+        assert_eq!(after.current_link_count, before.current_link_count);
+        assert_eq!(after.completed_runs, before.completed_runs);
+        assert_eq!(after.prepare_count, 1);
+        assert_eq!(after.load_count, 1);
+    }
+
+    #[test]
     fn retained_cpu_session_runs_separate_mux1_actions_without_reload() {
         let manifest =
             parse_and_validate_manifest_v1(MUX1_LIFECYCLE).unwrap();
@@ -1187,6 +1258,24 @@ mod tests {
         assert_eq!(opened.engine_instance_id, after.engine_instance_id);
         assert_eq!(opened.base_link_count, after.base_link_count);
         assert_eq!(opened.program_fingerprint, after.program_fingerprint);
+        assert_eq!(opened.program_profile, manifest.program_profile);
+        assert_eq!(after.program_profile, manifest.program_profile);
+        assert_eq!(
+            opened.manifest_field_semantics.invariants,
+            ScenarioManifestFieldAuthorityV1::Advisory
+        );
+        assert_eq!(
+            opened.manifest_field_semantics.profiling_policy,
+            ScenarioManifestFieldAuthorityV1::Advisory
+        );
+        assert_eq!(
+            opened.manifest_field_semantics.visualization_profile,
+            ScenarioManifestFieldAuthorityV1::Advisory
+        );
+        assert_eq!(
+            opened.manifest_field_semantics.program_profile,
+            ScenarioManifestFieldAuthorityV1::Enforced
+        );
         assert_eq!(opened.prepare_count, 1);
         assert_eq!(opened.load_count, 1);
         assert_eq!(after.prepare_count, 1);
@@ -1266,6 +1355,12 @@ mod tests {
         assert_eq!(
             report.provenance.program_fingerprint.as_deref(),
             Some(expected_fingerprint.as_str()),
+        );
+        assert_eq!(report.program_profile, manifest.program_profile);
+        assert_eq!(report.provenance.program_profile, manifest.program_profile);
+        assert_eq!(
+            report.manifest_field_semantics.invariants,
+            ScenarioManifestFieldAuthorityV1::Advisory
         );
     }
 
