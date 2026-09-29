@@ -1369,11 +1369,8 @@ export async function runGpuCarrierReaction(
     throw new RangeError("bounded GPU reaction carrier too large");
   }
 
-  const expected = expectedGpuCarrierReaction(
-    parsed,
-    input,
-    { maxAppend },
-  );
+  requireLookupHandle(parsed, input?.currentHandle, "current handle");
+  requireLookupHandle(parsed, input?.interpreterHandle, "interpreter handle");
   const plan = planGpuCarrierUpload(parsed.layout, device.limits);
   if (plan.mode === "unsupported") {
     throw new Error("WebGPU carrier upload unsupported: " + plan.reason);
@@ -1422,8 +1419,8 @@ export async function runGpuCarrierReaction(
 
     const shader = device.createShaderModule({
       code: gpuCarrierReactionShaderSource(plan.mode, {
-        currentHandle: expected.currentHandle,
-        interpreterHandle: expected.interpreterHandle,
+        currentHandle: input.currentHandle,
+        interpreterHandle: input.interpreterHandle,
         linkCount: parsed.layout.linkCount,
         rootHandle: parsed.layout.rootHandle,
       }),
@@ -1492,6 +1489,14 @@ export async function runGpuCarrierReaction(
       appendStarts.push(o[4 + i * 2] >>> 0);
       appendEnds.push(o[5 + i * 2] >>> 0);
     }
+    const roleCount = d[8] >>> 0;
+    const roleBindings = [];
+    for (let i = 0; i < roleCount; i += 1) {
+      roleBindings.push(Object.freeze({
+        role: d[10 + i * 2] >>> 0,
+        value: d[11 + i * 2] >>> 0,
+      }));
+    }
     const observed = Object.freeze({
       discoveryStatus: d[0] >>> 0,
       rawRuleMatches: d[1] >>> 0,
@@ -1501,14 +1506,31 @@ export async function runGpuCarrierReaction(
       triggerKey: d[5] >>> 0,
       ruleHandle: d[6] >>> 0,
       admissionHandle: d[7] >>> 0,
-      roleCount: d[8] >>> 0,
-      outputTemplate: d[9] >>> 0,
+      roleCount,
+      roleBindings: Object.freeze(roleBindings),
+      outputBundleTemplate: d[9] >>> 0,
       appendCount,
       appendStarts: Object.freeze(appendStarts),
       appendEnds: Object.freeze(appendEnds),
       publishedHandle: o[1] >>> 0,
       publishStatus: o[2] >>> 0,
+      groundedBundle: o[3] >>> 0,
     });
+
+    // Oracle is deliberately computed only after GPU execution and readback.
+    // Nothing derived from it can seed shader constants or publication.
+    const expected = expectedGpuCarrierReaction(
+      parsed,
+      input,
+      { maxAppend },
+    );
+    const sameBindings =
+      observed.roleBindings.length === expected.roleBindings.length &&
+      observed.roleBindings.every(
+        (binding, i) =>
+          binding.role === expected.roleBindings[i].role &&
+          binding.value === expected.roleBindings[i].value,
+      );
     const sameAppend =
       observed.appendCount === expected.appendCount &&
       observed.appendStarts.every(
@@ -1526,8 +1548,10 @@ export async function runGpuCarrierReaction(
         observed.triggerKey !== expected.triggerKey ||
         observed.ruleHandle !== expected.ruleHandle ||
         observed.admissionHandle !== expected.admissionHandle ||
-        observed.outputTemplate !== expected.outputTemplate ||
+        observed.outputBundleTemplate !== expected.outputBundleTemplate ||
+        observed.groundedBundle !== expected.groundedBundle ||
         observed.publishedHandle !== expected.candidateHandle ||
+        !sameBindings ||
         !sameAppend) {
       throw new Error(
         "WebGPU structural reaction diverged from CPU virtual-overlay oracle",
