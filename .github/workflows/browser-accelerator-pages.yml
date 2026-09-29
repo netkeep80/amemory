@@ -274,7 +274,7 @@ jobs:
           test ! -e _site/app.js
           test ! -e _site/i386-lab.js
           test ! -e _site/i386-lab-view.mjs
-          test ! -e _site/proof-view.mjs
+          test ! -e _site/i386-proof-view.mjs
           test -s _site/i386-blocks.json
           test -s _site/amemory_a_circuit.wasm
           test -s _site/mts-visual-lock.json
