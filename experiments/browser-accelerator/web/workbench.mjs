@@ -411,6 +411,7 @@ function styles() {
     ".wb-mode,.wb-actions{display:flex;gap:7px;flex-wrap:wrap}.wb-mode button,.wb-actions button{cursor:pointer}.wb-mode button[aria-pressed=true]{outline:2px solid var(--accent);font-weight:800}.wb-actions .primary{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:800}.wb-actions button:disabled{opacity:.45}",
     ".wb-help{color:var(--muted);font-size:.78rem;margin-top:6px}.wb-memory{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.wb-metric{padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);min-width:0}.wb-metric small{display:block;color:var(--muted)}.wb-metric strong,.wb-metric code{display:block;margin-top:4px;overflow-wrap:anywhere}",
     ".wb-result{margin-top:12px;padding:14px;border:2px solid var(--line);border-radius:12px}.wb-result.ready{border-color:var(--good)}.wb-result h4{margin:0 0 7px}.wb-result-value{font-size:1.35rem;font-weight:900;overflow-wrap:anywhere}",
+    ".wb-step-live{margin-top:12px;padding:14px;border:2px solid var(--accent);border-radius:12px;background:var(--surface-2)}.wb-step-live h4{margin:0 0 10px}",
     ".wb-verification{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:10px 0}.wb-verification-item{display:grid;gap:5px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2)}.wb-verification-item code{overflow-wrap:anywhere}.wb-verification-item strong{font-size:.76rem}.wb-verification-item small{color:var(--muted)}.wb-verification-item.verified{border-color:var(--good)}.wb-verification-item.failed{border-color:var(--bad)}",
     ".wb-tabs{padding:0 16px 16px}.wb-tabbar{display:flex;gap:6px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:9px}.wb-tabbar button{border:0;background:transparent;color:var(--muted);padding:7px 9px;cursor:pointer}.wb-tabbar button[aria-selected=true]{color:var(--text);font-weight:800;border-bottom:2px solid var(--accent)}.wb-tab{padding-top:12px}",
     ".wb-log{display:grid;gap:6px;max-height:360px;overflow:auto}.wb-log-row{padding:8px 10px;border:1px solid var(--line);border-radius:9px;background:var(--surface-2);font-size:.78rem}.wb-table{width:100%;border-collapse:collapse;font-size:.8rem}.wb-table th,.wb-table td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line)}.wb-table th{color:var(--muted)}",
@@ -669,7 +670,8 @@ function syncInputs(state) {
 function render(state) {
   const status = state.session;
   const run = state.run;
-  const pipeline = deriveWorkbenchPipeline(status, run);
+  const stepSnapshot = workbenchStepSnapshot(state.step);
+  const pipeline = deriveWorkbenchPipeline(status, run, state.step);
   const openSession = Boolean(status);
   const level = state.level;
   const resultStatus = workbenchResultStatus(run);
@@ -685,7 +687,13 @@ function render(state) {
     '<span class="wb-chip" title="' + esc(state.build.sha) + '">SHA ' + esc(compact(state.build.sha)) + '</span>' +
     '<span class="wb-chip">исполнитель ' + esc(state.backend) + '</span>' +
     '<span class="wb-chip">сессия ' + esc(compact(status && status.sessionId)) + '</span>' +
-    '<span class="wb-chip">запуск ' + esc(run && run.sessionRunId || 0) + '</span>' +
+    '<span class="wb-chip">запуск ' +
+      esc(run?.sessionRunId ?? stepSnapshot.sessionRunId ?? 0) +
+      '</span>' +
+    (state.step?.active
+      ? '<span class="wb-chip good">ПОШАГОВО · реакция ' +
+        esc(stepSnapshot.reactionCount) + '</span>'
+      : '') +
     '<span class="wb-chip ' + (state.error ? "bad" : openSession ? "good" : "") + '">' +
     esc(state.error ? "ОШИБКА" : openSession ? "СЕССИЯ ОТКРЫТА" : state.loading ? "ЗАГРУЗКА" : "ЗАКРЫТО") +
     '</span><div class="wb-levels" aria-label="Уровень подробности">' +
@@ -709,17 +717,21 @@ function render(state) {
     '</select><div class="wb-help">' + esc(state.manifest.description || "") + '</div></div>' +
 
     '<div class="wb-mode"><button data-mode="preset" aria-pressed="' + (state.mode === "preset") +
-    '">Готовый</button><button data-mode="manual" aria-pressed="' + (state.mode === "manual") +
-    '">Ручной</button></div>' +
+    '"' + (state.step?.active ? " disabled" : "") +
+    '>Готовый</button><button data-mode="manual" aria-pressed="' + (state.mode === "manual") +
+    '"' + (state.step?.active ? " disabled" : "") +
+    '>Ручной</button></div>' +
 
-    '<div class="wb-field"><label>Готовый запуск</label><select id="wb-preset-run">' +
+    '<div class="wb-field"><label>Готовый запуск</label><select id="wb-preset-run"' +
+    (state.step?.active ? " disabled" : "") + '>' +
     (state.manifest.runSequence || []).map((item, i) =>
       '<option value="' + i + '"' + (i === state.presetIndex ? " selected" : "") + '>' +
       esc("Запуск " + (i + 1) + " · " + (item.runId || ("run-" + (i + 1)))) + '</option>').join("") + '</select></div>' +
 
     (state.manifest.inputSchema || []).map((field) => {
       const value = state.inputs[field.key];
-      const disabled = state.mode === "preset" ? " disabled" : "";
+      const disabled =
+        state.mode === "preset" || state.step?.active ? " disabled" : "";
       const control = String(field.type || "").toUpperCase() === "BIT"
         ? '<select data-input-key="' + esc(field.key) + '"' + disabled + '><option value="0"' +
           (Number(value) === 0 ? " selected" : "") + '>0</option><option value="1"' +
@@ -736,9 +748,17 @@ function render(state) {
         (supported ? "" : " disabled") + '>' + esc(label + (supported ? "" : " — не поддерживается")) + '</option>';
     }).join("") + '</select><div class="wb-help">Неподдерживаемые исполнители показаны явно; скрытого переключения на другой исполнитель нет.</div></div>' +
 
-    '<div class="wb-actions"><button id="wb-open"' + (openSession || state.loading ? " disabled" : "") +
-    '>Открыть апамять</button><button id="wb-run" class="primary"' + (!openSession || state.loading ? " disabled" : "") +
-    '>Выполнить</button><button id="wb-close"' + (!openSession || state.loading ? " disabled" : "") + '>Закрыть</button></div>' +
+    '<div class="wb-actions"><button id="wb-open"' +
+      (openSession || state.loading ? " disabled" : "") +
+    '>Открыть апамять</button><button id="wb-run" class="primary"' +
+      (!openSession || state.loading || state.step?.active ? " disabled" : "") +
+    '>Выполнить полностью</button><button id="wb-step-start"' +
+      (!openSession || state.loading || state.step?.active ? " disabled" : "") +
+    '>Начать по шагам</button><button id="wb-step-next" class="primary"' +
+      (!state.step?.active || state.loading ? " disabled" : "") +
+    '>Шаг</button><button id="wb-close"' +
+      (!openSession || state.loading ? " disabled" : "") +
+    '>Закрыть</button></div>' +
     '<div class="wb-help">Готовый и ручной режим используют один и тот же манифест сценария. Изменение входов сохраняет эту же сессию и уже загруженную апамять.</div>' +
     (state.error ? '<p class="wb-error">' + esc(state.error) + '</p>' : '') + '</div>' +
 
@@ -749,7 +769,13 @@ function render(state) {
     '</strong></div>' +
     '<div class="wb-simple-item"><small>Входы</small><code>' + esc(JSON.stringify(state.inputs)) + '</code></div>' +
     '<div class="wb-simple-item"><small>Текущее состояние</small><strong>' +
-      esc(!status ? "апамять закрыта" : run ? "запуск №" + run.sessionRunId + " завершён" : "загружено один раз · готово к выполнению") +
+      esc(!status
+        ? "апамять закрыта"
+        : state.step?.active
+          ? "пошаговое исполнение · реакция " + stepSnapshot.reactionCount
+          : run
+            ? "запуск №" + run.sessionRunId + " завершён"
+            : "загружено один раз · готово к выполнению") +
     '</strong></div></div>' +
     (level === "simple" ? "" :
       '<div class="wb-memory">' +
@@ -761,6 +787,26 @@ function render(state) {
       '<div class="wb-metric"><small>Подготовка / загрузка / запуски</small><strong>' + esc(status && status.prepareCount || 0) +
       " / " + esc(status && status.loadCount || 0) + " / " + esc(status && status.completedRuns || 0) + '</strong></div>' +
       '</div>') +
+    (state.step
+      ? '<div class="wb-step-live"><h4>Реальный шаг исполнения</h4>' +
+        '<div class="wb-simple-grid">' +
+        '<div class="wb-simple-item"><small>Реакция</small><strong>' +
+          esc(stepSnapshot.reactionCount) + '</strong></div>' +
+        '<div class="wb-simple-item"><small>Scope до</small><code>' +
+          esc(JSON.stringify(stepSnapshot.scopeBefore)) + '</code></div>' +
+        '<div class="wb-simple-item"><small>Scope после</small><code>' +
+          esc(JSON.stringify(stepSnapshot.scopeAfter)) + '</code></div>' +
+        '</div><div class="wb-memory">' +
+        '<div class="wb-metric"><small>Совпадений правил</small><strong>' +
+          esc(stepSnapshot.rawRuleMatches ?? "—") + '</strong></div>' +
+        '<div class="wb-metric"><small>Переходов</small><strong>' +
+          esc(stepSnapshot.transitionedMembers ?? "—") + '</strong></div>' +
+        '<div class="wb-metric"><small>Публикаций / handoff</small><strong>' +
+          esc(stepSnapshot.handoffCount ?? "—") + '</strong></div>' +
+        '<div class="wb-metric"><small>Покой</small><strong>' +
+          esc(String(stepSnapshot.quiescent)) + '</strong></div>' +
+        '</div><div class="wb-help">Scope показан только из runtime ReactionEvidence. UI не передаёт Scope обратно в исполнитель.</div></div>'
+      : '') +
     '<div class="wb-result ' + (run ? resultStatus.kind : "") + '"><h4>' + esc(resultStatus.label) + '</h4><div class="wb-result-value">' +
     esc(resultText(run)) + '</div><div class="wb-help">' +
     esc(resultStatus.explanation +
@@ -824,7 +870,18 @@ function render(state) {
     input.addEventListener("change", () => { state.inputs[input.dataset.inputKey] = input.value; });
   }
   root.querySelector("#wb-open")?.addEventListener("click", () => void open(state));
-  root.querySelector("#wb-run")?.addEventListener("click", () => { syncInputs(state); void execute(state); });
+  root.querySelector("#wb-run")?.addEventListener("click", () => {
+    syncInputs(state);
+    state.step = null;
+    void execute(state);
+  });
+  root.querySelector("#wb-step-start")?.addEventListener("click", () => {
+    syncInputs(state);
+    void beginStep(state);
+  });
+  root.querySelector("#wb-step-next")?.addEventListener("click", () => {
+    void stepOnce(state);
+  });
   root.querySelector("#wb-close")?.addEventListener("click", () => close(state));
   for (const button of root.querySelectorAll("[data-tab]")) {
     button.addEventListener("click", () => { state.tab = button.dataset.tab; render(state); });
