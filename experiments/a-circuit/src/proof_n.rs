@@ -1,6 +1,6 @@
 use super::observability::{
     ns_u64, ObservedRunV1, RunEventKind, RunEventV1, RunObservationLevel,
-    RunProfileV1, StructuralProfileV1, OPTIMIZED_CPU_BACKEND_ID,
+    RunProfileV1, RunStage, StructuralProfileV1, OPTIMIZED_CPU_BACKEND_ID,
     RUN_OBSERVABILITY_SCHEMA_VERSION,
 };
 use amemory_optimized_cpu_probe::{
@@ -816,6 +816,7 @@ pub(crate) fn execute_session_observed_to_quiescence(
             backend_id: OPTIMIZED_CPU_BACKEND_ID.to_owned(),
             sequence,
             elapsed_ns: ns_u64(run_started.elapsed().as_nanos()),
+            stage: RunStage::Execute,
             kind: RunEventKind::ExecuteBegin,
             reaction_index: None,
             scope_before: Some(session.engine.current().to_vec()),
@@ -868,6 +869,7 @@ pub(crate) fn execute_session_observed_to_quiescence(
                 backend_id: OPTIMIZED_CPU_BACKEND_ID.to_owned(),
                 sequence,
                 elapsed_ns: ns_u64(run_started.elapsed().as_nanos()),
+            stage: RunStage::Execute,
                 kind: RunEventKind::ReactionEnd,
                 reaction_index: Some(reaction_index),
                 scope_before,
@@ -888,6 +890,7 @@ pub(crate) fn execute_session_observed_to_quiescence(
                     backend_id: OPTIMIZED_CPU_BACKEND_ID.to_owned(),
                     sequence,
                     elapsed_ns: ns_u64(run_started.elapsed().as_nanos()),
+            stage: RunStage::Execute,
                     kind: RunEventKind::Quiescence,
                     reaction_index: Some(reaction_index),
                     scope_before: None,
@@ -927,6 +930,7 @@ pub(crate) fn execute_session_observed_to_quiescence(
             backend_id: OPTIMIZED_CPU_BACKEND_ID.to_owned(),
             sequence,
             elapsed_ns: ns_u64(run_started.elapsed().as_nanos()),
+            stage: RunStage::Execute,
             kind: RunEventKind::RunEnd,
             reaction_index: None,
             scope_before: None,
