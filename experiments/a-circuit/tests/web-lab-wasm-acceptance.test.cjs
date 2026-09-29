@@ -178,6 +178,8 @@ Promise.all([
     clearScenarioTransportOutput,
     executeLoadedScenarioManifest,
     executeScenarioManifest,
+    exportScenarioReplayBundle,
+    importScenarioReplayBundle,
     readScenarioError,
     readScenarioReport,
     readScenarioTransportLimits,
@@ -683,6 +685,100 @@ Promise.all([
     throw new Error(
       "R3d4 MUL32 generic Scenario path mutated legacy LabInstanceState"
     );
+  }
+
+  // R3e: a canonical preset can be edited as the same manifest model,
+  // exported with exact execution provenance, imported, and replayed through
+  // the same generic transport. This is reproducibility, not retained-session
+  // UI state; R4 owns the latter.
+  const editedScenario = JSON.parse(JSON.stringify(scenarioManifest));
+  editedScenario.title += " — manual edit witness";
+  editedScenario.runSequence.push({
+    runId: "run-5-manual-select-b-zero",
+    inputs: { S: 1, A: 1, B: 0 },
+    executionMode: "TO_QUIESCENCE",
+    maxReactions: 64,
+    assertions: [
+      { kind: "RESULT_FIELD_EQUALS", field: "value", expected: 0 },
+      { kind: "QUIESCENT_EQUALS", expected: true },
+      { kind: "REACTION_COUNT_EQUALS", expected: 7 },
+    ],
+  });
+
+  const editedCpu = executeScenarioManifest(
+    w,
+    editedScenario,
+    "optimized-cpu"
+  );
+  if (!editedCpu.ok ||
+      editedCpu.report?.overallPass !== true ||
+      editedCpu.report?.runs?.length !== 5 ||
+      editedCpu.report.runs[4]?.sessionRunId !== 5 ||
+      editedCpu.report.runs.some(
+        (run) => run.observed?.sessionId !== editedCpu.report.sessionId
+      )) {
+    throw new Error("R3e edited manifest did not run in one Session");
+  }
+
+  const editedProvenance = editedCpu.report.provenance;
+  if (editedProvenance?.amemoryVersion !== version ||
+      editedProvenance?.buildSha !== sourceSha ||
+      !/^prepared-aset-fnv1a64-v1:[0-9a-f]{16}$/.test(
+        editedProvenance?.programFingerprint ?? ""
+      )) {
+    throw new Error("R3e exact replay provenance is incomplete");
+  }
+
+  const replayBundle = exportScenarioReplayBundle(
+    editedScenario,
+    editedCpu.report
+  );
+  const replayText = JSON.stringify(replayBundle);
+  const importedReplay = importScenarioReplayBundle(replayText);
+  if (importedReplay.schemaVersion !== 1 ||
+      importedReplay.manifest.runSequence.length !== 5 ||
+      importedReplay.backend !== "optimized-cpu" ||
+      importedReplay.provenance.buildSha !== sourceSha ||
+      importedReplay.provenance.programFingerprint !==
+        editedProvenance.programFingerprint) {
+    throw new Error("R3e replay bundle export/import mismatch");
+  }
+
+  const replayCpu = executeScenarioManifest(
+    w,
+    importedReplay.manifest,
+    importedReplay.backend
+  );
+  if (!replayCpu.ok ||
+      replayCpu.report?.overallPass !== true ||
+      replayCpu.report?.sessionId === editedCpu.report.sessionId ||
+      replayCpu.report?.provenance?.programFingerprint !==
+        importedReplay.provenance.programFingerprint ||
+      replayCpu.report?.provenance?.buildSha !==
+        importedReplay.provenance.buildSha) {
+    throw new Error("R3e imported replay provenance mismatch");
+  }
+  const editedSemanticResults = editedCpu.report.runs.map(
+    (run) => run.result?.fields
+  );
+  const replaySemanticResults = replayCpu.report.runs.map(
+    (run) => run.result?.fields
+  );
+  if (JSON.stringify(editedSemanticResults) !==
+      JSON.stringify(replaySemanticResults)) {
+    throw new Error("R3e imported replay changed semantic Results");
+  }
+
+  const tamperedReplay = JSON.parse(replayText);
+  tamperedReplay.provenance.programProfileId = "a-circuit:not-mux1";
+  let tamperRejected = false;
+  try {
+    importScenarioReplayBundle(tamperedReplay);
+  } catch (error) {
+    tamperRejected = String(error).includes("programProfileId");
+  }
+  if (!tamperRejected) {
+    throw new Error("R3e replay provenance mismatch did not fail closed");
   }
 
   const scenarioGpu = executeScenarioManifest(

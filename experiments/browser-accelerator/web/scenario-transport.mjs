@@ -1,5 +1,10 @@
 import { readJsonAbi } from "./i386-wasm-json.mjs";
 
+const REPLAY_BUNDLE_SCHEMA_VERSION = 1;
+const SOURCE_SHA_RE = /^[0-9a-f]{40}$/;
+const PROGRAM_FINGERPRINT_RE =
+  /^prepared-aset-fnv1a64-v1:[0-9a-f]{16}$/;
+
 const BACKENDS = new Map([
   ["optimized-cpu", 0],
   ["webgpu", 1],
@@ -135,4 +140,116 @@ export function executeScenarioManifest(
 ) {
   const length = writeScenarioManifest(wasm, manifest);
   return executeLoadedScenarioManifest(wasm, length, backend);
+}
+
+function cloneJson(value, label) {
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch (error) {
+    throw new Error(
+      `scenario replay: ${label} is not JSON-serializable: ${error}`,
+    );
+  }
+}
+
+function normalizeManifest(manifest) {
+  if (typeof manifest === "string") {
+    try {
+      return JSON.parse(manifest);
+    } catch (error) {
+      throw new Error(`scenario replay: invalid manifest JSON: ${error}`);
+    }
+  }
+  if (manifest === null || typeof manifest !== "object" ||
+      Array.isArray(manifest)) {
+    throw new Error("scenario replay: manifest must be an object");
+  }
+  return cloneJson(manifest, "manifest");
+}
+
+function requireReplayProvenance(manifest, backend, provenance) {
+  if (!BACKENDS.has(backend)) {
+    throw new Error(`scenario replay: unknown backend ${backend}`);
+  }
+  if (provenance === null || typeof provenance !== "object" ||
+      Array.isArray(provenance)) {
+    throw new Error("scenario replay: provenance is required");
+  }
+  if (typeof provenance.amemoryVersion !== "string" ||
+      provenance.amemoryVersion.length === 0) {
+    throw new Error("scenario replay: amemoryVersion is required");
+  }
+  if (!SOURCE_SHA_RE.test(provenance.buildSha ?? "")) {
+    throw new Error("scenario replay: exact 40-hex buildSha is required");
+  }
+  if (!PROGRAM_FINGERPRINT_RE.test(
+    provenance.programFingerprint ?? "",
+  )) {
+    throw new Error(
+      "scenario replay: versioned prepared-program fingerprint is required",
+    );
+  }
+  if (provenance.scenarioVersion !== manifest.scenarioVersion) {
+    throw new Error("scenario replay: scenarioVersion provenance mismatch");
+  }
+  if (provenance.programProfileId !==
+      manifest.programProfile?.profileId) {
+    throw new Error("scenario replay: programProfileId provenance mismatch");
+  }
+}
+
+export function exportScenarioReplayBundle(manifest, report) {
+  const normalizedManifest = normalizeManifest(manifest);
+  if (report === null || typeof report !== "object" ||
+      Array.isArray(report)) {
+    throw new Error("scenario replay: execution report is required");
+  }
+  if (report.scenarioVersion !== normalizedManifest.scenarioVersion ||
+      report.programProfile?.profileId !==
+        normalizedManifest.programProfile?.profileId) {
+    throw new Error("scenario replay: report does not match manifest");
+  }
+
+  const backend = report.backend;
+  const provenance = cloneJson(report.provenance, "provenance");
+  requireReplayProvenance(normalizedManifest, backend, provenance);
+
+  return {
+    schemaVersion: REPLAY_BUNDLE_SCHEMA_VERSION,
+    manifest: normalizedManifest,
+    backend,
+    provenance,
+  };
+}
+
+export function importScenarioReplayBundle(source) {
+  let bundle;
+  if (typeof source === "string") {
+    try {
+      bundle = JSON.parse(source);
+    } catch (error) {
+      throw new Error(`scenario replay: invalid bundle JSON: ${error}`);
+    }
+  } else {
+    bundle = cloneJson(source, "bundle");
+  }
+
+  if (bundle === null || typeof bundle !== "object" ||
+      Array.isArray(bundle) ||
+      bundle.schemaVersion !== REPLAY_BUNDLE_SCHEMA_VERSION) {
+    throw new Error(
+      `scenario replay: expected schemaVersion ${REPLAY_BUNDLE_SCHEMA_VERSION}`,
+    );
+  }
+
+  const manifest = normalizeManifest(bundle.manifest);
+  const provenance = cloneJson(bundle.provenance, "provenance");
+  requireReplayProvenance(manifest, bundle.backend, provenance);
+
+  return {
+    schemaVersion: REPLAY_BUNDLE_SCHEMA_VERSION,
+    manifest,
+    backend: bundle.backend,
+    provenance,
+  };
 }
