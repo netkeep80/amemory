@@ -199,8 +199,8 @@ Promise.all([
     "utf8"
   );
   const presetRegistry = refreshScenarioPresetRegistry(w);
-  if (presetRegistry.entries.length !== 2) {
-    throw new Error("R3d1 preset registry count mismatch");
+  if (presetRegistry.entries.length !== 3) {
+    throw new Error("R3d2 preset registry count mismatch");
   }
   const presetSummary = presetRegistry.entries.find(
     (entry) => entry.scenarioId === "mux1-lifecycle"
@@ -229,6 +229,21 @@ Promise.all([
       xorPresetSummary.inputSchema.length !== 2) {
     throw new Error("R3d1 manifest-derived XOR32 preset summary mismatch");
   }
+
+  const addPresetSummary = presetRegistry.entries.find(
+    (entry) => entry.scenarioId === "add32-lifecycle"
+  );
+  if (!addPresetSummary ||
+      addPresetSummary.scenarioVersion !== "1.0.0" ||
+      addPresetSummary.programProfileId !== "a-circuit:arithmetic-add32" ||
+      addPresetSummary.family !== "arithmetic-effect" ||
+      addPresetSummary.programId !== "add32" ||
+      addPresetSummary.runCount !== 4 ||
+      !Array.isArray(addPresetSummary.inputSchema) ||
+      addPresetSummary.inputSchema.length !== 2) {
+    throw new Error("R3d2 manifest-derived ADD32 preset summary mismatch");
+  }
+
 
   if (loadScenarioPresetManifestByIndex(w, 99) !== null ||
       readScenarioError(w)?.code !== "PRESET_REGISTRY") {
@@ -464,6 +479,64 @@ Promise.all([
       legacyResultBeforeScenario) {
     throw new Error(
       "R3d1 XOR32 generic Scenario path mutated legacy LabInstanceState"
+    );
+  }
+
+  // R3d2: arithmetic uses the same generic preset registry and Scenario
+  // transport. There is no ADD-specific browser executor.
+  const canonicalAddSource = fs.readFileSync(
+    "experiments/a-circuit/scenarios/add32-lifecycle-v1.json",
+    "utf8"
+  );
+  const addPreset = loadScenarioPresetManifest(
+    w,
+    presetRegistry,
+    "add32-lifecycle",
+    "1.0.0"
+  );
+  if (addPreset === null || addPreset.source !== canonicalAddSource) {
+    throw new Error("R3d2 ADD32 canonical preset round-trip mismatch");
+  }
+  const addScenario = JSON.parse(addPreset.source);
+  const addCpu = executeScenarioManifest(
+    w,
+    addScenario,
+    "optimized-cpu"
+  );
+  if (!addCpu.ok ||
+      addCpu.error !== null ||
+      addCpu.report?.scenarioId !== "add32-lifecycle" ||
+      addCpu.report?.overallPass !== true ||
+      addCpu.report?.runs?.length !== 4) {
+    throw new Error("R3d2 generic ADD32 Scenario execution failed");
+  }
+  for (let index = 0; index < addCpu.report.runs.length; index += 1) {
+    const run = addCpu.report.runs[index];
+    if ((run.sessionRunId >>> 0) !== index + 1 ||
+        run.observed?.sessionId !== addCpu.report.sessionId ||
+        run.observed?.finalQuiescent !== true ||
+        run.observed?.activeReactionCount !== 609 ||
+        run.oracleMatches !== true ||
+        !run.pipelineProfile ||
+        run.observed?.profile?.structural?.unificationAttempts <= 0) {
+      throw new Error(
+        "R3d2 ADD32 persistent-session evidence mismatch at run " + index
+      );
+    }
+  }
+  if (addCpu.report.runs[1].result?.fields?.value !== "0x00000000" ||
+      addCpu.report.runs[1].result?.fields?.valueMask !== "0x00000055" ||
+      addCpu.report.runs[2].result?.fields?.value !== "0x80000000" ||
+      addCpu.report.runs[2].result?.fields?.valueMask !== "0x00000894" ||
+      addCpu.report.runs[3].configurationReused !== true ||
+      JSON.stringify(addCpu.report.runs[3].inputs) !==
+        JSON.stringify(addCpu.report.runs[0].inputs)) {
+    throw new Error("R3d2 ADD32 result/flags/canonical reuse mismatch");
+  }
+  if ((w.amemory_i386_lab_result_available() >>> 0) !==
+      legacyResultBeforeScenario) {
+    throw new Error(
+      "R3d2 ADD32 generic Scenario path mutated legacy LabInstanceState"
     );
   }
 
