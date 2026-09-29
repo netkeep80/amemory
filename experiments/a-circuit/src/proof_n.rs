@@ -502,18 +502,230 @@ pub(crate) struct ProofRuntimeMemory {
     pub(crate) store: OptimizedLinkStore,
 }
 
+/// Execution-control state of one long-lived CPU A-memory Session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub(crate) enum ProofRuntimeSessionState {
+    Open,
+    Configured,
+    Running,
+    Quiescent,
+    Failed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ProofRuntimeStepError {
+    InvalidState(ProofRuntimeSessionState),
+    EngineFailure,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SessionReactionEvidenceV1 {
+    pub(crate) schema_version: u32,
+    pub(crate) session_id: String,
+    pub(crate) run_id: u64,
+    pub(crate) reaction_index: u32,
+    pub(crate) scope_before: Vec<u32>,
+    pub(crate) scope_after: Vec<u32>,
+    pub(crate) links_before: u32,
+    pub(crate) links_after: u32,
+    pub(crate) raw_rule_matches: u32,
+    pub(crate) transitioned_members: u32,
+    pub(crate) handoff_count: u32,
+    pub(crate) quiescent: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) structural_facts: Option<Vec<RunStructuralFactV1>>,
+}
+
+#[derive(Debug)]
+pub(crate) struct SessionStepOutcomeV1 {
+    pub(crate) evidence: SessionReactionEvidenceV1,
+    pub(crate) structural_profile: StructuralRunProfile,
+    pub(crate) trace_projection_ns: u128,
+}
+
 /// Long-lived CPU execution session over one loaded A-memory.
 ///
-/// The store and structural engine intentionally survive CONFIGURE/EXECUTE
-/// cycles so derived caches and inactive Scope banks are lifecycle state rather
-/// than reconstructed test fixtures. Program semantics still live only in
-/// loaded Links/Theory/data.
+/// `begin_run` publishes the initial Scope into the already loaded engine.
+/// `step` is the one authoritative semantic reaction operation for the
+/// persistent Session. Higher-level run-to-quiescence APIs are bounded loops
+/// over this primitive; they do not own a second execution path.
 #[derive(Debug)]
 pub(crate) struct ProofRuntimeSession {
     pub(crate) memory: ProofRuntimeMemory,
     pub(crate) engine: OptimizedStructuralEngine,
     pub(crate) base_link_count: usize,
     next_run_id: u64,
+    execution_state: ProofRuntimeSessionState,
+    active_run_id: Option<u64>,
+    next_reaction_index: u32,
+}
+
+impl ProofRuntimeSession {
+    pub(crate) fn execution_state(&self) -> ProofRuntimeSessionState {
+        self.execution_state
+    }
+
+    pub(crate) fn begin_run(
+        &mut self,
+        initial: Handle,
+    ) -> Result<u64, ProofRuntimeStepError> {
+        if !matches!(
+            self.execution_state,
+            ProofRuntimeSessionState::Open
+                | ProofRuntimeSessionState::Quiescent
+        ) {
+            return Err(ProofRuntimeStepError::InvalidState(
+                self.execution_state,
+            ));
+        }
+
+        if self
+            .engine
+            .set_current(&self.memory.store, &[initial])
+            .is_err()
+        {
+            self.execution_state = ProofRuntimeSessionState::Failed;
+            return Err(ProofRuntimeStepError::EngineFailure);
+        }
+
+        let run_id = self.next_run_id;
+        self.next_run_id = self.next_run_id.saturating_add(1);
+        self.active_run_id = Some(run_id);
+        self.next_reaction_index = 0;
+        self.execution_state = ProofRuntimeSessionState::Configured;
+        Ok(run_id)
+    }
+
+    pub(crate) fn step(
+        &mut self,
+        observation_level: RunObservationLevel,
+    ) -> Result<SessionStepOutcomeV1, ProofRuntimeStepError> {
+        if !matches!(
+            self.execution_state,
+            ProofRuntimeSessionState::Configured
+                | ProofRuntimeSessionState::Running
+        ) {
+            return Err(ProofRuntimeStepError::InvalidState(
+                self.execution_state,
+            ));
+        }
+
+        let run_id = match self.active_run_id {
+            Some(run_id) => run_id,
+            None => {
+                self.execution_state = ProofRuntimeSessionState::Failed;
+                return Err(ProofRuntimeStepError::EngineFailure);
+            }
+        };
+        let reaction_index = self.next_reaction_index;
+        let links_before = self.memory.store.link_count() as u32;
+
+        let mut trace_projection_ns = 0u128;
+        let scope_before = if observation_level.traces() {
+            let projection_started = ObservationTimer::start();
+            let scope = self.engine.current().to_vec();
+            trace_projection_ns = trace_projection_ns
+                .saturating_add(projection_started.elapsed_ns());
+            scope
+        } else {
+            self.engine.current().to_vec()
+        };
+
+        let (reaction, structural_profile, structural_facts) =
+            if observation_level.traces() {
+                let (reaction, profile, native_trace) = match self
+                    .engine
+                    .run_traced(&mut self.memory.store)
+                {
+                    Ok(value) => value,
+                    Err(_) => {
+                        self.execution_state =
+                            ProofRuntimeSessionState::Failed;
+                        return Err(ProofRuntimeStepError::EngineFailure);
+                    }
+                };
+
+                let projection_started = ObservationTimer::start();
+                let collection_ns = native_trace.collection_ns;
+                let facts = native_trace
+                    .events
+                    .into_iter()
+                    .map(RunStructuralFactV1::from)
+                    .collect::<Vec<_>>();
+                trace_projection_ns = trace_projection_ns
+                    .saturating_add(collection_ns)
+                    .saturating_add(projection_started.elapsed_ns());
+                (reaction, profile, Some(facts))
+            } else if observation_level.profiles() {
+                let (reaction, profile) = match self
+                    .engine
+                    .run_profiled(&mut self.memory.store)
+                {
+                    Ok(value) => value,
+                    Err(_) => {
+                        self.execution_state =
+                            ProofRuntimeSessionState::Failed;
+                        return Err(ProofRuntimeStepError::EngineFailure);
+                    }
+                };
+                (reaction, profile, None)
+            } else {
+                let reaction = match self.engine.run(&mut self.memory.store) {
+                    Ok(value) => value,
+                    Err(_) => {
+                        self.execution_state =
+                            ProofRuntimeSessionState::Failed;
+                        return Err(ProofRuntimeStepError::EngineFailure);
+                    }
+                };
+                (reaction, StructuralRunProfile::default(), None)
+            };
+
+        let scope_after = if observation_level.traces() {
+            let projection_started = ObservationTimer::start();
+            let scope = self.engine.current().to_vec();
+            trace_projection_ns = trace_projection_ns
+                .saturating_add(projection_started.elapsed_ns());
+            scope
+        } else {
+            self.engine.current().to_vec()
+        };
+        let quiescent = reaction.quiescent;
+
+        self.next_reaction_index =
+            self.next_reaction_index.saturating_add(1);
+        self.execution_state = if quiescent {
+            ProofRuntimeSessionState::Quiescent
+        } else {
+            ProofRuntimeSessionState::Running
+        };
+
+        Ok(SessionStepOutcomeV1 {
+            evidence: SessionReactionEvidenceV1 {
+                schema_version: RUN_OBSERVABILITY_SCHEMA_VERSION,
+                session_id: self.memory.id.clone(),
+                run_id,
+                reaction_index,
+                scope_before,
+                scope_after,
+                links_before,
+                links_after: self.memory.store.link_count() as u32,
+                raw_rule_matches: reaction.raw_rule_matches,
+                transitioned_members: reaction.transitioned_members,
+                handoff_count: reaction.handoff_count,
+                quiescent,
+                structural_facts,
+            },
+            structural_profile,
+            trace_projection_ns,
+        })
+    }
+
+    fn fail_active_run(&mut self) {
+        self.execution_state = ProofRuntimeSessionState::Failed;
+    }
 }
 
 pub(crate) fn export_packed_carrier(
@@ -764,6 +976,9 @@ pub(crate) fn load_runtime_session(
             engine,
             base_link_count,
             next_run_id: 1,
+            execution_state: ProofRuntimeSessionState::Open,
+            active_run_id: None,
+            next_reaction_index: 0,
         },
         load,
     ))
@@ -774,12 +989,49 @@ pub(crate) fn execute_session_to_quiescence(
     initial: Handle,
     max_steps: u32,
 ) -> Option<WebProofExecuteStage> {
-    run_engine_to_quiescence(
-        &mut session.memory,
-        &mut session.engine,
-        initial,
-        max_steps,
-    )
+    let memory_instance_id = session.memory.id.clone();
+    session.begin_run(initial).ok()?;
+
+    let mut reactions = Vec::new();
+    for _ in 0..max_steps {
+        let step = session.step(RunObservationLevel::Off).ok()?;
+        let evidence = step.evidence;
+        let quiescent = evidence.quiescent;
+        reactions.push(WebProofReactionStep {
+            memory_instance_id: memory_instance_id.clone(),
+            step: evidence.reaction_index,
+            scope_before: export_scope(
+                &session.memory.store,
+                &evidence.scope_before,
+            ),
+            raw_rule_matches: evidence.raw_rule_matches,
+            transitioned_members: evidence.transitioned_members,
+            handoff_count: evidence.handoff_count,
+            scope_after: export_scope(
+                &session.memory.store,
+                &evidence.scope_after,
+            ),
+            links_after: evidence.links_after,
+            quiescent,
+        });
+        if quiescent {
+            break;
+        }
+    }
+
+    if session.execution_state() != ProofRuntimeSessionState::Quiescent {
+        session.fail_active_run();
+        return None;
+    }
+
+    let active_reaction_count =
+        reactions.iter().filter(|step| !step.quiescent).count() as u32;
+    Some(WebProofExecuteStage {
+        memory_instance_id,
+        reactions,
+        active_reaction_count,
+        final_quiescent: true,
+    })
 }
 
 pub(crate) fn execute_session_observed_to_quiescence(
@@ -788,15 +1040,9 @@ pub(crate) fn execute_session_observed_to_quiescence(
     max_steps: u32,
     observation_level: RunObservationLevel,
 ) -> Option<ObservedRunV1> {
-    let run_id = session.next_run_id;
-    session.next_run_id = session.next_run_id.saturating_add(1);
-
     let session_id = session.memory.id.clone();
     let links_before_run = session.memory.store.link_count() as u32;
-    session
-        .engine
-        .set_current(&session.memory.store, &[initial])
-        .ok()?;
+    let run_id = session.begin_run(initial).ok()?;
     let scope_before_width = session.engine.current().len() as u32;
 
     let run_started = ObservationTimer::start();
@@ -805,7 +1051,6 @@ pub(crate) fn execute_session_observed_to_quiescence(
     let mut trace_projection_ns = 0u128;
     let mut structural_profile = StructuralRunProfile::default();
     let mut active_reaction_count = 0u32;
-    let mut final_quiescent = false;
 
     if observation_level.traces() {
         let projection_started = ObservationTimer::start();
@@ -833,60 +1078,22 @@ pub(crate) fn execute_session_observed_to_quiescence(
             .saturating_add(projection_started.elapsed_ns());
     }
 
-    for reaction_index in 0..max_steps {
-        let scope_before = if observation_level.traces() {
-            let projection_started = ObservationTimer::start();
-            let scope = session.engine.current().to_vec();
-            trace_projection_ns = trace_projection_ns
-                .saturating_add(projection_started.elapsed_ns());
-            Some(scope)
-        } else {
-            None
-        };
+    for _ in 0..max_steps {
+        let step = session.step(observation_level).ok()?;
+        structural_profile.accumulate(&step.structural_profile);
+        trace_projection_ns = trace_projection_ns
+            .saturating_add(step.trace_projection_ns);
 
-        let (reaction, structural_facts) =
-            if observation_level.traces() {
-                let (reaction, profile, native_trace) = session
-                    .engine
-                    .run_traced(&mut session.memory.store)
-                    .ok()?;
-                structural_profile.accumulate(&profile);
-
-                let projection_started = ObservationTimer::start();
-                let collection_ns = native_trace.collection_ns;
-                let facts = native_trace
-                    .events
-                    .into_iter()
-                    .map(RunStructuralFactV1::from)
-                    .collect::<Vec<_>>();
-                trace_projection_ns = trace_projection_ns
-                    .saturating_add(collection_ns)
-                    .saturating_add(
-                        projection_started.elapsed_ns(),
-                    );
-                (reaction, Some(facts))
-            } else if observation_level.profiles() {
-                let (reaction, profile) = session
-                    .engine
-                    .run_profiled(&mut session.memory.store)
-                    .ok()?;
-                structural_profile.accumulate(&profile);
-                (reaction, None)
-            } else {
-                (
-                    session.engine.run(&mut session.memory.store).ok()?,
-                    None,
-                )
-            };
-
-        let quiescent = reaction.quiescent;
+        let evidence = step.evidence;
+        let quiescent = evidence.quiescent;
         if !quiescent {
-            active_reaction_count = active_reaction_count.saturating_add(1);
+            active_reaction_count =
+                active_reaction_count.saturating_add(1);
         }
 
         if observation_level.traces() {
             let projection_started = ObservationTimer::start();
-            let scope_after = session.engine.current().to_vec();
+            let scope_after = evidence.scope_after.clone();
             events.push(RunEventV1 {
                 schema_version: RUN_OBSERVABILITY_SCHEMA_VERSION,
                 session_id: session_id.clone(),
@@ -894,17 +1101,19 @@ pub(crate) fn execute_session_observed_to_quiescence(
                 backend_id: OPTIMIZED_CPU_BACKEND_ID.to_owned(),
                 sequence,
                 elapsed_ns: ns_u64(run_started.elapsed_ns()),
-            stage: RunStage::Execute,
+                stage: RunStage::Execute,
                 kind: RunEventKind::ReactionEnd,
-                reaction_index: Some(reaction_index),
-                scope_before,
+                reaction_index: Some(evidence.reaction_index),
+                scope_before: Some(evidence.scope_before),
                 scope_after: Some(scope_after.clone()),
-                links_after: session.memory.store.link_count() as u32,
-                raw_rule_matches: Some(reaction.raw_rule_matches),
-                transitioned_members: Some(reaction.transitioned_members),
-                handoff_count: Some(reaction.handoff_count),
+                links_after: evidence.links_after,
+                raw_rule_matches: Some(evidence.raw_rule_matches),
+                transitioned_members: Some(
+                    evidence.transitioned_members,
+                ),
+                handoff_count: Some(evidence.handoff_count),
                 quiescent: Some(quiescent),
-                structural_facts,
+                structural_facts: evidence.structural_facts,
             });
             sequence = sequence.saturating_add(1);
 
@@ -916,15 +1125,17 @@ pub(crate) fn execute_session_observed_to_quiescence(
                     backend_id: OPTIMIZED_CPU_BACKEND_ID.to_owned(),
                     sequence,
                     elapsed_ns: ns_u64(run_started.elapsed_ns()),
-            stage: RunStage::Execute,
+                    stage: RunStage::Execute,
                     kind: RunEventKind::Quiescence,
-                    reaction_index: Some(reaction_index),
+                    reaction_index: Some(evidence.reaction_index),
                     scope_before: None,
                     scope_after: Some(scope_after),
-                    links_after: session.memory.store.link_count() as u32,
-                    raw_rule_matches: Some(reaction.raw_rule_matches),
-                    transitioned_members: Some(reaction.transitioned_members),
-                    handoff_count: Some(reaction.handoff_count),
+                    links_after: evidence.links_after,
+                    raw_rule_matches: Some(evidence.raw_rule_matches),
+                    transitioned_members: Some(
+                        evidence.transitioned_members,
+                    ),
+                    handoff_count: Some(evidence.handoff_count),
                     quiescent: Some(true),
                     structural_facts: None,
                 });
@@ -936,12 +1147,12 @@ pub(crate) fn execute_session_observed_to_quiescence(
         }
 
         if quiescent {
-            final_quiescent = true;
             break;
         }
     }
 
-    if !final_quiescent {
+    if session.execution_state() != ProofRuntimeSessionState::Quiescent {
+        session.fail_active_run();
         return None;
     }
 
@@ -1000,7 +1211,7 @@ pub(crate) fn execute_session_observed_to_quiescence(
         observation_level,
         final_scope,
         active_reaction_count,
-        final_quiescent,
+        final_quiescent: true,
         events,
         profile,
     })
