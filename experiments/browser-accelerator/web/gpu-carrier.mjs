@@ -342,3 +342,373 @@ export function readGpuCarrierWordsAbi(
 
   return parseGpuCarrierWords(words);
 }
+
+
+function requireLookupHandle(parsed, handle, label) {
+  checkedInteger(handle, label, { min: 1 });
+  if (handle > parsed.layout.linkCount) {
+    throw new RangeError(
+      `${label} ${handle} exceeds Link count ${parsed.layout.linkCount}`,
+    );
+  }
+  return handle;
+}
+
+export function gpuCarrierLogicalFingerprint(parsed) {
+  let hash = 0x811c9dc5;
+  for (const word of parsed.words) {
+    hash ^= word >>> 0;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash >>> 0;
+}
+
+export function expectedGpuCarrierLookup(parsed, {
+  handle = 1,
+  pole = 1,
+} = {}) {
+  requireLookupHandle(parsed, handle, "handle");
+  requireLookupHandle(parsed, pole, "pole");
+
+  const start = parsed.sections.starts[handle - 1] >>> 0;
+  const end = parsed.sections.ends[handle - 1] >>> 0;
+  const head = parsed.sections.startHead[pole] >>> 0;
+  const incidence = [];
+  const seen = new Set();
+  let current = head;
+
+  while (current !== 0) {
+    if (current > parsed.layout.linkCount || seen.has(current)) {
+      throw new Error("invalid/cyclic start-incidence chain");
+    }
+    seen.add(current);
+    incidence.push(current);
+    current = parsed.sections.nextByStart[current] >>> 0;
+  }
+
+  return Object.freeze({
+    handle,
+    pole,
+    start,
+    end,
+    head,
+    incidence: Object.freeze(incidence),
+    logicalFingerprint: gpuCarrierLogicalFingerprint(parsed),
+  });
+}
+
+function gpuLookupUsage() {
+  if (typeof GPUBufferUsage === "undefined") {
+    throw new Error("WebGPU buffer usage constants unavailable");
+  }
+  return GPUBufferUsage;
+}
+
+function createLookupBuffer(device, data, usage) {
+  const bytes = Math.max(4, data.byteLength);
+  const buffer = device.createBuffer({ size: bytes, usage });
+  if (data.byteLength) {
+    device.queue.writeBuffer(buffer, 0, data);
+  }
+  return buffer;
+}
+
+function singleLookupShader(handle, pole, linkCount) {
+  return `
+    const HANDLE: u32 = ${handle}u;
+    const POLE: u32 = ${pole}u;
+    const LINK_COUNT: u32 = ${linkCount}u;
+    @group(0) @binding(0) var<storage, read> carrier: array<u32>;
+    @group(0) @binding(1) var<storage, read_write> out: array<u32>;
+
+    @compute @workgroup_size(1)
+    fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+      if (id.x != 0u) { return; }
+      out[0] = 0u;
+      if (HANDLE == 0u || HANDLE > LINK_COUNT ||
+          POLE == 0u || POLE > LINK_COUNT) {
+        out[0] = 2u;
+        return;
+      }
+
+      let starts_offset = carrier[6];
+      let ends_offset = carrier[7];
+      let start_head_offset = carrier[8];
+      let next_by_start_offset = carrier[10];
+
+      out[1] = carrier[starts_offset + HANDLE - 1u];
+      out[2] = carrier[ends_offset + HANDLE - 1u];
+      out[3] = carrier[start_head_offset + POLE];
+
+      var current = out[3];
+      var count = 0u;
+      loop {
+        if (current == 0u) { break; }
+        if (current > LINK_COUNT || count >= LINK_COUNT) {
+          out[0] = 3u;
+          return;
+        }
+        out[5u + count] = current;
+        count = count + 1u;
+        current = carrier[next_by_start_offset + current];
+      }
+      out[4] = count;
+      out[0] = 1u;
+    }
+  `;
+}
+
+function sectionLookupShader(handle, pole, linkCount) {
+  return `
+    const HANDLE: u32 = ${handle}u;
+    const POLE: u32 = ${pole}u;
+    const LINK_COUNT: u32 = ${linkCount}u;
+    @group(0) @binding(0) var<storage, read> starts: array<u32>;
+    @group(0) @binding(1) var<storage, read> ends: array<u32>;
+    @group(0) @binding(2) var<storage, read> start_head: array<u32>;
+    @group(0) @binding(3) var<storage, read> end_head: array<u32>;
+    @group(0) @binding(4) var<storage, read> next_by_start: array<u32>;
+    @group(0) @binding(5) var<storage, read> next_by_end: array<u32>;
+    @group(0) @binding(6) var<storage, read_write> out: array<u32>;
+
+    @compute @workgroup_size(1)
+    fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+      if (id.x != 0u) { return; }
+      out[0] = 0u;
+      if (HANDLE == 0u || HANDLE > LINK_COUNT ||
+          POLE == 0u || POLE > LINK_COUNT) {
+        out[0] = 2u;
+        return;
+      }
+
+      out[1] = starts[HANDLE - 1u];
+      out[2] = ends[HANDLE - 1u];
+      out[3] = start_head[POLE];
+
+      var current = out[3];
+      var count = 0u;
+      loop {
+        if (current == 0u) { break; }
+        if (current > LINK_COUNT || count >= LINK_COUNT) {
+          out[0] = 3u;
+          return;
+        }
+        out[5u + count] = current;
+        count = count + 1u;
+        current = next_by_start[current];
+      }
+      out[4] = count;
+      out[0] = 1u;
+    }
+  `;
+}
+
+export function gpuCarrierLookupShaderSource(
+  mode,
+  { handle = 1, pole = 1, linkCount } = {},
+) {
+  checkedInteger(linkCount, "linkCount", { min: 1 });
+  checkedInteger(handle, "handle", { min: 1 });
+  checkedInteger(pole, "pole", { min: 1 });
+  if (mode === "single") {
+    return singleLookupShader(handle, pole, linkCount);
+  }
+  if (mode === "sections") {
+    return sectionLookupShader(handle, pole, linkCount);
+  }
+  throw new Error(`unsupported GPU carrier lookup mode: ${mode}`);
+}
+
+async function readLookupWords(device, source, wordLength) {
+  const usage = gpuLookupUsage();
+  const bytes = wordLength * 4;
+  const readback = device.createBuffer({
+    size: bytes,
+    usage: usage.COPY_DST | usage.MAP_READ,
+  });
+  const encoder = device.createCommandEncoder();
+  encoder.copyBufferToBuffer(source, 0, readback, 0, bytes);
+  device.queue.submit([encoder.finish()]);
+  await readback.mapAsync(GPUMapMode.READ, 0, bytes);
+  const words = new Uint32Array(readback.getMappedRange(0, bytes).slice(0));
+  readback.unmap();
+  readback.destroy();
+  return words;
+}
+
+export async function runGpuCarrierLookup(
+  device,
+  parsed,
+  {
+    handle = 1,
+    pole = 1,
+    maxDiagnosticLinks = 16_384,
+  } = {},
+) {
+  if (!device?.createBuffer || !device?.queue) {
+    throw new TypeError("WebGPU device is required");
+  }
+  requireLookupHandle(parsed, handle, "handle");
+  requireLookupHandle(parsed, pole, "pole");
+  checkedInteger(maxDiagnosticLinks, "maxDiagnosticLinks", { min: 1 });
+  if (parsed.layout.linkCount > maxDiagnosticLinks) {
+    throw new RangeError(
+      `bounded GPU lookup refuses ${parsed.layout.linkCount} Links; ` +
+      `limit is ${maxDiagnosticLinks}`,
+    );
+  }
+
+  const expected = expectedGpuCarrierLookup(parsed, { handle, pole });
+  const plan = planGpuCarrierUpload(parsed.layout, device.limits);
+  if (plan.mode === "unsupported") {
+    throw new Error(
+      `WebGPU carrier upload unsupported: ${plan.reason}`,
+    );
+  }
+  if (plan.mode === "sections" &&
+      plan.storageBufferCount + 1 >
+        Number(device.limits.maxStorageBuffersPerShaderStage)) {
+    throw new Error(
+      "WebGPU carrier lookup needs one additional storage output binding",
+    );
+  }
+
+  const usage = gpuLookupUsage();
+  const inputUsage = usage.STORAGE | usage.COPY_DST;
+  const outputUsage = usage.STORAGE | usage.COPY_SRC;
+  const inputBuffers = [];
+  const outputWordLength = 5 + parsed.layout.linkCount;
+  const output = createLookupBuffer(
+    device,
+    new Uint32Array(outputWordLength),
+    outputUsage,
+  );
+
+  device.pushErrorScope?.("validation");
+  try {
+    let entries;
+    if (plan.mode === "single") {
+      const carrier = createLookupBuffer(
+        device,
+        parsed.words,
+        inputUsage,
+      );
+      inputBuffers.push(carrier);
+      entries = [
+        { binding: 0, resource: { buffer: carrier } },
+        { binding: 1, resource: { buffer: output } },
+      ];
+    } else {
+      entries = plan.buffers.map((bufferPlan) => {
+        const section = parsed.sections[bufferPlan.name];
+        const buffer = createLookupBuffer(device, section, inputUsage);
+        inputBuffers.push(buffer);
+        return {
+          binding: bufferPlan.binding,
+          resource: { buffer },
+        };
+      });
+      entries.push({ binding: 6, resource: { buffer: output } });
+    }
+
+    const shader = device.createShaderModule({
+      code: gpuCarrierLookupShaderSource(plan.mode, {
+        handle,
+        pole,
+        linkCount: parsed.layout.linkCount,
+      }),
+    });
+    if (typeof shader.getCompilationInfo === "function") {
+      const info = await shader.getCompilationInfo();
+      const errors = info.messages.filter(
+        (message) => message.type === "error",
+      );
+      if (errors.length) {
+        throw new Error(
+          "C4 carrier lookup WGSL compilation failed: " +
+          errors.map((message) => message.message).join(" | "),
+        );
+      }
+    }
+
+    const descriptor = {
+      layout: "auto",
+      compute: { module: shader, entryPoint: "main" },
+    };
+    const pipeline =
+      typeof device.createComputePipelineAsync === "function"
+        ? await device.createComputePipelineAsync(descriptor)
+        : device.createComputePipeline(descriptor);
+    const bindGroup = device.createBindGroup({
+      layout: pipeline.getBindGroupLayout(0),
+      entries,
+    });
+    const encoder = device.createCommandEncoder();
+    const pass = encoder.beginComputePass();
+    pass.setPipeline(pipeline);
+    pass.setBindGroup(0, bindGroup);
+    pass.dispatchWorkgroups(1);
+    pass.end();
+    device.queue.submit([encoder.finish()]);
+    await device.queue.onSubmittedWorkDone();
+
+    const observedWords = await readLookupWords(
+      device,
+      output,
+      outputWordLength,
+    );
+    if (observedWords[0] !== 1) {
+      throw new Error(
+        `GPU carrier lookup failed closed with status ${observedWords[0]}`,
+      );
+    }
+    const incidenceCount = observedWords[4] >>> 0;
+    if (incidenceCount > parsed.layout.linkCount) {
+      throw new Error("GPU carrier lookup returned invalid incidence count");
+    }
+    const observed = {
+      handle,
+      pole,
+      start: observedWords[1] >>> 0,
+      end: observedWords[2] >>> 0,
+      head: observedWords[3] >>> 0,
+      incidence: Array.from(
+        observedWords.subarray(5, 5 + incidenceCount),
+        (value) => value >>> 0,
+      ),
+      logicalFingerprint: expected.logicalFingerprint,
+    };
+
+    if (observed.start !== expected.start ||
+        observed.end !== expected.end ||
+        observed.head !== expected.head ||
+        observed.incidence.length !== expected.incidence.length ||
+        observed.incidence.some(
+          (value, index) => value !== expected.incidence[index],
+        )) {
+      throw new Error("WebGPU carrier lookup differential mismatch");
+    }
+
+    return Object.freeze({
+      plan,
+      expected,
+      observed: Object.freeze({
+        ...observed,
+        incidence: Object.freeze(observed.incidence),
+      }),
+      differential: true,
+    });
+  } finally {
+    output.destroy();
+    for (const buffer of inputBuffers) buffer.destroy();
+    if (typeof device.popErrorScope === "function") {
+      const validationError = await device.popErrorScope();
+      if (validationError) {
+        throw new Error(
+          "WebGPU carrier lookup validation failed: " +
+          validationError.message,
+        );
+      }
+    }
+  }
+}

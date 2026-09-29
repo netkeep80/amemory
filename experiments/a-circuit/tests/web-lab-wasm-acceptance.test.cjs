@@ -67,6 +67,21 @@ for (const [label, pattern] of [
     throw new Error("browser still depends on " + label);
   }
 }
+const c4LabSource = fs.readFileSync(
+  "experiments/browser-accelerator/web/i386-lab.js",
+  "utf8"
+);
+for (const required of [
+  "setupGpuCarrierWitness",
+  "amemory_i386_lab_gpu_carrier_prepare",
+  "runGpuCarrierLookup",
+  "lab-run-gpu-carrier",
+  "real WASM carrier → WebGPU integer lookup",
+]) {
+  if (!c4LabSource.includes(required)) {
+    throw new Error("C4c2 workbench wiring missing: " + required);
+  }
+}
 const proofViewSource = fs.readFileSync(
   "experiments/browser-accelerator/web/i386-proof-view.mjs",
   "utf8"
@@ -97,7 +112,11 @@ Promise.all([
   {instance},
   { inflateCompactProof },
   { recursiveStructureHtml },
-  { readGpuCarrierWordsAbi },
+  {
+    expectedGpuCarrierLookup,
+    gpuCarrierLookupShaderSource,
+    readGpuCarrierWordsAbi,
+  },
 ]) => {
   const w = instance.exports;
   const recursiveUiSample = "8916<>&".repeat(256);
@@ -365,6 +384,29 @@ Promise.all([
       throw new Error(
         "C4c1 carrier/proof topology mismatch at Link " + (index + 1)
       );
+    }
+  }
+
+  const c4LookupOracle = expectedGpuCarrierLookup(gpuCarrier, {
+    handle: Math.min(2, gpuCarrier.layout.linkCount),
+    pole: gpuCarrier.layout.rootHandle,
+  });
+  if (!c4LookupOracle.incidence.length ||
+      c4LookupOracle.head !== c4LookupOracle.incidence[0]) {
+    throw new Error("C4c2 CPU lookup oracle has invalid ROOT incidence");
+  }
+  for (const mode of ["single", "sections"]) {
+    const shader = gpuCarrierLookupShaderSource(mode, {
+      handle: c4LookupOracle.handle,
+      pole: c4LookupOracle.pole,
+      linkCount: gpuCarrier.layout.linkCount,
+    });
+    if (!shader.includes("next_by_start") &&
+        !shader.includes("next_by_start_offset")) {
+      throw new Error("C4c2 " + mode + " shader lost incidence traversal");
+    }
+    if (!shader.includes("@compute @workgroup_size(1)")) {
+      throw new Error("C4c2 " + mode + " shader is not a bounded compute witness");
     }
   }
 
