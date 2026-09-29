@@ -60,12 +60,21 @@ pub(crate) enum ScenarioExecutionModeV1 {
     ToQuiescence,
 }
 
+pub(crate) const DEFAULT_SCENARIO_MAX_REACTIONS: u32 = 4096;
+pub(crate) const MAX_SCENARIO_MAX_REACTIONS: u32 = 1_000_000;
+
+fn default_scenario_max_reactions() -> u32 {
+    DEFAULT_SCENARIO_MAX_REACTIONS
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ScenarioRunV1 {
     pub(crate) run_id: String,
     pub(crate) inputs: BTreeMap<String, Value>,
     pub(crate) execution_mode: ScenarioExecutionModeV1,
+    #[serde(default = "default_scenario_max_reactions")]
+    pub(crate) max_reactions: u32,
     #[serde(default)]
     pub(crate) assertions: Vec<ScenarioAssertionV1>,
 }
@@ -271,6 +280,19 @@ pub(crate) fn validate_manifest_v1(
             &run.inputs,
             &input_types,
         );
+
+        if run.max_reactions == 0
+            || run.max_reactions > MAX_SCENARIO_MAX_REACTIONS
+        {
+            push_error(
+                &mut errors,
+                "MAX_REACTIONS",
+                &format!("{base}.maxReactions"),
+                format!(
+                    "maxReactions must be in 1..={MAX_SCENARIO_MAX_REACTIONS}"
+                ),
+            );
+        }
 
         for (assertion_index, assertion) in run.assertions.iter().enumerate() {
             if let ScenarioAssertionV1::ResultFieldEquals { field, .. } = assertion {
@@ -479,6 +501,25 @@ mod tests {
         assert!(codes.contains(&"INPUT_KEY_DUPLICATE"));
         assert!(codes.contains(&"INPUT_MISSING"));
         assert!(codes.contains(&"INPUT_VALUE"));
+    }
+
+    #[test]
+    fn reaction_budget_defaults_and_validates_independently_of_assertions() {
+        let manifest = parse_and_validate_manifest_v1(MUX1_LIFECYCLE)
+            .expect("MUX1 preset remains compatible without maxReactions");
+        assert!(manifest.run_sequence.iter().all(|run| {
+            run.max_reactions == DEFAULT_SCENARIO_MAX_REACTIONS
+        }));
+
+        let mut invalid = manifest.clone();
+        invalid.run_sequence[0].max_reactions = 0;
+        let errors = validate_manifest_v1(&invalid);
+        assert!(errors.iter().any(|error| error.code == "MAX_REACTIONS"));
+
+        invalid.run_sequence[0].max_reactions =
+            MAX_SCENARIO_MAX_REACTIONS.saturating_add(1);
+        let errors = validate_manifest_v1(&invalid);
+        assert!(errors.iter().any(|error| error.code == "MAX_REACTIONS"));
     }
 
     #[test]
