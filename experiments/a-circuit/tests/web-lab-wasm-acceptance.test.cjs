@@ -228,6 +228,7 @@ Promise.all([
   {
     clearScenarioLiveHistory,
     clearScenarioLiveHistoryExport,
+    beginScenarioLiveStepRun,
     clearScenarioTransportOutput,
     closeScenarioLiveSession,
     executeLoadedScenarioManifest,
@@ -245,6 +246,7 @@ Promise.all([
     refreshScenarioLiveSessionStatus,
     runScenarioLiveSession,
     setScenarioLiveRetentionPolicy,
+    stepScenarioLiveSession,
     writeScenarioManifest,
   },
   {
@@ -972,6 +974,130 @@ Promise.all([
     throw new Error(
       "R4a/R4b retained Scenario Session mutated legacy LabInstanceState"
     );
+  }
+
+  // #333 R2: real live stepping is driven by the same persistent CPU Session.
+  // The browser sends inputs once, then receives runtime-owned Scope evidence
+  // one reaction at a time; it never supplies scopeAfter back as execution input.
+  const steppedOpen = openScenarioLiveSession(w, scenarioManifest);
+  if (!steppedOpen.ok ||
+      steppedOpen.status?.completedRuns !== 0) {
+    throw new Error("#333 step Session failed to open cleanly");
+  }
+  const steppedIdentity = {
+    sessionId: steppedOpen.status.sessionId,
+    storeInstanceId: steppedOpen.status.storeInstanceId,
+    engineInstanceId: steppedOpen.status.engineInstanceId,
+    baseLinkCount: steppedOpen.status.baseLinkCount,
+  };
+  const stepRun = {
+    ...scenarioManifest.runSequence[0],
+    runId: "live-step-mux1",
+    executionMode: "STEP",
+    maxReactions: 16,
+  };
+  const stepBegin = beginScenarioLiveStepRun(w, stepRun);
+  if (!stepBegin.ok ||
+      stepBegin.payload?.begin?.sessionRunId !== 1 ||
+      stepBegin.payload?.begin?.manifestRunId !== "live-step-mux1" ||
+      stepBegin.payload?.status?.sessionId !== steppedIdentity.sessionId ||
+      stepBegin.payload?.status?.storeInstanceId !==
+        steppedIdentity.storeInstanceId ||
+      stepBegin.payload?.status?.engineInstanceId !==
+        steppedIdentity.engineInstanceId ||
+      stepBegin.payload?.status?.completedRuns !== 0) {
+    throw new Error("#333 live begin did not retain one Session");
+  }
+
+  // A second begin while RUNNING/CONFIGURED must fail before CONFIGURE.
+  const linksAtBegin = stepBegin.payload.status.currentLinkCount;
+  const duplicateBegin = beginScenarioLiveStepRun(w, {
+    ...stepRun,
+    runId: "live-step-illegal-overlap",
+  });
+  const statusAfterDuplicateBegin = refreshScenarioLiveSessionStatus(w);
+  if (duplicateBegin.ok ||
+      duplicateBegin.error?.code !== "RUNNER" ||
+      duplicateBegin.error?.error?.code !== "STEP_RUN_ALREADY_ACTIVE" ||
+      !statusAfterDuplicateBegin.ok ||
+      statusAfterDuplicateBegin.status?.currentLinkCount !== linksAtBegin ||
+      statusAfterDuplicateBegin.status?.completedRuns !== 0) {
+    throw new Error("#333 overlapping begin mutated active Session");
+  }
+
+  const stepReports = [];
+  for (let guard = 0; guard < 16; guard += 1) {
+    const stepped = stepScenarioLiveSession(w);
+    if (!stepped.ok) {
+      throw new Error(
+        "#333 live Session.step failed at " + guard + ": " +
+        JSON.stringify(stepped.error)
+      );
+    }
+    const status = stepped.payload?.status;
+    const report = stepped.payload?.step;
+    if (status?.sessionId !== steppedIdentity.sessionId ||
+        status?.storeInstanceId !== steppedIdentity.storeInstanceId ||
+        status?.engineInstanceId !== steppedIdentity.engineInstanceId ||
+        status?.baseLinkCount !== steppedIdentity.baseLinkCount ||
+        report?.sessionRunId !== 1 ||
+        report?.manifestRunId !== "live-step-mux1" ||
+        report?.evidence?.sessionId !== steppedIdentity.sessionId ||
+        report?.evidence?.runId !== 1 ||
+        report?.evidence?.reactionIndex !== guard) {
+      throw new Error("#333 live step identity/correlation mismatch at " + guard);
+    }
+    if (guard > 0 &&
+        JSON.stringify(stepReports[guard - 1].evidence.scopeAfter) !==
+          JSON.stringify(report.evidence.scopeBefore)) {
+      throw new Error("#333 runtime Scope chain broke at " + guard);
+    }
+    if (!report.completed && status?.completedRuns !== 0) {
+      throw new Error("#333 completedRuns advanced before quiescence");
+    }
+    stepReports.push(report);
+    if (report.completed) break;
+  }
+
+  const finalStep = stepReports.at(-1);
+  if (stepReports.length !== 8 ||
+      finalStep?.completed !== true ||
+      finalStep?.evidence?.quiescent !== true ||
+      finalStep?.activeReactionCount !== 7 ||
+      finalStep?.scalarOracleMatches !== true ||
+      finalStep?.freshInstanceMatches !== true ||
+      !Array.isArray(finalStep?.assertionResults) ||
+      !finalStep.assertionResults.every((item) => item.passed === true) ||
+      JSON.stringify(finalStep?.result) !==
+        JSON.stringify(scenarioReport.runs[0].result)) {
+    throw new Error("#333 stepped MUX1 final result/evidence mismatch");
+  }
+  if (!stepReports.slice(0, -1).every((report) =>
+      report.completed === false &&
+      report.evidence?.quiescent === false &&
+      report.result == null)) {
+    throw new Error("#333 nonterminal step fabricated a final Result");
+  }
+
+  const steppedFinalStatus = refreshScenarioLiveSessionStatus(w);
+  if (!steppedFinalStatus.ok ||
+      steppedFinalStatus.status?.completedRuns !== 1 ||
+      steppedFinalStatus.status?.sessionId !== steppedIdentity.sessionId ||
+      steppedFinalStatus.status?.storeInstanceId !==
+        steppedIdentity.storeInstanceId ||
+      steppedFinalStatus.status?.engineInstanceId !==
+        steppedIdentity.engineInstanceId) {
+    throw new Error("#333 stepped Session final status mismatch");
+  }
+
+  const stepAfterQuiescence = stepScenarioLiveSession(w);
+  if (stepAfterQuiescence.ok ||
+      stepAfterQuiescence.error?.code !== "RUNNER" ||
+      stepAfterQuiescence.error?.error?.code !== "STEP_RUN_NOT_ACTIVE") {
+    throw new Error("#333 extra step after quiescence did not fail closed");
+  }
+  if (!closeScenarioLiveSession(w)) {
+    throw new Error("#333 stepped Session close failed");
   }
 
   // R2e: observer-output cleanup// R2e: observer-output cleanup is separate from manifest/runtime input.
