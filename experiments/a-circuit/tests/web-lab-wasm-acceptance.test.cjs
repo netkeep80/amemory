@@ -160,6 +160,7 @@ Promise.all([
   import("../../browser-accelerator/web/i386-proof-transport.mjs"),
   import("../../browser-accelerator/web/i386-proof-view.mjs"),
   import("../../browser-accelerator/web/gpu-carrier.mjs"),
+  import("../../browser-accelerator/web/scenario-transport.mjs"),
 ]).then(([
   {instance},
   { inflateCompactProof },
@@ -172,8 +173,126 @@ Promise.all([
     gpuCarrierReactionShaderSource,
     readGpuCarrierWordsAbi,
   },
+  { executeScenarioManifest },
 ]) => {
   const w = instance.exports;
+
+  // R2d: browser transport must consume the generic Scenario Runner report,
+  // not the legacy block-result slot. The manifest itself contains four runs
+  // that execute on one real persistent CPU Session.
+  const scenarioManifest = JSON.parse(fs.readFileSync(
+    "experiments/a-circuit/scenarios/mux1-lifecycle-v1.json",
+    "utf8"
+  ));
+  const legacyResultBeforeScenario =
+    w.amemory_i386_lab_result_available() >>> 0;
+  const scenarioCpu = executeScenarioManifest(
+    w,
+    scenarioManifest,
+    "optimized-cpu"
+  );
+  if (!scenarioCpu.ok || scenarioCpu.error !== null) {
+    throw new Error("R2d optimized-cpu scenario transport failed");
+  }
+  const scenarioReport = scenarioCpu.report;
+  if (scenarioReport.schemaVersion !== 1 ||
+      scenarioReport.scenarioId !== "mux1-lifecycle" ||
+      scenarioReport.overallPass !== true ||
+      !Array.isArray(scenarioReport.runs) ||
+      scenarioReport.runs.length !== 4 ||
+      typeof scenarioReport.sessionId !== "string" ||
+      !scenarioReport.sessionId.length ||
+      scenarioReport.sessionOpenProfile?.sessionId !== scenarioReport.sessionId) {
+    throw new Error("R2d scenario report envelope mismatch");
+  }
+  const openStages = scenarioReport.sessionOpenProfile?.stages;
+  if (openStages?.timingAvailable !== false ||
+      openStages?.prepareNs !== 0 ||
+      openStages?.loadNs !== 0) {
+    throw new Error(
+      "R2d bare-WASM session-open timing must be explicitly unavailable"
+    );
+  }
+
+  for (let index = 0; index < scenarioReport.runs.length; index += 1) {
+    const run = scenarioReport.runs[index];
+    const observed = run.observed;
+    const profile = observed?.profile;
+    const structural = profile?.structural;
+    const stages = run.pipelineProfile?.stages;
+    const reactionEvents = Array.isArray(observed?.events)
+      ? observed.events.filter((event) => event.kind === "REACTION_END")
+      : [];
+    const nativeFacts = reactionEvents.flatMap(
+      (event) => Array.isArray(event.structuralFacts)
+        ? event.structuralFacts
+        : []
+    );
+
+    if ((run.sessionRunId >>> 0) !== index + 1 ||
+        observed?.sessionId !== scenarioReport.sessionId ||
+        observed?.finalQuiescent !== true ||
+        observed?.activeReactionCount !== 7 ||
+        !run.pipelineProfile ||
+        reactionEvents.length !== 8 ||
+        nativeFacts.length === 0) {
+      throw new Error("R2d run/session correlation mismatch at run " + index);
+    }
+
+    if (observed.timingAvailable !== false ||
+        profile?.timingAvailable !== false ||
+        structural?.timingAvailable !== false ||
+        stages?.timingAvailable !== false ||
+        profile?.executeNs !== 0 ||
+        profile?.traceProjectionNs !== 0 ||
+        structural?.discoveryNs !== 0 ||
+        structural?.roleDecodeNs !== 0 ||
+        structural?.unificationNs !== 0 ||
+        structural?.instantiationNs !== 0 ||
+        structural?.publicationNs !== 0 ||
+        structural?.totalNs !== 0 ||
+        stages?.configureNs !== 0 ||
+        stages?.executeNs !== 0 ||
+        stages?.resultNs !== 0 ||
+        stages?.evidenceNs !== 0) {
+      throw new Error(
+        "R2d bare-WASM internal timings must be zero and explicitly unavailable"
+      );
+    }
+
+    if (!(structural.triggerIncidenceCandidates > 0) ||
+        !(structural.unificationAttempts > 0) ||
+        !(structural.publicationOutputs > 0)) {
+      throw new Error(
+        "R2d bare-WASM profile lost real structural counters at run " + index
+      );
+    }
+  }
+  if (scenarioReport.runs[3].configurationReused !== true ||
+      JSON.stringify(scenarioReport.runs[3].inputs) !==
+        JSON.stringify(scenarioReport.runs[0].inputs)) {
+    throw new Error("R2d return-to-first canonical reuse missing");
+  }
+  if ((w.amemory_i386_lab_result_available() >>> 0) !==
+      legacyResultBeforeScenario) {
+    throw new Error(
+      "R2d generic scenario transport mutated legacy LabInstanceState result slot"
+    );
+  }
+
+  const scenarioGpu = executeScenarioManifest(
+    w,
+    scenarioManifest,
+    "webgpu"
+  );
+  if (scenarioGpu.ok ||
+      scenarioGpu.report !== null ||
+      scenarioGpu.error?.code !== "RUNNER" ||
+      scenarioGpu.error?.error?.code !== "UNSUPPORTED_BACKEND" ||
+      scenarioGpu.error?.error?.backend !== "webgpu") {
+    throw new Error("R2d unsupported WebGPU did not fail closed");
+  }
+
   const recursiveUiSample = "8916<>&".repeat(256);
   const recursiveUiHtml = recursiveStructureHtml(recursiveUiSample);
   if (!recursiveUiHtml.includes('class="proof-recursive-structure"') ||
