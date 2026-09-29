@@ -566,6 +566,9 @@ Promise.all([
         observed?.sessionId !== scenarioReport.sessionId ||
         observed?.finalQuiescent !== true ||
         observed?.activeReactionCount !== 7 ||
+        run.oracleMatches !== true ||
+        run.freshInstanceMatches !== true ||
+        run.scalarOracleMatches !== true ||
         !run.pipelineProfile ||
         reactionEvents.length !== 8 ||
         nativeFacts.length === 0) {
