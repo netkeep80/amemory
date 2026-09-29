@@ -139,6 +139,7 @@ pub enum StructuralTraceEvent {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct StructuralRunTrace {
     pub events: Vec<StructuralTraceEvent>,
+    pub collection_ns: u128,
 }
 
 #[derive(Clone, Debug)]
@@ -1080,7 +1081,10 @@ impl OptimizedStructuralEngine {
             let mut trace = Some(&mut owned_trace);
             self.run_internal(store, &mut profile, &mut trace)?
         };
-        owned_profile.total_ns = started.elapsed().as_nanos();
+        owned_profile.total_ns = started
+            .elapsed()
+            .as_nanos()
+            .saturating_sub(owned_trace.collection_ns);
         Ok((result, owned_profile, owned_trace))
     }
 
@@ -1126,6 +1130,7 @@ impl OptimizedStructuralEngine {
                     profile,
                 )?;
                 if let Some(trace) = trace.as_deref_mut() {
+                    let trace_started = Instant::now();
                     trace.events.push(StructuralTraceEvent::DiscoveryComplete {
                         active,
                         matched_rules: images.len() as u32,
@@ -1139,6 +1144,7 @@ impl OptimizedStructuralEngine {
                             bindings: image.bindings.clone(),
                         });
                     }
+                    trace.collection_ns += trace_started.elapsed().as_nanos();
                 }
                 discovered.push((active, images));
             }
@@ -1170,19 +1176,21 @@ impl OptimizedStructuralEngine {
             if images.is_empty() {
                 let publication_started = profile.as_ref().map(|_| Instant::now());
                 add_next(active)?;
+                if let Some(profile) = profile.as_deref_mut() {
+                    profile.publication_outputs += 1;
+                    if let Some(started) = publication_started {
+                        profile.publication_ns += started.elapsed().as_nanos();
+                    }
+                }
                 if let Some(trace) = trace.as_deref_mut() {
+                    let trace_started = Instant::now();
                     trace.events.push(StructuralTraceEvent::Published {
                         active,
                         rule: None,
                         outputs: vec![active],
                         preserved: true,
                     });
-                }
-                if let Some(profile) = profile.as_deref_mut() {
-                    profile.publication_outputs += 1;
-                    if let Some(started) = publication_started {
-                        profile.publication_ns += started.elapsed().as_nanos();
-                    }
+                    trace.collection_ns += trace_started.elapsed().as_nanos();
                 }
                 continue;
             }
@@ -1199,7 +1207,13 @@ impl OptimizedStructuralEngine {
                     &image.bindings,
                     profile,
                 )?;
+                if let Some(profile) = profile.as_deref_mut() {
+                    if let Some(started) = instantiation_started {
+                        profile.instantiation_ns += started.elapsed().as_nanos();
+                    }
+                }
                 if let Some(trace) = trace.as_deref_mut() {
+                    let trace_started = Instant::now();
                     trace.events.push(StructuralTraceEvent::Instantiated {
                         active,
                         rule: image.rule,
@@ -1207,11 +1221,7 @@ impl OptimizedStructuralEngine {
                             image.output_bundle_template,
                         grounded_bundle,
                     });
-                }
-                if let Some(profile) = profile.as_deref_mut() {
-                    if let Some(started) = instantiation_started {
-                        profile.instantiation_ns += started.elapsed().as_nanos();
-                    }
+                    trace.collection_ns += trace_started.elapsed().as_nanos();
                 }
 
                 let publication_started = profile.as_ref().map(|_| Instant::now());
@@ -1222,18 +1232,20 @@ impl OptimizedStructuralEngine {
                 for successor in outputs.iter().copied() {
                     add_next(successor)?;
                 }
+                if let Some(profile) = profile.as_deref_mut() {
+                    if let Some(started) = publication_started {
+                        profile.publication_ns += started.elapsed().as_nanos();
+                    }
+                }
                 if let Some(trace) = trace.as_deref_mut() {
+                    let trace_started = Instant::now();
                     trace.events.push(StructuralTraceEvent::Published {
                         active,
                         rule: Some(image.rule),
                         outputs,
                         preserved: false,
                     });
-                }
-                if let Some(profile) = profile.as_deref_mut() {
-                    if let Some(started) = publication_started {
-                        profile.publication_ns += started.elapsed().as_nanos();
-                    }
+                    trace.collection_ns += trace_started.elapsed().as_nanos();
                 }
             }
         }
@@ -1245,12 +1257,14 @@ impl OptimizedStructuralEngine {
         if raw_rule_matches == 0 {
             self.quiescent = true;
             if let Some(trace) = trace.as_deref_mut() {
+                let trace_started = Instant::now();
                 trace.events.push(StructuralTraceEvent::ScopeCommitted {
                     old_members: old_members.clone(),
                     next_members: old_members.clone(),
                     quiescent: true,
                     handoff_count: 0,
                 });
+                trace.collection_ns += trace_started.elapsed().as_nanos();
             }
             return Ok(StructuralReactionResult {
                 old_members: old_members.clone(),
@@ -1268,12 +1282,14 @@ impl OptimizedStructuralEngine {
         self.handoff_count = 1;
 
         if let Some(trace) = trace.as_deref_mut() {
+            let trace_started = Instant::now();
             trace.events.push(StructuralTraceEvent::ScopeCommitted {
                 old_members: old_members.clone(),
                 next_members: next_members.clone(),
                 quiescent: false,
                 handoff_count: 1,
             });
+            trace.collection_ns += trace_started.elapsed().as_nanos();
         }
 
         Ok(StructuralReactionResult {
@@ -1791,6 +1807,7 @@ mod tests {
             profile.unification_successes,
         );
         assert!(traced_profile.total_ns > 0);
+        assert!(trace.collection_ns > 0);
 
         assert!(trace.events.iter().any(|event| matches!(
             event,
