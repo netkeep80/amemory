@@ -133,7 +133,13 @@ for (const required of [
   '["timeline", "log", "profile", "compare"]',
   "workbenchResultStatus",
   "workbenchStageDetails",
+  "workbenchVerificationLevels",
   "workbenchRecursiveStructure",
+  "TRANSPORT_VALID",
+  "TRACE_CONSISTENT",
+  "SEMANTIC_REPLAY_VERIFIED",
+  "SCALAR_ORACLE_VERIFIED",
+  "FRESH_INSTANCE_MATCH",
   "recursiveStructureHtml",
   "Готовый сценарий",
   "Открыть апамять",
@@ -252,6 +258,7 @@ Promise.all([
     normalizeWorkbenchInputs,
     workbenchResultStatus,
     workbenchStageDetails,
+    workbenchVerificationLevels,
     workbenchRecursiveStructure,
   },
 ]) => {
@@ -465,6 +472,36 @@ Promise.all([
       workbenchLoadDetails?.loadCount !== 1 ||
       workbenchLoadDetails?.baseLinkCount !== 123) {
     throw new Error("R4 progressive-disclosure evidence projection mismatch");
+  }
+  const workbenchScenarioLevels = Object.fromEntries(
+    workbenchVerificationLevels({ scalarOracleMatches: true }).map(
+      (item) => [item.id, item.state]
+    )
+  );
+  if (workbenchScenarioLevels.TRANSPORT_VALID !== "unavailable" ||
+      workbenchScenarioLevels.TRACE_CONSISTENT !== "unavailable" ||
+      workbenchScenarioLevels.SEMANTIC_REPLAY_VERIFIED !== "unavailable" ||
+      workbenchScenarioLevels.SCALAR_ORACLE_VERIFIED !== "verified") {
+    throw new Error("R4 Scenario verification levels are not fail-closed");
+  }
+  const workbenchResultDetails = workbenchStageDetails(
+    null,
+    {
+      sessionRunId: 1,
+      result: { value: 0 },
+      assertionResults: [],
+      oracleMatches: true,
+      freshInstanceMatches: true,
+      scalarOracleMatches: true,
+    },
+    "RESULT"
+  );
+  if (Object.prototype.hasOwnProperty.call(
+        workbenchResultDetails, "oracleMatches"
+      ) ||
+      workbenchResultDetails?.freshInstanceMatches !== true ||
+      workbenchResultDetails?.scalarOracleMatches !== true) {
+    throw new Error("R4 generic oracle label leaked into Workbench projection");
   }
   const workbenchRecursive = workbenchRecursiveStructure({
     result: { resultRecursiveWire: "1AB" },
@@ -2058,6 +2095,19 @@ Promise.all([
             producedCompactProof.execute.reactions.length) {
         throw new Error(
           registryBlock.id + " independent semantic replay verification failed"
+        );
+      }
+      const replayLevels = Object.fromEntries(
+        workbenchVerificationLevels(null, verification).map(
+          (item) => [item.id, item.state]
+        )
+      );
+      if (replayLevels.TRANSPORT_VALID !== "verified" ||
+          replayLevels.TRACE_CONSISTENT !== "verified" ||
+          replayLevels.SEMANTIC_REPLAY_VERIFIED !== "verified" ||
+          replayLevels.SCALAR_ORACLE_VERIFIED !== "unavailable") {
+        throw new Error(
+          registryBlock.id + " Workbench replay-level mapping mismatch"
         );
       }
       semanticReplayVerifiedBlocks.add(registryBlock.id);
