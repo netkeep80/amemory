@@ -1,5 +1,6 @@
 use amemory_optimized_cpu_probe::structural::StructuralRunProfile;
 use serde::{Deserialize, Serialize};
+use std::time::Instant;
 
 pub(crate) const RUN_OBSERVABILITY_SCHEMA_VERSION: u32 = 1;
 pub(crate) const OPTIMIZED_CPU_BACKEND_ID: &str = "optimized-cpu";
@@ -152,6 +153,104 @@ pub(crate) struct RunProfileV1 {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct SessionStageTimingsV1 {
+    pub(crate) prepare_ns: u64,
+    pub(crate) load_ns: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SessionOpenProfileV1 {
+    pub(crate) schema_version: u32,
+    pub(crate) session_id: String,
+    pub(crate) backend_id: String,
+    pub(crate) stages: SessionStageTimingsV1,
+    pub(crate) prepared_links: u32,
+    pub(crate) base_links: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RunStageTimingsV1 {
+    pub(crate) configure_ns: u64,
+    pub(crate) execute_ns: u64,
+    pub(crate) result_ns: u64,
+    pub(crate) evidence_ns: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RunPipelineProfileV1 {
+    pub(crate) schema_version: u32,
+    pub(crate) session_id: String,
+    pub(crate) run_id: u64,
+    pub(crate) backend_id: String,
+    pub(crate) stages: RunStageTimingsV1,
+    pub(crate) links_before_configure: u32,
+    pub(crate) links_after_configure: u32,
+    pub(crate) links_after_execute: u32,
+    pub(crate) execute_profile: RunProfileV1,
+}
+
+pub(crate) fn time_stage<T>(work: impl FnOnce() -> T) -> (T, u64) {
+    let started = Instant::now();
+    let value = work();
+    (value, ns_u64(started.elapsed().as_nanos()))
+}
+
+pub(crate) fn session_open_profile_v1(
+    session_id: String,
+    prepare_ns: u64,
+    load_ns: u64,
+    prepared_links: u32,
+    base_links: u32,
+) -> SessionOpenProfileV1 {
+    SessionOpenProfileV1 {
+        schema_version: RUN_OBSERVABILITY_SCHEMA_VERSION,
+        session_id,
+        backend_id: OPTIMIZED_CPU_BACKEND_ID.to_owned(),
+        stages: SessionStageTimingsV1 {
+            prepare_ns,
+            load_ns,
+        },
+        prepared_links,
+        base_links,
+    }
+}
+
+pub(crate) fn run_pipeline_profile_v1(
+    observed: &ObservedRunV1,
+    configure_ns: u64,
+    result_ns: u64,
+    external_evidence_ns: u64,
+    links_before_configure: u32,
+    links_after_configure: u32,
+) -> Option<RunPipelineProfileV1> {
+    let execute_profile = observed.profile.clone()?;
+    let evidence_ns = execute_profile
+        .trace_projection_ns
+        .saturating_add(external_evidence_ns);
+
+    Some(RunPipelineProfileV1 {
+        schema_version: RUN_OBSERVABILITY_SCHEMA_VERSION,
+        session_id: observed.session_id.clone(),
+        run_id: observed.run_id,
+        backend_id: observed.backend_id.clone(),
+        stages: RunStageTimingsV1 {
+            configure_ns,
+            execute_ns: execute_profile.execute_ns,
+            result_ns,
+            evidence_ns,
+        },
+        links_before_configure,
+        links_after_configure,
+        links_after_execute: execute_profile.links_after_run,
+        execute_profile,
+    })
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct ObservedRunV1 {
     pub(crate) schema_version: u32,
     pub(crate) session_id: String,
@@ -212,6 +311,68 @@ mod tests {
         assert!(json.contains("\"stage\":\"EXECUTE\""));
         let decoded: ObservedRunV1 = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded, run);
+    }
+
+    #[test]
+    fn pipeline_profiles_round_trip_and_keep_session_run_split() {
+        let execute = RunProfileV1 {
+            schema_version: RUN_OBSERVABILITY_SCHEMA_VERSION,
+            session_id: "A-memory#pipeline".to_owned(),
+            run_id: 3,
+            backend_id: OPTIMIZED_CPU_BACKEND_ID.to_owned(),
+            base_links: 20,
+            links_before_run: 23,
+            links_after_run: 30,
+            execution_link_delta: 7,
+            scope_before_width: 1,
+            scope_after_width: 1,
+            active_reaction_count: 7,
+            execute_ns: 100,
+            trace_projection_ns: 9,
+            structural: StructuralProfileV1::default(),
+        };
+        let observed = ObservedRunV1 {
+            schema_version: RUN_OBSERVABILITY_SCHEMA_VERSION,
+            session_id: execute.session_id.clone(),
+            run_id: execute.run_id,
+            backend_id: execute.backend_id.clone(),
+            observation_level: RunObservationLevel::Trace,
+            final_scope: vec![30],
+            active_reaction_count: 7,
+            final_quiescent: true,
+            events: Vec::new(),
+            profile: Some(execute),
+        };
+
+        let open = session_open_profile_v1(
+            observed.session_id.clone(),
+            11,
+            22,
+            20,
+            20,
+        );
+        let run = run_pipeline_profile_v1(
+            &observed,
+            5,
+            7,
+            13,
+            20,
+            23,
+        )
+        .unwrap();
+
+        assert_eq!(open.stages.prepare_ns, 11);
+        assert_eq!(open.stages.load_ns, 22);
+        assert_eq!(run.stages.configure_ns, 5);
+        assert_eq!(run.stages.execute_ns, 100);
+        assert_eq!(run.stages.result_ns, 7);
+        assert_eq!(run.stages.evidence_ns, 22);
+        assert_eq!(run.links_after_execute, 30);
+
+        let json = serde_json::to_string(&(open.clone(), run.clone())).unwrap();
+        let decoded: (SessionOpenProfileV1, RunPipelineProfileV1) =
+            serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, (open, run));
     }
 
     #[test]
