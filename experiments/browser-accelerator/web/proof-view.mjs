@@ -161,7 +161,7 @@ export function proofPipelineHtml(proof) {
           </div>
         </article>
 
-        <div class="proof-arrow">↓ same ${escapeHtml(id)}</div>
+        <div class="proof-arrow">↓ та же апамять ${escapeHtml(id)}</div>
 
         <article class="proof-stage proof-execute">
           <div class="proof-stage-number">3</div>
@@ -176,7 +176,7 @@ export function proofPipelineHtml(proof) {
           </div>
         </article>
 
-        <div class="proof-arrow">↓ same ${escapeHtml(id)}</div>
+        <div class="proof-arrow">↓ та же апамять ${escapeHtml(id)}</div>
 
         <article class="proof-stage proof-result">
           <div class="proof-stage-number">4</div>
@@ -213,7 +213,7 @@ export function proofPipelineHtml(proof) {
               <div class="notice">Загрузка точно зафиксированного визуализатора схемы mts_visual…</div>
             </div>
             <details>
-              <summary>Сырой DTO VisualLinkNetwork (${proof.result.visualLinks.length} links)</summary>
+              <summary>Сырой DTO VisualLinkNetwork (${proof.result.visualLinks.length} связей)</summary>
               <pre class="proof-aset">${escapeHtml(JSON.stringify(visualNetworkFromProof(proof), null, 2))}</pre>
             </details>
           </div>
