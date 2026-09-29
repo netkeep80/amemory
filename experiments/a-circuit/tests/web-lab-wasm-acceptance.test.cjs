@@ -147,6 +147,43 @@ for (const required of [
     throw new Error("recursive-structure collapse wiring missing: " + required);
   }
 }
+const workbenchPageSource = fs.readFileSync(
+  "experiments/browser-accelerator/web/index.html",
+  "utf8"
+);
+const workbenchSource = fs.readFileSync(
+  "experiments/browser-accelerator/web/workbench.mjs",
+  "utf8"
+);
+for (const required of [
+  'id="workbench-root"',
+  'src="./workbench.mjs"',
+]) {
+  if (!workbenchPageSource.includes(required)) {
+    throw new Error("R4 Workbench page wiring missing: " + required);
+  }
+}
+for (const required of [
+  "refreshScenarioPresetRegistry",
+  "loadScenarioPresetManifestByIndex",
+  "openScenarioLiveSession",
+  "runScenarioLiveSession",
+  "refreshScenarioLiveHistoryStatus",
+  "setScenarioLiveRetentionPolicy",
+  "closeScenarioLiveSession",
+  "PREPARE",
+  "LOAD",
+  "CONFIGURE",
+  "EXECUTE",
+  "RESULT",
+  "EVIDENCE",
+  "configurationReused",
+  "timing unavailable",
+]) {
+  if (!workbenchSource.includes(required)) {
+    throw new Error("R4 Workbench runtime wiring missing: " + required);
+  }
+}
 const bytes = fs.readFileSync(wasmPath);
 const sourceSha =
   process.env.AMEMORY_SOURCE_SHA || process.env.GITHUB_SHA || null;
@@ -164,6 +201,7 @@ Promise.all([
   import("../../browser-accelerator/web/gpu-carrier.mjs"),
   import("../../browser-accelerator/web/scenario-transport.mjs"),
   import("../../browser-accelerator/web/scenario-presets.mjs"),
+  import("../../browser-accelerator/web/workbench.mjs"),
 ]).then(([
   {instance},
   { inflateCompactProof },
@@ -202,6 +240,11 @@ Promise.all([
     loadScenarioPresetManifest,
     loadScenarioPresetManifestByIndex,
     refreshScenarioPresetRegistry,
+  },
+  {
+    createWorkbenchRun,
+    deriveWorkbenchPipeline,
+    normalizeWorkbenchInputs,
   },
 ]) => {
   const w = instance.exports;
@@ -306,6 +349,66 @@ Promise.all([
     throw new Error("R3c canonical preset manifest round-trip mismatch");
   }
   const scenarioManifest = JSON.parse(preset.source);
+
+  // R4c: the visible Workbench uses this same canonical Scenario model.
+  const workbenchInputs = normalizeWorkbenchInputs(
+    scenarioManifest.inputSchema,
+    { S: "1", A: "0", B: "1" }
+  );
+  const workbenchPreset = createWorkbenchRun(
+    scenarioManifest,
+    1,
+    workbenchInputs,
+    3,
+    "preset"
+  );
+  const workbenchManual = createWorkbenchRun(
+    scenarioManifest,
+    0,
+    { S: "1", A: "1", B: "0" },
+    4,
+    "manual"
+  );
+  if (JSON.stringify(workbenchInputs) !==
+        JSON.stringify({ S: 1, A: 0, B: 1 }) ||
+      workbenchPreset.runId !== "workbench-live-3" ||
+      workbenchPreset.assertions.length === 0 ||
+      workbenchManual.runId !== "workbench-live-4" ||
+      workbenchManual.assertions.length !== 0) {
+    throw new Error("R4 Workbench preset/manual Scenario-model mismatch");
+  }
+  const workbenchOpenPipeline = deriveWorkbenchPipeline(
+    { prepareCount: 1, loadCount: 1, baseLinkCount: 123 },
+    null
+  );
+  const workbenchRunPipeline = deriveWorkbenchPipeline(
+    { prepareCount: 1, loadCount: 1, baseLinkCount: 123 },
+    {
+      linksBeforeConfigure: 123,
+      linksAfterConfigure: 130,
+      pipelineProfile: {
+        stages: {
+          timingAvailable: false,
+          configureNs: 0,
+          executeNs: 0,
+          resultNs: 0,
+          evidenceNs: 0,
+        },
+      },
+      observed: {
+        activeReactionCount: 7,
+        events: [{ kind: "RUN_START" }, { kind: "RUN_END" }],
+      },
+    }
+  );
+  if (workbenchOpenPipeline[0].state !== "done" ||
+      workbenchOpenPipeline[1].state !== "done" ||
+      workbenchOpenPipeline.slice(2).some(
+        (stage) => stage.state !== "waiting"
+      ) ||
+      workbenchRunPipeline.some((stage) => stage.state !== "done")) {
+    throw new Error("R4 Workbench pipeline is not driven by runtime evidence");
+  }
 
   // R2d: browser transport must consume the generic Scenario Runner report,
   // not the legacy block-result slot. The manifest itself contains four runs
