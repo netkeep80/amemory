@@ -9,79 +9,14 @@ const wasmPath =
   "experiments/a-circuit/target/wasm32-unknown-unknown/release/amemory_a_circuit.wasm";
 const registryText = fs.readFileSync(registryPath, "utf8");
 const registry = JSON.parse(registryText);
-const labPageSource = fs.readFileSync(
+for (const removedUiPath of [
+  "experiments/browser-accelerator/web/app.js",
   "experiments/browser-accelerator/web/i386-lab.js",
-  "utf8"
-);
-for (const required of [
-  "M5 architectural state witness",
-  "setupArchitecturalStateWitness",
-  "amemory_i386_state_run_add32",
-  "amemory_i386_state_run_mul32",
-  "amemory_i386_state_run_add_ecx",
-  "Full GPR",
-  "EDX:EAX",
-  "Stateₜ₊₁",
-  "M6 structural word memory witness",
-  "amemory_i386_memory32_run",
-  "amemory_i386_word_memory_run",
-  "M6d State + MemoryRoot fetch / stack witness",
-  "setupM6dWitness",
-  "amemory_i386_fetch_run",
-  "amemory_i386_stack_run",
-  "collectBrowserProof",
-  "renderProofPipeline",
-  "amemory_i386_lab_result_available",
-  "amemory-i386-lab-result-json",
+  "experiments/browser-accelerator/web/i386-lab-view.mjs",
+  "experiments/browser-accelerator/web/proof-view.mjs",
 ]) {
-  if (!labPageSource.includes(required)) {
-    throw new Error("Pages witness wiring missing: " + required);
-  }
-}
-for (const retiredBrowserGetter of [
-  "amemory_i386_lab_value()",
-  "amemory_i386_lab_value_hi()",
-  "amemory_i386_lab_writeback()",
-  "amemory_i386_lab_defined_mask()",
-  "amemory_i386_lab_value_mask()",
-  "amemory_i386_lab_undefined_mask()",
-  "amemory_i386_lab_preserve_mask()",
-  "amemory_i386_lab_reactions()",
-  "amemory_i386_lab_links_after_build()",
-  "amemory_i386_lab_links_after_first()",
-  "amemory_i386_lab_steady_link_delta()",
-  "amemory_i386_lab_quiescent()",
-]) {
-  if (labPageSource.includes(retiredBrowserGetter)) {
-    throw new Error("browser still depends on scalar result getter: " + retiredBrowserGetter);
-  }
-}
-for (const [label, pattern] of [
-  ["M5 state observation getter", /wasm\.amemory_i386_state_(?:eax|ebx|ecx|edx|esi|edi|ebp|esp|eip|flags_|reactions|old_state_retained|atomic_scope|steady_link_delta|quiescent)/],
-  ["M6b byte-memory observation getter", /wasm\.amemory_i386_memory32_(?:address|page24|offset8|write_value|before_value|after_value|old_after_value|old_root_ref|new_root_ref|reactions|links_after_load|links_final|steady_link_delta|quiescent)/],
-  ["M6c word-memory observation getter", /wasm\.amemory_i386_word_memory_(?:width|address|write_value|before_value|after_value|old_after_value|old_root_ref|new_root_ref|reactions|links_after_load|links_final|steady_link_delta|atomic_scope|crosses_page|quiescent)/],
-  ["M6d FETCH observation getter", /wasm\.amemory_i386_fetch_(?:eip_before|eip_after|byte|initial_root_ref|final_root_ref|seeded_write|state_preserved|old_state_retained|atomic_scope|reactions|links_after_load|links_final|steady_link_delta|quiescent)/],
-  ["M6d STACK observation getter", /wasm\.amemory_i386_stack_(?:esp_before|esp_after|value|initial_root_ref|final_root_ref|state_preserved|old_state_retained|old_memory_retained|atomic_scope|reactions|links_after_load|links_final|steady_link_delta|quiescent)/],
-]) {
-  if (pattern.test(labPageSource)) {
-    throw new Error("browser still depends on " + label);
-  }
-}
-const c4LabSource = fs.readFileSync(
-  "experiments/browser-accelerator/web/i386-lab.js",
-  "utf8"
-);
-for (const required of [
-  "setupGpuCarrierWitness",
-  "amemory_i386_lab_gpu_carrier_prepare",
-  "runGpuCarrierLookup",
-  "runGpuCarrierReaction",
-  "deriveGpuCarrierReactionInput",
-  "lab-run-gpu-carrier",
-  "WebGPU discover → publish",
-]) {
-  if (!c4LabSource.includes(required)) {
-    throw new Error("C4c2 workbench wiring missing: " + required);
+  if (fs.existsSync(removedUiPath)) {
+    throw new Error("obsolete parallel UI file still exists: " + removedUiPath);
   }
 }
 const gpuCarrierSource = fs.readFileSync(
@@ -135,7 +70,7 @@ for (const forbidden of [
   }
 }
 const proofViewSource = fs.readFileSync(
-  "experiments/browser-accelerator/web/i386-proof-view.mjs",
+  "experiments/browser-accelerator/web/proof-view.mjs",
   "utf8"
 );
 for (const required of [
@@ -159,11 +94,19 @@ for (const required of [
   'id="workbench-root"',
   'src="./workbench.mjs"',
   'main { width: 100%; max-width: none;',
-  'id="legacy-diagnostics"',
-  'Compatibility witnesses · collapsed by default',
 ]) {
   if (!workbenchPageSource.includes(required)) {
     throw new Error("R4 Workbench page wiring missing: " + required);
+  }
+}
+for (const forbidden of [
+  'legacy-diagnostics',
+  'src="./app.js"',
+  'src="./i386-lab.js"',
+  'Compatibility witnesses',
+]) {
+  if (workbenchPageSource.includes(forbidden)) {
+    throw new Error("obsolete parallel UI wiring remains on Pages: " + forbidden);
   }
 }
 for (const required of [
@@ -187,6 +130,8 @@ for (const required of [
   '["timeline", "log", "profile", "compare"]',
   "workbenchResultStatus",
   "workbenchStageDetails",
+  "workbenchRecursiveStructure",
+  "recursiveStructureHtml",
 ]) {
   if (!workbenchSource.includes(required)) {
     throw new Error("R4 Workbench runtime wiring missing: " + required);
@@ -205,7 +150,7 @@ const PROGRAM_FINGERPRINT_RE =
 Promise.all([
   WebAssembly.instantiate(bytes, {}),
   import("../../browser-accelerator/web/i386-proof-transport.mjs"),
-  import("../../browser-accelerator/web/i386-proof-view.mjs"),
+  import("../../browser-accelerator/web/proof-view.mjs"),
   import("../../browser-accelerator/web/gpu-carrier.mjs"),
   import("../../browser-accelerator/web/scenario-transport.mjs"),
   import("../../browser-accelerator/web/scenario-presets.mjs"),
@@ -255,6 +200,7 @@ Promise.all([
     normalizeWorkbenchInputs,
     workbenchResultStatus,
     workbenchStageDetails,
+    workbenchRecursiveStructure,
   },
 ]) => {
   const w = instance.exports;
@@ -440,10 +386,15 @@ Promise.all([
       workbenchLoadDetails?.baseLinkCount !== 123) {
     throw new Error("R4 progressive-disclosure evidence projection mismatch");
   }
-  if (/<details[^>]*id="legacy-diagnostics"[^>]*\bopen\b/.test(
-        workbenchPageSource
+  const workbenchRecursive = workbenchRecursiveStructure({
+    result: { resultRecursiveWire: "1AB" },
+  });
+  if (workbenchRecursive?.key !== "resultRecursiveWire" ||
+      workbenchRecursive?.value !== "1AB" ||
+      !recursiveStructureHtml(workbenchRecursive.value).includes(
+        'class="proof-recursive-structure"'
       )) {
-    throw new Error("R4 legacy diagnostics must stay collapsed by default");
+    throw new Error("R4 generic recursive proof projection mismatch");
   }
 
   // R2d: browser transport must consume the generic Scenario Runner report,

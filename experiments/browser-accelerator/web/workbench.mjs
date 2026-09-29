@@ -10,6 +10,7 @@ import {
   loadScenarioPresetManifestByIndex,
   refreshScenarioPresetRegistry,
 } from "./scenario-presets.mjs";
+import { recursiveStructureHtml } from "./proof-view.mjs";
 
 const BACKENDS = [
   ["optimized-cpu", "CPU / optimized"],
@@ -220,6 +221,7 @@ function styles() {
     ".wb-tabs{padding:0 16px 16px}.wb-tabbar{display:flex;gap:6px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:9px}.wb-tabbar button{border:0;background:transparent;color:var(--muted);padding:7px 9px;cursor:pointer}.wb-tabbar button[aria-selected=true]{color:var(--text);font-weight:800;border-bottom:2px solid var(--accent)}.wb-tab{padding-top:12px}",
     ".wb-log{display:grid;gap:6px;max-height:360px;overflow:auto}.wb-log-row{padding:8px 10px;border:1px solid var(--line);border-radius:9px;background:var(--surface-2);font-size:.78rem}.wb-table{width:100%;border-collapse:collapse;font-size:.8rem}.wb-table th,.wb-table td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line)}.wb-table th{color:var(--muted)}",
     ".wb-raw{margin-top:10px;border:1px solid var(--line);border-radius:10px;overflow:hidden}.wb-raw summary{cursor:pointer;padding:9px 11px;font-weight:700}.wb-raw pre{border-radius:0;max-height:360px;font-size:.75rem}.wb-error{color:var(--bad);font-weight:800}",
+    ".wb-proof-structure{margin-top:10px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2)}.proof-recursive-structure{margin-top:8px;border:1px solid var(--line);border-radius:9px;background:var(--surface)}.proof-recursive-structure summary{cursor:pointer;padding:8px 10px}.proof-recursive-structure>code{display:block;padding:10px;max-height:280px;overflow:auto;overflow-wrap:anywhere}",
     ".wb-levels{display:flex;gap:5px;flex-wrap:wrap}.wb-levels button{border:1px solid var(--line);border-radius:999px;background:var(--surface-2);color:var(--muted);padding:5px 8px;cursor:pointer;font-size:.76rem}.wb-levels button[aria-pressed=true]{border-color:var(--accent);color:var(--text);font-weight:800}",
     ".wb-simple-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:12px}.wb-simple-item{padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);min-width:0}.wb-simple-item small{display:block;color:var(--muted)}.wb-simple-item strong,.wb-simple-item code{display:block;margin-top:5px;overflow-wrap:anywhere}.wb-result.pass{border-color:var(--good)}.wb-result.fail{border-color:var(--bad)}",
 
@@ -327,6 +329,17 @@ function close(state) {
   render(state);
 }
 
+export function workbenchRecursiveStructure(run) {
+  const result = run && run.result;
+  if (!result || typeof result !== "object") return null;
+  for (const key of ["resultRecursiveWire", "resultSequenceAnum", "resultAnum", "recursiveWire"]) {
+    if (typeof result[key] === "string" && result[key].length > 0) {
+      return { key, value: result[key] };
+    }
+  }
+  return null;
+}
+
 function tab(state) {
   const run = state.run;
   if (state.tab === "log") {
@@ -380,7 +393,12 @@ function tab(state) {
       ).join("") + '</tbody></table>' +
       '<div class="wb-help">Retained WebGPU / LinksDB adapters are tracked by #279 / #280; differential comparison by #281.</div>';
   }
+  const recursive = workbenchRecursiveStructure(run);
   return '<div class="wb-help">Proof/raw structures are collapsed by default.</div>' +
+    (recursive
+      ? '<div class="wb-proof-structure"><strong>Portable recursive structure · ' + esc(recursive.key) +
+        '</strong>' + recursiveStructureHtml(recursive.value) + '</div>'
+      : '<div class="wb-help">This run does not expose a portable recursive structure in its normalized Result.</div>') +
     '<details class="wb-raw"><summary>Current run report</summary><pre>' + json(run || {}) + '</pre></details>' +
     '<details class="wb-raw"><summary>Scenario manifest</summary><pre>' + json(state.manifest || {}) + '</pre></details>';
 }
