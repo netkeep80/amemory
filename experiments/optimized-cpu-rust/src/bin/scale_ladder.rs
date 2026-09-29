@@ -94,10 +94,10 @@ fn storage_scale(size: usize, probes: usize) {
         probes.min((40_000_000usize / store.link_count().max(1)).max(4));
     let membership_target = |probe: usize| -> u32 {
         let count = store.link_count() as u64;
-        1 + (((probe as u64)
+        let mixed = (probe as u64)
             .wrapping_mul(2_654_435_761)
-            .wrapping_add(count / 2))
-            % count) as u32)
+            .wrapping_add(count / 2);
+        1 + (mixed % count) as u32
     };
 
     let intrusive_membership_started = Instant::now();
