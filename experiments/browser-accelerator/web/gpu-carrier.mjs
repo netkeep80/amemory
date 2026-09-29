@@ -1114,7 +1114,7 @@ export function gpuCarrierReactionShaderSource(
 export async function runGpuCarrierReaction(
   device,
   parsed,
-  witness,
+  input,
   { maxDiagnosticLinks = 16_384 } = {},
 ) {
   if (!device?.createBuffer || !device?.queue) {
@@ -1124,7 +1124,8 @@ export async function runGpuCarrierReaction(
   if (parsed.layout.linkCount > maxDiagnosticLinks) {
     throw new RangeError("bounded GPU reaction carrier too large");
   }
-  const expected = expectedGpuCarrierReaction(parsed, witness);
+  requireLookupHandle(parsed, input?.currentHandle, "current handle");
+  requireLookupHandle(parsed, input?.interpreterHandle, "interpreter handle");
   const plan = planGpuCarrierUpload(parsed.layout, device.limits);
   if (plan.mode === "unsupported") {
     throw new Error("WebGPU carrier upload unsupported: " + plan.reason);
@@ -1165,8 +1166,8 @@ export async function runGpuCarrierReaction(
 
     const shader = device.createShaderModule({
       code: gpuCarrierReactionShaderSource(plan.mode, {
-        currentHandle: expected.currentHandle,
-        interpreterHandle: expected.interpreterHandle,
+        currentHandle: input.currentHandle,
+        interpreterHandle: input.interpreterHandle,
         linkCount: parsed.layout.linkCount,
         rootHandle: parsed.layout.rootHandle,
       }),
@@ -1237,6 +1238,10 @@ export async function runGpuCarrierReaction(
       publishStatus: p[0] >>> 0,
       publishedHandle: p[1] >>> 0,
     });
+
+    // Independent oracle is intentionally computed only after GPU readback.
+    // It cannot seed shader constants, candidate discovery, or publication.
+    const expected = expectedGpuCarrierReaction(parsed, input);
     if (observed.discoveryStatus !== 1 ||
         observed.publishStatus !== 1 ||
         observed.candidateHandle !== expected.candidateHandle ||
