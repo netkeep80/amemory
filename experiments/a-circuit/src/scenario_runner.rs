@@ -221,7 +221,7 @@ struct ScenarioActiveStepRunV1 {
     active_reaction_count: u32,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ScenarioStepBeginV1 {
     pub(crate) schema_version: u32,
@@ -233,7 +233,7 @@ pub(crate) struct ScenarioStepBeginV1 {
     pub(crate) max_reactions: u32,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ScenarioStepReportV1 {
     pub(crate) schema_version: u32,
@@ -572,6 +572,27 @@ pub(crate) fn open_cpu_scenario_session_v1(
     })
 }
 
+fn ensure_cpu_session_configurable(
+    live: &ScenarioCpuSessionV1,
+    run_id: &str,
+) -> Result<(), ScenarioRunnerErrorV1> {
+    if matches!(
+        live.session.execution_state(),
+        ProofRuntimeSessionState::Open
+            | ProofRuntimeSessionState::Quiescent
+    ) {
+        return Ok(());
+    }
+
+    Err(ScenarioRunnerErrorV1::StepControlFailed {
+        run_id: run_id.to_owned(),
+        message: format!(
+            "Session is not configurable in state {:?}",
+            live.session.execution_state(),
+        ),
+    })
+}
+
 pub(crate) fn run_cpu_scenario_session_once_v1(
     live: &mut ScenarioCpuSessionV1,
     run: &ScenarioRunV1,
@@ -597,6 +618,7 @@ pub(crate) fn run_cpu_scenario_session_once_v1(
             mode: run.execution_mode,
         });
     }
+    ensure_cpu_session_configurable(live, &run.run_id)?;
 
     let adapter = live.adapter;
     let (configured, configure_ns) =
@@ -751,6 +773,7 @@ pub(crate) fn begin_cpu_scenario_step_run_v1(
             mode: run.execution_mode,
         });
     }
+    ensure_cpu_session_configurable(live, &run.run_id)?;
 
     let configured = (live.adapter.configure)(
         &mut live.session,
@@ -805,13 +828,19 @@ pub(crate) fn step_cpu_scenario_session_v1(
         });
     }
 
-    let step = live
+    let step = match live
         .session
         .step(live.manifest.observation_level)
-        .map_err(|error| ScenarioRunnerErrorV1::StepControlFailed {
-            run_id: active.run.run_id.clone(),
-            message: format!("{error:?}"),
-        })?;
+    {
+        Ok(step) => step,
+        Err(error) => {
+            live.session.fail_active_run();
+            return Err(ScenarioRunnerErrorV1::StepControlFailed {
+                run_id: active.run.run_id,
+                message: format!("{error:?}"),
+            });
+        }
+    };
     active.steps_taken = active.steps_taken.saturating_add(1);
     if !step.evidence.quiescent {
         active.active_reaction_count =
