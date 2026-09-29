@@ -1187,8 +1187,6 @@ impl OptimizedStructuralEngine {
         profile: &mut Option<&mut StructuralRunProfile>,
         trace: &mut Option<&mut StructuralRunTrace>,
     ) -> Result<StructuralReactionResult, StructuralError> {
-        self.quiescent = false;
-
         let store_instance = store.instance_id();
         if self.metadata_store_instance != Some(store_instance) {
             self.rule_metadata_cache.clear();
@@ -1205,10 +1203,9 @@ impl OptimizedStructuralEngine {
             });
         }
 
-        // Phase 1 is read-only. Borrow only dense carrier/index slices, not
-        // canonical HashMaps, and discover every old Scope member before any
-        // publication mutates the store. This makes reaction observation
-        // atomic without cloning the whole carrier on every run().
+        // Phase 1 is strictly read-only. Borrow only dense carrier/index
+        // slices, not canonical HashMaps, and discover every old Scope member
+        // before publication can append a Link.
         let discovered = {
             let execution_view = store.packed_execution_ref();
             let authority =
@@ -1244,105 +1241,132 @@ impl OptimizedStructuralEngine {
             discovered
         };
 
-        // Phase 2 is the explicit mutation/publication boundary. The borrowed
-        // execution view is gone, so constructor/canonicalization writes are
-        // impossible during discovery and legal only from this point onward.
-        let mut next_members = Vec::new();
-        let mut next_seen = HashSet::new();
-        let mut raw_rule_matches = 0u32;
-        let mut transitioned_members = 0u32;
+        // Phase 2 is one physical Store transaction. OptimizedLinkStore is
+        // append-only, so an exact checkpoint is just the committed Link count;
+        // rollback unwinds canonical/index mutations in reverse allocation
+        // order. Scope/counters are committed only after this whole closure
+        // succeeds.
+        let checkpoint = store.append_checkpoint();
+        let cap = self.cap;
+        let publication = (|| -> Result<(Vec<Handle>, u32, u32), StructuralError> {
+            let mut next_members = Vec::new();
+            let mut next_seen = HashSet::new();
+            let mut raw_rule_matches = 0u32;
+            let mut transitioned_members = 0u32;
 
-        let mut add_next = |link: Handle| -> Result<(), StructuralError> {
-            if next_seen.insert(link) {
-                if next_members.len() >= self.cap {
-                    return Err(StructuralError::ScopeCapacity {
-                        requested: next_members.len() + 1,
-                        cap: self.cap,
-                    });
+            let mut add_next = |link: Handle| -> Result<(), StructuralError> {
+                if next_seen.insert(link) {
+                    if next_members.len() >= cap {
+                        return Err(StructuralError::ScopeCapacity {
+                            requested: next_members.len() + 1,
+                            cap,
+                        });
+                    }
+                    next_members.push(link);
                 }
-                next_members.push(link);
-            }
-            Ok(())
-        };
+                Ok(())
+            };
 
-        for (active, images) in discovered {
-            if images.is_empty() {
-                let publication_started = profile.as_ref().map(|_| ProfileTimer::start());
-                add_next(active)?;
-                if let Some(profile) = profile.as_deref_mut() {
-                    profile.publication_outputs += 1;
-                    if let Some(started) = publication_started {
-                        profile.publication_ns += started.elapsed_ns();
+            for (active, images) in discovered {
+                if images.is_empty() {
+                    let publication_started =
+                        profile.as_ref().map(|_| ProfileTimer::start());
+                    add_next(active)?;
+                    if let Some(profile) = profile.as_deref_mut() {
+                        profile.publication_outputs += 1;
+                        if let Some(started) = publication_started {
+                            profile.publication_ns += started.elapsed_ns();
+                        }
+                    }
+                    if let Some(trace) = trace.as_deref_mut() {
+                        let trace_started = ProfileTimer::start();
+                        trace.events.push(StructuralTraceEvent::Published {
+                            active,
+                            rule: None,
+                            outputs: vec![active],
+                            preserved: true,
+                        });
+                        trace.collection_ns += trace_started.elapsed_ns();
+                    }
+                    continue;
+                }
+
+                transitioned_members = transitioned_members.saturating_add(1);
+
+                for image in images {
+                    raw_rule_matches = raw_rule_matches.saturating_add(1);
+
+                    let instantiation_started =
+                        profile.as_ref().map(|_| ProfileTimer::start());
+                    let grounded_bundle = instantiate_structural_template_internal(
+                        store,
+                        image.output_bundle_template,
+                        &image.bindings,
+                        profile,
+                    )?;
+                    if let Some(profile) = profile.as_deref_mut() {
+                        if let Some(started) = instantiation_started {
+                            profile.instantiation_ns += started.elapsed_ns();
+                        }
+                    }
+                    if let Some(trace) = trace.as_deref_mut() {
+                        let trace_started = ProfileTimer::start();
+                        trace.events.push(StructuralTraceEvent::Instantiated {
+                            active,
+                            rule: image.rule,
+                            output_bundle_template:
+                                image.output_bundle_template,
+                            grounded_bundle,
+                        });
+                        trace.collection_ns += trace_started.elapsed_ns();
+                    }
+
+                    let publication_started =
+                        profile.as_ref().map(|_| ProfileTimer::start());
+                    let outputs = read_exact_sequence(store, grounded_bundle)?;
+                    if let Some(profile) = profile.as_deref_mut() {
+                        profile.publication_outputs += outputs.len() as u64;
+                    }
+                    for successor in outputs.iter().copied() {
+                        add_next(successor)?;
+                    }
+                    if let Some(profile) = profile.as_deref_mut() {
+                        if let Some(started) = publication_started {
+                            profile.publication_ns += started.elapsed_ns();
+                        }
+                    }
+                    if let Some(trace) = trace.as_deref_mut() {
+                        let trace_started = ProfileTimer::start();
+                        trace.events.push(StructuralTraceEvent::Published {
+                            active,
+                            rule: Some(image.rule),
+                            outputs,
+                            preserved: false,
+                        });
+                        trace.collection_ns += trace_started.elapsed_ns();
                     }
                 }
-                if let Some(trace) = trace.as_deref_mut() {
-                    let trace_started = ProfileTimer::start();
-                    trace.events.push(StructuralTraceEvent::Published {
-                        active,
-                        rule: None,
-                        outputs: vec![active],
-                        preserved: true,
-                    });
-                    trace.collection_ns += trace_started.elapsed_ns();
-                }
-                continue;
             }
 
-            transitioned_members = transitioned_members.saturating_add(1);
+            Ok((
+                next_members,
+                raw_rule_matches,
+                transitioned_members,
+            ))
+        })();
 
-            for image in images {
-                raw_rule_matches = raw_rule_matches.saturating_add(1);
+        let (next_members, raw_rule_matches, transitioned_members) =
+            match publication {
+                Ok(committed) => committed,
+                Err(error) => {
+                    store.rollback_append(checkpoint);
+                    return Err(error);
+                }
+            };
 
-                let instantiation_started = profile.as_ref().map(|_| ProfileTimer::start());
-                let grounded_bundle = instantiate_structural_template_internal(
-                    store,
-                    image.output_bundle_template,
-                    &image.bindings,
-                    profile,
-                )?;
-                if let Some(profile) = profile.as_deref_mut() {
-                    if let Some(started) = instantiation_started {
-                        profile.instantiation_ns += started.elapsed_ns();
-                    }
-                }
-                if let Some(trace) = trace.as_deref_mut() {
-                    let trace_started = ProfileTimer::start();
-                    trace.events.push(StructuralTraceEvent::Instantiated {
-                        active,
-                        rule: image.rule,
-                        output_bundle_template:
-                            image.output_bundle_template,
-                        grounded_bundle,
-                    });
-                    trace.collection_ns += trace_started.elapsed_ns();
-                }
-
-                let publication_started = profile.as_ref().map(|_| ProfileTimer::start());
-                let outputs = read_exact_sequence(store, grounded_bundle)?;
-                if let Some(profile) = profile.as_deref_mut() {
-                    profile.publication_outputs += outputs.len() as u64;
-                }
-                for successor in outputs.iter().copied() {
-                    add_next(successor)?;
-                }
-                if let Some(profile) = profile.as_deref_mut() {
-                    if let Some(started) = publication_started {
-                        profile.publication_ns += started.elapsed_ns();
-                    }
-                }
-                if let Some(trace) = trace.as_deref_mut() {
-                    let trace_started = ProfileTimer::start();
-                    trace.events.push(StructuralTraceEvent::Published {
-                        active,
-                        rule: Some(image.rule),
-                        outputs,
-                        preserved: false,
-                    });
-                    trace.collection_ns += trace_started.elapsed_ns();
-                }
-            }
-        }
-
+        // Engine-visible state commits only after the Store transaction has
+        // completed. A rejected reaction therefore preserves both physical
+        // Store state and the previously committed Scope/counters.
         self.raw_rule_matches = raw_rule_matches;
         self.transitioned_members = transitioned_members;
         self.handoff_count = 0;
@@ -1373,6 +1397,7 @@ impl OptimizedStructuralEngine {
         self.scope_banks[target_bank] = next_members.clone();
         self.current_bank = target_bank;
         self.handoff_count = 1;
+        self.quiescent = false;
 
         if let Some(trace) = trace.as_deref_mut() {
             let trace_started = ProfileTimer::start();
@@ -1440,6 +1465,15 @@ mod tests {
             result.push(seed);
         }
         result
+    }
+
+    fn physical_snapshot(
+        store: &OptimizedLinkStore,
+    ) -> (crate::PackedCarrierImage, crate::PackedIncidenceIndexImage) {
+        (
+            store.export_packed_carrier_image(),
+            store.export_packed_incidence_index_image(),
+        )
     }
 
     #[test]
@@ -2133,7 +2167,7 @@ mod tests {
     }
 
     #[test]
-    fn malformed_output_bundle_fails_closed_before_scope_handoff() {
+    fn malformed_output_bundle_rolls_back_store_and_preserves_committed_engine_state() {
         let mut store = OptimizedLinkStore::new();
         let anchors = fresh(&mut store, 32);
         let theory = anchors[0];
@@ -2148,12 +2182,24 @@ mod tests {
         let interpreter =
             define_structural_interpreter(&mut store, authority_dictionary, grammar, theory)
                 .unwrap();
+        let active = store.ensure_pair(caller, input).unwrap();
+
+        let mut engine = OptimizedStructuralEngine::new(8);
+        engine.set_interpreter(&store, interpreter).unwrap();
+        engine.set_current(&store, &[active]).unwrap();
+
+        // Establish a real previously committed quiescent state. A rejected
+        // later reaction must not rewrite these engine-visible counters.
+        let initial = engine.run(&mut store).unwrap();
+        assert!(initial.quiescent);
+        assert!(engine.quiescent());
 
         let dictionary =
             define_structural_role_dictionary(&mut store, &[role]).unwrap();
         let before = store.ensure_pair(role, input).unwrap();
 
-        // Deliberately not an ExactSequence carrier.
+        // Deliberately not an ExactSequence carrier. Grounding this template
+        // first creates (caller, output); sequence decoding then rejects it.
         let malformed_bundle = store.ensure_pair(role, output).unwrap();
         let body = store.ensure_pair(before, malformed_bundle).unwrap();
         let rule = define_structural_rule(&mut store, dictionary, body).unwrap();
@@ -2161,18 +2207,181 @@ mod tests {
         let (trigger_key, _) = store.poles(input).unwrap();
         index_structural_rule_trigger(&mut store, trigger_key, admission).unwrap();
 
-        let active = store.ensure_pair(caller, input).unwrap();
-        let mut engine = OptimizedStructuralEngine::new(8);
-        engine.set_interpreter(&store, interpreter).unwrap();
-        engine.set_current(&store, &[active]).unwrap();
         let bank = engine.current_bank();
+        let raw_before = engine.raw_rule_matches();
+        let transitioned_before = engine.transitioned_members();
+        let handoff_before = engine.handoff_count();
+        let quiescent_before = engine.quiescent();
+        let links_before = store.link_count();
+        let snapshot_before = physical_snapshot(&store);
 
         let error = engine.run(&mut store).unwrap_err();
         assert!(matches!(error, StructuralError::InvalidExactSequence(_)));
+
+        assert_eq!(store.link_count(), links_before);
+        assert_eq!(physical_snapshot(&store), snapshot_before);
         assert_eq!(engine.current_bank(), bank);
         assert_eq!(engine.current(), &[active]);
+        assert_eq!(engine.raw_rule_matches(), raw_before);
+        assert_eq!(engine.transitioned_members(), transitioned_before);
+        assert_eq!(engine.handoff_count(), handoff_before);
+        assert_eq!(engine.quiescent(), quiescent_before);
+
+        // The failed instantiation must also be gone from canonical maps. If a
+        // ghost entry survived rollback this constructor would return a stale
+        // handle without appending a physical record.
+        let recreated = store.ensure_pair(caller, output).unwrap();
+        assert_eq!(recreated as usize, links_before + 1);
+        assert_eq!(store.link_count(), links_before + 1);
+    }
+
+    #[test]
+    fn scope_capacity_failure_rolls_back_instantiation_and_future_retry_matches_clean_control() {
+        let mut store = OptimizedLinkStore::new();
+        let anchors = fresh(&mut store, 40);
+        let theory = anchors[0];
+        let grammar = anchors[1];
+        let caller = anchors[2];
+        let input = anchors[3];
+        let output_a = anchors[4];
+        let output_b = anchors[5];
+        let role = anchors[30];
+
+        let authority_dictionary =
+            define_structural_role_dictionary(&mut store, &[]).unwrap();
+        let interpreter =
+            define_structural_interpreter(&mut store, authority_dictionary, grammar, theory)
+                .unwrap();
+
+        let dictionary =
+            define_structural_role_dictionary(&mut store, &[role]).unwrap();
+        let before = store.ensure_pair(role, input).unwrap();
+        let after_a = store.ensure_pair(role, output_a).unwrap();
+        let after_b = store.ensure_pair(role, output_b).unwrap();
+        let bundle =
+            materialize_exact_sequence(&mut store, &[after_a, after_b]).unwrap();
+        let body = store.ensure_pair(before, bundle).unwrap();
+        let rule = define_structural_rule(&mut store, dictionary, body).unwrap();
+        let admission = admit_structural_rule(&mut store, theory, rule).unwrap();
+        let (trigger_key, _) = store.poles(input).unwrap();
+        index_structural_rule_trigger(&mut store, trigger_key, admission).unwrap();
+
+        let active = store.ensure_pair(caller, input).unwrap();
+        let snapshot_before = physical_snapshot(&store);
+        let links_before = store.link_count();
+        let mut clean_control = store.clone();
+
+        let mut too_small = OptimizedStructuralEngine::new(1);
+        too_small.set_interpreter(&store, interpreter).unwrap();
+        too_small.set_current(&store, &[active]).unwrap();
+        let bank = too_small.current_bank();
+
+        let error = too_small.run(&mut store).unwrap_err();
+        assert_eq!(
+            error,
+            StructuralError::ScopeCapacity {
+                requested: 2,
+                cap: 1,
+            }
+        );
+        assert_eq!(store.link_count(), links_before);
+        assert_eq!(physical_snapshot(&store), snapshot_before);
+        assert_eq!(too_small.current_bank(), bank);
+        assert_eq!(too_small.current(), &[active]);
+        assert_eq!(too_small.handoff_count(), 0);
+
+        // A larger engine can immediately execute on the rolled-back Store.
+        // Compare with an untouched clone from before the rejected reaction.
+        let mut retry = OptimizedStructuralEngine::new(4);
+        retry.set_interpreter(&store, interpreter).unwrap();
+        retry.set_current(&store, &[active]).unwrap();
+        let retry_reaction = retry.run(&mut store).unwrap();
+
+        let mut control = OptimizedStructuralEngine::new(4);
+        control
+            .set_interpreter(&clean_control, interpreter)
+            .unwrap();
+        control
+            .set_current(&clean_control, &[active])
+            .unwrap();
+        let control_reaction = control.run(&mut clean_control).unwrap();
+
+        assert_eq!(retry_reaction, control_reaction);
+        assert_eq!(
+            store.export_packed_carrier_image(),
+            clean_control.export_packed_carrier_image()
+        );
+        assert_eq!(
+            store.export_packed_incidence_index_image(),
+            clean_control.export_packed_incidence_index_image()
+        );
+    }
+
+    #[test]
+    fn later_failed_rule_rolls_back_links_created_by_earlier_valid_rule_image() {
+        let mut store = OptimizedLinkStore::new();
+        let anchors = fresh(&mut store, 48);
+        let theory = anchors[0];
+        let grammar = anchors[1];
+        let caller = anchors[2];
+        let input = anchors[3];
+        let good_output = anchors[4];
+        let bad_output = anchors[5];
+        let good_role = anchors[40];
+        let bad_role = anchors[41];
+
+        let authority_dictionary =
+            define_structural_role_dictionary(&mut store, &[]).unwrap();
+        let interpreter =
+            define_structural_interpreter(&mut store, authority_dictionary, grammar, theory)
+                .unwrap();
+        let (trigger_key, _) = store.poles(input).unwrap();
+
+        // Register the malformed trigger first. Intrusive start-incidence is
+        // newest-first, so the valid rule registered second executes first.
+        let bad_dictionary =
+            define_structural_role_dictionary(&mut store, &[bad_role]).unwrap();
+        let bad_before = store.ensure_pair(bad_role, input).unwrap();
+        let malformed_bundle = store.ensure_pair(bad_role, bad_output).unwrap();
+        let bad_body = store.ensure_pair(bad_before, malformed_bundle).unwrap();
+        let bad_rule =
+            define_structural_rule(&mut store, bad_dictionary, bad_body).unwrap();
+        let bad_admission =
+            admit_structural_rule(&mut store, theory, bad_rule).unwrap();
+        index_structural_rule_trigger(&mut store, trigger_key, bad_admission).unwrap();
+
+        let good_dictionary =
+            define_structural_role_dictionary(&mut store, &[good_role]).unwrap();
+        let good_before = store.ensure_pair(good_role, input).unwrap();
+        let good_after = store.ensure_pair(good_role, good_output).unwrap();
+        let good_bundle =
+            materialize_exact_sequence(&mut store, &[good_after]).unwrap();
+        let good_body = store.ensure_pair(good_before, good_bundle).unwrap();
+        let good_rule =
+            define_structural_rule(&mut store, good_dictionary, good_body).unwrap();
+        let good_admission =
+            admit_structural_rule(&mut store, theory, good_rule).unwrap();
+        index_structural_rule_trigger(&mut store, trigger_key, good_admission).unwrap();
+
+        let active = store.ensure_pair(caller, input).unwrap();
+        let links_before = store.link_count();
+        let snapshot_before = physical_snapshot(&store);
+
+        let mut engine = OptimizedStructuralEngine::new(8);
+        engine.set_interpreter(&store, interpreter).unwrap();
+        engine.set_current(&store, &[active]).unwrap();
+
+        let error = engine.run(&mut store).unwrap_err();
+        assert!(matches!(error, StructuralError::InvalidExactSequence(_)));
+        assert_eq!(store.link_count(), links_before);
+        assert_eq!(physical_snapshot(&store), snapshot_before);
+        assert_eq!(engine.current(), &[active]);
         assert_eq!(engine.handoff_count(), 0);
-        assert!(!engine.quiescent());
+
+        // The valid first image did create this successor transiently. It must
+        // not survive in canonical state after the later image rejects.
+        let recreated = store.ensure_pair(caller, good_output).unwrap();
+        assert_eq!(recreated as usize, links_before + 1);
     }
 
     #[test]
