@@ -1,8 +1,8 @@
 use super::observability::{
-    ns_u64, ObservedRunV1, RunEventKind, RunEventV1, RunObservationLevel,
-    RunProfileV1, RunStage, RunStructuralFactV1, StructuralProfileV1,
-    OPTIMIZED_CPU_BACKEND_ID,
-    RUN_OBSERVABILITY_SCHEMA_VERSION,
+    ns_u64, ObservationTimer, ObservedRunV1, RunEventKind, RunEventV1,
+    RunObservationLevel, RunProfileV1, RunStage, RunStructuralFactV1,
+    StructuralProfileV1, OBSERVABILITY_TIMING_AVAILABLE,
+    OPTIMIZED_CPU_BACKEND_ID, RUN_OBSERVABILITY_SCHEMA_VERSION,
 };
 use amemory_optimized_cpu_probe::{
     structural::{OptimizedStructuralEngine, StructuralRunProfile},
@@ -12,7 +12,6 @@ use serde::Serialize;
 use std::{
     collections::{HashMap, HashSet},
     sync::atomic::{AtomicU32, Ordering},
-    time::Instant,
 };
 
 static NEXT_PROOF_MEMORY_ID: AtomicU32 = AtomicU32::new(1);
@@ -800,7 +799,7 @@ pub(crate) fn execute_session_observed_to_quiescence(
         .ok()?;
     let scope_before_width = session.engine.current().len() as u32;
 
-    let run_started = Instant::now();
+    let run_started = ObservationTimer::start();
     let mut sequence = 0u32;
     let mut events = Vec::new();
     let mut trace_projection_ns = 0u128;
@@ -809,14 +808,14 @@ pub(crate) fn execute_session_observed_to_quiescence(
     let mut final_quiescent = false;
 
     if observation_level.traces() {
-        let projection_started = Instant::now();
+        let projection_started = ObservationTimer::start();
         events.push(RunEventV1 {
             schema_version: RUN_OBSERVABILITY_SCHEMA_VERSION,
             session_id: session_id.clone(),
             run_id,
             backend_id: OPTIMIZED_CPU_BACKEND_ID.to_owned(),
             sequence,
-            elapsed_ns: ns_u64(run_started.elapsed().as_nanos()),
+            elapsed_ns: ns_u64(run_started.elapsed_ns()),
             stage: RunStage::Execute,
             kind: RunEventKind::ExecuteBegin,
             reaction_index: None,
@@ -831,15 +830,15 @@ pub(crate) fn execute_session_observed_to_quiescence(
         });
         sequence = sequence.saturating_add(1);
         trace_projection_ns = trace_projection_ns
-            .saturating_add(projection_started.elapsed().as_nanos());
+            .saturating_add(projection_started.elapsed_ns());
     }
 
     for reaction_index in 0..max_steps {
         let scope_before = if observation_level.traces() {
-            let projection_started = Instant::now();
+            let projection_started = ObservationTimer::start();
             let scope = session.engine.current().to_vec();
             trace_projection_ns = trace_projection_ns
-                .saturating_add(projection_started.elapsed().as_nanos());
+                .saturating_add(projection_started.elapsed_ns());
             Some(scope)
         } else {
             None
@@ -853,7 +852,7 @@ pub(crate) fn execute_session_observed_to_quiescence(
                     .ok()?;
                 structural_profile.accumulate(&profile);
 
-                let projection_started = Instant::now();
+                let projection_started = ObservationTimer::start();
                 let collection_ns = native_trace.collection_ns;
                 let facts = native_trace
                     .events
@@ -863,7 +862,7 @@ pub(crate) fn execute_session_observed_to_quiescence(
                 trace_projection_ns = trace_projection_ns
                     .saturating_add(collection_ns)
                     .saturating_add(
-                        projection_started.elapsed().as_nanos(),
+                        projection_started.elapsed_ns(),
                     );
                 (reaction, Some(facts))
             } else if observation_level.profiles() {
@@ -886,7 +885,7 @@ pub(crate) fn execute_session_observed_to_quiescence(
         }
 
         if observation_level.traces() {
-            let projection_started = Instant::now();
+            let projection_started = ObservationTimer::start();
             let scope_after = session.engine.current().to_vec();
             events.push(RunEventV1 {
                 schema_version: RUN_OBSERVABILITY_SCHEMA_VERSION,
@@ -894,7 +893,7 @@ pub(crate) fn execute_session_observed_to_quiescence(
                 run_id,
                 backend_id: OPTIMIZED_CPU_BACKEND_ID.to_owned(),
                 sequence,
-                elapsed_ns: ns_u64(run_started.elapsed().as_nanos()),
+                elapsed_ns: ns_u64(run_started.elapsed_ns()),
             stage: RunStage::Execute,
                 kind: RunEventKind::ReactionEnd,
                 reaction_index: Some(reaction_index),
@@ -916,7 +915,7 @@ pub(crate) fn execute_session_observed_to_quiescence(
                     run_id,
                     backend_id: OPTIMIZED_CPU_BACKEND_ID.to_owned(),
                     sequence,
-                    elapsed_ns: ns_u64(run_started.elapsed().as_nanos()),
+                    elapsed_ns: ns_u64(run_started.elapsed_ns()),
             stage: RunStage::Execute,
                     kind: RunEventKind::Quiescence,
                     reaction_index: Some(reaction_index),
@@ -933,7 +932,7 @@ pub(crate) fn execute_session_observed_to_quiescence(
             }
 
             trace_projection_ns = trace_projection_ns
-                .saturating_add(projection_started.elapsed().as_nanos());
+                .saturating_add(projection_started.elapsed_ns());
         }
 
         if quiescent {
@@ -950,14 +949,14 @@ pub(crate) fn execute_session_observed_to_quiescence(
     let links_after_run = session.memory.store.link_count() as u32;
 
     if observation_level.traces() {
-        let projection_started = Instant::now();
+        let projection_started = ObservationTimer::start();
         events.push(RunEventV1 {
             schema_version: RUN_OBSERVABILITY_SCHEMA_VERSION,
             session_id: session_id.clone(),
             run_id,
             backend_id: OPTIMIZED_CPU_BACKEND_ID.to_owned(),
             sequence,
-            elapsed_ns: ns_u64(run_started.elapsed().as_nanos()),
+            elapsed_ns: ns_u64(run_started.elapsed_ns()),
             stage: RunStage::Execute,
             kind: RunEventKind::RunEnd,
             reaction_index: None,
@@ -971,11 +970,12 @@ pub(crate) fn execute_session_observed_to_quiescence(
             structural_facts: None,
         });
         trace_projection_ns = trace_projection_ns
-            .saturating_add(projection_started.elapsed().as_nanos());
+            .saturating_add(projection_started.elapsed_ns());
     }
 
     let profile = observation_level.profiles().then(|| RunProfileV1 {
         schema_version: RUN_OBSERVABILITY_SCHEMA_VERSION,
+        timing_available: OBSERVABILITY_TIMING_AVAILABLE,
         session_id: session_id.clone(),
         run_id,
         backend_id: OPTIMIZED_CPU_BACKEND_ID.to_owned(),
@@ -993,6 +993,7 @@ pub(crate) fn execute_session_observed_to_quiescence(
 
     Some(ObservedRunV1 {
         schema_version: RUN_OBSERVABILITY_SCHEMA_VERSION,
+        timing_available: OBSERVABILITY_TIMING_AVAILABLE,
         session_id,
         run_id,
         backend_id: OPTIMIZED_CPU_BACKEND_ID.to_owned(),
