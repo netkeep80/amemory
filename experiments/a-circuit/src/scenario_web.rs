@@ -3,6 +3,7 @@ use super::{
         parse_and_validate_manifest_v1, ScenarioBackendV1, ScenarioRunV1,
         ScenarioValidationErrorV1,
     },
+    observability::RunPipelineProfileV1,
     scenario_registry::{
         load_preset_registry_v1, preset_manifest_source_by_index_v1,
         ScenarioPresetRegistryErrorV1,
@@ -16,6 +17,7 @@ use super::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::VecDeque,
     io::{self, Write},
     sync::Mutex,
 };
@@ -24,8 +26,16 @@ const SCENARIO_TRANSPORT_SCHEMA_VERSION: u32 = 1;
 const MAX_SCENARIO_MANIFEST_BYTES: usize = 1024 * 1024;
 const MAX_SCENARIO_REPORT_BYTES: usize = 8 * 1024 * 1024;
 const MAX_SCENARIO_ERROR_BYTES: usize = 512 * 1024;
+const MAX_LIVE_RETAINED_RUNS: u32 = 32;
+const MAX_LIVE_RETAINED_EVENTS: u32 = 65_536;
+const MAX_LIVE_RETAINED_BYTES: u32 = 16 * 1024 * 1024;
+const MAX_LIVE_PROFILE_POINTS: u32 = 64;
+const MAX_LIVE_EXPORT_BYTES: usize = 16 * 1024 * 1024;
+const DEFAULT_LIVE_RETAINED_RUNS: u32 = 8;
+const DEFAULT_LIVE_RETAINED_EVENTS: u32 = 8_192;
+const DEFAULT_LIVE_RETAINED_BYTES: u32 = 16 * 1024 * 1024;
 const SCENARIO_LIMITS_JSON: &str =
-    "{\"schemaVersion\":1,\"maxManifestBytes\":1048576,\"maxSingleReportBytes\":8388608,\"maxErrorBytes\":524288,\"maxRetainedReports\":1,\"maxRetainedErrors\":1,\"retentionMode\":\"LATEST\",\"liveSessionRetained\":true,\"batchSessionRetained\":false}";
+    "{\"schemaVersion\":1,\"maxManifestBytes\":1048576,\"maxSingleReportBytes\":8388608,\"maxErrorBytes\":524288,\"maxRetainedReports\":1,\"maxRetainedErrors\":1,\"retentionMode\":\"LATEST\",\"liveSessionRetained\":true,\"batchSessionRetained\":false,\"liveObserver\":{\"schemaVersion\":1,\"defaultRetentionMode\":\"RING\",\"supportedRetentionModes\":[\"LATEST\",\"RING\",\"EXPLICIT_EXPORT\"],\"maxRetainedRuns\":32,\"maxRetainedEvents\":65536,\"maxRetainedBytes\":16777216,\"maxSingleReportBytes\":8388608,\"maxProfilePoints\":64,\"maxExportBytes\":16777216}}";
 const FALLBACK_ERROR_LIMIT_JSON: &str =
     "{\"code\":\"ERROR_LIMIT\",\"schemaVersion\":1,\"maxBytes\":524288}";
 
@@ -38,6 +48,12 @@ static SCENARIO_LIVE_SESSION: Mutex<Option<ScenarioCpuSessionV1>> =
     Mutex::new(None);
 static SCENARIO_LIVE_RUN_BYTES: Mutex<Vec<u8>> = Mutex::new(Vec::new());
 static SCENARIO_LIVE_OUTPUT_JSON: Mutex<String> =
+    Mutex::new(String::new());
+static SCENARIO_LIVE_HISTORY: Mutex<Option<ScenarioLiveObserverHistoryV1>> =
+    Mutex::new(None);
+static SCENARIO_LIVE_HISTORY_JSON: Mutex<String> =
+    Mutex::new(String::new());
+static SCENARIO_LIVE_EXPORT_JSON: Mutex<String> =
     Mutex::new(String::new());
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -52,6 +68,356 @@ struct ScenarioTransportLimitsV1 {
     retention_mode: String,
     live_session_retained: bool,
     batch_session_retained: bool,
+    live_observer: ScenarioLiveObserverLimitsV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ScenarioLiveObserverLimitsV1 {
+    schema_version: u32,
+    default_retention_mode: LiveRetentionModeV1,
+    supported_retention_modes: Vec<LiveRetentionModeV1>,
+    max_retained_runs: u32,
+    max_retained_events: u32,
+    max_retained_bytes: u32,
+    max_single_report_bytes: u32,
+    max_profile_points: u32,
+    max_export_bytes: u32,
+}
+
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+enum LiveRetentionModeV1 {
+    Latest,
+    Ring,
+    ExplicitExport,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ScenarioLiveHistoryPolicyV1 {
+    schema_version: u32,
+    retention_mode: LiveRetentionModeV1,
+    max_retained_runs: u32,
+    max_retained_events: u32,
+    max_retained_bytes: u32,
+    max_single_report_bytes: u32,
+    max_profile_points: u32,
+}
+
+impl Default for ScenarioLiveHistoryPolicyV1 {
+    fn default() -> Self {
+        Self {
+            schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+            retention_mode: LiveRetentionModeV1::Ring,
+            max_retained_runs: DEFAULT_LIVE_RETAINED_RUNS,
+            max_retained_events: DEFAULT_LIVE_RETAINED_EVENTS,
+            max_retained_bytes: DEFAULT_LIVE_RETAINED_BYTES,
+            max_single_report_bytes: MAX_SCENARIO_REPORT_BYTES as u32,
+            max_profile_points: MAX_LIVE_PROFILE_POINTS,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct RetainedLiveRunV1 {
+    report: ScenarioRunReportV1,
+    event_count: u32,
+    serialized_bytes: u32,
+}
+
+#[derive(Debug)]
+struct ScenarioLiveObserverHistoryV1 {
+    session_id: String,
+    program_fingerprint: String,
+    policy: ScenarioLiveHistoryPolicyV1,
+    runs: VecDeque<RetainedLiveRunV1>,
+    retained_events: u32,
+    retained_bytes: u32,
+    latest_report: Option<ScenarioRunReportV1>,
+    latest_report_bytes: u32,
+    profile_trend: VecDeque<RunPipelineProfileV1>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ScenarioLiveHistoryStatusV1 {
+    schema_version: u32,
+    session_id: String,
+    program_fingerprint: String,
+    retention_mode: LiveRetentionModeV1,
+    max_retained_runs: u32,
+    max_retained_events: u32,
+    max_retained_bytes: u32,
+    max_single_report_bytes: u32,
+    retained_runs: u32,
+    retained_events: u32,
+    retained_bytes: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    first_run_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_run_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    latest_run_id: Option<u64>,
+    latest_report_bytes: u32,
+    profile_points: u32,
+    max_profile_points: u32,
+    export_available: bool,
+    profile_trend: Vec<RunPipelineProfileV1>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+enum ScenarioLiveHistoryExportKindV1 {
+    SelectedRun,
+    AvailableHistory,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ScenarioLiveHistoryExportV1 {
+    schema_version: u32,
+    representation_id: String,
+    representation_version: String,
+    export_kind: ScenarioLiveHistoryExportKindV1,
+    session_id: String,
+    program_fingerprint: String,
+    runs: Vec<ScenarioRunReportV1>,
+}
+
+impl ScenarioLiveObserverHistoryV1 {
+    fn new(status: &ScenarioLiveSessionStatusV1) -> Self {
+        Self {
+            session_id: status.session_id.clone(),
+            program_fingerprint: status.program_fingerprint.clone(),
+            policy: ScenarioLiveHistoryPolicyV1::default(),
+            runs: VecDeque::new(),
+            retained_events: 0,
+            retained_bytes: 0,
+            latest_report: None,
+            latest_report_bytes: 0,
+            profile_trend: VecDeque::new(),
+        }
+    }
+
+    fn status(&self, export_available: bool) -> ScenarioLiveHistoryStatusV1 {
+        ScenarioLiveHistoryStatusV1 {
+            schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+            session_id: self.session_id.clone(),
+            program_fingerprint: self.program_fingerprint.clone(),
+            retention_mode: self.policy.retention_mode,
+            max_retained_runs: self.policy.max_retained_runs,
+            max_retained_events: self.policy.max_retained_events,
+            max_retained_bytes: self.policy.max_retained_bytes,
+            max_single_report_bytes: self.policy.max_single_report_bytes,
+            retained_runs: self.runs.len().min(u32::MAX as usize) as u32,
+            retained_events: self.retained_events,
+            retained_bytes: self.retained_bytes,
+            first_run_id:
+                self.runs.front().map(|entry| entry.report.session_run_id),
+            last_run_id:
+                self.runs.back().map(|entry| entry.report.session_run_id),
+            latest_run_id:
+                self.latest_report.as_ref().map(|report| report.session_run_id),
+            latest_report_bytes: self.latest_report_bytes,
+            profile_points:
+                self.profile_trend.len().min(u32::MAX as usize) as u32,
+            max_profile_points: self.policy.max_profile_points,
+            export_available,
+            profile_trend: self.profile_trend.iter().cloned().collect(),
+        }
+    }
+
+    fn push_profile(&mut self, report: &ScenarioRunReportV1) {
+        if let Some(profile) = report.pipeline_profile.clone() {
+            self.profile_trend.push_back(profile);
+            while self.profile_trend.len()
+                > self.policy.max_profile_points as usize
+            {
+                self.profile_trend.pop_front();
+            }
+        }
+    }
+
+    fn remove_oldest(&mut self) {
+        if let Some(entry) = self.runs.pop_front() {
+            self.retained_events =
+                self.retained_events.saturating_sub(entry.event_count);
+            self.retained_bytes =
+                self.retained_bytes.saturating_sub(entry.serialized_bytes);
+        }
+    }
+
+    fn clear_raw(&mut self) {
+        self.runs.clear();
+        self.retained_events = 0;
+        self.retained_bytes = 0;
+    }
+
+    fn clear_history(&mut self) {
+        self.clear_raw();
+        self.latest_report = None;
+        self.latest_report_bytes = 0;
+    }
+
+    fn enforce_policy(&mut self) {
+        match self.policy.retention_mode {
+            LiveRetentionModeV1::Latest => {
+                while self.runs.len() > 1 {
+                    self.remove_oldest();
+                }
+            }
+            LiveRetentionModeV1::Ring => {
+                while self.runs.len()
+                    > self.policy.max_retained_runs as usize
+                    || self.retained_events > self.policy.max_retained_events
+                    || self.retained_bytes > self.policy.max_retained_bytes
+                {
+                    self.remove_oldest();
+                }
+            }
+            LiveRetentionModeV1::ExplicitExport => self.clear_raw(),
+        }
+
+        let latest_events = self
+            .latest_report
+            .as_ref()
+            .map(|report| {
+                report.observed.events.len().min(u32::MAX as usize) as u32
+            })
+            .unwrap_or(0);
+        if self.latest_report_bytes > self.policy.max_retained_bytes
+            || latest_events > self.policy.max_retained_events
+        {
+            self.latest_report = None;
+            self.latest_report_bytes = 0;
+        }
+
+        while self.profile_trend.len()
+            > self.policy.max_profile_points as usize
+        {
+            self.profile_trend.pop_front();
+        }
+    }
+
+    fn set_policy(&mut self, policy: ScenarioLiveHistoryPolicyV1) {
+        self.policy = policy;
+        self.enforce_policy();
+    }
+
+    fn record_run(
+        &mut self,
+        report: &ScenarioRunReportV1,
+    ) -> Result<(), ScenarioTransportErrorV1> {
+        // PROFILE is observer-only and remains available even when a detailed
+        // report cannot be retained under the raw-history policy.
+        self.push_profile(report);
+
+        let serialized = serialize_bounded(
+            report,
+            self.policy.max_single_report_bytes as usize,
+        )
+        .map_err(|error| match error {
+            BoundedJsonError::Limit => {
+                ScenarioTransportErrorV1::LiveHistoryLimit {
+                    schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+                    limit_kind: "SINGLE_REPORT_BYTES".to_owned(),
+                    requested: 0,
+                    max: self.policy.max_single_report_bytes as u64,
+                }
+            }
+            error => ScenarioTransportErrorV1::Serialize {
+                schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+                message: format!("{error:?}"),
+            },
+        })?;
+        let serialized_bytes =
+            serialized.len().min(u32::MAX as usize) as u32;
+        let event_count =
+            report.observed.events.len().min(u32::MAX as usize) as u32;
+
+        if event_count > self.policy.max_retained_events {
+            return Err(ScenarioTransportErrorV1::LiveHistoryLimit {
+                schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+                limit_kind: "RETAINED_EVENTS".to_owned(),
+                requested: event_count as u64,
+                max: self.policy.max_retained_events as u64,
+            });
+        }
+        if serialized_bytes > self.policy.max_retained_bytes {
+            return Err(ScenarioTransportErrorV1::LiveHistoryLimit {
+                schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+                limit_kind: "RETAINED_BYTES".to_owned(),
+                requested: serialized_bytes as u64,
+                max: self.policy.max_retained_bytes as u64,
+            });
+        }
+
+        self.latest_report = Some(report.clone());
+        self.latest_report_bytes = serialized_bytes;
+
+        match self.policy.retention_mode {
+            LiveRetentionModeV1::Latest => {
+                self.clear_raw();
+                self.runs.push_back(RetainedLiveRunV1 {
+                    report: report.clone(),
+                    event_count,
+                    serialized_bytes,
+                });
+                self.retained_events = event_count;
+                self.retained_bytes = serialized_bytes;
+            }
+            LiveRetentionModeV1::Ring => {
+                self.runs.push_back(RetainedLiveRunV1 {
+                    report: report.clone(),
+                    event_count,
+                    serialized_bytes,
+                });
+                self.retained_events =
+                    self.retained_events.saturating_add(event_count);
+                self.retained_bytes =
+                    self.retained_bytes.saturating_add(serialized_bytes);
+                self.enforce_policy();
+            }
+            LiveRetentionModeV1::ExplicitExport => {
+                // Keep only the latest complete report for an explicit export
+                // action. No automatic raw run history is retained.
+                self.clear_raw();
+            }
+        }
+        Ok(())
+    }
+
+    fn selected_run(&self, run_id: u64) -> Option<ScenarioRunReportV1> {
+        self.runs
+            .iter()
+            .find(|entry| entry.report.session_run_id == run_id)
+            .map(|entry| entry.report.clone())
+            .or_else(|| {
+                self.latest_report
+                    .as_ref()
+                    .filter(|report| report.session_run_id == run_id)
+                    .cloned()
+            })
+    }
+
+    fn available_runs(&self) -> Vec<ScenarioRunReportV1> {
+        if self.runs.is_empty() {
+            self.latest_report.iter().cloned().collect()
+        } else {
+            self.runs.iter().map(|entry| entry.report.clone()).collect()
+        }
+    }
+}
+
+fn live_retention_mode_from_code(code: u32) -> Option<LiveRetentionModeV1> {
+    match code {
+        0 => Some(LiveRetentionModeV1::Latest),
+        1 => Some(LiveRetentionModeV1::Ring),
+        2 => Some(LiveRetentionModeV1::ExplicitExport),
+        _ => None,
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -152,6 +518,25 @@ enum ScenarioTransportErrorV1 {
         schema_version: u32,
         message: String,
     },
+    LiveHistoryPolicy {
+        schema_version: u32,
+        field: String,
+        requested: u64,
+        max: u64,
+    },
+    LiveHistoryLimit {
+        schema_version: u32,
+        limit_kind: String,
+        requested: u64,
+        max: u64,
+    },
+    LiveHistoryRunNotFound {
+        schema_version: u32,
+        session_run_id: u64,
+    },
+    LiveHistoryEmpty {
+        schema_version: u32,
+    },
     Runner {
         schema_version: u32,
         error: ScenarioRunnerErrorV1,
@@ -181,6 +566,13 @@ fn backend_from_code(code: u32) -> Option<ScenarioBackendV1> {
         2 => Some(ScenarioBackendV1::Linksdb),
         _ => None,
     }
+}
+
+fn clear_error_only() {
+    *SCENARIO_ERROR_JSON
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+        String::new();
 }
 
 fn clear_report_and_error() {
@@ -386,6 +778,19 @@ pub extern "C" fn amemory_scenario_transport_limits_json_byte(
         .unwrap_or(u32::MAX)
 }
 
+fn clear_live_history_buffers(clear_export: bool) {
+    *SCENARIO_LIVE_HISTORY_JSON
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+        String::new();
+    if clear_export {
+        *SCENARIO_LIVE_EXPORT_JSON
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+            String::new();
+    }
+}
+
 fn clear_live_output_and_error() {
     *SCENARIO_LIVE_OUTPUT_JSON
         .lock()
@@ -417,6 +822,121 @@ fn store_live_output<T: Serialize>(
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = json;
     Ok(())
+}
+
+
+fn store_live_history_json<T: Serialize>(
+    value: &T,
+) -> Result<(), ScenarioTransportErrorV1> {
+    let json = serialize_bounded(value, MAX_SCENARIO_REPORT_BYTES)
+        .map_err(|error| match error {
+            BoundedJsonError::Limit => {
+                ScenarioTransportErrorV1::ReportLimit {
+                    schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+                    max_bytes: MAX_SCENARIO_REPORT_BYTES as u32,
+                }
+            }
+            error => ScenarioTransportErrorV1::Serialize {
+                schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+                message: format!("{error:?}"),
+            },
+        })?;
+    *SCENARIO_LIVE_HISTORY_JSON
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = json;
+    Ok(())
+}
+
+fn store_live_history_export(
+    value: &ScenarioLiveHistoryExportV1,
+) -> Result<(), ScenarioTransportErrorV1> {
+    let json = serialize_bounded(value, MAX_LIVE_EXPORT_BYTES)
+        .map_err(|error| match error {
+            BoundedJsonError::Limit => {
+                ScenarioTransportErrorV1::LiveHistoryLimit {
+                    schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+                    limit_kind: "EXPORT_BYTES".to_owned(),
+                    requested: 0,
+                    max: MAX_LIVE_EXPORT_BYTES as u64,
+                }
+            }
+            error => ScenarioTransportErrorV1::Serialize {
+                schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+                message: format!("{error:?}"),
+            },
+        })?;
+    *SCENARIO_LIVE_EXPORT_JSON
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = json;
+    Ok(())
+}
+
+fn live_export_available() -> bool {
+    !SCENARIO_LIVE_EXPORT_JSON
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .is_empty()
+}
+
+fn live_history_status() -> Result<ScenarioLiveHistoryStatusV1, ScenarioTransportErrorV1> {
+    let export_available = live_export_available();
+    let history = SCENARIO_LIVE_HISTORY
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let Some(history) = history.as_ref() else {
+        return Err(ScenarioTransportErrorV1::LiveSessionNotOpen {
+            schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+        });
+    };
+    Ok(history.status(export_available))
+}
+
+fn validate_live_history_policy(
+    mode_code: u32,
+    max_retained_runs: u32,
+    max_retained_events: u32,
+    max_retained_bytes: u32,
+) -> Result<ScenarioLiveHistoryPolicyV1, ScenarioTransportErrorV1> {
+    let retention_mode = live_retention_mode_from_code(mode_code)
+        .ok_or_else(|| ScenarioTransportErrorV1::LiveHistoryPolicy {
+            schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+            field: "retentionMode".to_owned(),
+            requested: mode_code as u64,
+            max: 2,
+        })?;
+
+    for (field, requested, max) in [
+        ("maxRetainedRuns", max_retained_runs, MAX_LIVE_RETAINED_RUNS),
+        (
+            "maxRetainedEvents",
+            max_retained_events,
+            MAX_LIVE_RETAINED_EVENTS,
+        ),
+        (
+            "maxRetainedBytes",
+            max_retained_bytes,
+            MAX_LIVE_RETAINED_BYTES,
+        ),
+    ] {
+        if requested == 0 || requested > max {
+            return Err(ScenarioTransportErrorV1::LiveHistoryPolicy {
+                schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+                field: field.to_owned(),
+                requested: requested as u64,
+                max: max as u64,
+            });
+        }
+    }
+
+    Ok(ScenarioLiveHistoryPolicyV1 {
+        schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+        retention_mode,
+        max_retained_runs,
+        max_retained_events,
+        max_retained_bytes,
+        max_single_report_bytes: MAX_SCENARIO_REPORT_BYTES as u32,
+        max_profile_points: MAX_LIVE_PROFILE_POINTS,
+    })
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -497,6 +1017,12 @@ pub extern "C" fn amemory_scenario_live_open_json(
         store_error(error);
         return 0;
     }
+
+    *SCENARIO_LIVE_HISTORY
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+        Some(ScenarioLiveObserverHistoryV1::new(&status));
+    clear_live_history_buffers(true);
     *slot = Some(session);
     1
 }
@@ -520,6 +1046,245 @@ pub extern "C" fn amemory_scenario_live_status_refresh() -> u32 {
             0
         }
     }
+}
+
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_live_history_policy_set(
+    mode_code: u32,
+    max_retained_runs: u32,
+    max_retained_events: u32,
+    max_retained_bytes: u32,
+) -> u32 {
+    clear_error_only();
+    *SCENARIO_LIVE_HISTORY_JSON
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+        String::new();
+
+    let policy = match validate_live_history_policy(
+        mode_code,
+        max_retained_runs,
+        max_retained_events,
+        max_retained_bytes,
+    ) {
+        Ok(policy) => policy,
+        Err(error) => {
+            store_error(error);
+            return 0;
+        }
+    };
+
+    {
+        let mut history = SCENARIO_LIVE_HISTORY
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(history) = history.as_mut() else {
+            store_error(ScenarioTransportErrorV1::LiveSessionNotOpen {
+                schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+            });
+            return 0;
+        };
+        history.set_policy(policy);
+    }
+
+    match live_history_status()
+        .and_then(|status| {
+            store_live_history_json(&status)?;
+            Ok(status)
+        })
+    {
+        Ok(_) => 1,
+        Err(error) => {
+            store_error(error);
+            0
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_live_history_status_refresh() -> u32 {
+    clear_error_only();
+    *SCENARIO_LIVE_HISTORY_JSON
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+        String::new();
+    match live_history_status()
+        .and_then(|status| {
+            store_live_history_json(&status)?;
+            Ok(status)
+        })
+    {
+        Ok(_) => 1,
+        Err(error) => {
+            store_error(error);
+            0
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_live_history_clear() -> u32 {
+    clear_error_only();
+    {
+        let mut history = SCENARIO_LIVE_HISTORY
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(history) = history.as_mut() else {
+            store_error(ScenarioTransportErrorV1::LiveSessionNotOpen {
+                schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+            });
+            return 0;
+        };
+        history.clear_history();
+    }
+    *SCENARIO_LIVE_OUTPUT_JSON
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+        String::new();
+    *SCENARIO_LIVE_HISTORY_JSON
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+        String::new();
+    1
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_live_history_export_run(
+    session_run_id: u32,
+) -> u32 {
+    clear_error_only();
+    let export = {
+        let history = SCENARIO_LIVE_HISTORY
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(history) = history.as_ref() else {
+            store_error(ScenarioTransportErrorV1::LiveSessionNotOpen {
+                schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+            });
+            return 0;
+        };
+        let Some(report) = history.selected_run(session_run_id as u64) else {
+            store_error(ScenarioTransportErrorV1::LiveHistoryRunNotFound {
+                schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+                session_run_id: session_run_id as u64,
+            });
+            return 0;
+        };
+        ScenarioLiveHistoryExportV1 {
+            schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+            representation_id:
+                "amemory-live-observer-history-json".to_owned(),
+            representation_version: "0.1.0".to_owned(),
+            export_kind: ScenarioLiveHistoryExportKindV1::SelectedRun,
+            session_id: history.session_id.clone(),
+            program_fingerprint: history.program_fingerprint.clone(),
+            runs: vec![report],
+        }
+    };
+
+    match store_live_history_export(&export) {
+        Ok(()) => 1,
+        Err(error) => {
+            store_error(error);
+            0
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_live_history_export_available() -> u32 {
+    clear_error_only();
+    let export = {
+        let history = SCENARIO_LIVE_HISTORY
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(history) = history.as_ref() else {
+            store_error(ScenarioTransportErrorV1::LiveSessionNotOpen {
+                schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+            });
+            return 0;
+        };
+        let runs = history.available_runs();
+        if runs.is_empty() {
+            store_error(ScenarioTransportErrorV1::LiveHistoryEmpty {
+                schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+            });
+            return 0;
+        }
+        ScenarioLiveHistoryExportV1 {
+            schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+            representation_id:
+                "amemory-live-observer-history-json".to_owned(),
+            representation_version: "0.1.0".to_owned(),
+            export_kind:
+                ScenarioLiveHistoryExportKindV1::AvailableHistory,
+            session_id: history.session_id.clone(),
+            program_fingerprint: history.program_fingerprint.clone(),
+            runs,
+        }
+    };
+
+    match store_live_history_export(&export) {
+        Ok(()) => 1,
+        Err(error) => {
+            store_error(error);
+            0
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_live_history_export_clear() {
+    *SCENARIO_LIVE_EXPORT_JSON
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+        String::new();
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_live_history_available() -> u32 {
+    string_available(&SCENARIO_LIVE_HISTORY_JSON)
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_live_history_json_len() -> u32 {
+    string_len(&SCENARIO_LIVE_HISTORY_JSON)
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_live_history_json_ptr() -> u32 {
+    string_ptr(&SCENARIO_LIVE_HISTORY_JSON)
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_live_history_json_byte(
+    index: u32,
+) -> u32 {
+    string_byte(&SCENARIO_LIVE_HISTORY_JSON, index)
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_live_history_export_json_available(
+) -> u32 {
+    string_available(&SCENARIO_LIVE_EXPORT_JSON)
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_live_history_export_json_len() -> u32 {
+    string_len(&SCENARIO_LIVE_EXPORT_JSON)
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_live_history_export_json_ptr() -> u32 {
+    string_ptr(&SCENARIO_LIVE_EXPORT_JSON)
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_live_history_export_json_byte(
+    index: u32,
+) -> u32 {
+    string_byte(&SCENARIO_LIVE_EXPORT_JSON, index)
 }
 
 #[no_mangle]
@@ -621,15 +1386,52 @@ pub extern "C" fn amemory_scenario_live_execute_json(
     let envelope = ScenarioLiveRunEnvelopeV1 {
         schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
         status: session.status_v1(),
-        run: report,
+        run: report.clone(),
     };
-    match store_live_output(&envelope) {
-        Ok(()) => 1,
+
+    // Serialize the current run completely before mutating observer-history
+    // state. A detailed TRACE/FULL payload is never partially published.
+    let live_json = match serialize_bounded(
+        &envelope,
+        MAX_SCENARIO_REPORT_BYTES,
+    ) {
+        Ok(json) => json,
+        Err(BoundedJsonError::Limit) => {
+            store_error(ScenarioTransportErrorV1::ReportLimit {
+                schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+                max_bytes: MAX_SCENARIO_REPORT_BYTES as u32,
+            });
+            return 0;
+        }
         Err(error) => {
+            store_error(ScenarioTransportErrorV1::Serialize {
+                schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+                message: format!("{error:?}"),
+            });
+            return 0;
+        }
+    };
+
+    {
+        let mut history = SCENARIO_LIVE_HISTORY
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(history) = history.as_mut() else {
+            store_error(ScenarioTransportErrorV1::LiveSessionNotOpen {
+                schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+            });
+            return 0;
+        };
+        if let Err(error) = history.record_run(&report) {
             store_error(error);
-            0
+            return 0;
         }
     }
+
+    *SCENARIO_LIVE_OUTPUT_JSON
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = live_json;
+    1
 }
 
 #[no_mangle]
@@ -641,6 +1443,10 @@ pub extern "C" fn amemory_scenario_live_close() -> u32 {
     *SCENARIO_LIVE_RUN_BYTES
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = Vec::new();
+    *SCENARIO_LIVE_HISTORY
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+    clear_live_history_buffers(true);
     clear_live_output_and_error();
     u32::from(existed)
 }
@@ -977,6 +1783,81 @@ mod tests {
         assert_eq!(limits.retention_mode, "LATEST");
         assert!(limits.live_session_retained);
         assert!(!limits.batch_session_retained);
+        assert_eq!(
+            limits.live_observer.default_retention_mode,
+            LiveRetentionModeV1::Ring
+        );
+        assert_eq!(
+            limits.live_observer.supported_retention_modes,
+            vec![
+                LiveRetentionModeV1::Latest,
+                LiveRetentionModeV1::Ring,
+                LiveRetentionModeV1::ExplicitExport,
+            ]
+        );
+        assert_eq!(
+            limits.live_observer.max_retained_runs,
+            MAX_LIVE_RETAINED_RUNS
+        );
+        assert_eq!(
+            limits.live_observer.max_retained_events,
+            MAX_LIVE_RETAINED_EVENTS
+        );
+        assert_eq!(
+            limits.live_observer.max_retained_bytes,
+            MAX_LIVE_RETAINED_BYTES
+        );
+        assert_eq!(
+            limits.live_observer.max_profile_points,
+            MAX_LIVE_PROFILE_POINTS
+        );
+        assert_eq!(
+            limits.live_observer.max_export_bytes,
+            MAX_LIVE_EXPORT_BYTES as u32
+        );
+    }
+
+    #[test]
+    fn live_history_policy_codes_and_bounds_are_explicit() {
+        assert_eq!(
+            live_retention_mode_from_code(0),
+            Some(LiveRetentionModeV1::Latest)
+        );
+        assert_eq!(
+            live_retention_mode_from_code(1),
+            Some(LiveRetentionModeV1::Ring)
+        );
+        assert_eq!(
+            live_retention_mode_from_code(2),
+            Some(LiveRetentionModeV1::ExplicitExport)
+        );
+        assert_eq!(live_retention_mode_from_code(3), None);
+
+        assert!(validate_live_history_policy(
+            1,
+            DEFAULT_LIVE_RETAINED_RUNS,
+            DEFAULT_LIVE_RETAINED_EVENTS,
+            DEFAULT_LIVE_RETAINED_BYTES,
+        )
+        .is_ok());
+        assert!(matches!(
+            validate_live_history_policy(
+                1,
+                MAX_LIVE_RETAINED_RUNS + 1,
+                DEFAULT_LIVE_RETAINED_EVENTS,
+                DEFAULT_LIVE_RETAINED_BYTES,
+            ),
+            Err(ScenarioTransportErrorV1::LiveHistoryPolicy { .. })
+        ));
+        assert!(matches!(
+            validate_live_history_policy(
+                1,
+                DEFAULT_LIVE_RETAINED_RUNS,
+                0,
+                DEFAULT_LIVE_RETAINED_BYTES,
+            ),
+            Err(ScenarioTransportErrorV1::LiveHistoryPolicy { .. })
+        ));
     }
 
     #[test]

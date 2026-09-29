@@ -177,18 +177,25 @@ Promise.all([
     readGpuCarrierWordsAbi,
   },
   {
+    clearScenarioLiveHistory,
+    clearScenarioLiveHistoryExport,
     clearScenarioTransportOutput,
     closeScenarioLiveSession,
     executeLoadedScenarioManifest,
     executeScenarioManifest,
+    exportScenarioLiveHistory,
+    exportScenarioLiveRun,
     exportScenarioReplayBundle,
     importScenarioReplayBundle,
     openScenarioLiveSession,
     readScenarioError,
     readScenarioReport,
     readScenarioTransportLimits,
+    readScenarioLiveHistoryExport,
+    refreshScenarioLiveHistoryStatus,
     refreshScenarioLiveSessionStatus,
     runScenarioLiveSession,
+    setScenarioLiveRetentionPolicy,
     writeScenarioManifest,
   },
   {
@@ -313,7 +320,16 @@ Promise.all([
       scenarioLimits.maxRetainedErrors !== 1 ||
       scenarioLimits.retentionMode !== "LATEST" ||
       scenarioLimits.liveSessionRetained !== true ||
-      scenarioLimits.batchSessionRetained !== false) {
+      scenarioLimits.batchSessionRetained !== false ||
+      scenarioLimits.liveObserver?.defaultRetentionMode !== "RING" ||
+      JSON.stringify(
+        scenarioLimits.liveObserver?.supportedRetentionModes
+      ) !== JSON.stringify(["LATEST", "RING", "EXPLICIT_EXPORT"]) ||
+      scenarioLimits.liveObserver?.maxRetainedRuns !== 32 ||
+      scenarioLimits.liveObserver?.maxRetainedEvents !== 65536 ||
+      scenarioLimits.liveObserver?.maxRetainedBytes !== 16 * 1024 * 1024 ||
+      scenarioLimits.liveObserver?.maxProfilePoints !== 64 ||
+      scenarioLimits.liveObserver?.maxExportBytes !== 16 * 1024 * 1024) {
     throw new Error("R2e scenario transport limits/policy mismatch");
   }
 
@@ -427,7 +443,8 @@ Promise.all([
     );
   }
 
-  // R4a: separate browser Run calls reuse one retained CPU Session.
+  // R4a/R4b: separate browser Run calls reuse one retained CPU Session,
+  // while observer history remains a bounded host-only concern.
   const liveOpened = openScenarioLiveSession(w, scenarioManifest);
   if (!liveOpened.ok ||
       liveOpened.status?.completedRuns !== 0 ||
@@ -450,6 +467,19 @@ Promise.all([
     programFingerprint: liveOpened.status.programFingerprint,
   };
 
+  const ringPolicy = setScenarioLiveRetentionPolicy(w, {
+    retentionMode: "RING",
+    maxRetainedRuns: 2,
+    maxRetainedEvents: 512,
+    maxRetainedBytes: 2 * 1024 * 1024,
+  });
+  if (!ringPolicy.ok ||
+      ringPolicy.status?.retentionMode !== "RING" ||
+      ringPolicy.status?.retainedRuns !== 0 ||
+      ringPolicy.status?.profilePoints !== 0) {
+    throw new Error("R4b RING policy activation mismatch");
+  }
+
   const liveRun1 = {
     ...scenarioManifest.runSequence[0],
     runId: "live-run-1",
@@ -462,13 +492,10 @@ Promise.all([
     ...scenarioManifest.runSequence[0],
     runId: "live-run-3-return",
   };
-  const liveResults = [
-    runScenarioLiveSession(w, liveRun1),
-    runScenarioLiveSession(w, liveRun2),
-    runScenarioLiveSession(w, liveRun3),
-  ];
-  for (let index = 0; index < liveResults.length; index += 1) {
-    const result = liveResults[index];
+
+  const liveFirst = runScenarioLiveSession(w, liveRun1);
+  const liveSecond = runScenarioLiveSession(w, liveRun2);
+  for (const [index, result] of [liveFirst, liveSecond].entries()) {
     const status = result.payload?.status;
     const run = result.payload?.run;
     if (!result.ok ||
@@ -488,17 +515,163 @@ Promise.all([
       );
     }
   }
-  if (liveResults[2].payload.run.configurationReused !== true ||
-      JSON.stringify(liveResults[0].payload.run.result) !==
-        JSON.stringify(liveResults[2].payload.run.result)) {
+
+  const historyAfterAB = refreshScenarioLiveHistoryStatus(w);
+  if (!historyAfterAB.ok ||
+      historyAfterAB.status?.retentionMode !== "RING" ||
+      historyAfterAB.status?.retainedRuns !== 2 ||
+      historyAfterAB.status?.firstRunId !== 1 ||
+      historyAfterAB.status?.lastRunId !== 2 ||
+      historyAfterAB.status?.latestRunId !== 2 ||
+      historyAfterAB.status?.retainedEvents <= 0 ||
+      historyAfterAB.status?.retainedBytes <= 0 ||
+      historyAfterAB.status?.profilePoints !== 2 ||
+      historyAfterAB.status?.exportAvailable !== false) {
+    throw new Error("R4b RING counters after A/B mismatch");
+  }
+
+  const exportedA = exportScenarioLiveRun(w, 1);
+  if (!exportedA.ok ||
+      exportedA.export?.exportKind !== "SELECTED_RUN" ||
+      exportedA.export?.sessionId !== liveIdentity.sessionId ||
+      exportedA.export?.programFingerprint !==
+        liveIdentity.programFingerprint ||
+      exportedA.export?.runs?.length !== 1 ||
+      exportedA.export.runs[0]?.sessionRunId !== 1) {
+    throw new Error("R4b selected run A export mismatch");
+  }
+  const exportedABeforeClear = JSON.stringify(exportedA.export);
+
+  const clearedHistory = clearScenarioLiveHistory(w);
+  if (!clearedHistory.ok ||
+      clearedHistory.status?.retainedRuns !== 0 ||
+      clearedHistory.status?.retainedEvents !== 0 ||
+      clearedHistory.status?.retainedBytes !== 0 ||
+      clearedHistory.status?.latestRunId !== undefined ||
+      clearedHistory.status?.profilePoints !== 2 ||
+      clearedHistory.status?.exportAvailable !== true ||
+      JSON.stringify(readScenarioLiveHistoryExport(w)) !==
+        exportedABeforeClear) {
     throw new Error(
-      "R4a return-to-first did not reuse canonical runtime Links"
+      "R4b raw-history clear changed profile/export observer state"
     );
+  }
+
+  const liveThird = runScenarioLiveSession(w, liveRun3);
+  const thirdStatus = liveThird.payload?.status;
+  const thirdRun = liveThird.payload?.run;
+  if (!liveThird.ok ||
+      thirdStatus?.sessionId !== liveIdentity.sessionId ||
+      thirdStatus?.storeInstanceId !== liveIdentity.storeInstanceId ||
+      thirdStatus?.engineInstanceId !== liveIdentity.engineInstanceId ||
+      thirdStatus?.baseLinkCount !== liveIdentity.baseLinkCount ||
+      thirdStatus?.programFingerprint !== liveIdentity.programFingerprint ||
+      thirdStatus?.prepareCount !== 1 ||
+      thirdStatus?.loadCount !== 1 ||
+      thirdStatus?.completedRuns !== 3 ||
+      thirdRun?.sessionRunId !== 3 ||
+      thirdRun?.observed?.sessionId !== liveIdentity.sessionId ||
+      thirdRun?.observed?.finalQuiescent !== true ||
+      thirdRun?.configurationReused !== true ||
+      JSON.stringify(thirdRun?.result) !==
+        JSON.stringify(liveFirst.payload?.run?.result) ||
+      thirdRun?.observed?.activeReactionCount !==
+        liveFirst.payload?.run?.observed?.activeReactionCount) {
+    throw new Error(
+      "R4b run C changed retained Session or semantic behavior"
+    );
+  }
+
+  const historyAfterC = refreshScenarioLiveHistoryStatus(w);
+  if (!historyAfterC.ok ||
+      historyAfterC.status?.retainedRuns !== 1 ||
+      historyAfterC.status?.firstRunId !== 3 ||
+      historyAfterC.status?.lastRunId !== 3 ||
+      historyAfterC.status?.profilePoints !== 3 ||
+      historyAfterC.status?.exportAvailable !== true ||
+      JSON.stringify(readScenarioLiveHistoryExport(w)) !==
+        exportedABeforeClear) {
+    throw new Error("R4b run C history/profile/export mismatch");
+  }
+
+  const exportedAvailable = exportScenarioLiveHistory(w);
+  if (!exportedAvailable.ok ||
+      exportedAvailable.export?.exportKind !== "AVAILABLE_HISTORY" ||
+      exportedAvailable.export?.runs?.length !== 1 ||
+      exportedAvailable.export.runs[0]?.sessionRunId !== 3) {
+    throw new Error("R4b available-history export mismatch");
+  }
+
+  // LATEST is real policy behavior, not an alias for RING.
+  const latestPolicy = setScenarioLiveRetentionPolicy(w, {
+    retentionMode: "LATEST",
+    maxRetainedRuns: 8,
+    maxRetainedEvents: 512,
+    maxRetainedBytes: 2 * 1024 * 1024,
+  });
+  if (!latestPolicy.ok ||
+      latestPolicy.status?.retentionMode !== "LATEST") {
+    throw new Error("R4b LATEST policy activation mismatch");
+  }
+  const liveFourth = runScenarioLiveSession(w, {
+    ...liveRun2,
+    runId: "live-run-4-latest-a",
+  });
+  const liveFifth = runScenarioLiveSession(w, {
+    ...liveRun1,
+    runId: "live-run-5-latest-b",
+  });
+  const latestStatus = refreshScenarioLiveHistoryStatus(w);
+  if (!liveFourth.ok || !liveFifth.ok || !latestStatus.ok ||
+      latestStatus.status?.retainedRuns !== 1 ||
+      latestStatus.status?.firstRunId !== 5 ||
+      latestStatus.status?.lastRunId !== 5 ||
+      latestStatus.status?.profilePoints !== 5) {
+    throw new Error("R4b LATEST did not retain exactly the newest run");
+  }
+
+  // EXPLICIT_EXPORT retains no automatic raw ring, but exposes the latest
+  // complete report for an explicit pin/export action.
+  const explicitPolicy = setScenarioLiveRetentionPolicy(w, {
+    retentionMode: "EXPLICIT_EXPORT",
+    maxRetainedRuns: 8,
+    maxRetainedEvents: 512,
+    maxRetainedBytes: 2 * 1024 * 1024,
+  });
+  if (!explicitPolicy.ok ||
+      explicitPolicy.status?.retentionMode !== "EXPLICIT_EXPORT" ||
+      explicitPolicy.status?.retainedRuns !== 0) {
+    throw new Error("R4b EXPLICIT_EXPORT policy activation mismatch");
+  }
+  const liveSixth = runScenarioLiveSession(w, {
+    ...liveRun2,
+    runId: "live-run-6-explicit",
+  });
+  const explicitStatus = refreshScenarioLiveHistoryStatus(w);
+  if (!liveSixth.ok || !explicitStatus.ok ||
+      explicitStatus.status?.retainedRuns !== 0 ||
+      explicitStatus.status?.latestRunId !== 6 ||
+      explicitStatus.status?.profilePoints !== 6) {
+    throw new Error("R4b EXPLICIT_EXPORT automatic retention mismatch");
+  }
+  const exportedSixth = exportScenarioLiveRun(w, 6);
+  if (!exportedSixth.ok ||
+      exportedSixth.export?.runs?.length !== 1 ||
+      exportedSixth.export.runs[0]?.sessionRunId !== 6) {
+    throw new Error("R4b EXPLICIT_EXPORT pin mismatch");
+  }
+
+  clearScenarioLiveHistoryExport(w);
+  const noExportStatus = refreshScenarioLiveHistoryStatus(w);
+  if (!noExportStatus.ok ||
+      noExportStatus.status?.exportAvailable !== false ||
+      readScenarioLiveHistoryExport(w) !== null) {
+    throw new Error("R4b explicit export clear mismatch");
   }
 
   const liveRefreshed = refreshScenarioLiveSessionStatus(w);
   if (!liveRefreshed.ok ||
-      liveRefreshed.status?.completedRuns !== 3 ||
+      liveRefreshed.status?.completedRuns !== 6 ||
       liveRefreshed.status?.sessionId !== liveIdentity.sessionId ||
       liveRefreshed.status?.engineInstanceId !==
         liveIdentity.engineInstanceId) {
@@ -515,14 +688,20 @@ Promise.all([
       afterClose.error?.code !== "LIVE_SESSION_NOT_OPEN") {
     throw new Error("R4a run after close did not fail closed");
   }
+  const historyAfterClose = refreshScenarioLiveHistoryStatus(w);
+  if (historyAfterClose.ok ||
+      historyAfterClose.error?.code !== "LIVE_SESSION_NOT_OPEN" ||
+      readScenarioLiveHistoryExport(w) !== null) {
+    throw new Error("R4b close did not release observer host state");
+  }
   if ((w.amemory_i386_lab_result_available() >>> 0) !==
       legacyResultBeforeScenario) {
     throw new Error(
-      "R4a retained Scenario Session mutated legacy LabInstanceState"
+      "R4a/R4b retained Scenario Session mutated legacy LabInstanceState"
     );
   }
 
-  // R2e: observer-output cleanup is separate from manifest/runtime input.
+  // R2e: observer-output cleanup// R2e: observer-output cleanup is separate from manifest/runtime input.
   // Clearing the latest report/error must not alter legacy state and the same
   // already-loaded manifest must remain executable.
   clearScenarioTransportOutput(w);
