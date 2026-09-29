@@ -160,6 +160,7 @@ Promise.all([
   import("../../browser-accelerator/web/i386-proof-transport.mjs"),
   import("../../browser-accelerator/web/i386-proof-view.mjs"),
   import("../../browser-accelerator/web/gpu-carrier.mjs"),
+  import("../../browser-accelerator/web/scenario-transport.mjs"),
 ]).then(([
   {instance},
   { inflateCompactProof },
@@ -172,8 +173,72 @@ Promise.all([
     gpuCarrierReactionShaderSource,
     readGpuCarrierWordsAbi,
   },
+  { executeScenarioManifest },
 ]) => {
   const w = instance.exports;
+
+  // R2d: browser transport must consume the generic Scenario Runner report,
+  // not the legacy block-result slot. The manifest itself contains four runs
+  // that execute on one real persistent CPU Session.
+  const scenarioManifest = JSON.parse(fs.readFileSync(
+    "experiments/a-circuit/scenarios/mux1-lifecycle-v1.json",
+    "utf8"
+  ));
+  const legacyResultBeforeScenario =
+    w.amemory_i386_lab_result_available() >>> 0;
+  const scenarioCpu = executeScenarioManifest(
+    w,
+    scenarioManifest,
+    "optimized-cpu"
+  );
+  if (!scenarioCpu.ok || scenarioCpu.error !== null) {
+    throw new Error("R2d optimized-cpu scenario transport failed");
+  }
+  const scenarioReport = scenarioCpu.report;
+  if (scenarioReport.schemaVersion !== 1 ||
+      scenarioReport.scenarioId !== "mux1-lifecycle" ||
+      scenarioReport.overallPass !== true ||
+      !Array.isArray(scenarioReport.runs) ||
+      scenarioReport.runs.length !== 4 ||
+      typeof scenarioReport.sessionId !== "string" ||
+      !scenarioReport.sessionId.length ||
+      scenarioReport.sessionOpenProfile?.sessionId !== scenarioReport.sessionId) {
+    throw new Error("R2d scenario report envelope mismatch");
+  }
+  for (let index = 0; index < scenarioReport.runs.length; index += 1) {
+    const run = scenarioReport.runs[index];
+    if ((run.sessionRunId >>> 0) !== index + 1 ||
+        run.observed?.sessionId !== scenarioReport.sessionId ||
+        run.observed?.finalQuiescent !== true ||
+        !run.pipelineProfile) {
+      throw new Error("R2d run/session correlation mismatch at run " + index);
+    }
+  }
+  if (scenarioReport.runs[3].configurationReused !== true ||
+      JSON.stringify(scenarioReport.runs[3].inputs) !==
+        JSON.stringify(scenarioReport.runs[0].inputs)) {
+    throw new Error("R2d return-to-first canonical reuse missing");
+  }
+  if ((w.amemory_i386_lab_result_available() >>> 0) !==
+      legacyResultBeforeScenario) {
+    throw new Error(
+      "R2d generic scenario transport mutated legacy LabInstanceState result slot"
+    );
+  }
+
+  const scenarioGpu = executeScenarioManifest(
+    w,
+    scenarioManifest,
+    "webgpu"
+  );
+  if (scenarioGpu.ok ||
+      scenarioGpu.report !== null ||
+      scenarioGpu.error?.code !== "RUNNER" ||
+      scenarioGpu.error?.error?.code !== "UNSUPPORTED_BACKEND" ||
+      scenarioGpu.error?.error?.backend !== "webgpu") {
+    throw new Error("R2d unsupported WebGPU did not fail closed");
+  }
+
   const recursiveUiSample = "8916<>&".repeat(256);
   const recursiveUiHtml = recursiveStructureHtml(recursiveUiSample);
   if (!recursiveUiHtml.includes('class="proof-recursive-structure"') ||
