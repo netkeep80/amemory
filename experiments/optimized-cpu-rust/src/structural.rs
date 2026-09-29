@@ -16,14 +16,14 @@ impl ProfileTimer {
     fn start() -> Self {
         Self {
             #[cfg(not(target_family = "wasm"))]
-            started: ProfileTimer::start(),
+            started: Instant::now(),
         }
     }
 
     fn elapsed_ns(&self) -> u128 {
         #[cfg(not(target_family = "wasm"))]
         {
-            self.started.elapsed_ns()
+            self.started.elapsed().as_nanos()
         }
         #[cfg(target_family = "wasm")]
         {
