@@ -495,6 +495,28 @@ mod tests {
     }
 
     #[test]
+    fn oversized_error_is_replaced_by_small_structured_error_limit() {
+        clear_report_and_error();
+        store_error(ScenarioTransportErrorV1::Serialize {
+            schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+            message: "x".repeat(MAX_SCENARIO_ERROR_BYTES + 1024),
+        });
+
+        assert_eq!(amemory_scenario_report_available(), 0);
+        assert_eq!(amemory_scenario_error_available(), 1);
+        assert!(
+            amemory_scenario_error_json_len()
+                < MAX_SCENARIO_ERROR_BYTES as u32
+        );
+        let json = read_buffer(
+            amemory_scenario_error_json_len,
+            amemory_scenario_error_json_byte,
+        );
+        assert!(json.contains("\"code\":\"ERROR_LIMIT\""));
+        let _: serde_json::Value = serde_json::from_str(&json).unwrap();
+    }
+
+    #[test]
     fn output_clear_preserves_manifest_for_semantically_equal_rerun() {
         load_manifest(MUX1_LIFECYCLE);
         assert_eq!(
