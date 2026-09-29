@@ -850,9 +850,12 @@ function discoverCarrierRule(parsed, rule, active) {
   });
 }
 
-function compactRootHandle(compactProof, role) {
-  const root = compactProof?.roots?.find((entry) => entry.role === role);
-  if (!root) throw new Error("compact proof root missing: " + role);
+function semanticRootHandle(roots, role) {
+  if (!Array.isArray(roots)) {
+    throw new TypeError("semantic roots are required");
+  }
+  const root = roots.find((entry) => entry.role === role);
+  if (!root) throw new Error("semantic root missing: " + role);
   return root.carrierRef >>> 0;
 }
 
@@ -1144,10 +1147,10 @@ export function expectedGpuCarrierReaction(
   });
 }
 
-export function deriveGpuCarrierReactionInput(parsed, compactProof) {
-  const currentHandle = compactRootHandle(compactProof, "scope.initial");
-  const interpreterHandle = compactRootHandle(
-    compactProof,
+export function deriveGpuCarrierReactionInput(parsed, roots) {
+  const currentHandle = semanticRootHandle(roots, "scope.initial");
+  const interpreterHandle = semanticRootHandle(
+    roots,
     "execution.interpreter",
   );
   requireLookupHandle(parsed, currentHandle, "initial scope handle");
