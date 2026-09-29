@@ -14,7 +14,7 @@ import { renderProofPipeline } from "./i386-proof-view.mjs";
 import { collectBrowserProof } from "./i386-proof-transport.mjs";
 import { readJsonAbi } from "./i386-wasm-json.mjs";
 import {
-  deriveGpuCarrierReactionWitness,
+  deriveGpuCarrierReactionInput,
   readGpuCarrierWordsAbi,
   runGpuCarrierLookup,
   runGpuCarrierReaction,
@@ -1400,18 +1400,35 @@ function setupGpuCarrierWitness(section, wasm) {
           pole: carrier.layout.rootHandle,
         });
         const observed = lookup.observed;
-        const reactionWitness = deriveGpuCarrierReactionWitness(
+        const reactionInput = deriveGpuCarrierReactionInput(
           carrier,
           compactProof,
         );
         const reaction = await runGpuCarrierReaction(
           device,
           carrier,
-          reactionWitness,
+          reactionInput,
         );
-        if (reaction.observed.publishedHandle !==
-            reactionWitness.expectedHandle) {
-          throw new Error("C4c3 GPU publish disagrees with Rust/WASM scopeAfter");
+
+        // Proof trace is intentionally read only after the GPU has published.
+        // It is a differential oracle, never an execution input or step selector.
+        const firstReaction = compactProof.execute?.reactions?.[0];
+        if (!firstReaction ||
+            firstReaction.quiescent ||
+            firstReaction.scopeBefore?.length !== 1 ||
+            firstReaction.scopeAfter?.length !== 1 ||
+            (firstReaction.scopeBefore[0] >>> 0) !==
+              reactionInput.currentHandle) {
+          throw new Error("C4c3 proof trace does not start from scope.initial");
+        }
+        const proofAfter = firstReaction.scopeAfter[0] >>> 0;
+        if (proofAfter > carrier.layout.linkCount) {
+          throw new Error("C4c3 first result is not canonical in PREPARE carrier");
+        }
+        if (reaction.observed.publishedHandle !== proofAfter ||
+            reaction.observed.rawRuleMatches !==
+              (firstReaction.rawRuleMatches >>> 0)) {
+          throw new Error("C4c3 GPU result disagrees with post-execution WASM oracle");
         }
         result.innerHTML = `
           <div class="lab-state-grid">
@@ -1420,7 +1437,7 @@ function setupGpuCarrierWitness(section, wasm) {
             <div class="lab-state-snapshot"><strong>GPU Link L${observed.handle}</strong><code>(L${observed.start}, L${observed.end})</code></div>
             <div class="lab-state-snapshot"><strong>ROOT start-incidence</strong><code>[${observed.incidence.map((value) => "L" + value).join(", ")}]</code></div>
             <div class="lab-state-snapshot"><strong>C4c3 discover</strong><code>L${reaction.observed.currentHandle} → Rule L${reaction.observed.ruleHandle} → L${reaction.observed.candidateHandle}</code></div>
-            <div class="lab-state-snapshot"><strong>C4c3 publish</strong><code>GPU L${reaction.observed.publishedHandle} = WASM L${reactionWitness.expectedHandle}</code></div>
+            <div class="lab-state-snapshot"><strong>C4c3 publish</strong><code>GPU L${reaction.observed.publishedHandle} = WASM L${proofAfter}</code></div>
           </div>
           <small>carrier fingerprint: <code>0x${observed.logicalFingerprint.toString(16).padStart(8, "0")}</code> · raw matches: <code>${reaction.observed.rawRuleMatches}</code> · reaction projection: <code>${escapeHtml(reaction.plan.mode)}</code></small>`;
         status.textContent =
