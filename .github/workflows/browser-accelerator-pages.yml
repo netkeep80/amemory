@@ -3,7 +3,7 @@ name: browser accelerator Pages
 on:
   workflow_run:
     workflows:
-      - A-Circuit web 80386 interactive lab
+      - A-Circuit Workbench real-WASM
     types: [completed]
   workflow_dispatch:
     inputs:
