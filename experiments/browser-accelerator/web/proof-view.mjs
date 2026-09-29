@@ -15,8 +15,8 @@ export function recursiveStructureHtml(value) {
   const text = String(value ?? "");
   return `<details class="proof-recursive-structure" data-recursive-length="${text.length}">
     <summary>
-      <span>recursive structure</span>
-      <small>${text.length} symbols · <span class="proof-recursive-action"></span></small>
+      <span>рекурсивная структура</span>
+      <small>${text.length} символов · <span class="proof-recursive-action">нажмите, чтобы раскрыть</span></small>
     </summary>
     <code>${escapeHtml(text)}</code>
   </details>`;
@@ -30,7 +30,7 @@ function semanticRootsHtml(roots, loaded = false) {
   return `<div class="proof-root-list">${roots.map((root) => `
     <div class="proof-root">
       <strong>${escapeHtml(root.role)}</strong>
-      ${loaded ? `<span>local handle ${root.localHandle} · substrate-only</span>` : ""}
+      ${loaded ? `<span>локальный дескриптор ${root.localHandle} · только носитель</span>` : ""}
       ${recursiveStructureHtml(root.source)}
     </div>`).join("")}</div>`;
 }
@@ -39,15 +39,15 @@ function reactionTableHtml(proof) {
   return `<div class="lab-table-wrap"><table class="lab-table proof-reaction-table">
     <thead>
       <tr>
-        <th>step</th>
-        <th>A-memory</th>
-        <th>Scope before</th>
-        <th>matches</th>
-        <th>transitioned</th>
-        <th>handoff</th>
-        <th>Scope after</th>
-        <th>Links</th>
-        <th>Q</th>
+        <th>шаг</th>
+        <th>апамять</th>
+        <th>область до</th>
+        <th>совпадения</th>
+        <th>переходы</th>
+        <th>передачи</th>
+        <th>область после</th>
+        <th>связи Links</th>
+        <th>покой</th>
       </tr>
     </thead>
     <tbody>
@@ -60,7 +60,7 @@ function reactionTableHtml(proof) {
         <td>${step.handoffCount}</td>
         <td>${step.scopeAfter.map(code).join("<br>")}</td>
         <td>${step.linksAfter}</td>
-        <td>${step.quiescent ? "YES" : "—"}</td>
+        <td>${step.quiescent ? "ДА" : "—"}</td>
       </tr>`).join("")}
     </tbody>
   </table></div>`;
@@ -108,13 +108,13 @@ export function proofPipelineHtml(proof) {
     <section class="proof-pipeline" data-memory-instance="${escapeHtml(id)}">
       <div class="proof-title">
         <div>
-          <h3>Structural proof: packed duplet Aset → one A-memory → result</h3>
-          <p>This evidence comes from the same WASM execution that produced the visible block result.</p>
+          <h3>Структурное доказательство: упакованная асеть дуплетов → одна апамять → результат</h3>
+          <p>Эти доказательства получены тем же исполнением WASM, которое сформировало видимый результат блока.</p>
         </div>
         <div class="proof-memory ${oneMemory ? "proof-pass" : "proof-fail"}">
-          <small>ONE RUNTIME A-MEMORY</small>
+          <small>ОДНА ИСПОЛНЯЕМАЯ АПАМЯТЬ</small>
           <strong>${escapeHtml(id)}</strong>
-          <span>${oneMemory ? "same identity in load, every reaction and result" : "IDENTITY MISMATCH"}</span>
+          <span>${oneMemory ? "одна и та же идентичность при загрузке, во всех реакциях и в результате" : "НЕСОВПАДЕНИЕ ИДЕНТИЧНОСТИ"}</span>
         </div>
       </div>
 
@@ -122,41 +122,41 @@ export function proofPipelineHtml(proof) {
         <article class="proof-stage proof-prepare">
           <div class="proof-stage-number">1</div>
           <div>
-            <h4>PREPARE ASET</h4>
-            <p><strong>No runtime A-memory exists yet.</strong> Packed structural Aset prepared before the runtime store is created.</p>
+            <h4>ПОДГОТОВКА АСЕТИ</h4>
+            <p><strong>Исполняемая апамять ещё не создана.</strong> Упакованная структурная асеть подготовлена до создания рабочего хранилища.</p>
             <div class="proof-kpis">
-              <span><small>Compiled Links</small><strong>${proof.prepare.compiledLinks}</strong></span>
-              <span><small>Packed duplets</small><strong>${proof.prepare.carrierDuplets.length}</strong></span>
-              <span><small>Runtime memory</small><strong>${proof.prepare.runtimeMemoryExists ? "CREATED" : "NOT CREATED"}</strong></span>
+              <span><small>Скомпилировано связей Links</small><strong>${proof.prepare.compiledLinks}</strong></span>
+              <span><small>Упаковано дуплетов</small><strong>${proof.prepare.carrierDuplets.length}</strong></span>
+              <span><small>Исполняемая память</small><strong>${proof.prepare.runtimeMemoryExists ? "СОЗДАНА" : "НЕ СОЗДАНА"}</strong></span>
             </div>
-            <h5>Semantic roots inside the packed image</h5>
+            <h5>Семантические корни внутри упакованного образа</h5>
             ${semanticRootsHtml(proof.prepare.semanticRoots)}
             <details>
-              <summary>Structural rules admitted to Theory (${proof.prepare.theoryAdmissions?.length || 0})</summary>
+              <summary>Структурные правила, допущенные в теорию (${proof.prepare.theoryAdmissions?.length || 0})</summary>
               <pre class="proof-aset">${escapeHtml((proof.prepare.theoryAdmissions || []).join("\n"))}</pre>
             </details>
             <details>
-              <summary>Complete packed Aset (${proof.prepare.carrierDuplets.length} duplets)</summary>
+              <summary>Полная упакованная асеть (${proof.prepare.carrierDuplets.length} дуплетов)</summary>
               <pre class="proof-aset">${escapeHtml(carrierText)}</pre>
             </details>
           </div>
         </article>
 
-        <div class="proof-arrow">↓ packed (startIndex, endIndex) carrier</div>
+        <div class="proof-arrow">↓ упакованный носитель (startIndex, endIndex)</div>
 
         <article class="proof-stage proof-load">
           <div class="proof-stage-number">2</div>
           <div>
-            <h4>LOAD INTO A-MEMORY</h4>
-            <p>One fresh runtime Link store is created here and keeps identity <code>${escapeHtml(id)}</code> through all remaining stages.</p>
+            <h4>ЗАГРУЗКА В АПАМЯТЬ</h4>
+            <p>Здесь создаётся одно новое рабочее хранилище связей Link и сохраняет идентичность <code>${escapeHtml(id)}</code> на всех последующих стадиях.</p>
             <div class="proof-kpis">
-              <span><small>Links before load</small><strong>${proof.load.linksBeforeLoad}</strong></span>
-              <span><small>Links after load</small><strong>${proof.load.linksAfterLoad}</strong></span>
-              <span><small>Complete image</small><strong>${proof.load.linksAfterLoad === proof.prepare.compiledLinks ? "PASS" : "FAIL"}</strong></span>
-              <span><small>Imported duplets</small><strong>${proof.load.importedDuplets}</strong></span>
-              <span><small>Carrier round-trip</small><strong>${proof.load.carrierRoundTrip ? "PASS" : "FAIL"}</strong></span>
+              <span><small>Связей до загрузки</small><strong>${proof.load.linksBeforeLoad}</strong></span>
+              <span><small>Связей после загрузки</small><strong>${proof.load.linksAfterLoad}</strong></span>
+              <span><small>Полный образ</small><strong>${proof.load.linksAfterLoad === proof.prepare.compiledLinks ? "ПРОЙДЕНО" : "НЕ ПРОЙДЕНО"}</strong></span>
+              <span><small>Импортировано дуплетов</small><strong>${proof.load.importedDuplets}</strong></span>
+              <span><small>Проверка носителя</small><strong>${proof.load.carrierRoundTrip ? "ПРОЙДЕНО" : "НЕ ПРОЙДЕНО"}</strong></span>
             </div>
-            <h5>Roots resolved in this same memory</h5>
+            <h5>Корни, разрешённые в этой же памяти</h5>
             ${semanticRootsHtml(proof.load.semanticRoots, true)}
           </div>
         </article>
@@ -166,11 +166,11 @@ export function proofPipelineHtml(proof) {
         <article class="proof-stage proof-execute">
           <div class="proof-stage-number">3</div>
           <div>
-            <h4>EXECUTE IN THE SAME A-MEMORY</h4>
-            <p>No reload and no replacement store. The structural interpreter, Theory, function, data and Scope are Links inside <code>${escapeHtml(id)}</code>.</p>
+            <h4>ИСПОЛНЕНИЕ В ТОЙ ЖЕ АПАМЯТИ</h4>
+            <p>Без повторной загрузки и без замены хранилища. Структурный интерпретатор, теория, функция, данные и область Scope представлены связями Links внутри <code>${escapeHtml(id)}</code>.</p>
             <div class="proof-kpis">
-              <span><small>Active reactions</small><strong>${proof.execute.activeReactionCount}</strong></span>
-              <span><small>Final quiescence</small><strong>${proof.execute.finalQuiescent ? "PASS" : "FAIL"}</strong></span>
+              <span><small>Активных реакций</small><strong>${proof.execute.activeReactionCount}</strong></span>
+              <span><small>Итоговый покой</small><strong>${proof.execute.finalQuiescent ? "ПРОЙДЕНО" : "НЕ ПРОЙДЕНО"}</strong></span>
             </div>
             ${reactionTableHtml(proof)}
           </div>
@@ -181,39 +181,39 @@ export function proofPipelineHtml(proof) {
         <article class="proof-stage proof-result">
           <div class="proof-stage-number">4</div>
           <div>
-            <h4>RESULT + VISUALIZATION</h4>
-            <p>The result is exported from the same runtime store. The host comparison below is an independent oracle only.</p>
+            <h4>РЕЗУЛЬТАТ И ВИЗУАЛИЗАЦИЯ</h4>
+            <p>Результат экспортируется из того же рабочего хранилища. Сравнение на стороне хоста ниже — только независимый эталон.</p>
             <div class="proof-kpis">
-              <span><small>Decoded ${wideResult ? "Hi:Lo" : "result"}</small><strong>${decodedResult}</strong></span>
-              <span><small>Host oracle ${wideResult ? "Hi:Lo" : ""}</small><strong>${oracleResult}</strong></span>
-              <span><small>Oracle comparison</small><strong>${proof.result.oracleMatches ? "PASS" : "FAIL"}</strong></span>
-              <span><small>Final Links</small><strong>${proof.result.linksFinal}</strong></span>
-              <span><small>Identical rerun ΔLinks</small><strong>${proof.result.identicalRerunLinkDelta}</strong></span>
+              <span><small>Декодировано ${wideResult ? "старшая:младшая" : "значение"}</small><strong>${decodedResult}</strong></span>
+              <span><small>Эталон хоста ${wideResult ? "старшая:младшая" : ""}</small><strong>${oracleResult}</strong></span>
+              <span><small>Сравнение с эталоном</small><strong>${proof.result.oracleMatches ? "ПРОЙДЕНО" : "НЕ ПРОЙДЕНО"}</strong></span>
+              <span><small>Итоговых связей Links</small><strong>${proof.result.linksFinal}</strong></span>
+              <span><small>Повтор того же запуска ΔLinks</small><strong>${proof.result.identicalRerunLinkDelta}</strong></span>
             </div>
             <div class="proof-result-anums">
-              <div><strong>Result recursive Link wire</strong>${recursiveStructureHtml(resultRecursiveWire)}</div>
-              <div><strong>Result sequence Anum</strong>${code(proof.result.resultSequenceAnum)}</div>
+              <div><strong>Рекурсивная запись связи результата</strong>${recursiveStructureHtml(resultRecursiveWire)}</div>
+              <div><strong>Последовательностное ачисло результата</strong>${code(proof.result.resultSequenceAnum)}</div>
             </div>
             <div class="proof-visual-toolbar">
               <div>
-                <strong>Same-memory Link topology</strong>
-                <span>${proof.result.visualLinks.length} runtime Links · projected directly from ${escapeHtml(id)}</span>
+                <strong>Топология связей той же апамяти</strong>
+                <span>${proof.result.visualLinks.length} рабочих связей Links · проекция прямо из ${escapeHtml(id)}</span>
               </div>
               <div class="proof-visual-tabs" data-proof-visual-tabs>
-                <button type="button" data-proof-view="blueprint" aria-pressed="true">Blueprint 2D</button>
-                <button type="button" data-proof-view="static3d" aria-pressed="false">Static 3D</button>
-                <button type="button" data-proof-view="live3d" aria-pressed="false">Live physics 3D</button>
+                <button type="button" data-proof-view="blueprint" aria-pressed="true">Схема 2D</button>
+                <button type="button" data-proof-view="static3d" aria-pressed="false">Статическая 3D</button>
+                <button type="button" data-proof-view="live3d" aria-pressed="false">Живая физика 3D</button>
               </div>
             </div>
             <div class="proof-visual-note">
-              Exact renderer authority: <code>@mts/visual 0.5.0</code> ·
-              <code>mts_visual@ccb23ffacb6e</code>. Live physics uses the compatible Octahedral Link3D persistent batched path from the accepted 0.5.0 package. Presentation only; semantic truth remains the runtime A-memory.
+              Зафиксированный визуализатор: <code>@mts/visual 0.5.0</code> ·
+              <code>mts_visual@ccb23ffacb6e</code>. Живая физика использует совместимый постоянный пакетный путь Octahedral Link3D из принятого пакета 0.5.0. Это только представление; семантическим источником истины остаётся исполняемая апамять.
             </div>
             <div class="proof-visual" data-proof-visual>
-              <div class="notice">Loading exact-pinned mts_visual Blueprint renderer…</div>
+              <div class="notice">Загрузка точно зафиксированного визуализатора схемы mts_visual…</div>
             </div>
             <details>
-              <summary>Raw VisualLinkNetwork DTO (${proof.result.visualLinks.length} links)</summary>
+              <summary>Сырой DTO VisualLinkNetwork (${proof.result.visualLinks.length} links)</summary>
               <pre class="proof-aset">${escapeHtml(JSON.stringify(visualNetworkFromProof(proof), null, 2))}</pre>
             </details>
           </div>
@@ -237,7 +237,7 @@ async function renderBlueprint(target, network) {
   const scene = mts.buildBlueprintSvgScene(network);
   target.classList.remove("proof-visual-three");
   target.innerHTML = mts.serializeBlueprintSvg(scene);
-  target.dataset.renderer = "@mts/visual Blueprint 2D";
+  target.dataset.renderer = "@mts/visual · Схема 2D";
 }
 
 async function renderStatic3D(target, network) {
@@ -250,7 +250,7 @@ async function renderStatic3D(target, network) {
   target.innerHTML = "";
   target.classList.add("proof-visual-three");
   threeVisual.createVisualThreeRenderer(target, data);
-  target.dataset.renderer = "@mts/visual Static 3D";
+  target.dataset.renderer = "@mts/visual · Статическая 3D";
   proofVisualCleanup.set(target, () => {
     threeVisual.destroyVisualThreeRenderer(target);
   });
@@ -269,7 +269,7 @@ async function renderLive3D(target, network) {
   target.innerHTML = "";
   target.classList.add("proof-visual-three");
   const snapshot = threeVisual.createOctahedralThreeLiveRenderer(target, controller);
-  target.dataset.renderer = "@mts/visual Octahedral Live physics 3D";
+  target.dataset.renderer = "@mts/visual · Живая физика 3D";
   target.dataset.drawCallProxy = String(snapshot.drawCallProxy);
   proofVisualCleanup.set(target, () => {
     threeVisual.destroyOctahedralThreeLiveRenderer(target);
@@ -278,15 +278,15 @@ async function renderLive3D(target, network) {
 
 async function renderProofVisual(target, network, mode) {
   await destroyProofVisual(target);
-  target.innerHTML = `<div class="notice">Rendering ${escapeHtml(mode)} from the same runtime Link snapshot…</div>`;
+  target.innerHTML = `<div class="notice">Построение ${escapeHtml(mode)} по тому же снимку рабочих связей Link…</div>`;
   try {
     if (mode === "blueprint") await renderBlueprint(target, network);
     else if (mode === "static3d") await renderStatic3D(target, network);
     else if (mode === "live3d") await renderLive3D(target, network);
-    else throw new Error(`unknown proof visual mode: ${mode}`);
+    else throw new Error(`неизвестный режим визуализации доказательства: ${mode}`);
   } catch (error) {
     target.classList.remove("proof-visual-three");
-    target.innerHTML = `<div class="notice lab-error">mts_visual rendering failed closed: ${escapeHtml(error.message)}</div>`;
+    target.innerHTML = `<div class="notice lab-error">визуализация mts_visual завершилась с ошибкой: ${escapeHtml(error.message)}</div>`;
   }
 }
 
