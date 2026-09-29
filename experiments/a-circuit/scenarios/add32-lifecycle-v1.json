@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "scenarioId": "add32-lifecycle",
   "scenarioVersion": "1.0.0",
-  "title": "ADD32: граничные случаи в одной A-memory",
-  "description": "Один ADD32 Aset загружается один раз; четыре пары 32-битных входов публикуются Links-ами и исполняются в одной persistent Session с проверкой результата и EFLAGS.",
+  "title": "ADD32: граничные случаи в одной апамяти",
+  "description": "Одна асеть ADD32 загружается один раз; четыре пары 32-битных входов публикуются связями Links и исполняются в одной постоянной сессии с проверкой результата и EFLAGS.",
   "programProfile": {
     "profileId": "a-circuit:arithmetic-add32",
     "family": "arithmetic-effect",
