@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "scenarioId": "mul32-lifecycle",
   "scenarioVersion": "1.0.0",
-  "title": "MUL32: Wide64 result in one persistent A-memory",
-  "description": "One raw MUL32 Aset is loaded once; A/B inputs are published as Links for four runs in one persistent Session, including a non-zero high 32-bit product.",
+  "title": "MUL32: 64-битный результат в одной апамяти",
+  "description": "Одна асеть MUL32 загружается один раз; входы A/B публикуются связями Links для четырёх запусков в одной постоянной сессии, включая произведение с ненулевой старшей 32-битной частью.",
   "programProfile": {
     "profileId": "a-circuit:mul32",
     "family": "mul",
@@ -14,13 +14,13 @@
     {
       "key": "A",
       "type": "WORD32",
-      "description": "32-bit unsigned multiplicand",
+      "description": "Первый 32-битный беззнаковый множитель",
       "default": "0x00000000"
     },
     {
       "key": "B",
       "type": "WORD32",
-      "description": "32-bit unsigned multiplier",
+      "description": "Второй 32-битный беззнаковый множитель",
       "default": "0x00000000"
     }
   ],

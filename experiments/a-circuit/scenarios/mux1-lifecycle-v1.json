@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "scenarioId": "mux1-lifecycle",
   "scenarioVersion": "1.0.0",
-  "title": "MUX1: четыре запуска в одной A-memory",
-  "description": "Один MUX1 Aset загружается один раз; четыре конфигурации входов публикуются Links-ами и исполняются в одной persistent Session.",
+  "title": "MUX1: четыре запуска в одной апамяти",
+  "description": "Одна асеть MUX1 загружается один раз; четыре конфигурации входов публикуются связями Links и исполняются в одной постоянной сессии.",
   "programProfile": {
     "profileId": "a-circuit:mux1",
     "family": "mux",

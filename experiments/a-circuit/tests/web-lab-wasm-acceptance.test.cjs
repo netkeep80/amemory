@@ -94,6 +94,9 @@ for (const required of [
   'id="workbench-root"',
   'src="./workbench.mjs"',
   'main { width: 100%; max-width: none;',
+  '<html lang="ru">',
+  'Апамять — рабочая лаборатория',
+  'Нотация МТС v0.14',
 ]) {
   if (!workbenchPageSource.includes(required)) {
     throw new Error("R4 Workbench page wiring missing: " + required);
@@ -124,7 +127,7 @@ for (const required of [
   "RESULT",
   "EVIDENCE",
   "configurationReused",
-  "timing unavailable",
+  "время недоступно",
   "wb-levels",
   "data-stage",
   '["timeline", "log", "profile", "compare"]',
@@ -132,11 +135,58 @@ for (const required of [
   "workbenchStageDetails",
   "workbenchRecursiveStructure",
   "recursiveStructureHtml",
+  "Готовый сценарий",
+  "Открыть апамять",
+  "Выполнить",
+  "Простой",
+  "Инженерный",
+  "Доказательство",
+  "Хронология",
+  "Журнал",
+  "Профиль",
+  "Сравнение",
 ]) {
   if (!workbenchSource.includes(required)) {
     throw new Error("R4 Workbench runtime wiring missing: " + required);
   }
 }
+for (const required of [
+  "Структурное доказательство:",
+  "ПОДГОТОВКА АСЕТИ",
+  "ЗАГРУЗКА В АПАМЯТЬ",
+  "ИСПОЛНЕНИЕ В ТОЙ ЖЕ АПАМЯТИ",
+  "РЕЗУЛЬТАТ И ВИЗУАЛИЗАЦИЯ",
+  "Схема 2D",
+  "Статическая 3D",
+  "Живая физика 3D",
+  "рекурсивная структура",
+]) {
+  if (!proofViewSource.includes(required)) {
+    throw new Error("Russian proof UI surface missing: " + required);
+  }
+}
+for (const forbidden of [
+  "Scenario / constructor",
+  ">Preset</button>",
+  ">Manual</button>",
+  ">Open A-memory</button>",
+  ">Run</button>",
+  ">Close</button>",
+  "Simple view deliberately",
+  "Structural proof:",
+  "PREPARE ASET",
+  "LOAD INTO A-MEMORY",
+  "RESULT + VISUALIZATION",
+  "Loading exact-pinned",
+  "<html lang=\"en\">",
+]) {
+  if (workbenchPageSource.includes(forbidden) ||
+      workbenchSource.includes(forbidden) ||
+      proofViewSource.includes(forbidden)) {
+    throw new Error("English UI regression: " + forbidden);
+  }
+}
+
 const bytes = fs.readFileSync(wasmPath);
 const sourceSha =
   process.env.AMEMORY_SOURCE_SHA || process.env.GITHUB_SHA || null;
@@ -1172,7 +1222,7 @@ Promise.all([
       !recursiveUiHtml.includes(
         'data-recursive-length="' + recursiveUiSample.length + '"'
       ) ||
-      !recursiveUiHtml.includes(recursiveUiSample.length + " symbols") ||
+      !recursiveUiHtml.includes(recursiveUiSample.length + " символов") ||
       !recursiveUiHtml.includes("&lt;&gt;&amp;") ||
       recursiveUiHtml.includes("8916<>&")) {
     throw new Error("recursive structure UI is not default-collapsed / exact-safe");

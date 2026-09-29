@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "scenarioId": "xor32-lifecycle",
   "scenarioVersion": "1.0.0",
-  "title": "XOR32: четыре запуска в одной A-memory",
-  "description": "Один XOR32 Aset загружается один раз; четыре пары 32-битных входов публикуются Links-ами и исполняются в одной persistent Session.",
+  "title": "XOR32: четыре запуска в одной апамяти",
+  "description": "Одна асеть XOR32 загружается один раз; четыре пары 32-битных входов публикуются связями Links и исполняются в одной постоянной сессии.",
   "programProfile": {
     "profileId": "a-circuit:logic-xor32",
     "family": "logic-effect",

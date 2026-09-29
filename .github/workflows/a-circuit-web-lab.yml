@@ -54,7 +54,7 @@ jobs:
           const collapsed = recursiveStructureHtml("1".repeat(4096));
           if (!collapsed.includes('class="proof-recursive-structure"') ||
               !collapsed.includes("<details") ||
-              !collapsed.includes("4096 symbols")) {
+              !collapsed.includes("4096 символов")) {
             throw new Error("collapsed recursive-structure renderer witness failed");
           }
 
@@ -118,19 +118,19 @@ jobs:
           };
           const proofHtml = proofPipelineHtml(proofFixture);
           for (const required of [
-            "PREPARE ASET",
-            "LOAD INTO A-MEMORY",
-            "EXECUTE IN THE SAME A-MEMORY",
-            "RESULT + VISUALIZATION",
-            "Result recursive Link wire",
-            "ONE RUNTIME A-MEMORY",
+            "ПОДГОТОВКА АСЕТИ",
+            "ЗАГРУЗКА В АПАМЯТЬ",
+            "ИСПОЛНЕНИЕ В ТОЙ ЖЕ АПАМЯТИ",
+            "РЕЗУЛЬТАТ И ВИЗУАЛИЗАЦИЯ",
+            "Рекурсивная запись связи результата",
+            "ОДНА ИСПОЛНЯЕМАЯ АПАМЯТЬ",
             "A-memory#7",
-            "Blueprint 2D",
-            "Static 3D",
-            "Live physics 3D",
+            "Схема 2D",
+            "Статическая 3D",
+            "Живая физика 3D",
             "@mts/visual 0.5.0",
             "Octahedral Link3D",
-            "Structural rules admitted to Theory",
+            "Структурные правила, допущенные в теорию",
           ]) {
             if (!proofHtml.includes(required)) {
               throw new Error("proof browser renderer missing: " + required);
