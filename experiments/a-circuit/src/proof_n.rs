@@ -496,6 +496,12 @@ pub(crate) struct ProofRuntimeMemory {
     pub(crate) store: OptimizedLinkStore,
 }
 
+/// Long-lived CPU execution session over one loaded A-memory.
+///
+/// The store and structural engine intentionally survive CONFIGURE/EXECUTE
+/// cycles so derived caches and inactive Scope banks are lifecycle state rather
+/// than reconstructed test fixtures. Program semantics still live only in
+/// loaded Links/Theory/data.
 #[derive(Debug)]
 pub(crate) struct ProofRuntimeSession {
     pub(crate) memory: ProofRuntimeMemory,
