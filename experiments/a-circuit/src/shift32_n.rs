@@ -10,7 +10,8 @@ use super::{
     proof_n::{
         execute_to_quiescence, identical_rerun, load_runtime, loaded_handle,
         prepare_stage, semantic_source, theory_admissions, visual_snapshot,
-        ProofRuntimeMemory, WebProofResultStage, WebStructuralProof,
+        ProofRuntimeMemory, ProofRuntimeSession, WebProofLoadStage,
+        WebProofPrepareStage, WebProofResultStage, WebStructuralProof,
     },
 };
 use amemory_optimized_cpu_probe::{
@@ -1407,6 +1408,237 @@ fn decode_runtime_shift_effect(
         },
         payload,
     ))
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Shl32SessionProjection {
+    pub(crate) value: u32,
+    pub(crate) writeback: u8,
+    pub(crate) defined_mask: u32,
+    pub(crate) value_mask: u32,
+    pub(crate) undefined_mask: u32,
+    pub(crate) preserve_mask: u32,
+    pub(crate) result_recursive_wire: String,
+}
+
+pub(crate) fn prepare_shl32_session_program(
+) -> Option<WebProofPrepareStage> {
+    let mut compiler = FullFixture::new();
+    let program = Shift32Program::install(&mut compiler);
+
+    // Static SHIFT program only. Concrete VALUE/COUNT and the invocation
+    // are published after LOAD by CONFIGURE.
+    let prepared_roots = vec![
+        semantic_source(
+            &compiler.store,
+            "function.shift.selected",
+            program.shl,
+        ),
+        semantic_source(
+            &compiler.store,
+            "function.shift.shl",
+            program.shl,
+        ),
+        semantic_source(
+            &compiler.store,
+            "function.shift.shr",
+            program.shr,
+        ),
+        semantic_source(
+            &compiler.store,
+            "function.shift.sar",
+            program.sar,
+        ),
+        semantic_source(
+            &compiler.store,
+            "data.bit.zero",
+            compiler.zero,
+        ),
+        semantic_source(
+            &compiler.store,
+            "data.bit.one",
+            compiler.one,
+        ),
+        semantic_source(
+            &compiler.store,
+            "execution.interpreter",
+            compiler.interpreter,
+        ),
+        semantic_source(
+            &compiler.store,
+            "execution.theory",
+            compiler.theory,
+        ),
+        semantic_source(
+            &compiler.store,
+            "execution.apply",
+            compiler.apply,
+        ),
+        semantic_source(
+            &compiler.store,
+            "context.caller",
+            compiler.k,
+        ),
+        semantic_source(
+            &compiler.store,
+            "result.tag",
+            program.result_tag,
+        ),
+        semantic_source(
+            &compiler.store,
+            "result.flag.set_tag",
+            program.schema.set_tag,
+        ),
+        semantic_source(
+            &compiler.store,
+            "result.flag.undefined_tag",
+            program.schema.undefined_tag,
+        ),
+        semantic_source(
+            &compiler.store,
+            "result.flag.cf",
+            program.schema.cf,
+        ),
+        semantic_source(
+            &compiler.store,
+            "result.flag.pf",
+            program.schema.pf,
+        ),
+        semantic_source(
+            &compiler.store,
+            "result.flag.af",
+            program.schema.af,
+        ),
+        semantic_source(
+            &compiler.store,
+            "result.flag.zf",
+            program.schema.zf,
+        ),
+        semantic_source(
+            &compiler.store,
+            "result.flag.sf",
+            program.schema.sf,
+        ),
+        semantic_source(
+            &compiler.store,
+            "result.flag.of",
+            program.schema.of,
+        ),
+    ];
+    let admissions =
+        theory_admissions(&compiler.store, compiler.theory)?;
+    Some(prepare_stage(
+        &compiler.store,
+        prepared_roots,
+        admissions,
+    ))
+}
+
+pub(crate) fn configure_shl32_session(
+    session: &mut ProofRuntimeSession,
+    load: &WebProofLoadStage,
+    value: u32,
+    count: u8,
+) -> Option<(Handle, usize, usize)> {
+    let function = loaded_handle(load, "function.shift.selected")?;
+    let apply = loaded_handle(load, "execution.apply")?;
+    let caller = loaded_handle(load, "context.caller")?;
+    let zero = loaded_handle(load, "data.bit.zero")?;
+    let one = loaded_handle(load, "data.bit.one")?;
+
+    let word = |store: &mut OptimizedLinkStore, width: usize, raw: u32| {
+        let bits = (0..width)
+            .map(|bit| {
+                if (raw >> bit) & 1 == 1 { one } else { zero }
+            })
+            .collect::<Vec<_>>();
+        materialize_exact_sequence(store, &bits).ok()
+    };
+
+    let before = session.memory.store.link_count();
+    let value_word = word(&mut session.memory.store, WIDTH, value)?;
+    let count_word =
+        word(&mut session.memory.store, 8, u32::from(count))?;
+    let args = materialize_exact_sequence(
+        &mut session.memory.store,
+        &[value_word, count_word],
+    )
+    .ok()?;
+    let invocation =
+        call(&mut session.memory.store, apply, function, args);
+    let initial = session
+        .memory
+        .store
+        .ensure_pair(caller, invocation)
+        .ok()?;
+    let after = session.memory.store.link_count();
+
+    Some((initial, before, after))
+}
+
+pub(crate) fn project_shl32_session_result(
+    session: &ProofRuntimeSession,
+    load: &WebProofLoadStage,
+) -> Option<Shl32SessionProjection> {
+    if session.engine.current().len() != 1 {
+        return None;
+    }
+
+    let caller = loaded_handle(load, "context.caller")?;
+    let result_tag = loaded_handle(load, "result.tag")?;
+    let zero = loaded_handle(load, "data.bit.zero")?;
+    let one = loaded_handle(load, "data.bit.one")?;
+    let set_tag = loaded_handle(load, "result.flag.set_tag")?;
+    let undefined_tag =
+        loaded_handle(load, "result.flag.undefined_tag")?;
+    let cf_flag = loaded_handle(load, "result.flag.cf")?;
+    let pf_flag = loaded_handle(load, "result.flag.pf")?;
+    let af_flag = loaded_handle(load, "result.flag.af")?;
+    let zf_flag = loaded_handle(load, "result.flag.zf")?;
+    let sf_flag = loaded_handle(load, "result.flag.sf")?;
+    let of_flag = loaded_handle(load, "result.flag.of")?;
+    let final_link = session.engine.current()[0];
+
+    let (outcome, _) = decode_runtime_shift_effect(
+        &session.memory,
+        final_link,
+        caller,
+        result_tag,
+        zero,
+        one,
+        set_tag,
+        undefined_tag,
+        cf_flag,
+        pf_flag,
+        af_flag,
+        zf_flag,
+        sf_flag,
+        of_flag,
+        0,
+    )?;
+    let (defined_mask, value_mask, undefined_mask, preserve_mask) =
+        web_flag_masks([
+            (WEB_CF, outcome.cf),
+            (WEB_PF, outcome.pf),
+            (WEB_AF, outcome.af),
+            (WEB_ZF, outcome.zf),
+            (WEB_SF, outcome.sf),
+            (WEB_OF, outcome.of),
+        ]);
+
+    Some(Shl32SessionProjection {
+        value: outcome.value,
+        writeback: outcome.writeback,
+        defined_mask,
+        value_mask,
+        undefined_mask,
+        preserve_mask,
+        result_recursive_wire: session
+            .memory
+            .store
+            .export_anum(final_link)
+            .ok()?,
+    })
 }
 
 pub(crate) fn web_prove_shift32(

@@ -199,8 +199,8 @@ Promise.all([
     "utf8"
   );
   const presetRegistry = refreshScenarioPresetRegistry(w);
-  if (presetRegistry.entries.length !== 3) {
-    throw new Error("R3d2 preset registry count mismatch");
+  if (presetRegistry.entries.length !== 4) {
+    throw new Error("R3d3 preset registry count mismatch");
   }
   const presetSummary = presetRegistry.entries.find(
     (entry) => entry.scenarioId === "mux1-lifecycle"
@@ -243,6 +243,21 @@ Promise.all([
       addPresetSummary.inputSchema.length !== 2) {
     throw new Error("R3d2 manifest-derived ADD32 preset summary mismatch");
   }
+
+  const shlPresetSummary = presetRegistry.entries.find(
+    (entry) => entry.scenarioId === "shl32-lifecycle"
+  );
+  if (!shlPresetSummary ||
+      shlPresetSummary.scenarioVersion !== "1.0.0" ||
+      shlPresetSummary.programProfileId !== "a-circuit:shift-shl32" ||
+      shlPresetSummary.family !== "shift-effect" ||
+      shlPresetSummary.programId !== "shl32" ||
+      shlPresetSummary.runCount !== 5 ||
+      !Array.isArray(shlPresetSummary.inputSchema) ||
+      shlPresetSummary.inputSchema.length !== 2) {
+    throw new Error("R3d3 manifest-derived SHL32 preset summary mismatch");
+  }
+
 
 
   if (loadScenarioPresetManifestByIndex(w, 99) !== null ||
@@ -537,6 +552,66 @@ Promise.all([
       legacyResultBeforeScenario) {
     throw new Error(
       "R3d2 ADD32 generic Scenario path mutated legacy LabInstanceState"
+    );
+  }
+
+  // R3d3: SHIFT also uses the exact same generic preset/Scenario path.
+  // COUNT=33 stays a distinct structural input and masks to COUNT=1 only
+  // through the loaded SHL32 program.
+  const canonicalShlSource = fs.readFileSync(
+    "experiments/a-circuit/scenarios/shl32-lifecycle-v1.json",
+    "utf8"
+  );
+  const shlPreset = loadScenarioPresetManifest(
+    w,
+    presetRegistry,
+    "shl32-lifecycle",
+    "1.0.0"
+  );
+  if (shlPreset === null || shlPreset.source !== canonicalShlSource) {
+    throw new Error("R3d3 SHL32 canonical preset round-trip mismatch");
+  }
+  const shlScenario = JSON.parse(shlPreset.source);
+  const shlCpu = executeScenarioManifest(
+    w,
+    shlScenario,
+    "optimized-cpu"
+  );
+  if (!shlCpu.ok ||
+      shlCpu.error !== null ||
+      shlCpu.report?.scenarioId !== "shl32-lifecycle" ||
+      shlCpu.report?.overallPass !== true ||
+      shlCpu.report?.runs?.length !== 5) {
+    throw new Error("R3d3 generic SHL32 Scenario execution failed");
+  }
+  const expectedShlReactions = [1, 84, 82, 84, 1];
+  for (let index = 0; index < shlCpu.report.runs.length; index += 1) {
+    const run = shlCpu.report.runs[index];
+    if ((run.sessionRunId >>> 0) !== index + 1 ||
+        run.observed?.sessionId !== shlCpu.report.sessionId ||
+        run.observed?.finalQuiescent !== true ||
+        run.observed?.activeReactionCount !== expectedShlReactions[index] ||
+        run.oracleMatches !== true ||
+        !run.pipelineProfile ||
+        run.observed?.profile?.structural?.unificationAttempts <= 0) {
+      throw new Error(
+        "R3d3 SHL32 persistent-session evidence mismatch at run " + index
+      );
+    }
+  }
+  if (JSON.stringify(shlCpu.report.runs[1].result) !==
+        JSON.stringify(shlCpu.report.runs[3].result) ||
+      shlCpu.report.runs[3].configurationReused !== false ||
+      shlCpu.report.runs[2].result?.fields?.undefinedMask !== "0x00000810" ||
+      shlCpu.report.runs[4].configurationReused !== true ||
+      JSON.stringify(shlCpu.report.runs[4].inputs) !==
+        JSON.stringify(shlCpu.report.runs[0].inputs)) {
+    throw new Error("R3d3 SHL32 masking/flags/canonical reuse mismatch");
+  }
+  if ((w.amemory_i386_lab_result_available() >>> 0) !==
+      legacyResultBeforeScenario) {
+    throw new Error(
+      "R3d3 SHL32 generic Scenario path mutated legacy LabInstanceState"
     );
   }
 
