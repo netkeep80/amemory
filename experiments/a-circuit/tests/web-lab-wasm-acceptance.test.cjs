@@ -75,8 +75,9 @@ for (const required of [
   "setupGpuCarrierWitness",
   "amemory_i386_lab_gpu_carrier_prepare",
   "runGpuCarrierLookup",
+  "runGpuCarrierReaction",
   "lab-run-gpu-carrier",
-  "real WASM carrier → WebGPU integer lookup",
+  "WebGPU discover → publish",
 ]) {
   if (!c4LabSource.includes(required)) {
     throw new Error("C4c2 workbench wiring missing: " + required);
@@ -113,8 +114,11 @@ Promise.all([
   { inflateCompactProof },
   { recursiveStructureHtml },
   {
+    deriveGpuCarrierReactionWitness,
     expectedGpuCarrierLookup,
+    expectedGpuCarrierReaction,
     gpuCarrierLookupShaderSource,
+    gpuCarrierReactionShaderSource,
     readGpuCarrierWordsAbi,
   },
 ]) => {
@@ -407,6 +411,40 @@ Promise.all([
     }
     if (!shader.includes("@compute @workgroup_size(1)")) {
       throw new Error("C4c2 " + mode + " shader is not a bounded compute witness");
+    }
+  }
+
+  const c4ReactionWitness =
+    deriveGpuCarrierReactionWitness(gpuCarrier, gpuCarrierProof);
+  const c4ReactionOracle = expectedGpuCarrierReaction(
+    gpuCarrier,
+    c4ReactionWitness
+  );
+  if (c4ReactionOracle.candidateHandle !==
+        c4ReactionWitness.expectedHandle ||
+      c4ReactionOracle.rawRuleMatches !==
+        c4ReactionWitness.expectedRawRuleMatches) {
+    throw new Error("C4c3 CPU carrier oracle disagrees with MUX1 proof");
+  }
+  for (const mode of ["single", "sections"]) {
+    const shader = gpuCarrierReactionShaderSource(mode, {
+      currentHandle: c4ReactionWitness.currentHandle,
+      interpreterHandle: c4ReactionWitness.interpreterHandle,
+      linkCount: gpuCarrier.layout.linkCount,
+      rootHandle: gpuCarrier.layout.rootHandle,
+    });
+    for (const marker of [
+      "fn apply_rule",
+      "fn discover",
+      "fn publish",
+      "start_head",
+      "next_start",
+      "find_start_self",
+      "find_end_self",
+    ]) {
+      if (!shader.includes(marker)) {
+        throw new Error("C4c3 " + mode + " shader missing " + marker);
+      }
     }
   }
 
