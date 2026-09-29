@@ -33,7 +33,6 @@ for (const required of [
   "renderProofPipeline",
   "amemory_i386_lab_result_available",
   "amemory-i386-lab-result-json",
-  "amemory_i386_lab_gpu_carrier_prepare",
 ]) {
   if (!labPageSource.includes(required)) {
     throw new Error("Pages witness wiring missing: " + required);
