@@ -200,6 +200,7 @@ const PROGRAM_FINGERPRINT_RE =
 Promise.all([
   WebAssembly.instantiate(bytes, {}),
   import("../../browser-accelerator/web/i386-proof-transport.mjs"),
+  import("../../browser-accelerator/web/proof-verifier.mjs"),
   import("../../browser-accelerator/web/proof-view.mjs"),
   import("../../browser-accelerator/web/gpu-carrier.mjs"),
   import("../../browser-accelerator/web/scenario-transport.mjs"),
@@ -207,7 +208,8 @@ Promise.all([
   import("../../browser-accelerator/web/workbench.mjs"),
 ]).then(([
   {instance},
-  { inflateCompactProof },
+  { inflateCompactProof, validateCompactProof },
+  { verifyCompactExecutionProof },
   { recursiveStructureHtml },
   {
     deriveGpuCarrierReactionInput,
@@ -1453,6 +1455,8 @@ Promise.all([
   let compactLegacyV1CompatibilityChecked = false;
   let compactMutationMatrixChecked = false;
   let futureScopeBeforeNegativeChecked = false;
+  let semanticReplayCorruptionChecked = false;
+  const semanticReplayVerifiedBlocks = new Set();
   const jsonBytes = (value) =>
     Buffer.byteLength(JSON.stringify(value), "utf8");
   const readCurrentCompactProof = (label) => {
@@ -2023,6 +2027,79 @@ Promise.all([
       throw new Error(
         registryBlock.id + " Rust compact producer != independent JS shadow"
       );
+    }
+
+    const semanticReplayTargets = new Set([
+      "mux1",
+      "xor32",
+      "add32",
+      "mul32-raw",
+    ]);
+    if (semanticReplayTargets.has(registryBlock.id)) {
+      const verification = verifyCompactExecutionProof(producedCompactProof);
+      if (verification.profileId !==
+            "bounded-static-theory-structural-v1" ||
+          verification.transportValid !== true ||
+          verification.traceConsistent !== true ||
+          verification.semanticReplayVerified !== true ||
+          verification.admittedRules <= 0 ||
+          verification.reactions !==
+            producedCompactProof.execute.reactions.length) {
+        throw new Error(
+          registryBlock.id + " independent semantic replay verification failed"
+        );
+      }
+      semanticReplayVerifiedBlocks.add(registryBlock.id);
+    }
+
+    if (registryBlock.id === "mux1" && !semanticReplayCorruptionChecked) {
+      const requireCodecValidButReplayRejected = (label, mutate) => {
+        const corrupted = JSON.parse(JSON.stringify(producedCompactProof));
+        mutate(corrupted);
+
+        validateCompactProof(corrupted);
+
+        let rejected = false;
+        try {
+          verifyCompactExecutionProof(corrupted);
+        } catch {
+          rejected = true;
+        }
+        if (!rejected) {
+          throw new Error(
+            "MUX1 semantic verifier accepted codec-valid corruption: " + label
+          );
+        }
+      };
+
+      requireCodecValidButReplayRejected("forged-result", (p) => {
+        p.result.decodedValue =
+          p.result.decodedValue === 0 ? 1 : 0;
+        if (Object.prototype.hasOwnProperty.call(p.result, "oracleValue")) {
+          p.result.oracleValue = p.result.decodedValue;
+        }
+        if (Object.prototype.hasOwnProperty.call(p.result, "oracleMatches")) {
+          p.result.oracleMatches = true;
+        }
+      });
+      requireCodecValidButReplayRejected("broken-scope-chain", (p) => {
+        if (p.execute.reactions.length < 2) {
+          throw new Error("MUX1 verifier test needs at least two reactions");
+        }
+        const current = p.execute.reactions[1].scopeBefore[0];
+        p.execute.reactions[1].scopeBefore = [current === 1 ? 2 : 1];
+      });
+      requireCodecValidButReplayRejected("forged-match-count", (p) => {
+        p.execute.reactions[0].rawRuleMatches += 999;
+      });
+      requireCodecValidButReplayRejected("forged-result-wire", (p) => {
+        p.result.resultRecursiveWire = "8";
+        p.result.resultSequenceAnum = "8";
+      });
+      requireCodecValidButReplayRejected("forged-theory-directory", (p) => {
+        p.theoryAdmissions = p.theoryAdmissions.slice(1);
+      });
+      semanticReplayCorruptionChecked = true;
     }
 
     if (!compactLegacyV1CompatibilityChecked) {
@@ -4126,6 +4203,16 @@ Promise.all([
       "proof measurement coverage mismatch: " +
       proofMeasurements.size + "/" + registry.blocks.length
     );
+  }
+  for (const required of ["mux1", "xor32", "add32", "mul32-raw"]) {
+    if (!semanticReplayVerifiedBlocks.has(required)) {
+      throw new Error(
+        "missing independent semantic replay verification for " + required
+      );
+    }
+  }
+  if (!semanticReplayCorruptionChecked) {
+    throw new Error("semantic replay corruption matrix was not exercised");
   }
   if (!compactRendererProjectionChecked) {
     throw new Error("compact renderer projection witness was not executed");
