@@ -75,11 +75,63 @@ for (const required of [
   "setupGpuCarrierWitness",
   "amemory_i386_lab_gpu_carrier_prepare",
   "runGpuCarrierLookup",
+  "runGpuCarrierReaction",
+  "deriveGpuCarrierReactionInput",
   "lab-run-gpu-carrier",
-  "real WASM carrier → WebGPU integer lookup",
+  "WebGPU discover → publish",
 ]) {
   if (!c4LabSource.includes(required)) {
     throw new Error("C4c2 workbench wiring missing: " + required);
+  }
+}
+const gpuCarrierSource = fs.readFileSync(
+  "experiments/browser-accelerator/web/gpu-carrier.mjs",
+  "utf8"
+);
+for (const forbiddenBlockName of ["MUX1", "XOR2", "AND2", "NOT1"]) {
+  if (gpuCarrierSource.includes(forbiddenBlockName)) {
+    throw new Error(
+      "generic GPU carrier executor leaked block-specific semantics: " +
+      forbiddenBlockName
+    );
+  }
+}
+const c4InputStart = gpuCarrierSource.indexOf(
+  "export function deriveGpuCarrierReactionInput"
+);
+const c4InputEnd = gpuCarrierSource.indexOf(
+  "function carrierReactionCommonShader",
+  c4InputStart
+);
+const c4InputSource = gpuCarrierSource.slice(c4InputStart, c4InputEnd);
+const c4RunStart = gpuCarrierSource.indexOf(
+  "export async function runGpuCarrierReaction"
+);
+const c4RunSource = gpuCarrierSource.slice(c4RunStart);
+const c4GpuReadback = c4RunSource.indexOf("const [d, o] = await Promise.all");
+const c4CpuOracle = c4RunSource.indexOf(
+  "const expected = expectedGpuCarrierReaction"
+);
+if (c4GpuReadback < 0 || c4CpuOracle < 0 || c4CpuOracle <= c4GpuReadback) {
+  throw new Error("C4c3 CPU oracle must be computed only after GPU readback");
+}
+for (const forbiddenSeed of [
+  "currentHandle: expected.currentHandle",
+  "interpreterHandle: expected.interpreterHandle",
+]) {
+  if (c4RunSource.includes(forbiddenSeed)) {
+    throw new Error("C4c3 CPU oracle leaked into shader input: " + forbiddenSeed);
+  }
+}
+for (const forbidden of [
+  "compactProof",
+  "scopeAfter",
+  "scopeBefore",
+  "rawRuleMatches",
+  "execute?.reactions",
+]) {
+  if (c4InputSource.includes(forbidden)) {
+    throw new Error("C4c3 execution input leaked future proof data: " + forbidden);
   }
 }
 const proofViewSource = fs.readFileSync(
@@ -113,8 +165,11 @@ Promise.all([
   { inflateCompactProof },
   { recursiveStructureHtml },
   {
+    deriveGpuCarrierReactionInput,
     expectedGpuCarrierLookup,
+    expectedGpuCarrierReaction,
     gpuCarrierLookupShaderSource,
+    gpuCarrierReactionShaderSource,
     readGpuCarrierWordsAbi,
   },
 ]) => {
@@ -407,6 +462,68 @@ Promise.all([
     }
     if (!shader.includes("@compute @workgroup_size(1)")) {
       throw new Error("C4c2 " + mode + " shader is not a bounded compute witness");
+    }
+  }
+
+  const c4ReactionInput =
+    deriveGpuCarrierReactionInput(gpuCarrier, gpuCarrierProof.roots);
+  const c4ReactionOracle = expectedGpuCarrierReaction(
+    gpuCarrier,
+    c4ReactionInput
+  );
+
+  // Only after independent carrier execution do we inspect the proof trace.
+  const c4FirstReaction = gpuCarrierProof.execute?.reactions?.[0];
+  const c4ProofAppend = gpuCarrierProof.topology?.append;
+  const c4ProofAppendCount = c4FirstReaction
+    ? (c4FirstReaction.linksAfter >>> 0) -
+      (gpuCarrierProof.load.linksAfterLoad >>> 0)
+    : -1;
+  const c4SameAppend =
+    c4ProofAppendCount === c4ReactionOracle.appendCount &&
+    Array.isArray(c4ProofAppend?.starts) &&
+    Array.isArray(c4ProofAppend?.ends) &&
+    c4ReactionOracle.appendStarts.every(
+      (value, index) => value === (c4ProofAppend.starts[index] >>> 0)
+    ) &&
+    c4ReactionOracle.appendEnds.every(
+      (value, index) => value === (c4ProofAppend.ends[index] >>> 0)
+    );
+  if (!c4FirstReaction ||
+      c4FirstReaction.quiescent ||
+      c4FirstReaction.scopeBefore?.length !== 1 ||
+      c4FirstReaction.scopeAfter?.length !== 1 ||
+      (c4FirstReaction.scopeBefore[0] >>> 0) !==
+        c4ReactionInput.currentHandle ||
+      c4ReactionOracle.candidateHandle !==
+        (c4FirstReaction.scopeAfter[0] >>> 0) ||
+      c4ReactionOracle.rawRuleMatches !==
+        (c4FirstReaction.rawRuleMatches >>> 0) ||
+      !c4SameAppend) {
+    throw new Error("C4c3 independent publish/append disagrees with MUX1 proof");
+  }
+  for (const mode of ["single", "sections"]) {
+    const shader = gpuCarrierReactionShaderSource(mode, {
+      currentHandle: c4ReactionInput.currentHandle,
+      interpreterHandle: c4ReactionInput.interpreterHandle,
+      linkCount: gpuCarrier.layout.linkCount,
+      rootHandle: gpuCarrier.layout.rootHandle,
+    });
+    for (const marker of [
+      "fn discover_rule",
+      "fn discover",
+      "fn publish",
+      "start_head",
+      "next_start",
+      "ensure_pair_overlay",
+      "ensure_start_self_overlay",
+      "ensure_end_self_overlay",
+      "read_single_output_bundle",
+      "grounded_bundle",
+    ]) {
+      if (!shader.includes(marker)) {
+        throw new Error("C4c3 " + mode + " shader missing " + marker);
+      }
     }
   }
 

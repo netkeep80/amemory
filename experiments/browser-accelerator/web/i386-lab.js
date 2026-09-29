@@ -14,8 +14,10 @@ import { renderProofPipeline } from "./i386-proof-view.mjs";
 import { collectBrowserProof } from "./i386-proof-transport.mjs";
 import { readJsonAbi } from "./i386-wasm-json.mjs";
 import {
+  deriveGpuCarrierReactionInput,
   readGpuCarrierWordsAbi,
   runGpuCarrierLookup,
+  runGpuCarrierReaction,
 } from "./gpu-carrier.mjs";
 
 function parseWord(text) {
@@ -344,10 +346,10 @@ function buildLab(registry) {
     <div class="lab-state-shell" id="lab-gpu-carrier-witness">
       <div class="lab-state-head">
         <div>
-          <h3>C4 packed carrier → WebGPU lookup witness</h3>
-          <p>The real A-Circuit WASM exports the exact packed PREPARE carrier. WebGPU reads only integer local handles and the C4 carrier/index sections; JavaScript compares GPU Link poles and ROOT start-incidence against that same logical carrier.</p>
+          <h3>C4 packed carrier → WebGPU lookup + reaction witness</h3>
+          <p>The real A-Circuit WASM exports the exact packed PREPARE carrier. WebGPU first proves integer lookup, then executes one authentic MUX1 structural discover → publish reaction over the same carrier; Rust/WASM scopeAfter is used only as the final oracle.</p>
         </div>
-        <button class="lab-run" id="lab-run-gpu-carrier" type="button">Run WebGPU carrier lookup</button>
+        <button class="lab-run" id="lab-run-gpu-carrier" type="button">Run WebGPU carrier + reaction</button>
       </div>
       <div class="notice" id="lab-gpu-carrier-status">C4 WebGPU lookup not run yet.</div>
       <div class="lab-gpu-carrier-result" id="lab-gpu-carrier-result"></div>
@@ -1387,6 +1389,10 @@ function setupGpuCarrierWitness(section, wasm) {
           "i386 C4 carrier",
         );
         if (!carrier) throw new Error("real WASM C4 carrier is unavailable");
+        const { compactProof } = collectBrowserProof(wasm);
+        if (!compactProof || compactProof.block !== "MUX1") {
+          throw new Error("real MUX1 compact proof missing for C4c3");
+        }
 
         const handle = Math.min(2, carrier.layout.linkCount);
         const lookup = await runGpuCarrierLookup(device, carrier, {
@@ -1394,16 +1400,61 @@ function setupGpuCarrierWitness(section, wasm) {
           pole: carrier.layout.rootHandle,
         });
         const observed = lookup.observed;
+        const reactionInput = deriveGpuCarrierReactionInput(
+          carrier,
+          compactProof.roots,
+        );
+        const reaction = await runGpuCarrierReaction(
+          device,
+          carrier,
+          reactionInput,
+        );
+
+        // Proof trace is intentionally read only after the GPU has published.
+        // It is a differential oracle, never an execution input or step selector.
+        const firstReaction = compactProof.execute?.reactions?.[0];
+        if (!firstReaction ||
+            firstReaction.quiescent ||
+            firstReaction.scopeBefore?.length !== 1 ||
+            firstReaction.scopeAfter?.length !== 1 ||
+            (firstReaction.scopeBefore[0] >>> 0) !==
+              reactionInput.currentHandle) {
+          throw new Error("C4c3 proof trace does not start from scope.initial");
+        }
+        const proofAfter = firstReaction.scopeAfter[0] >>> 0;
+        const proofAppendCount =
+          (firstReaction.linksAfter >>> 0) -
+          (compactProof.load.linksAfterLoad >>> 0);
+        const proofAppend = compactProof.topology?.append;
+        const sameAppend =
+          proofAppendCount === reaction.observed.appendCount &&
+          Array.isArray(proofAppend?.starts) &&
+          Array.isArray(proofAppend?.ends) &&
+          reaction.observed.appendStarts.every(
+            (value, index) => value === (proofAppend.starts[index] >>> 0),
+          ) &&
+          reaction.observed.appendEnds.every(
+            (value, index) => value === (proofAppend.ends[index] >>> 0),
+          );
+        if (reaction.observed.publishedHandle !== proofAfter ||
+            reaction.observed.rawRuleMatches !==
+              (firstReaction.rawRuleMatches >>> 0) ||
+            !sameAppend) {
+          throw new Error("C4c3 GPU publish/append disagrees with post-execution WASM oracle");
+        }
         result.innerHTML = `
           <div class="lab-state-grid">
             <div class="lab-state-snapshot"><strong>Logical carrier</strong><code>${carrier.layout.linkCount} Links · ${carrier.layout.totalBytes} bytes</code></div>
             <div class="lab-state-snapshot"><strong>Physical projection</strong><code>${escapeHtml(lookup.plan.mode)} · ${lookup.plan.storageBufferCount} storage buffer(s)</code></div>
             <div class="lab-state-snapshot"><strong>GPU Link L${observed.handle}</strong><code>(L${observed.start}, L${observed.end})</code></div>
             <div class="lab-state-snapshot"><strong>ROOT start-incidence</strong><code>[${observed.incidence.map((value) => "L" + value).join(", ")}]</code></div>
+            <div class="lab-state-snapshot"><strong>C4c3 discover</strong><code>L${reaction.observed.currentHandle} → Rule L${reaction.observed.ruleHandle} → L${reaction.observed.candidateHandle}</code></div>
+            <div class="lab-state-snapshot"><strong>C4c3 publish</strong><code>GPU L${reaction.observed.publishedHandle} = WASM L${proofAfter}</code></div>
+            <div class="lab-state-snapshot"><strong>C4c3 append overlay</strong><code>${reaction.observed.appendCount} new Link(s) · PREPARE immutable</code></div>
           </div>
-          <small>carrier fingerprint: <code>0x${observed.logicalFingerprint.toString(16).padStart(8, "0")}</code></small>`;
+          <small>carrier fingerprint: <code>0x${observed.logicalFingerprint.toString(16).padStart(8, "0")}</code> · raw matches: <code>${reaction.observed.rawRuleMatches}</code> · reaction projection: <code>${escapeHtml(reaction.plan.mode)}</code></small>`;
         status.textContent =
-          "PASS: real WASM carrier → WebGPU integer lookup → exact CPU differential.";
+          "PASS: real WASM MUX1 carrier → WebGPU discover → publish → CPU/WASM differential.";
         status.className = "notice lab-ok";
       } finally {
         device.destroy?.();
@@ -1419,7 +1470,7 @@ function setupGpuCarrierWitness(section, wasm) {
   run.addEventListener("click", execute);
   status.textContent =
     globalThis.navigator?.gpu
-      ? "C4 carrier producer ready; run the real WebGPU lookup witness."
+      ? "C4 carrier producer ready; run lookup plus the real structural WebGPU reaction."
       : "C4 carrier producer ready; WebGPU is unavailable in this browser.";
 }
 
