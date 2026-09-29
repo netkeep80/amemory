@@ -1,10 +1,12 @@
 import {
+  beginScenarioLiveStepRun,
   closeScenarioLiveSession,
   openScenarioLiveSession,
   readScenarioTransportLimits,
   refreshScenarioLiveHistoryStatus,
   runScenarioLiveSession,
   setScenarioLiveRetentionPolicy,
+  stepScenarioLiveSession,
 } from "./scenario-transport.mjs";
 import {
   loadScenarioPresetManifestByIndex,
@@ -139,18 +141,114 @@ export function createWorkbenchRun(manifest, presetIndex, rawInputs, ordinal, mo
   return base;
 }
 
-export function deriveWorkbenchPipeline(status, run) {
+export function createWorkbenchStepRun(
+  manifest,
+  presetIndex,
+  rawInputs,
+  ordinal,
+  mode = "preset",
+) {
+  const run = createWorkbenchRun(
+    manifest,
+    presetIndex,
+    rawInputs,
+    ordinal,
+    mode,
+  );
+  run.executionMode = "STEP";
+  return run;
+}
+
+export function workbenchStepSnapshot(stepState) {
+  const reports = Array.isArray(stepState?.reports)
+    ? stepState.reports
+    : [];
+  const latest = reports.at(-1) ?? null;
+  return {
+    active: Boolean(stepState?.active),
+    sessionRunId:
+      latest?.sessionRunId ?? stepState?.begin?.sessionRunId ?? null,
+    reactionCount: reports.length,
+    activeReactionCount: latest?.activeReactionCount ?? 0,
+    scopeBefore: latest?.evidence?.scopeBefore ?? [],
+    scopeAfter: latest?.evidence?.scopeAfter ?? [],
+    linksBefore: latest?.evidence?.linksBefore ?? null,
+    linksAfter: latest?.evidence?.linksAfter ?? null,
+    rawRuleMatches: latest?.evidence?.rawRuleMatches ?? null,
+    transitionedMembers: latest?.evidence?.transitionedMembers ?? null,
+    handoffCount: latest?.evidence?.handoffCount ?? null,
+    quiescent: latest?.evidence?.quiescent ?? false,
+    completed: latest?.completed === true,
+  };
+}
+
+function completedStepRun(stepState) {
+  const latest = stepState?.reports?.at(-1);
+  if (!latest?.completed) return null;
+  return {
+    sessionRunId: latest.sessionRunId,
+    configurationReused: stepState.begin?.configurationReused ?? false,
+    linksBeforeConfigure: stepState.begin?.linksBeforeConfigure ?? null,
+    linksAfterConfigure: stepState.begin?.linksAfterConfigure ?? null,
+    result: latest.result,
+    assertionResults: latest.assertionResults ?? [],
+    freshInstanceMatches: latest.freshInstanceMatches ?? null,
+    scalarOracleMatches: latest.scalarOracleMatches ?? null,
+    observed: {
+      sessionId: latest.evidence?.sessionId ?? null,
+      runId: latest.sessionRunId,
+      finalScope: latest.evidence?.scopeAfter ?? [],
+      activeReactionCount: latest.activeReactionCount ?? 0,
+      finalQuiescent: latest.evidence?.quiescent === true,
+      events: stepState.reports.map((report) => ({
+        kind: "REACTION_END",
+        reactionIndex: report.evidence?.reactionIndex ?? null,
+        scopeBefore: report.evidence?.scopeBefore ?? [],
+        scopeAfter: report.evidence?.scopeAfter ?? [],
+        linksAfter: report.evidence?.linksAfter ?? null,
+        rawRuleMatches: report.evidence?.rawRuleMatches ?? null,
+        transitionedMembers: report.evidence?.transitionedMembers ?? null,
+        handoffCount: report.evidence?.handoffCount ?? null,
+        quiescent: report.evidence?.quiescent ?? false,
+        structuralFacts: report.evidence?.structuralFacts ?? null,
+      })),
+      profile: null,
+    },
+    pipelineProfile: null,
+    executionMode: "STEP",
+    steppedLive: true,
+  };
+}
+
+export function deriveWorkbenchPipeline(status, run, stepState = null) {
   const open = Boolean(status);
-  const stages = run && run.pipelineProfile && run.pipelineProfile.stages;
-  const done = Boolean(run && stages);
+  const snapshot = workbenchStepSnapshot(stepState);
+  const configured = Boolean(run || stepState?.begin);
+  const executed = Boolean(run || snapshot.reactionCount > 0);
+  const done = Boolean(
+    run && (run.pipelineProfile?.stages || run.steppedLive),
+  );
   return [
     ["PREPARE", open && status.prepareCount === 1, open ? "prepareCount=" + status.prepareCount : "сессия не открыта"],
     ["LOAD", open && status.loadCount === 1, open ? "базовых связей Links=" + status.baseLinkCount : "сессия не открыта"],
-    ["CONFIGURE", done, done ? "связи Links " + run.linksBeforeConfigure + " → " + run.linksAfterConfigure : "запуск ещё не выполнен"],
-    ["EXECUTE", done, done ? "реакций=" + (run.observed && run.observed.activeReactionCount) : "запуск ещё не выполнен"],
-    ["RESULT", done, done ? "получен реальный результат исполнения" : "запуск ещё не выполнен"],
-    ["EVIDENCE", done, done ? "событий=" + ((run.observed && run.observed.events || []).length) : "запуск ещё не выполнен"],
-  ].map(([id, complete, detail]) => ({ id, state: complete ? "done" : "waiting", detail }));
+    ["CONFIGURE", configured, configured
+      ? "связи Links " + (run?.linksBeforeConfigure ?? stepState?.begin?.linksBeforeConfigure) +
+        " → " + (run?.linksAfterConfigure ?? stepState?.begin?.linksAfterConfigure)
+      : "запуск ещё не настроен"],
+    ["EXECUTE", executed, executed
+      ? "реакций=" + (run?.observed?.activeReactionCount ?? snapshot.activeReactionCount) +
+        (snapshot.active ? " · пошагово" : "")
+      : "исполнение ещё не начато"],
+    ["RESULT", done, done ? "получен реальный результат исполнения" :
+      snapshot.active ? "результат появится только после покоя" : "запуск ещё не завершён"],
+    ["EVIDENCE", executed, executed
+      ? "реальных шагов=" + (run?.observed?.events?.length ?? snapshot.reactionCount)
+      : "доказательства исполнения ещё не получены"],
+  ].map(([id, complete, detail]) => ({
+    id,
+    state: complete ? "done" : "waiting",
+    detail,
+  }));
 }
 
 
@@ -336,6 +434,8 @@ async function wasm() {
     "amemory_scenario_preset_registry_refresh",
     "amemory_scenario_live_open_json",
     "amemory_scenario_live_execute_json",
+    "amemory_scenario_live_step_begin_json",
+    "amemory_scenario_live_step_json",
     "amemory_scenario_live_close",
   ]) {
     if (typeof w[name] !== "function") throw new Error("В WASM отсутствует функция ABI лаборатории: " + name);
@@ -369,6 +469,7 @@ function loadManifest(state, index) {
   state.backend = (state.manifest.supportedИсполнительs || [])[0] || "optimized-cpu";
   state.session = null;
   state.run = null;
+  state.step = null;
   state.history = null;
   state.error = null;
   presetInputs(state);
@@ -385,6 +486,8 @@ async function open(state) {
     const opened = openScenarioLiveSession(state.wasm, state.manifest, state.backend);
     if (!opened.ok) throw new Error(opened.error && opened.error.message || JSON.stringify(opened.error));
     state.session = opened.status;
+    state.run = null;
+    state.step = null;
     const cap = readScenarioTransportLimits(state.wasm).liveObserver;
     const policy = setScenarioLiveRetentionPolicy(state.wasm, {
       retentionMode: "RING",
@@ -419,9 +522,65 @@ async function execute(state) {
   state.loading = false; render(state);
 }
 
+async function beginStep(state) {
+  state.loading = true; state.error = null; render(state);
+  try {
+    const request = createWorkbenchStepRun(
+      state.manifest,
+      state.presetIndex,
+      state.inputs,
+      (state.session.completedRuns || 0) + 1,
+      state.mode,
+    );
+    const result = beginScenarioLiveStepRun(state.wasm, request);
+    if (!result.ok) {
+      throw new Error(result.error?.message || JSON.stringify(result.error));
+    }
+    state.session = result.payload.status;
+    state.run = null;
+    state.step = {
+      active: true,
+      begin: result.payload.begin,
+      reports: [],
+    };
+    state.stage = "EXECUTE";
+  } catch (error) {
+    state.error = "Не удалось начать пошаговое исполнение: " +
+      errorText(error);
+  }
+  state.loading = false; render(state);
+}
+
+async function stepOnce(state) {
+  state.loading = true; state.error = null; render(state);
+  try {
+    const result = stepScenarioLiveSession(state.wasm);
+    if (!result.ok) {
+      throw new Error(result.error?.message || JSON.stringify(result.error));
+    }
+    state.session = result.payload.status;
+    state.step.reports.push(result.payload.step);
+    if (result.payload.step.completed) {
+      state.step.active = false;
+      state.run = completedStepRun(state.step);
+      state.stage = "RESULT";
+      await history(state);
+    } else {
+      state.stage = "EXECUTE";
+    }
+  } catch (error) {
+    state.error = "Ошибка шага исполнения: " + errorText(error);
+  }
+  state.loading = false; render(state);
+}
+
 function close(state) {
   if (state.session) closeScenarioLiveSession(state.wasm);
-  state.session = null; state.run = null; state.history = null; state.error = null;
+  state.session = null;
+  state.run = null;
+  state.step = null;
+  state.history = null;
+  state.error = null;
   render(state);
 }
 
@@ -677,7 +836,7 @@ export async function mountWorkbench(root) {
   const state = {
     root, wasm: null, registry: { entries: [] }, manifest: { runSequence: [], inputSchema: [] },
     scenarioIndex: 0, presetIndex: 0, inputs: {}, mode: "preset", backend: "optimized-cpu",
-    session: null, run: null, history: null, tab: "timeline",
+    session: null, run: null, step: null, history: null, tab: "timeline",
     level: "simple", stage: "RESULT",
     build: { version: "загрузка", sha: "загрузка" }, loading: true, error: null,
   };
