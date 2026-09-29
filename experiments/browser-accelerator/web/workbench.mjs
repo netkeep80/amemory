@@ -43,6 +43,35 @@ const levelLabel = (id) => LEVEL_LABELS[id] || id;
 const tabLabel = (id) => TAB_LABELS[id] || id;
 const errorText = (error) => error && error.message ? error.message : String(error);
 
+const VERIFICATION_LEVEL_SPECS = Object.freeze([
+  ["TRANSPORT_VALID", "transportValid",
+    "Проверен формат, границы, декодирование и перенос compact proof."],
+  ["TRACE_CONSISTENT", "traceConsistent",
+    "Проверена внутренняя согласованность цепочки Scope/Result."],
+  ["SEMANTIC_REPLAY_VERIFIED", "semanticReplayVerified",
+    "Независимый structural replay воспроизвёл исполнение."],
+]);
+const verificationState = (value) =>
+  value === true ? "verified" : value === false ? "failed" : "unavailable";
+
+export function workbenchVerificationLevels(run, compactVerification = null) {
+  const levels = VERIFICATION_LEVEL_SPECS.map(([id, field, detail]) => ({
+    id,
+    state: verificationState(compactVerification?.[field]),
+    detail,
+    source: "compact-proof",
+    profileId: compactVerification?.profileId ?? null,
+  }));
+  levels.push({
+    id: "SCALAR_ORACLE_VERIFIED",
+    state: verificationState(run?.scalarOracleMatches),
+    detail: "Независимая обычная scalar-семантика совпала с результатом апамяти.",
+    source: "scenario-scalar-oracle",
+    profileId: null,
+  });
+  return levels;
+}
+
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const sameInputs = (a, b) => JSON.stringify(a || {}) === JSON.stringify(b || {});
 
@@ -143,8 +172,8 @@ export function workbenchResultStatus(run) {
     kind: passed ? "pass" : "fail",
     label: passed ? "ПРОЙДЕНО" : "НЕ ПРОЙДЕНО",
     explanation: passed
-      ? "Результат исполнения удовлетворяет всем проверкам, заданным этим готовым сценарием."
-      : "Хотя бы одна проверка готового сценария не совпала с реальным результатом исполнения.",
+      ? "Результат исполнения удовлетворяет assertions готового сценария. Это статус проверок сценария, а не общий вердикт доказательства."
+      : "Хотя бы одна assertion готового сценария не совпала с реальным результатом исполнения. Уровни доказательства показаны отдельно.",
   };
 }
 
@@ -191,7 +220,9 @@ export function workbenchStageDetails(status, run, stageId) {
       sessionRunId: run.sessionRunId,
       result: run.result,
       assertionResults: run.assertionResults ?? [],
-      oracleMatches: run.oracleMatches ?? null,
+      freshInstanceMatches: run.freshInstanceMatches ?? null,
+      scalarOracleMatches: run.scalarOracleMatches ?? null,
+      verificationLevels: workbenchVerificationLevels(run),
     };
   }
   if (stageId === "EVIDENCE") {
@@ -200,6 +231,7 @@ export function workbenchStageDetails(status, run, stageId) {
       eventCount: run.observed?.events?.length ?? 0,
       observationLevel: run.observed?.observationLevel ?? null,
       pipelineProfile: run.pipelineProfile ?? null,
+      verificationLevels: workbenchVerificationLevels(run),
     };
   }
   return null;
@@ -234,6 +266,31 @@ function assertionText(run) {
   return items.filter((item) => item.passed === true).length + "/" + items.length + " проверок пройдено";
 }
 
+function verificationLevelsHtml(run, compactVerification = null) {
+  const stateLabels = {
+    verified: "ПОДТВЕРЖДЕНО",
+    failed: "НЕ ПРОШЛО",
+    unavailable: "НЕТ ДАННЫХ",
+  };
+  return '<div class="wb-verification">' +
+    workbenchVerificationLevels(run, compactVerification).map((item) =>
+      '<div class="wb-verification-item ' + item.state + '">' +
+      '<code>' + esc(item.id) + '</code><strong>' +
+      esc(stateLabels[item.state]) + '</strong><small>' +
+      esc(item.detail) + '</small></div>'
+    ).join("") + '</div>';
+}
+
+function freshInstanceEvidenceHtml(run) {
+  const value = run?.freshInstanceMatches;
+  const state = value === true ? "СОВПАЛО" :
+    value === false ? "НЕ СОВПАЛО" : "НЕТ ДАННЫХ";
+  return '<div class="wb-help"><code>FRESH_INSTANCE_MATCH</code> · ' +
+    esc(state) +
+    " · повтор тем же структурным исполнителем; это lifecycle-проверка, " +
+    "а не независимый semantic oracle.</div>";
+}
+
 function styles() {
   if (document.querySelector("#amemory-workbench-style")) return;
   const style = document.createElement("style");
@@ -249,6 +306,7 @@ function styles() {
     ".wb-mode,.wb-actions{display:flex;gap:7px;flex-wrap:wrap}.wb-mode button,.wb-actions button{cursor:pointer}.wb-mode button[aria-pressed=true]{outline:2px solid var(--accent);font-weight:800}.wb-actions .primary{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:800}.wb-actions button:disabled{opacity:.45}",
     ".wb-help{color:var(--muted);font-size:.78rem;margin-top:6px}.wb-memory{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.wb-metric{padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);min-width:0}.wb-metric small{display:block;color:var(--muted)}.wb-metric strong,.wb-metric code{display:block;margin-top:4px;overflow-wrap:anywhere}",
     ".wb-result{margin-top:12px;padding:14px;border:2px solid var(--line);border-radius:12px}.wb-result.ready{border-color:var(--good)}.wb-result h4{margin:0 0 7px}.wb-result-value{font-size:1.35rem;font-weight:900;overflow-wrap:anywhere}",
+    ".wb-verification{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:10px 0}.wb-verification-item{display:grid;gap:5px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2)}.wb-verification-item strong{font-size:.76rem}.wb-verification-item small{color:var(--muted)}.wb-verification-item.verified{border-color:var(--good)}.wb-verification-item.failed{border-color:var(--bad)}",
     ".wb-tabs{padding:0 16px 16px}.wb-tabbar{display:flex;gap:6px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:9px}.wb-tabbar button{border:0;background:transparent;color:var(--muted);padding:7px 9px;cursor:pointer}.wb-tabbar button[aria-selected=true]{color:var(--text);font-weight:800;border-bottom:2px solid var(--accent)}.wb-tab{padding-top:12px}",
     ".wb-log{display:grid;gap:6px;max-height:360px;overflow:auto}.wb-log-row{padding:8px 10px;border:1px solid var(--line);border-radius:9px;background:var(--surface-2);font-size:.78rem}.wb-table{width:100%;border-collapse:collapse;font-size:.8rem}.wb-table th,.wb-table td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line)}.wb-table th{color:var(--muted)}",
     ".wb-raw{margin-top:10px;border:1px solid var(--line);border-radius:10px;overflow:hidden}.wb-raw summary{cursor:pointer;padding:9px 11px;font-weight:700}.wb-raw pre{border-radius:0;max-height:360px;font-size:.75rem}.wb-error{color:var(--bad);font-weight:800}",
@@ -425,7 +483,10 @@ function tab(state) {
       '<div class="wb-help">Постоянные адаптеры WebGPU / LinksDB отслеживаются в #279 / #280; дифференциальное сравнение — в #281.</div>';
   }
   const recursive = workbenchRecursiveStructure(run);
-  return '<div class="wb-help">Доказательства и сырые структуры по умолчанию свёрнуты.</div>' +
+  return '<div class="wb-help">Уровни ниже независимы: отсутствие данных не считается успешной проверкой.</div>' +
+    verificationLevelsHtml(run) +
+    freshInstanceEvidenceHtml(run) +
+    '<div class="wb-help">Доказательства и сырые структуры по умолчанию свёрнуты.</div>' +
     (recursive
       ? '<div class="wb-proof-structure"><strong>Переносимая рекурсивная структура · ' + esc(recursive.key) +
         '</strong>' + recursiveStructureHtml(recursive.value) + '</div>'
