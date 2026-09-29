@@ -3,6 +3,10 @@ use super::{
         parse_and_validate_manifest_v1, ScenarioBackendV1,
         ScenarioValidationErrorV1,
     },
+    scenario_registry::{
+        load_preset_registry_v1, preset_manifest_source_by_index_v1,
+        ScenarioPresetRegistryErrorV1,
+    },
     scenario_runner::{
         run_scenario_manifest_v1, ScenarioExecutionReportV1,
         ScenarioRunnerErrorV1,
@@ -26,6 +30,8 @@ const FALLBACK_ERROR_LIMIT_JSON: &str =
 static SCENARIO_MANIFEST_BYTES: Mutex<Vec<u8>> = Mutex::new(Vec::new());
 static SCENARIO_REPORT_JSON: Mutex<String> = Mutex::new(String::new());
 static SCENARIO_ERROR_JSON: Mutex<String> = Mutex::new(String::new());
+static SCENARIO_PRESET_REGISTRY_JSON: Mutex<String> = Mutex::new(String::new());
+static SCENARIO_PRESET_MANIFEST_JSON: Mutex<String> = Mutex::new(String::new());
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -120,6 +126,10 @@ enum ScenarioTransportErrorV1 {
     Runner {
         schema_version: u32,
         error: ScenarioRunnerErrorV1,
+    },
+    PresetRegistry {
+        schema_version: u32,
+        error: ScenarioPresetRegistryErrorV1,
     },
     ReportLimit {
         schema_version: u32,
@@ -338,6 +348,135 @@ pub extern "C" fn amemory_scenario_transport_limits_json_byte(
         .unwrap_or(u32::MAX)
 }
 
+fn clear_preset_buffers() {
+    *SCENARIO_PRESET_REGISTRY_JSON
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = String::new();
+    *SCENARIO_PRESET_MANIFEST_JSON
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = String::new();
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_preset_registry_refresh() -> u32 {
+    clear_preset_buffers();
+    clear_report_and_error();
+
+    let registry = match load_preset_registry_v1() {
+        Ok(registry) => registry,
+        Err(error) => {
+            store_error(ScenarioTransportErrorV1::PresetRegistry {
+                schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+                error,
+            });
+            return 0;
+        }
+    };
+
+    match serialize_bounded(&registry, MAX_SCENARIO_REPORT_BYTES) {
+        Ok(json) => {
+            *SCENARIO_PRESET_REGISTRY_JSON
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = json;
+            1
+        }
+        Err(BoundedJsonError::Limit) => {
+            store_error(ScenarioTransportErrorV1::ReportLimit {
+                schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+                max_bytes: MAX_SCENARIO_REPORT_BYTES as u32,
+            });
+            0
+        }
+        Err(error) => {
+            store_error(ScenarioTransportErrorV1::Serialize {
+                schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+                message: format!("{error:?}"),
+            });
+            0
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_preset_registry_available() -> u32 {
+    string_available(&SCENARIO_PRESET_REGISTRY_JSON)
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_preset_registry_json_len() -> u32 {
+    string_len(&SCENARIO_PRESET_REGISTRY_JSON)
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_preset_registry_json_ptr() -> u32 {
+    string_ptr(&SCENARIO_PRESET_REGISTRY_JSON)
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_preset_registry_json_byte(
+    index: u32,
+) -> u32 {
+    string_byte(&SCENARIO_PRESET_REGISTRY_JSON, index)
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_preset_manifest_load(
+    index: u32,
+) -> u32 {
+    *SCENARIO_PRESET_MANIFEST_JSON
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = String::new();
+    clear_report_and_error();
+
+    let source = match preset_manifest_source_by_index_v1(index) {
+        Ok(source) => source,
+        Err(error) => {
+            store_error(ScenarioTransportErrorV1::PresetRegistry {
+                schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+                error,
+            });
+            return 0;
+        }
+    };
+
+    if source.len() > MAX_SCENARIO_MANIFEST_BYTES {
+        store_error(ScenarioTransportErrorV1::ManifestLength {
+            schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+            requested: source.len().min(u32::MAX as usize) as u32,
+            available: source.len().min(u32::MAX as usize) as u32,
+            max_bytes: MAX_SCENARIO_MANIFEST_BYTES as u32,
+        });
+        return 0;
+    }
+
+    *SCENARIO_PRESET_MANIFEST_JSON
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = source.to_owned();
+    1
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_preset_manifest_available() -> u32 {
+    string_available(&SCENARIO_PRESET_MANIFEST_JSON)
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_preset_manifest_json_len() -> u32 {
+    string_len(&SCENARIO_PRESET_MANIFEST_JSON)
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_preset_manifest_json_ptr() -> u32 {
+    string_ptr(&SCENARIO_PRESET_MANIFEST_JSON)
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_preset_manifest_json_byte(
+    index: u32,
+) -> u32 {
+    string_byte(&SCENARIO_PRESET_MANIFEST_JSON, index)
+}
+
 fn string_available(buffer: &Mutex<String>) -> u32 {
     let guard = buffer
         .lock()
@@ -414,6 +553,7 @@ pub extern "C" fn amemory_scenario_error_json_byte(index: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scenario_registry::ScenarioPresetRegistryV1;
 
     const MUX1_LIFECYCLE: &str =
         include_str!("../scenarios/mux1-lifecycle-v1.json");
@@ -439,6 +579,44 @@ mod tests {
             output.push(value as u8);
         }
         String::from_utf8(output).unwrap()
+    }
+
+    #[test]
+    fn preset_registry_transport_derives_summary_and_exact_manifest() {
+        clear_preset_buffers();
+        clear_report_and_error();
+
+        assert_eq!(amemory_scenario_preset_registry_refresh(), 1);
+        assert_eq!(amemory_scenario_preset_registry_available(), 1);
+        assert_eq!(amemory_scenario_error_available(), 0);
+
+        let registry_json = read_buffer(
+            amemory_scenario_preset_registry_json_len,
+            amemory_scenario_preset_registry_json_byte,
+        );
+        let registry: ScenarioPresetRegistryV1 =
+            serde_json::from_str(&registry_json).unwrap();
+        assert_eq!(registry.entries.len(), 1);
+        assert_eq!(registry.entries[0].scenario_id, "mux1-lifecycle");
+
+        assert_eq!(amemory_scenario_preset_manifest_load(0), 1);
+        let manifest_json = read_buffer(
+            amemory_scenario_preset_manifest_json_len,
+            amemory_scenario_preset_manifest_json_byte,
+        );
+        assert_eq!(
+            manifest_json,
+            include_str!("../scenarios/mux1-lifecycle-v1.json")
+        );
+
+        assert_eq!(amemory_scenario_preset_manifest_load(99), 0);
+        assert_eq!(amemory_scenario_preset_manifest_available(), 0);
+        let error_json = read_buffer(
+            amemory_scenario_error_json_len,
+            amemory_scenario_error_json_byte,
+        );
+        assert!(error_json.contains("\"code\":\"PRESET_REGISTRY\""));
+        assert!(error_json.contains("PRESET_INDEX_OUT_OF_RANGE"));
     }
 
     #[test]
