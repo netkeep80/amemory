@@ -7,7 +7,8 @@ use super::{
         execute_session_to_quiescence, execute_to_quiescence,
         identical_rerun, load_runtime, load_runtime_session, loaded_handle,
         prepare_stage, semantic_source, theory_admissions, visual_snapshot,
-        WebMux1Proof, WebProofResultStage, WebStructuralProof,
+        ProofRuntimeSession, WebMux1Proof, WebProofLoadStage,
+        WebProofPrepareStage, WebProofResultStage, WebStructuralProof,
     },
 };
 use amemory_optimized_cpu_probe::{
@@ -26,10 +27,7 @@ use super::{
         RunEventKind, RunObservationLevel, RunStructuralFactKind,
         RUN_OBSERVABILITY_SCHEMA_VERSION,
     },
-    proof_n::{
-        execute_session_observed_to_quiescence, ProofRuntimeSession,
-        WebProofLoadStage, WebProofPrepareStage,
-    },
+    proof_n::execute_session_observed_to_quiescence,
 };
 
 const WIDTH: usize = 32;
@@ -1354,8 +1352,13 @@ pub(crate) fn web_prove_mux1(
     })
 }
 
-#[cfg(test)]
-fn prepare_static_mux1_runtime() -> WebProofPrepareStage {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Mux1SessionProjection {
+    pub(crate) value: u32,
+    pub(crate) result_recursive_wire: String,
+}
+
+pub(crate) fn prepare_mux1_session_program() -> Option<WebProofPrepareStage> {
     let compiler = build_proof_mux_fixture();
     let prepared_roots = vec![
         semantic_source(&compiler.store, "function.mux1", compiler.mux1),
@@ -1383,24 +1386,30 @@ fn prepare_static_mux1_runtime() -> WebProofPrepareStage {
             compiler.bit_result_tag,
         ),
     ];
-    let admissions =
-        theory_admissions(&compiler.store, compiler.theory).unwrap();
-    prepare_stage(&compiler.store, prepared_roots, admissions)
+    let admissions = theory_admissions(&compiler.store, compiler.theory)?;
+    Some(prepare_stage(
+        &compiler.store,
+        prepared_roots,
+        admissions,
+    ))
 }
 
-#[cfg(test)]
-fn publish_mux1_configuration(
+pub(crate) fn configure_mux1_session(
     session: &mut ProofRuntimeSession,
     load: &WebProofLoadStage,
     select: usize,
     a: usize,
     b: usize,
-) -> (Handle, usize, usize) {
-    let mux1 = loaded_handle(load, "function.mux1").unwrap();
-    let apply = loaded_handle(load, "execution.apply").unwrap();
-    let caller = loaded_handle(load, "context.caller").unwrap();
-    let zero = loaded_handle(load, "data.zero").unwrap();
-    let one = loaded_handle(load, "data.one").unwrap();
+) -> Option<(Handle, usize, usize)> {
+    if select > 1 || a > 1 || b > 1 {
+        return None;
+    }
+
+    let mux1 = loaded_handle(load, "function.mux1")?;
+    let apply = loaded_handle(load, "execution.apply")?;
+    let caller = loaded_handle(load, "context.caller")?;
+    let zero = loaded_handle(load, "data.zero")?;
+    let one = loaded_handle(load, "data.one")?;
     let bits = [zero, one];
 
     let before = session.memory.store.link_count();
@@ -1408,17 +1417,60 @@ fn publish_mux1_configuration(
         &mut session.memory.store,
         &[bits[select], bits[a], bits[b]],
     )
-    .unwrap();
+    .ok()?;
     let invocation =
         call(&mut session.memory.store, apply, mux1, args);
     let initial = session
         .memory
         .store
         .ensure_pair(caller, invocation)
-        .unwrap();
+        .ok()?;
     let after = session.memory.store.link_count();
 
-    (initial, before, after)
+    Some((initial, before, after))
+}
+
+pub(crate) fn project_mux1_session_result(
+    session: &ProofRuntimeSession,
+    load: &WebProofLoadStage,
+) -> Option<Mux1SessionProjection> {
+    if session.engine.current().len() != 1 {
+        return None;
+    }
+
+    let caller = loaded_handle(load, "context.caller")?;
+    let result_tag = loaded_handle(load, "result.tag")?;
+    let zero = loaded_handle(load, "data.zero")?;
+    let one = loaded_handle(load, "data.one")?;
+    let final_link = session.engine.current()[0];
+
+    let (final_caller, endpoint) =
+        session.memory.store.poles(final_link).ok()?;
+    if final_caller != caller {
+        return None;
+    }
+    let (tag, payload) = session.memory.store.poles(endpoint).ok()?;
+    if tag != result_tag {
+        return None;
+    }
+    let values =
+        read_exact_sequence(&session.memory.store, payload).ok()?;
+    if values.len() != 1 {
+        return None;
+    }
+
+    let value = if values[0] == one {
+        1
+    } else if values[0] == zero {
+        0
+    } else {
+        return None;
+    };
+
+    Some(Mux1SessionProjection {
+        value,
+        result_recursive_wire: session.memory.store.export_anum(final_link).ok()?,
+    })
 }
 
 #[test]
@@ -1426,7 +1478,7 @@ fn web_mux1_lifecycle_reconfigures_four_runs_in_one_loaded_memory() {
     // PREPARE the static program/Theory only. No concrete invocation/current
     // Link is part of the packed image: every input configuration below is
     // published after LOAD into this one runtime store.
-    let prepare = prepare_static_mux1_runtime();
+    let prepare = prepare_mux1_session_program().unwrap();
 
     // LOAD exactly once and create one engine owned by the runtime Session.
     let (mut session, load) =
@@ -1477,7 +1529,7 @@ fn web_mux1_lifecycle_reconfigures_four_runs_in_one_loaded_memory() {
         // CONFIGURE: publish this run's input as normal immutable Links in the
         // already-loaded A-memory. No old Link is rewritten.
         let (initial, before_config, after_config) =
-            publish_mux1_configuration(&mut session, &load, select, a, b);
+            configure_mux1_session(&mut session, &load, select, a, b).unwrap();
 
         if run_index < 3 {
             assert!(
@@ -1566,7 +1618,7 @@ fn web_mux1_lifecycle_reconfigures_four_runs_in_one_loaded_memory() {
 
 #[test]
 fn web_mux1_observation_levels_are_semantically_passive() {
-    let prepare = prepare_static_mux1_runtime();
+    let prepare = prepare_mux1_session_program().unwrap();
     let levels = [
         RunObservationLevel::Off,
         RunObservationLevel::Profile,
@@ -1579,7 +1631,7 @@ fn web_mux1_observation_levels_are_semantically_passive() {
         let (mut session, load) =
             load_runtime_session(&prepare, 32).unwrap();
         let (initial, _, _) =
-            publish_mux1_configuration(&mut session, &load, 1, 0, 1);
+            configure_mux1_session(&mut session, &load, 1, 0, 1).unwrap();
 
         let observed = execute_session_observed_to_quiescence(
             &mut session,
@@ -1757,7 +1809,7 @@ fn web_mux1_pipeline_profile_separates_session_open_from_run_stages() {
     // charged again for this persistent Session.
     let ((initial, links_before_configure, links_after_configure), configure_ns) =
         time_stage(|| {
-            publish_mux1_configuration(&mut session, &load, 1, 0, 1)
+            configure_mux1_session(&mut session, &load, 1, 0, 1).unwrap()
         });
     assert_eq!(
         links_before_configure as u32,
