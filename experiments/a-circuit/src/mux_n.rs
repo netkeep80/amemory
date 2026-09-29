@@ -1790,7 +1790,8 @@ fn web_mux1_observation_levels_are_semantically_passive() {
 #[test]
 fn web_mux1_pipeline_profile_separates_session_open_from_run_stages() {
     // Session-open lifecycle: PREPARE and LOAD happen exactly once.
-    let (prepare, prepare_ns) = time_stage(prepare_static_mux1_runtime);
+    let (prepare, prepare_ns) =
+        time_stage(|| prepare_mux1_session_program().unwrap());
     let prepared_links = prepare.compiled_links;
     let ((mut session, load), load_ns) =
         time_stage(|| load_runtime_session(&prepare, 32).unwrap());
