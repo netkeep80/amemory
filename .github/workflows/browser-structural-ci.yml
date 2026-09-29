@@ -40,7 +40,10 @@ jobs:
 
       - name: Parse browser structural harnesses
         run: |
-          node --check experiments/browser-accelerator/web/app.js
+          node --check experiments/browser-accelerator/web/workbench.mjs
+          node --check experiments/browser-accelerator/web/proof-view.mjs
+          node --check experiments/browser-accelerator/web/scenario-transport.mjs
+          node --check experiments/browser-accelerator/web/scenario-presets.mjs
           node --check experiments/browser-accelerator/web/anum-boundary.mjs
           node --check experiments/browser-accelerator/web/state-store.mjs
           node --check experiments/browser-accelerator/web/canonicalization.mjs
