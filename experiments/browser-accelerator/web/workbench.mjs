@@ -87,6 +87,92 @@ export function deriveWorkbenchPipeline(status, run) {
   ].map(([id, complete, detail]) => ({ id, state: complete ? "done" : "waiting", detail }));
 }
 
+
+export function workbenchResultStatus(run) {
+  if (!run) {
+    return {
+      kind: "ready",
+      label: "Ready",
+      explanation: "The program is loaded once. Press Run to execute it in this A-memory Session.",
+    };
+  }
+  const assertions = Array.isArray(run.assertionResults)
+    ? run.assertionResults
+    : [];
+  if (assertions.length === 0) {
+    return {
+      kind: "neutral",
+      label: "Result",
+      explanation: "A runtime Result was produced. This manual input has no preset assertion, so the UI does not invent pass/fail.",
+    };
+  }
+  const passed = assertions.every((item) => item.passed === true);
+  return {
+    kind: passed ? "pass" : "fail",
+    label: passed ? "PASS" : "FAIL",
+    explanation: passed
+      ? "The runtime Result satisfies every assertion declared by this preset."
+      : "At least one declared preset assertion does not match the runtime Result.",
+  };
+}
+
+export function workbenchStageDetails(status, run, stageId) {
+  if (stageId === "PREPARE") {
+    return status ? {
+      sessionId: status.sessionId,
+      programProfile: status.programProfile,
+      programFingerprint: status.programFingerprint,
+      prepareCount: status.prepareCount,
+      profile: status.sessionOpenProfile?.stages ?? null,
+    } : null;
+  }
+  if (stageId === "LOAD") {
+    return status ? {
+      sessionId: status.sessionId,
+      loadCount: status.loadCount,
+      baseLinkCount: status.baseLinkCount,
+      currentLinkCount: status.currentLinkCount,
+      profile: status.sessionOpenProfile?.stages ?? null,
+    } : null;
+  }
+  if (!run) return null;
+  if (stageId === "CONFIGURE") {
+    return {
+      sessionRunId: run.sessionRunId,
+      configurationReused: run.configurationReused,
+      linksBeforeConfigure: run.linksBeforeConfigure,
+      linksAfterConfigure: run.linksAfterConfigure,
+      profile: run.pipelineProfile?.stages ?? null,
+    };
+  }
+  if (stageId === "EXECUTE") {
+    return {
+      sessionRunId: run.sessionRunId,
+      finalScope: run.observed?.finalScope ?? [],
+      activeReactionCount: run.observed?.activeReactionCount ?? null,
+      finalQuiescent: run.observed?.finalQuiescent ?? null,
+      executeProfile: run.observed?.profile ?? null,
+    };
+  }
+  if (stageId === "RESULT") {
+    return {
+      sessionRunId: run.sessionRunId,
+      result: run.result,
+      assertionResults: run.assertionResults ?? [],
+      oracleMatches: run.oracleMatches ?? null,
+    };
+  }
+  if (stageId === "EVIDENCE") {
+    return {
+      sessionRunId: run.sessionRunId,
+      eventCount: run.observed?.events?.length ?? 0,
+      observationLevel: run.observed?.observationLevel ?? null,
+      pipelineProfile: run.pipelineProfile ?? null,
+    };
+  }
+  return null;
+}
+
 const esc = (value) => String(value == null ? "" : value)
   .replaceAll("&", "&amp;").replaceAll("<", "&lt;")
   .replaceAll(">", "&gt;").replaceAll('"', "&quot;")
@@ -125,7 +211,7 @@ function styles() {
     ".wb-card{background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);min-width:0}",
     ".wb-top{padding:14px 16px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}.wb-top strong{margin-right:auto}",
     ".wb-chip{padding:5px 8px;border:1px solid var(--line);border-radius:999px;background:var(--surface-2);font-size:.76rem}.wb-chip.good{border-color:var(--good);color:var(--good)}.wb-chip.bad{border-color:var(--bad);color:var(--bad)}",
-    ".wb-pipe{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}.wb-stage{padding:10px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}.wb-stage.done{border-color:var(--good)}.wb-stage strong{display:block;font-size:.76rem}.wb-stage small{display:block;color:var(--muted);margin-top:4px;overflow-wrap:anywhere}",
+    ".wb-pipe{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}.wb-stage{padding:10px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--text);text-align:left;cursor:pointer}.wb-stage.done{border-color:var(--good)}.wb-stage strong{display:block;font-size:.76rem}.wb-stage small{display:block;color:var(--muted);margin-top:4px;overflow-wrap:anywhere}",
     ".wb-grid{display:grid;grid-template-columns:minmax(300px,360px) minmax(0,1fr);gap:12px;align-items:start}.wb-controls,.wb-main{padding:16px}.wb-controls h3,.wb-main h3{margin:0 0 12px}",
     ".wb-field{display:grid;gap:5px;margin:10px 0}.wb-field label{color:var(--muted);font-size:.78rem;font-weight:700}.wb-field input,.wb-field select,.wb-actions button,.wb-mode button{min-height:38px;border:1px solid var(--line);border-radius:9px;background:var(--surface-2);color:var(--text);padding:7px 9px}.wb-field input,.wb-field select{width:100%}",
     ".wb-mode,.wb-actions{display:flex;gap:7px;flex-wrap:wrap}.wb-mode button,.wb-actions button{cursor:pointer}.wb-mode button[aria-pressed=true]{outline:2px solid var(--accent);font-weight:800}.wb-actions .primary{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:800}.wb-actions button:disabled{opacity:.45}",
@@ -134,6 +220,9 @@ function styles() {
     ".wb-tabs{padding:0 16px 16px}.wb-tabbar{display:flex;gap:6px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:9px}.wb-tabbar button{border:0;background:transparent;color:var(--muted);padding:7px 9px;cursor:pointer}.wb-tabbar button[aria-selected=true]{color:var(--text);font-weight:800;border-bottom:2px solid var(--accent)}.wb-tab{padding-top:12px}",
     ".wb-log{display:grid;gap:6px;max-height:360px;overflow:auto}.wb-log-row{padding:8px 10px;border:1px solid var(--line);border-radius:9px;background:var(--surface-2);font-size:.78rem}.wb-table{width:100%;border-collapse:collapse;font-size:.8rem}.wb-table th,.wb-table td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line)}.wb-table th{color:var(--muted)}",
     ".wb-raw{margin-top:10px;border:1px solid var(--line);border-radius:10px;overflow:hidden}.wb-raw summary{cursor:pointer;padding:9px 11px;font-weight:700}.wb-raw pre{border-radius:0;max-height:360px;font-size:.75rem}.wb-error{color:var(--bad);font-weight:800}",
+    ".wb-levels{display:flex;gap:5px;flex-wrap:wrap}.wb-levels button{border:1px solid var(--line);border-radius:999px;background:var(--surface-2);color:var(--muted);padding:5px 8px;cursor:pointer;font-size:.76rem}.wb-levels button[aria-pressed=true]{border-color:var(--accent);color:var(--text);font-weight:800}",
+    ".wb-simple-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:12px}.wb-simple-item{padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);min-width:0}.wb-simple-item small{display:block;color:var(--muted)}.wb-simple-item strong,.wb-simple-item code{display:block;margin-top:5px;overflow-wrap:anywhere}.wb-result.pass{border-color:var(--good)}.wb-result.fail{border-color:var(--bad)}",
+
     "@media(max-width:1000px){.wb-grid{grid-template-columns:1fr}.wb-memory{grid-template-columns:1fr 1fr}.wb-pipe{grid-template-columns:repeat(3,1fr)}}@media(max-width:620px){.wb-memory,.wb-pipe{grid-template-columns:1fr}}",
   ].join("\n");
   document.head.append(style);
@@ -261,14 +350,35 @@ function tab(state) {
       '<tr><th>unification attempts</th><td>' + esc(structural && structural.unificationAttempts || "n/a") + '</td></tr>' +
       '<tr><th>published outputs</th><td>' + esc(structural && structural.publicationOutputs || "n/a") + '</td></tr></tbody></table>';
   }
-  if (state.tab === "history") {
+  if (state.tab === "timeline") {
     const h = state.history;
-    return h
-      ? '<div class="wb-help">Observer-only ' + esc(h.retentionMode) +
-        " · runs=" + h.retainedRuns + " · events=" + h.retainedEvents +
-        " · bytes=" + h.retainedBytes + " · profile points=" + h.profilePoints + '</div>' +
-        '<details class="wb-raw"><summary>Profile trend</summary><pre>' + json(h.profileTrend || []) + '</pre></details>'
-      : '<div class="wb-help">Observer history appears after Session open.</div>';
+    const trend = Array.isArray(h?.profileTrend) ? h.profileTrend : [];
+    if (!h) return '<div class="wb-help">Timeline appears after Session open.</div>';
+    return '<div class="wb-help">Observer-only ' + esc(h.retentionMode) +
+      " · retained runs=" + h.retainedRuns + " · events=" + h.retainedEvents +
+      " · profile points=" + h.profilePoints + '</div>' +
+      (trend.length === 0
+        ? '<div class="wb-help">No completed runs yet.</div>'
+        : '<table class="wb-table"><thead><tr><th>Run</th><th>Backend</th><th>Links before</th><th>Configured</th><th>After execute</th></tr></thead><tbody>' +
+          trend.map((profile) =>
+            '<tr><td>' + esc(profile.runId) + '</td><td>' + esc(profile.backendId) +
+            '</td><td>' + esc(profile.linksBeforeConfigure) + '</td><td>' +
+            esc(profile.linksAfterConfigure) + '</td><td>' +
+            esc(profile.linksAfterExecute) + '</td></tr>'
+          ).join("") + '</tbody></table>');
+  }
+  if (state.tab === "compare") {
+    const supported = new Set(state.manifest.supportedBackends || []);
+    return '<div class="wb-help">No differential result is fabricated. Compare becomes executable only when at least two retained backend adapters support this same Scenario.</div>' +
+      '<table class="wb-table"><thead><tr><th>Backend</th><th>Scenario capability</th><th>Current state</th></tr></thead><tbody>' +
+      BACKENDS.map(([id, label]) =>
+        '<tr><td>' + esc(label) + '</td><td>' +
+        esc(supported.has(id) ? "declared supported" : "not declared") +
+        '</td><td>' + esc(id === state.backend && state.session ? "active Session" :
+          supported.has(id) ? "available when adapter exists" : "unsupported") +
+        '</td></tr>'
+      ).join("") + '</tbody></table>' +
+      '<div class="wb-help">Retained WebGPU / LinksDB adapters are tracked by #279 / #280; differential comparison by #281.</div>';
   }
   return '<div class="wb-help">Proof/raw structures are collapsed by default.</div>' +
     '<details class="wb-raw"><summary>Current run report</summary><pre>' + json(run || {}) + '</pre></details>' +
@@ -286,6 +396,9 @@ function render(state) {
   const run = state.run;
   const pipeline = deriveWorkbenchPipeline(status, run);
   const openSession = Boolean(status);
+  const level = state.level;
+  const resultStatus = workbenchResultStatus(run);
+  const stageDetail = workbenchStageDetails(status, run, state.stage);
   const currentLinks = status
     ? (status.currentLinkCount == null ? status.baseLinkCount : status.currentLinkCount)
     : "—";
@@ -300,11 +413,16 @@ function render(state) {
     '<span class="wb-chip">run ' + esc(run && run.sessionRunId || 0) + '</span>' +
     '<span class="wb-chip ' + (state.error ? "bad" : openSession ? "good" : "") + '">' +
     esc(state.error ? "ERROR" : openSession ? "SESSION OPEN" : state.loading ? "LOADING" : "CLOSED") +
-    '</span></section>' +
+    '</span><div class="wb-levels" aria-label="Disclosure level">' +
+    ["simple", "engineering", "proof"].map((name) =>
+      '<button data-level="' + name + '" aria-pressed="' + (level === name) + '">' +
+      esc(name[0].toUpperCase() + name.slice(1)) + '</button>').join("") +
+    '</div></section>' +
 
     '<section class="wb-pipe">' + pipeline.map((stage) =>
-      '<div class="wb-stage ' + stage.state + '"><strong>' + esc(stage.id) +
-      '</strong><small>' + esc(stage.detail) + '</small></div>').join("") + '</section>' +
+      '<button type="button" data-stage="' + stage.id + '" class="wb-stage ' + stage.state + '"' +
+      ' aria-pressed="' + (state.stage === stage.id) + '"><strong>' + esc(stage.id) +
+      '</strong><small>' + esc(stage.detail) + '</small></button>').join("") + '</section>' +
 
     '<section class="wb-grid"><div class="wb-card wb-controls"><h3>Scenario / constructor</h3>' +
     '<div class="wb-field"><label>Scenario preset</label><select id="wb-scenario"' +
@@ -348,29 +466,65 @@ function render(state) {
     '<div class="wb-help">Preset and Manual use the same Scenario manifest. Editing inputs keeps this Session and loaded A-memory.</div>' +
     (state.error ? '<p class="wb-error">' + esc(state.error) + '</p>' : '') + '</div>' +
 
-    '<div class="wb-card wb-main"><h3>One persistent A-memory</h3><div class="wb-memory">' +
-    '<div class="wb-metric"><small>Session</small><code>' + esc(status && status.sessionId || "closed") + '</code></div>' +
-    '<div class="wb-metric"><small>Store / engine</small><code>' + esc(compact(status && status.storeInstanceId)) +
-    " / " + esc(compact(status && status.engineInstanceId)) + '</code></div>' +
-    '<div class="wb-metric"><small>Links base / current</small><strong>' + esc(status && status.baseLinkCount || "—") +
-    " / " + esc(currentLinks) + '</strong></div>' +
-    '<div class="wb-metric"><small>Prepare / load / runs</small><strong>' + esc(status && status.prepareCount || 0) +
-    " / " + esc(status && status.loadCount || 0) + " / " + esc(status && status.completedRuns || 0) + '</strong></div>' +
-    '</div><div class="wb-result ' + (run ? "ready" : "") + '"><h4>Result</h4><div class="wb-result-value">' +
+    '<div class="wb-card wb-main"><h3>One persistent A-memory</h3>' +
+    '<div class="wb-simple-grid">' +
+    '<div class="wb-simple-item"><small>Loaded</small><strong>' +
+      esc(state.manifest.title || state.manifest.scenarioId || state.manifest.programProfileId || "Scenario") +
+    '</strong></div>' +
+    '<div class="wb-simple-item"><small>Inputs</small><code>' + esc(JSON.stringify(state.inputs)) + '</code></div>' +
+    '<div class="wb-simple-item"><small>Current action</small><strong>' +
+      esc(!status ? "A-memory closed" : run ? "Run #" + run.sessionRunId + " completed" : "Loaded once · ready to Run") +
+    '</strong></div></div>' +
+    (level === "simple" ? "" :
+      '<div class="wb-memory">' +
+      '<div class="wb-metric"><small>Session</small><code>' + esc(status && status.sessionId || "closed") + '</code></div>' +
+      '<div class="wb-metric"><small>Store / engine</small><code>' + esc(compact(status && status.storeInstanceId)) +
+      " / " + esc(compact(status && status.engineInstanceId)) + '</code></div>' +
+      '<div class="wb-metric"><small>Links base / current</small><strong>' + esc(status && status.baseLinkCount || "—") +
+      " / " + esc(currentLinks) + '</strong></div>' +
+      '<div class="wb-metric"><small>Prepare / load / runs</small><strong>' + esc(status && status.prepareCount || 0) +
+      " / " + esc(status && status.loadCount || 0) + " / " + esc(status && status.completedRuns || 0) + '</strong></div>' +
+      '</div>') +
+    '<div class="wb-result ' + (run ? resultStatus.kind : "") + '"><h4>' + esc(resultStatus.label) + '</h4><div class="wb-result-value">' +
     esc(resultText(run)) + '</div><div class="wb-help">' +
-    esc(run ? (run.configurationReused ? "canonical configuration reused" : "configuration Links published") +
-      " · " + assertionText(run) + " · quiescent=" + String(run.observed && run.observed.finalQuiescent)
-      : "Press Run. The UI only renders the retained runtime report; it does not recompute the answer.") +
-    '</div>' + (run ? '<details class="wb-raw"><summary>Normalized result</summary><pre>' + json(run.result) +
-    '</pre></details>' : '') + '</div></div></section>' +
+    esc(resultStatus.explanation +
+      (level === "simple" || !run ? "" :
+        " · " + (run.configurationReused ? "canonical configuration reused" : "configuration Links published") +
+        " · quiescent=" + String(run.observed && run.observed.finalQuiescent))) +
+    '</div>' + (run && level !== "simple" ? '<details class="wb-raw"><summary>Normalized result</summary><pre>' + json(run.result) +
+    '</pre></details>' : '') + '</div>' +
+    (level === "simple" ? '<div class="wb-help">Open Engineering for Links, Scope, reactions and profiler; Proof for raw structural evidence.</div>' :
+      stageDetail ? '<details class="wb-raw" open><summary>Stage ' + esc(state.stage) + ' · real evidence</summary><pre>' +
+        json(stageDetail) + '</pre></details>' : '<div class="wb-help">Select a completed pipeline stage to inspect its evidence.</div>') +
+    '</div></section>' +
 
-    '<section class="wb-card wb-tabs"><div class="wb-tabbar">' +
-    ["history", "log", "profile", "proof"].map((name) =>
-      '<button data-tab="' + name + '" aria-selected="' + (state.tab === name) + '">' +
-      esc(name[0].toUpperCase() + name.slice(1)) + '</button>').join("") +
-    '</div><div class="wb-tab">' + tab(state) + '</div></section></div>';
+    (level === "simple"
+      ? '<section class="wb-card wb-tabs"><div class="wb-help">Simple view deliberately hides engineering/proof noise. The result above is still the real runtime Result.</div></section>'
+      : '<section class="wb-card wb-tabs"><div class="wb-tabbar">' +
+        (level === "proof"
+          ? ["timeline", "log", "profile", "compare", "proof"]
+          : ["timeline", "log", "profile", "compare"]).map((name) =>
+          '<button data-tab="' + name + '" aria-selected="' + (state.tab === name) + '">' +
+          esc(name[0].toUpperCase() + name.slice(1)) + '</button>').join("") +
+        '</div><div class="wb-tab">' + tab(state) + '</div></section>') +
+    '</div>';
 
   const root = state.root;
+  for (const button of root.querySelectorAll("[data-level]")) {
+    button.addEventListener("click", () => {
+      state.level = button.dataset.level;
+      if (state.level === "proof") state.tab = "proof";
+      else if (state.tab === "proof") state.tab = "timeline";
+      render(state);
+    });
+  }
+  for (const button of root.querySelectorAll("[data-stage]")) {
+    button.addEventListener("click", () => {
+      state.stage = button.dataset.stage;
+      if (state.level === "simple") state.level = "engineering";
+      render(state);
+    });
+  }
   root.querySelector("#wb-scenario")?.addEventListener("change", (event) => {
     try { loadManifest(state, Number(event.target.value)); } catch (error) {
       state.error = error && error.message || String(error);
@@ -406,7 +560,8 @@ export async function mountWorkbench(root) {
   const state = {
     root, wasm: null, registry: { entries: [] }, manifest: { runSequence: [], inputSchema: [] },
     scenarioIndex: 0, presetIndex: 0, inputs: {}, mode: "preset", backend: "optimized-cpu",
-    session: null, run: null, history: null, tab: "history",
+    session: null, run: null, history: null, tab: "timeline",
+    level: "simple", stage: "RESULT",
     build: { version: "loading", sha: "loading" }, loading: true, error: null,
   };
   root.innerHTML = '<div class="notice">Loading real A-memory Workbench…</div>';

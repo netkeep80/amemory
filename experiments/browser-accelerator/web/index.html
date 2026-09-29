@@ -110,6 +110,9 @@
 
   <section id="workbench-root" aria-label="A-memory Workbench"></section>
 
+  <details id="legacy-diagnostics" class="panel legacy-diagnostics">
+    <summary><span>Legacy diagnostics</span><small>Compatibility witnesses · collapsed by default</small></summary>
+
   <section class="status-grid" aria-label="System overview">
     <div class="status-card"><span class="kicker">Rust / WASM</span><span class="value" id="overview-wasm">STARTING</span></div>
     <div class="status-card"><span class="kicker">WebGPU path</span><span class="value" id="overview-webgpu">WAITING</span></div>
@@ -288,6 +291,8 @@
   <details class="panel raw">
     <summary><span>Raw details</span><small>Exact diagnostic log</small></summary>
     <pre id="details"></pre>
+  </details>
+
   </details>
 
   <script type="importmap">
