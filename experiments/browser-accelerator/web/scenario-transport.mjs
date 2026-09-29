@@ -32,6 +32,13 @@ const LIMITS_ABI = {
   byte: "amemory_scenario_transport_limits_json_byte",
 };
 
+const LIVE_OUTPUT_ABI = {
+  available: "amemory_scenario_live_output_available",
+  length: "amemory_scenario_live_output_json_len",
+  pointer: "amemory_scenario_live_output_json_ptr",
+  byte: "amemory_scenario_live_output_json_byte",
+};
+
 function requireFunction(wasm, name) {
   const fn = wasm[name];
   if (typeof fn !== "function") {
@@ -57,7 +64,8 @@ export function readScenarioTransportLimits(wasm) {
       limits.maxRetainedReports !== 1 ||
       limits.maxRetainedErrors !== 1 ||
       limits.retentionMode !== "LATEST" ||
-      limits.liveSessionRetained !== false) {
+      limits.liveSessionRetained !== true ||
+      limits.batchSessionRetained !== false) {
     throw new Error("scenario transport: invalid limits/capability envelope");
   }
   return limits;
@@ -140,6 +148,132 @@ export function executeScenarioManifest(
 ) {
   const length = writeScenarioManifest(wasm, manifest);
   return executeLoadedScenarioManifest(wasm, length, backend);
+}
+
+export function readScenarioLiveOutput(wasm) {
+  return readJsonAbi(wasm, LIVE_OUTPUT_ABI, "scenario live output");
+}
+
+export function openScenarioLiveSession(
+  wasm,
+  manifest,
+  backend = "optimized-cpu",
+) {
+  const backendCode = BACKENDS.get(backend);
+  if (backendCode === undefined) {
+    throw new Error(`scenario live session: unknown backend ${backend}`);
+  }
+  const length = writeScenarioManifest(wasm, manifest);
+  const open = requireFunction(wasm, "amemory_scenario_live_open_json");
+  const success = open(length >>> 0, backendCode) >>> 0;
+  const status = readScenarioLiveOutput(wasm);
+  const error = readScenarioError(wasm);
+  if (success === 1) {
+    if (status === null || error !== null) {
+      throw new Error(
+        "scenario live session: open success must expose status and no error",
+      );
+    }
+    return { ok: true, status, error: null };
+  }
+  if (success !== 0 || status !== null || error === null) {
+    throw new Error(
+      "scenario live session: open failure must expose error and no status",
+    );
+  }
+  return { ok: false, status: null, error };
+}
+
+export function writeScenarioLiveRun(wasm, run) {
+  const text = typeof run === "string" ? run : JSON.stringify(run);
+  const bytes = new TextEncoder().encode(text);
+  const limits = readScenarioTransportLimits(wasm);
+  if (bytes.length > limits.maxManifestBytes) {
+    throw new Error(
+      `scenario live session: run ${bytes.length} bytes exceeds ` +
+      `${limits.maxManifestBytes}`,
+    );
+  }
+  requireFunction(wasm, "amemory_scenario_live_run_clear")();
+  const setByte = requireFunction(
+    wasm,
+    "amemory_scenario_live_run_set_byte",
+  );
+  for (let index = 0; index < bytes.length; index += 1) {
+    if ((setByte(index, bytes[index]) >>> 0) !== 1) {
+      throw new Error(
+        `scenario live session ABI: rejected run byte ${index}`,
+      );
+    }
+  }
+  return bytes.length >>> 0;
+}
+
+export function runScenarioLiveSession(wasm, run) {
+  const length = writeScenarioLiveRun(wasm, run);
+  const execute = requireFunction(
+    wasm,
+    "amemory_scenario_live_execute_json",
+  );
+  const success = execute(length) >>> 0;
+  const payload = readScenarioLiveOutput(wasm);
+  const error = readScenarioError(wasm);
+  if (success === 1) {
+    if (payload === null || error !== null ||
+        payload.schemaVersion !== 1 ||
+        payload.status === null ||
+        payload.run === null) {
+      throw new Error(
+        "scenario live session: run success has invalid payload/error state",
+      );
+    }
+    return { ok: true, payload, error: null };
+  }
+  if (success !== 0 || payload !== null || error === null) {
+    throw new Error(
+      "scenario live session: run failure must expose error only",
+    );
+  }
+  return { ok: false, payload: null, error };
+}
+
+export function refreshScenarioLiveSessionStatus(wasm) {
+  const refresh = requireFunction(
+    wasm,
+    "amemory_scenario_live_status_refresh",
+  );
+  const success = refresh() >>> 0;
+  const status = readScenarioLiveOutput(wasm);
+  const error = readScenarioError(wasm);
+  if (success === 1) {
+    if (status === null || error !== null) {
+      throw new Error(
+        "scenario live session: status refresh has invalid output",
+      );
+    }
+    return { ok: true, status, error: null };
+  }
+  if (success !== 0 || status !== null || error === null) {
+    throw new Error(
+      "scenario live session: status failure must expose error only",
+    );
+  }
+  return { ok: false, status: null, error };
+}
+
+export function closeScenarioLiveSession(wasm) {
+  const close = requireFunction(wasm, "amemory_scenario_live_close");
+  const closed = close() >>> 0;
+  const output = readScenarioLiveOutput(wasm);
+  const error = readScenarioError(wasm);
+  if ((closed !== 0 && closed !== 1) ||
+      output !== null ||
+      error !== null) {
+    throw new Error(
+      "scenario live session: close must clear live output and error",
+    );
+  }
+  return closed === 1;
 }
 
 function cloneJson(value, label) {

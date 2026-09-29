@@ -30,7 +30,7 @@ use super::{
     scenario::{
         validate_manifest_v1, ScenarioAssertionV1, ScenarioBackendV1,
         ScenarioExecutionModeV1, ScenarioManifestV1, ScenarioOraclePolicyV1,
-        ScenarioProgramProfileV1, ScenarioValidationErrorV1,
+        ScenarioProgramProfileV1, ScenarioRunV1, ScenarioValidationErrorV1,
     },
 };
 use amemory_optimized_cpu_probe::Handle;
@@ -286,6 +286,264 @@ fn prepared_aset_fingerprint_v1(
     format!("{PREPARED_ASET_FINGERPRINT_ID}:{hash:016x}")
 }
 
+pub(crate) struct ScenarioCpuSessionV1 {
+    manifest: ScenarioManifestV1,
+    adapter: &'static CpuScenarioAdapter,
+    session: ProofRuntimeSession,
+    load: WebProofLoadStage,
+    loaded_link_count: usize,
+    loaded_prefix: Vec<(Handle, Handle)>,
+    pub(crate) session_open_profile: SessionOpenProfileV1,
+    pub(crate) program_fingerprint: String,
+    store_instance_id: String,
+    engine_instance_id: String,
+    completed_runs: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ScenarioLiveSessionStatusV1 {
+    pub(crate) schema_version: u32,
+    pub(crate) backend: ScenarioBackendV1,
+    pub(crate) session_id: String,
+    pub(crate) store_instance_id: String,
+    pub(crate) engine_instance_id: String,
+    pub(crate) program_profile: ScenarioProgramProfileV1,
+    pub(crate) program_fingerprint: String,
+    pub(crate) base_link_count: u32,
+    pub(crate) current_link_count: u32,
+    pub(crate) completed_runs: u64,
+    pub(crate) prepare_count: u32,
+    pub(crate) load_count: u32,
+    pub(crate) session_open_profile: SessionOpenProfileV1,
+}
+
+impl ScenarioCpuSessionV1 {
+    pub(crate) fn status_v1(&self) -> ScenarioLiveSessionStatusV1 {
+        ScenarioLiveSessionStatusV1 {
+            schema_version: SCENARIO_REPORT_SCHEMA_VERSION,
+            backend: ScenarioBackendV1::OptimizedCpu,
+            session_id: self.session.memory.id.clone(),
+            store_instance_id: self.store_instance_id.clone(),
+            engine_instance_id: self.engine_instance_id.clone(),
+            program_profile: self.manifest.program_profile.clone(),
+            program_fingerprint: self.program_fingerprint.clone(),
+            base_link_count: self.loaded_link_count as u32,
+            current_link_count:
+                self.session.memory.store.link_count() as u32,
+            completed_runs: self.completed_runs,
+            prepare_count: 1,
+            load_count: 1,
+            session_open_profile: self.session_open_profile.clone(),
+        }
+    }
+}
+
+pub(crate) fn open_cpu_scenario_session_v1(
+    manifest: &ScenarioManifestV1,
+) -> Result<ScenarioCpuSessionV1, ScenarioRunnerErrorV1> {
+    let validation = validate_manifest_v1(manifest);
+    if !validation.is_empty() {
+        return Err(ScenarioRunnerErrorV1::Validation {
+            errors: validation,
+        });
+    }
+
+    if !manifest
+        .supported_backends
+        .contains(&ScenarioBackendV1::OptimizedCpu)
+    {
+        return Err(ScenarioRunnerErrorV1::UnsupportedBackend {
+            backend: ScenarioBackendV1::OptimizedCpu,
+        });
+    }
+
+    let adapter = CPU_SCENARIO_ADAPTERS
+        .iter()
+        .find(|adapter| {
+            adapter.profile_id == manifest.program_profile.profile_id
+        })
+        .ok_or_else(|| ScenarioRunnerErrorV1::UnsupportedProgramProfile {
+            profile_id: manifest.program_profile.profile_id.clone(),
+        })?;
+
+    let (prepare, prepare_ns) = time_stage(|| (adapter.prepare)());
+    let prepare = prepare.ok_or_else(|| {
+        ScenarioRunnerErrorV1::PrepareFailed {
+            profile_id: manifest.program_profile.profile_id.clone(),
+        }
+    })?;
+    let prepared_links = prepare.compiled_links;
+    let program_fingerprint = prepared_aset_fingerprint_v1(&prepare);
+
+    let (loaded, load_ns) =
+        time_stage(|| load_runtime_session(&prepare, 32));
+    let (session, load) = loaded.ok_or_else(|| {
+        ScenarioRunnerErrorV1::LoadFailed {
+            profile_id: manifest.program_profile.profile_id.clone(),
+        }
+    })?;
+
+    let session_open_profile = session_open_profile_v1(
+        session.memory.id.clone(),
+        prepare_ns,
+        load_ns,
+        prepared_links,
+        session.base_link_count as u32,
+    );
+    let loaded_link_count = session.base_link_count;
+    let loaded_prefix = session.memory.store.export_packed_duplets();
+    let store_instance_id = session.memory.id.clone();
+    let engine_instance_id = format!(
+        "{}:optimized-structural-engine",
+        session.memory.id
+    );
+
+    Ok(ScenarioCpuSessionV1 {
+        manifest: manifest.clone(),
+        adapter,
+        session,
+        load,
+        loaded_link_count,
+        loaded_prefix,
+        session_open_profile,
+        program_fingerprint,
+        store_instance_id,
+        engine_instance_id,
+        completed_runs: 0,
+    })
+}
+
+pub(crate) fn run_cpu_scenario_session_once_v1(
+    live: &mut ScenarioCpuSessionV1,
+    run: &ScenarioRunV1,
+) -> Result<ScenarioRunReportV1, ScenarioRunnerErrorV1> {
+    let mut validation_manifest = live.manifest.clone();
+    validation_manifest.run_sequence = vec![run.clone()];
+    let validation = validate_manifest_v1(&validation_manifest);
+    if !validation.is_empty() {
+        return Err(ScenarioRunnerErrorV1::Validation {
+            errors: validation,
+        });
+    }
+
+    if run.execution_mode != ScenarioExecutionModeV1::ToQuiescence {
+        return Err(ScenarioRunnerErrorV1::UnsupportedExecutionMode {
+            run_id: run.run_id.clone(),
+            mode: run.execution_mode,
+        });
+    }
+
+    let adapter = live.adapter;
+    let (configured, configure_ns) =
+        time_stage(|| (adapter.configure)(
+            &mut live.session,
+            &live.load,
+            &run.inputs,
+        ));
+    let configured = configured.map_err(|message| {
+        ScenarioRunnerErrorV1::ConfigureFailed {
+            run_id: run.run_id.clone(),
+            message,
+        }
+    })?;
+
+    let observed = execute_session_observed_to_quiescence(
+        &mut live.session,
+        configured.initial,
+        run.max_reactions,
+        live.manifest.observation_level,
+    )
+    .ok_or_else(|| ScenarioRunnerErrorV1::ExecuteFailed {
+        run_id: run.run_id.clone(),
+        max_reactions: run.max_reactions,
+    })?;
+
+    let links_before_result = live.session.memory.store.link_count();
+    let (projected, result_ns) =
+        time_stage(|| (adapter.project)(&live.session, &live.load));
+    let result = projected.map_err(|message| {
+        ScenarioRunnerErrorV1::ProjectResultFailed {
+            run_id: run.run_id.clone(),
+            message,
+        }
+    })?;
+    if live.session.memory.store.link_count() != links_before_result {
+        return Err(
+            ScenarioRunnerErrorV1::ResultProjectionMutatedCarrier {
+                run_id: run.run_id.clone(),
+            },
+        );
+    }
+
+    let assertion_results =
+        evaluate_assertions(&run.assertions, &result, &observed);
+
+    let oracle_matches = match live.manifest.oracle_policy {
+        ScenarioOraclePolicyV1::FreshInstance => {
+            let oracle = (adapter.oracle)(&run.inputs).map_err(|message| {
+                ScenarioRunnerErrorV1::OracleFailed {
+                    run_id: run.run_id.clone(),
+                    message,
+                }
+            })?;
+            Some(oracle == result)
+        }
+        ScenarioOraclePolicyV1::None
+        | ScenarioOraclePolicyV1::ExpectedAssertions => None,
+    };
+
+    let links_before_evidence = live.session.memory.store.link_count();
+    let (_, external_evidence_ns) = time_stage(|| {
+        serde_json::to_string(&(&observed, &result, &assertion_results))
+            .expect("serializable scenario evidence")
+    });
+    if live.session.memory.store.link_count() != links_before_evidence {
+        return Err(
+            ScenarioRunnerErrorV1::EvidenceProjectionMutatedCarrier {
+                run_id: run.run_id.clone(),
+            },
+        );
+    }
+
+    let pipeline_profile = run_pipeline_profile_v1(
+        &observed,
+        configure_ns,
+        result_ns,
+        external_evidence_ns,
+        configured.links_before,
+        configured.links_after,
+    );
+
+    let carrier = live.session.memory.store.export_packed_duplets();
+    if carrier.len() < live.loaded_link_count
+        || &carrier[..live.loaded_link_count]
+            != live.loaded_prefix.as_slice()
+    {
+        return Err(ScenarioRunnerErrorV1::LoadedBaseMutated {
+            run_id: run.run_id.clone(),
+        });
+    }
+
+    let session_run_id = observed.run_id;
+    let report = ScenarioRunReportV1 {
+        manifest_run_id: run.run_id.clone(),
+        session_run_id,
+        inputs: run.inputs.clone(),
+        configuration_reused:
+            configured.links_after == configured.links_before,
+        links_before_configure: configured.links_before,
+        links_after_configure: configured.links_after,
+        result,
+        assertion_results,
+        oracle_matches,
+        observed,
+        pipeline_profile,
+    };
+    live.completed_runs = session_run_id;
+    Ok(report)
+}
+
 pub(crate) fn run_scenario_manifest_v1(
     manifest: &ScenarioManifestV1,
     backend: ScenarioBackendV1,
@@ -303,156 +561,17 @@ pub(crate) fn run_scenario_manifest_v1(
         return Err(ScenarioRunnerErrorV1::UnsupportedBackend { backend });
     }
 
-    let adapter = CPU_SCENARIO_ADAPTERS
-        .iter()
-        .find(|adapter| adapter.profile_id == manifest.program_profile.profile_id)
-        .ok_or_else(|| ScenarioRunnerErrorV1::UnsupportedProgramProfile {
-            profile_id: manifest.program_profile.profile_id.clone(),
-        })?;
-
-    let (prepare, prepare_ns) = time_stage(|| (adapter.prepare)());
-    let prepare = prepare.ok_or_else(|| ScenarioRunnerErrorV1::PrepareFailed {
-        profile_id: manifest.program_profile.profile_id.clone(),
-    })?;
-    let prepared_links = prepare.compiled_links;
-    let program_fingerprint = prepared_aset_fingerprint_v1(&prepare);
-
-    let (loaded, load_ns) =
-        time_stage(|| load_runtime_session(&prepare, 32));
-    let (mut session, load) = loaded.ok_or_else(|| {
-        ScenarioRunnerErrorV1::LoadFailed {
-            profile_id: manifest.program_profile.profile_id.clone(),
-        }
-    })?;
-
-    let session_open_profile = session_open_profile_v1(
-        session.memory.id.clone(),
-        prepare_ns,
-        load_ns,
-        prepared_links,
-        session.base_link_count as u32,
-    );
-    let session_id = session.memory.id.clone();
-    let loaded_link_count = session.base_link_count;
-    let loaded_prefix = session.memory.store.export_packed_duplets();
+    let mut live = open_cpu_scenario_session_v1(manifest)?;
+    let session_id = live.session.memory.id.clone();
+    let session_open_profile = live.session_open_profile.clone();
+    let program_fingerprint = live.program_fingerprint.clone();
     let mut reports = Vec::with_capacity(manifest.run_sequence.len());
 
     for run in &manifest.run_sequence {
-        if run.execution_mode != ScenarioExecutionModeV1::ToQuiescence {
-            return Err(ScenarioRunnerErrorV1::UnsupportedExecutionMode {
-                run_id: run.run_id.clone(),
-                mode: run.execution_mode,
-            });
-        }
-
-        // Adapter receives inputs only. Assertions/oracle expected values are
-        // structurally unavailable to CONFIGURE and therefore cannot become
-        // execution authority.
-        let (configured, configure_ns) =
-            time_stage(|| (adapter.configure)(
-                &mut session,
-                &load,
-                &run.inputs,
-            ));
-        let configured = configured.map_err(|message| {
-            ScenarioRunnerErrorV1::ConfigureFailed {
-                run_id: run.run_id.clone(),
-                message,
-            }
-        })?;
-
-        let observed = execute_session_observed_to_quiescence(
-            &mut session,
-            configured.initial,
-            run.max_reactions,
-            manifest.observation_level,
-        )
-        .ok_or_else(|| ScenarioRunnerErrorV1::ExecuteFailed {
-            run_id: run.run_id.clone(),
-            max_reactions: run.max_reactions,
-        })?;
-
-        let links_before_result = session.memory.store.link_count();
-        let (projected, result_ns) =
-            time_stage(|| (adapter.project)(&session, &load));
-        let result = projected.map_err(|message| {
-            ScenarioRunnerErrorV1::ProjectResultFailed {
-                run_id: run.run_id.clone(),
-                message,
-            }
-        })?;
-        if session.memory.store.link_count() != links_before_result {
-            return Err(
-                ScenarioRunnerErrorV1::ResultProjectionMutatedCarrier {
-                    run_id: run.run_id.clone(),
-                },
-            );
-        }
-
-        // Assertions are evaluated only after semantic execution and RESULT
-        // projection. Their expected values never enter CONFIGURE/EXECUTE.
-        let assertion_results =
-            evaluate_assertions(&run.assertions, &result, &observed);
-
-        let oracle_matches = match manifest.oracle_policy {
-            ScenarioOraclePolicyV1::FreshInstance => {
-                let oracle = (adapter.oracle)(&run.inputs).map_err(|message| {
-                    ScenarioRunnerErrorV1::OracleFailed {
-                        run_id: run.run_id.clone(),
-                        message,
-                    }
-                })?;
-                Some(oracle == result)
-            }
-            ScenarioOraclePolicyV1::None
-            | ScenarioOraclePolicyV1::ExpectedAssertions => None,
-        };
-
-        let links_before_evidence = session.memory.store.link_count();
-        let (_, external_evidence_ns) = time_stage(|| {
-            serde_json::to_string(&(&observed, &result, &assertion_results))
-                .expect("serializable scenario evidence")
-        });
-        if session.memory.store.link_count() != links_before_evidence {
-            return Err(
-                ScenarioRunnerErrorV1::EvidenceProjectionMutatedCarrier {
-                    run_id: run.run_id.clone(),
-                },
-            );
-        }
-
-        let pipeline_profile = run_pipeline_profile_v1(
-            &observed,
-            configure_ns,
-            result_ns,
-            external_evidence_ns,
-            configured.links_before,
-            configured.links_after,
-        );
-
-        let carrier = session.memory.store.export_packed_duplets();
-        if carrier.len() < loaded_link_count
-            || &carrier[..loaded_link_count] != loaded_prefix.as_slice()
-        {
-            return Err(ScenarioRunnerErrorV1::LoadedBaseMutated {
-                run_id: run.run_id.clone(),
-            });
-        }
-
-        reports.push(ScenarioRunReportV1 {
-            manifest_run_id: run.run_id.clone(),
-            session_run_id: observed.run_id,
-            inputs: run.inputs.clone(),
-            configuration_reused:
-                configured.links_after == configured.links_before,
-            links_before_configure: configured.links_before,
-            links_after_configure: configured.links_after,
-            result,
-            assertion_results,
-            oracle_matches,
-            observed,
-            pipeline_profile,
-        });
+        reports.push(run_cpu_scenario_session_once_v1(
+            &mut live,
+            run,
+        )?);
     }
 
     let overall_pass = reports.iter().all(|run| {
@@ -929,6 +1048,65 @@ mod tests {
         assert_eq!(
             mux_fingerprint.len(),
             "prepared-aset-fnv1a64-v1:".len() + 16,
+        );
+    }
+
+    #[test]
+    fn retained_cpu_session_runs_separate_mux1_actions_without_reload() {
+        let manifest =
+            parse_and_validate_manifest_v1(MUX1_LIFECYCLE).unwrap();
+        let mut live = open_cpu_scenario_session_v1(&manifest).unwrap();
+        let opened = live.status_v1();
+
+        let first = run_cpu_scenario_session_once_v1(
+            &mut live,
+            &manifest.run_sequence[0],
+        )
+        .unwrap();
+        let second = run_cpu_scenario_session_once_v1(
+            &mut live,
+            &manifest.run_sequence[1],
+        )
+        .unwrap();
+
+        let mut return_run = manifest.run_sequence[0].clone();
+        return_run.run_id = "manual-return-to-first".to_owned();
+        let returned = run_cpu_scenario_session_once_v1(
+            &mut live,
+            &return_run,
+        )
+        .unwrap();
+        let after = live.status_v1();
+
+        assert_eq!(
+            vec![
+                first.session_run_id,
+                second.session_run_id,
+                returned.session_run_id,
+            ],
+            vec![1, 2, 3],
+        );
+        assert_eq!(opened.session_id, after.session_id);
+        assert_eq!(opened.store_instance_id, after.store_instance_id);
+        assert_eq!(opened.engine_instance_id, after.engine_instance_id);
+        assert_eq!(opened.base_link_count, after.base_link_count);
+        assert_eq!(opened.program_fingerprint, after.program_fingerprint);
+        assert_eq!(opened.prepare_count, 1);
+        assert_eq!(opened.load_count, 1);
+        assert_eq!(after.prepare_count, 1);
+        assert_eq!(after.load_count, 1);
+        assert_eq!(after.completed_runs, 3);
+        assert_eq!(first.observed.session_id, opened.session_id);
+        assert_eq!(second.observed.session_id, opened.session_id);
+        assert_eq!(returned.observed.session_id, opened.session_id);
+        assert_eq!(first.result, returned.result);
+        assert!(
+            returned.configuration_reused,
+            "return-to-first must reuse canonical configuration Links",
+        );
+        assert!(
+            after.current_link_count >= after.base_link_count,
+            "CONFIGURE/EXECUTE may append runtime Links but must retain base",
         );
     }
 

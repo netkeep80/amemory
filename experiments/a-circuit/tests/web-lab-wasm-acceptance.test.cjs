@@ -155,6 +155,8 @@ if (sourceSha !== null && !/^[0-9a-f]{40}$/.test(sourceSha)) {
 }
 const version = fs.readFileSync("VERSION", "utf8").trim();
 if (!version) throw new Error("VERSION is empty");
+const PROGRAM_FINGERPRINT_RE =
+  /^prepared-aset-fnv1a64-v1:[0-9a-f]{16}$/;
 Promise.all([
   WebAssembly.instantiate(bytes, {}),
   import("../../browser-accelerator/web/i386-proof-transport.mjs"),
@@ -176,13 +178,17 @@ Promise.all([
   },
   {
     clearScenarioTransportOutput,
+    closeScenarioLiveSession,
     executeLoadedScenarioManifest,
     executeScenarioManifest,
     exportScenarioReplayBundle,
     importScenarioReplayBundle,
+    openScenarioLiveSession,
     readScenarioError,
     readScenarioReport,
     readScenarioTransportLimits,
+    refreshScenarioLiveSessionStatus,
+    runScenarioLiveSession,
     writeScenarioManifest,
   },
   {
@@ -306,7 +312,8 @@ Promise.all([
       scenarioLimits.maxRetainedReports !== 1 ||
       scenarioLimits.maxRetainedErrors !== 1 ||
       scenarioLimits.retentionMode !== "LATEST" ||
-      scenarioLimits.liveSessionRetained !== false) {
+      scenarioLimits.liveSessionRetained !== true ||
+      scenarioLimits.batchSessionRetained !== false) {
     throw new Error("R2e scenario transport limits/policy mismatch");
   }
 
@@ -417,6 +424,101 @@ Promise.all([
       legacyResultBeforeScenario) {
     throw new Error(
       "R2d generic scenario transport mutated legacy LabInstanceState result slot"
+    );
+  }
+
+  // R4a: separate browser Run calls reuse one retained CPU Session.
+  const liveOpened = openScenarioLiveSession(w, scenarioManifest);
+  if (!liveOpened.ok ||
+      liveOpened.status?.completedRuns !== 0 ||
+      liveOpened.status?.prepareCount !== 1 ||
+      liveOpened.status?.loadCount !== 1 ||
+      liveOpened.status?.storeInstanceId !==
+        liveOpened.status?.sessionId ||
+      typeof liveOpened.status?.engineInstanceId !== "string" ||
+      liveOpened.status.engineInstanceId.length === 0 ||
+      !PROGRAM_FINGERPRINT_RE.test(
+        liveOpened.status?.programFingerprint ?? ""
+      )) {
+    throw new Error("R4a retained Session open evidence mismatch");
+  }
+  const liveIdentity = {
+    sessionId: liveOpened.status.sessionId,
+    storeInstanceId: liveOpened.status.storeInstanceId,
+    engineInstanceId: liveOpened.status.engineInstanceId,
+    baseLinkCount: liveOpened.status.baseLinkCount,
+    programFingerprint: liveOpened.status.programFingerprint,
+  };
+
+  const liveRun1 = {
+    ...scenarioManifest.runSequence[0],
+    runId: "live-run-1",
+  };
+  const liveRun2 = {
+    ...scenarioManifest.runSequence[1],
+    runId: "live-run-2",
+  };
+  const liveRun3 = {
+    ...scenarioManifest.runSequence[0],
+    runId: "live-run-3-return",
+  };
+  const liveResults = [
+    runScenarioLiveSession(w, liveRun1),
+    runScenarioLiveSession(w, liveRun2),
+    runScenarioLiveSession(w, liveRun3),
+  ];
+  for (let index = 0; index < liveResults.length; index += 1) {
+    const result = liveResults[index];
+    const status = result.payload?.status;
+    const run = result.payload?.run;
+    if (!result.ok ||
+        status?.sessionId !== liveIdentity.sessionId ||
+        status?.storeInstanceId !== liveIdentity.storeInstanceId ||
+        status?.engineInstanceId !== liveIdentity.engineInstanceId ||
+        status?.baseLinkCount !== liveIdentity.baseLinkCount ||
+        status?.programFingerprint !== liveIdentity.programFingerprint ||
+        status?.prepareCount !== 1 ||
+        status?.loadCount !== 1 ||
+        status?.completedRuns !== index + 1 ||
+        run?.sessionRunId !== index + 1 ||
+        run?.observed?.sessionId !== liveIdentity.sessionId ||
+        run?.observed?.finalQuiescent !== true) {
+      throw new Error(
+        "R4a separate Run call did not retain one Session at " + index
+      );
+    }
+  }
+  if (liveResults[2].payload.run.configurationReused !== true ||
+      JSON.stringify(liveResults[0].payload.run.result) !==
+        JSON.stringify(liveResults[2].payload.run.result)) {
+    throw new Error(
+      "R4a return-to-first did not reuse canonical runtime Links"
+    );
+  }
+
+  const liveRefreshed = refreshScenarioLiveSessionStatus(w);
+  if (!liveRefreshed.ok ||
+      liveRefreshed.status?.completedRuns !== 3 ||
+      liveRefreshed.status?.sessionId !== liveIdentity.sessionId ||
+      liveRefreshed.status?.engineInstanceId !==
+        liveIdentity.engineInstanceId) {
+    throw new Error("R4a retained Session status refresh mismatch");
+  }
+  if (!closeScenarioLiveSession(w)) {
+    throw new Error("R4a explicit Session close reported no live Session");
+  }
+  const afterClose = runScenarioLiveSession(w, {
+    ...liveRun1,
+    runId: "live-run-after-close",
+  });
+  if (afterClose.ok ||
+      afterClose.error?.code !== "LIVE_SESSION_NOT_OPEN") {
+    throw new Error("R4a run after close did not fail closed");
+  }
+  if ((w.amemory_i386_lab_result_available() >>> 0) !==
+      legacyResultBeforeScenario) {
+    throw new Error(
+      "R4a retained Scenario Session mutated legacy LabInstanceState"
     );
   }
 

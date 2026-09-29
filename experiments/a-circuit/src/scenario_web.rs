@@ -1,6 +1,6 @@
 use super::{
     scenario::{
-        parse_and_validate_manifest_v1, ScenarioBackendV1,
+        parse_and_validate_manifest_v1, ScenarioBackendV1, ScenarioRunV1,
         ScenarioValidationErrorV1,
     },
     scenario_registry::{
@@ -8,8 +8,10 @@ use super::{
         ScenarioPresetRegistryErrorV1,
     },
     scenario_runner::{
-        run_scenario_manifest_v1, ScenarioExecutionReportV1,
-        ScenarioRunnerErrorV1,
+        open_cpu_scenario_session_v1, run_cpu_scenario_session_once_v1,
+        run_scenario_manifest_v1, ScenarioCpuSessionV1,
+        ScenarioExecutionReportV1, ScenarioLiveSessionStatusV1,
+        ScenarioRunReportV1, ScenarioRunnerErrorV1,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -23,7 +25,7 @@ const MAX_SCENARIO_MANIFEST_BYTES: usize = 1024 * 1024;
 const MAX_SCENARIO_REPORT_BYTES: usize = 8 * 1024 * 1024;
 const MAX_SCENARIO_ERROR_BYTES: usize = 512 * 1024;
 const SCENARIO_LIMITS_JSON: &str =
-    "{\"schemaVersion\":1,\"maxManifestBytes\":1048576,\"maxSingleReportBytes\":8388608,\"maxErrorBytes\":524288,\"maxRetainedReports\":1,\"maxRetainedErrors\":1,\"retentionMode\":\"LATEST\",\"liveSessionRetained\":false}";
+    "{\"schemaVersion\":1,\"maxManifestBytes\":1048576,\"maxSingleReportBytes\":8388608,\"maxErrorBytes\":524288,\"maxRetainedReports\":1,\"maxRetainedErrors\":1,\"retentionMode\":\"LATEST\",\"liveSessionRetained\":true,\"batchSessionRetained\":false}";
 const FALLBACK_ERROR_LIMIT_JSON: &str =
     "{\"code\":\"ERROR_LIMIT\",\"schemaVersion\":1,\"maxBytes\":524288}";
 
@@ -32,6 +34,11 @@ static SCENARIO_REPORT_JSON: Mutex<String> = Mutex::new(String::new());
 static SCENARIO_ERROR_JSON: Mutex<String> = Mutex::new(String::new());
 static SCENARIO_PRESET_REGISTRY_JSON: Mutex<String> = Mutex::new(String::new());
 static SCENARIO_PRESET_MANIFEST_JSON: Mutex<String> = Mutex::new(String::new());
+static SCENARIO_LIVE_SESSION: Mutex<Option<ScenarioCpuSessionV1>> =
+    Mutex::new(None);
+static SCENARIO_LIVE_RUN_BYTES: Mutex<Vec<u8>> = Mutex::new(Vec::new());
+static SCENARIO_LIVE_OUTPUT_JSON: Mutex<String> =
+    Mutex::new(String::new());
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -44,6 +51,7 @@ struct ScenarioTransportLimitsV1 {
     max_retained_errors: u32,
     retention_mode: String,
     live_session_retained: bool,
+    batch_session_retained: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -122,6 +130,27 @@ enum ScenarioTransportErrorV1 {
     BackendCode {
         schema_version: u32,
         backend_code: u32,
+    },
+    LiveSessionAlreadyOpen {
+        schema_version: u32,
+        session_id: String,
+    },
+    LiveSessionNotOpen {
+        schema_version: u32,
+    },
+    LiveRunLength {
+        schema_version: u32,
+        requested: u32,
+        available: u32,
+        max_bytes: u32,
+    },
+    LiveRunUtf8 {
+        schema_version: u32,
+        message: String,
+    },
+    LiveRunJson {
+        schema_version: u32,
+        message: String,
     },
     Runner {
         schema_version: u32,
@@ -215,26 +244,22 @@ fn store_report_bounded(
     Ok(())
 }
 
-fn execute_manifest_bytes(
+fn parse_manifest_bytes(
     length: u32,
-    backend_code: u32,
-) -> Result<ScenarioExecutionReportV1, ScenarioTransportErrorV1> {
-    let backend =
-        backend_from_code(backend_code).ok_or(ScenarioTransportErrorV1::BackendCode {
-            schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
-            backend_code,
-        })?;
-
+) -> Result<super::scenario::ScenarioManifestV1, ScenarioTransportErrorV1> {
     let bytes = {
         let manifest = SCENARIO_MANIFEST_BYTES
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let requested = length as usize;
-        if requested > manifest.len() || requested > MAX_SCENARIO_MANIFEST_BYTES {
+        if requested > manifest.len()
+            || requested > MAX_SCENARIO_MANIFEST_BYTES
+        {
             return Err(ScenarioTransportErrorV1::ManifestLength {
                 schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
                 requested: length,
-                available: manifest.len().min(u32::MAX as usize) as u32,
+                available:
+                    manifest.len().min(u32::MAX as usize) as u32,
                 max_bytes: MAX_SCENARIO_MANIFEST_BYTES as u32,
             });
         }
@@ -248,12 +273,25 @@ fn execute_manifest_bytes(
         }
     })?;
 
-    let manifest = parse_and_validate_manifest_v1(source).map_err(|errors| {
+    parse_and_validate_manifest_v1(source).map_err(|errors| {
         ScenarioTransportErrorV1::Validation {
             schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
             errors,
         }
-    })?;
+    })
+}
+
+fn execute_manifest_bytes(
+    length: u32,
+    backend_code: u32,
+) -> Result<ScenarioExecutionReportV1, ScenarioTransportErrorV1> {
+    let backend = backend_from_code(backend_code).ok_or(
+        ScenarioTransportErrorV1::BackendCode {
+            schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+            backend_code,
+        },
+    )?;
+    let manifest = parse_manifest_bytes(length)?;
 
     run_scenario_manifest_v1(&manifest, backend).map_err(|error| {
         ScenarioTransportErrorV1::Runner {
@@ -346,6 +384,287 @@ pub extern "C" fn amemory_scenario_transport_limits_json_byte(
         .copied()
         .map(u32::from)
         .unwrap_or(u32::MAX)
+}
+
+fn clear_live_output_and_error() {
+    *SCENARIO_LIVE_OUTPUT_JSON
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+        String::new();
+    *SCENARIO_ERROR_JSON
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+        String::new();
+}
+
+fn store_live_output<T: Serialize>(
+    value: &T,
+) -> Result<(), ScenarioTransportErrorV1> {
+    let json = serialize_bounded(value, MAX_SCENARIO_REPORT_BYTES)
+        .map_err(|error| match error {
+            BoundedJsonError::Limit => {
+                ScenarioTransportErrorV1::ReportLimit {
+                    schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+                    max_bytes: MAX_SCENARIO_REPORT_BYTES as u32,
+                }
+            }
+            error => ScenarioTransportErrorV1::Serialize {
+                schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+                message: format!("{error:?}"),
+            },
+        })?;
+    *SCENARIO_LIVE_OUTPUT_JSON
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = json;
+    Ok(())
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ScenarioLiveRunEnvelopeV1 {
+    schema_version: u32,
+    status: ScenarioLiveSessionStatusV1,
+    run: ScenarioRunReportV1,
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_live_session_available() -> u32 {
+    let slot = SCENARIO_LIVE_SESSION
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    u32::from(slot.is_some())
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_live_open_json(
+    length: u32,
+    backend_code: u32,
+) -> u32 {
+    clear_live_output_and_error();
+
+    let backend = match backend_from_code(backend_code) {
+        Some(backend) => backend,
+        None => {
+            store_error(ScenarioTransportErrorV1::BackendCode {
+                schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+                backend_code,
+            });
+            return 0;
+        }
+    };
+    if backend != ScenarioBackendV1::OptimizedCpu {
+        store_error(ScenarioTransportErrorV1::Runner {
+            schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+            error: ScenarioRunnerErrorV1::UnsupportedBackend {
+                backend,
+            },
+        });
+        return 0;
+    }
+
+    let mut slot = SCENARIO_LIVE_SESSION
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(existing) = slot.as_ref() {
+        store_error(
+            ScenarioTransportErrorV1::LiveSessionAlreadyOpen {
+                schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+                session_id: existing.status_v1().session_id,
+            },
+        );
+        return 0;
+    }
+
+    let manifest = match parse_manifest_bytes(length) {
+        Ok(manifest) => manifest,
+        Err(error) => {
+            store_error(error);
+            return 0;
+        }
+    };
+    let session = match open_cpu_scenario_session_v1(&manifest) {
+        Ok(session) => session,
+        Err(error) => {
+            store_error(ScenarioTransportErrorV1::Runner {
+                schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+                error,
+            });
+            return 0;
+        }
+    };
+    let status = session.status_v1();
+    if let Err(error) = store_live_output(&status) {
+        store_error(error);
+        return 0;
+    }
+    *slot = Some(session);
+    1
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_live_status_refresh() -> u32 {
+    clear_live_output_and_error();
+    let slot = SCENARIO_LIVE_SESSION
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let Some(session) = slot.as_ref() else {
+        store_error(ScenarioTransportErrorV1::LiveSessionNotOpen {
+            schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+        });
+        return 0;
+    };
+    match store_live_output(&session.status_v1()) {
+        Ok(()) => 1,
+        Err(error) => {
+            store_error(error);
+            0
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_live_run_clear() {
+    *SCENARIO_LIVE_RUN_BYTES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Vec::new();
+    clear_live_output_and_error();
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_live_run_set_byte(
+    index: u32,
+    byte: u32,
+) -> u32 {
+    let index = index as usize;
+    if index >= MAX_SCENARIO_MANIFEST_BYTES
+        || byte > u8::MAX as u32
+    {
+        return 0;
+    }
+    let mut run = SCENARIO_LIVE_RUN_BYTES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if run.len() <= index {
+        run.resize(index + 1, 0);
+    }
+    run[index] = byte as u8;
+    1
+}
+
+fn parse_live_run_bytes(
+    length: u32,
+) -> Result<ScenarioRunV1, ScenarioTransportErrorV1> {
+    let bytes = {
+        let run = SCENARIO_LIVE_RUN_BYTES
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let requested = length as usize;
+        if requested > run.len()
+            || requested > MAX_SCENARIO_MANIFEST_BYTES
+        {
+            return Err(ScenarioTransportErrorV1::LiveRunLength {
+                schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+                requested: length,
+                available: run.len().min(u32::MAX as usize) as u32,
+                max_bytes: MAX_SCENARIO_MANIFEST_BYTES as u32,
+            });
+        }
+        run[..requested].to_vec()
+    };
+    let source = std::str::from_utf8(&bytes).map_err(|error| {
+        ScenarioTransportErrorV1::LiveRunUtf8 {
+            schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+            message: error.to_string(),
+        }
+    })?;
+    serde_json::from_str(source).map_err(|error| {
+        ScenarioTransportErrorV1::LiveRunJson {
+            schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+            message: error.to_string(),
+        }
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_live_execute_json(
+    length: u32,
+) -> u32 {
+    clear_live_output_and_error();
+    let run = match parse_live_run_bytes(length) {
+        Ok(run) => run,
+        Err(error) => {
+            store_error(error);
+            return 0;
+        }
+    };
+
+    let mut slot = SCENARIO_LIVE_SESSION
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let Some(session) = slot.as_mut() else {
+        store_error(ScenarioTransportErrorV1::LiveSessionNotOpen {
+            schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+        });
+        return 0;
+    };
+
+    let report = match run_cpu_scenario_session_once_v1(session, &run) {
+        Ok(report) => report,
+        Err(error) => {
+            store_error(ScenarioTransportErrorV1::Runner {
+                schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+                error,
+            });
+            return 0;
+        }
+    };
+    let envelope = ScenarioLiveRunEnvelopeV1 {
+        schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+        status: session.status_v1(),
+        run: report,
+    };
+    match store_live_output(&envelope) {
+        Ok(()) => 1,
+        Err(error) => {
+            store_error(error);
+            0
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_live_close() -> u32 {
+    let mut slot = SCENARIO_LIVE_SESSION
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let existed = slot.take().is_some();
+    *SCENARIO_LIVE_RUN_BYTES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Vec::new();
+    clear_live_output_and_error();
+    u32::from(existed)
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_live_output_available() -> u32 {
+    string_available(&SCENARIO_LIVE_OUTPUT_JSON)
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_live_output_json_len() -> u32 {
+    string_len(&SCENARIO_LIVE_OUTPUT_JSON)
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_live_output_json_ptr() -> u32 {
+    string_ptr(&SCENARIO_LIVE_OUTPUT_JSON)
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_live_output_json_byte(
+    index: u32,
+) -> u32 {
+    string_byte(&SCENARIO_LIVE_OUTPUT_JSON, index)
 }
 
 fn clear_preset_buffers() {
@@ -656,7 +975,8 @@ mod tests {
         assert_eq!(limits.max_retained_reports, 1);
         assert_eq!(limits.max_retained_errors, 1);
         assert_eq!(limits.retention_mode, "LATEST");
-        assert!(!limits.live_session_retained);
+        assert!(limits.live_session_retained);
+        assert!(!limits.batch_session_retained);
     }
 
     #[test]
