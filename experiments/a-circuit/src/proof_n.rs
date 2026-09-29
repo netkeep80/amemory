@@ -723,7 +723,7 @@ impl ProofRuntimeSession {
         })
     }
 
-    fn fail_active_run(&mut self) {
+    pub(crate) fn fail_active_run(&mut self) {
         self.execution_state = ProofRuntimeSessionState::Failed;
     }
 }
