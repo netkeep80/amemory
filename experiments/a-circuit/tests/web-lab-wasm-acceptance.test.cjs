@@ -88,6 +88,14 @@ const gpuCarrierSource = fs.readFileSync(
   "experiments/browser-accelerator/web/gpu-carrier.mjs",
   "utf8"
 );
+for (const forbiddenBlockName of ["MUX1", "XOR2", "AND2", "NOT1"]) {
+  if (gpuCarrierSource.includes(forbiddenBlockName)) {
+    throw new Error(
+      "generic GPU carrier executor leaked block-specific semantics: " +
+      forbiddenBlockName
+    );
+  }
+}
 const c4InputStart = gpuCarrierSource.indexOf(
   "export function deriveGpuCarrierReactionInput"
 );
