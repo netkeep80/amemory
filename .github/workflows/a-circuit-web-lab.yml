@@ -1,6 +1,6 @@
-name: A-Circuit web 80386 interactive lab
+name: A-Circuit Workbench real-WASM
 
-# The user-visible constructor is a first-class executable test surface.
+# The unified Workbench is a first-class executable test surface.
 
 on:
   pull_request:
@@ -37,82 +37,25 @@ jobs:
       - name: Browser lab syntax and rendering witness
         run: |
           set -euo pipefail
-          cp experiments/browser-accelerator/web/i386-lab.js /tmp/i386-lab.mjs
-          node --check /tmp/i386-lab.mjs
-          node --check experiments/browser-accelerator/web/i386-lab-view.mjs
-          node --check experiments/browser-accelerator/web/i386-proof-view.mjs
+          node --check experiments/browser-accelerator/web/workbench.mjs
+          node --check experiments/browser-accelerator/web/proof-view.mjs
           node --check experiments/browser-accelerator/web/i386-proof-transport.mjs
           node --check experiments/browser-accelerator/web/i386-wasm-json.mjs
+          node --check experiments/browser-accelerator/web/gpu-carrier.mjs
+          node --check experiments/browser-accelerator/web/scenario-transport.mjs
+          node --check experiments/browser-accelerator/web/scenario-presets.mjs
 
           node --input-type=module <<'NODE'
           import {
-            blockDefinitionHtml,
-            catalogCardHtml,
-            evidenceHtml,
-          } from "./experiments/browser-accelerator/web/i386-lab-view.mjs";
-          import {
             proofPipelineHtml,
-          } from "./experiments/browser-accelerator/web/i386-proof-view.mjs";
+            recursiveStructureHtml,
+          } from "./experiments/browser-accelerator/web/proof-view.mjs";
 
-          const outcome = {
-            value: 0x0a0a0a0a,
-            valueHi: 0,
-            writeback: 1,
-            defined: 0,
-            flagValues: 0,
-            undefined: 0,
-            preserve: 0x000008d5,
-            reactions: 42,
-            linksBuild: 100,
-            linksFirst: 120,
-            steadyDelta: 0,
-            quiescent: 1,
-          };
-
-          const and32 = {
-            id: "and32",
-            opcode: 1,
-            category: "Logic",
-            name: "AND32",
-            formula: "A & B",
-            inputs: [
-              { key: "A", slot: "a", type: "word32" },
-              { key: "B", slot: "b", type: "word32" },
-            ],
-            outputs: [{ key: "Result", type: "word32" }],
-            modes: ["single", "vectors"],
-          };
-
-          const one = evidenceHtml(and32, { A: 0xaaaaaaaa, B: 0x0f0f0f0f }, outcome);
-          if (!one.includes("Result") || !one.includes("0x0a0a0a0a") || !one.includes("Identical rerun Link growth")) {
-            throw new Error("one-output browser renderer witness failed");
-          }
-
-          const mul = {
-            id: "mul32-raw",
-            opcode: 23,
-            category: "Multiply",
-            name: "MUL32 raw Wide64",
-            formula: "Wide64 = A × B",
-            inputs: [
-              { key: "A", slot: "a", type: "word32" },
-              { key: "B", slot: "b", type: "word32" },
-            ],
-            outputs: [
-              { key: "LoWord32", slot: "value", type: "word32" },
-              { key: "HiWord32", slot: "valueHi", type: "word32" },
-            ],
-            modes: ["single", "vectors"],
-          };
-          const wide = evidenceHtml(mul, { A: 0xffffffff, B: 2 }, { ...outcome, value: 0xfffffffe, valueHi: 1 });
-          if (!wide.includes("LoWord32") || !wide.includes("HiWord32") || !wide.includes("Combined Hi:Lo") || !wide.includes("0x00000001:0xfffffffe")) {
-            throw new Error("Wide64 browser renderer witness failed");
-          }
-
-          const definition = blockDefinitionHtml(mul);
-          const card = catalogCardHtml(mul);
-          if (!definition.includes("INPUT ABI") || !definition.includes("OUTPUT ABI") || !card.includes("MUL32 raw Wide64")) {
-            throw new Error("constructor definition/catalog renderer witness failed");
+          const collapsed = recursiveStructureHtml("1".repeat(4096));
+          if (!collapsed.includes('class="proof-recursive-structure"') ||
+              !collapsed.includes("<details") ||
+              !collapsed.includes("4096 symbols")) {
+            throw new Error("collapsed recursive-structure renderer witness failed");
           }
 
           const proofFixture = {
@@ -194,7 +137,7 @@ jobs:
             }
           }
 
-          console.log("browser syntax + one-output + Wide64 + four-stage proof rendering PASS");
+          console.log("Workbench syntax + collapsed recursive structure + four-stage proof rendering PASS");
           NODE
 
       - name: Build identity consumer acceptance
@@ -312,11 +255,11 @@ jobs:
           node --input-type=module -e 'import("file:///tmp/mts-visual-core.bundle.mjs").then(m => { const network={links:Array.from({length:64},(_,i)=>({key:"L"+i,startKey:"L"+i,endKey:"L"+i}))}; const c=m.createOctahedralLivePhysics3D(network,{aspectRatio:2*Math.SQRT2,stiffness:1,simulationSpeed:1}); const t=c.template,p=c.positions; let minY=Infinity,maxY=-Infinity,minZ=Infinity,maxZ=-Infinity; for(let link=0;link<64;link++){let y=0,z=0;for(const v of t.centerTriangle){const o=(link*t.vertexCount+v)*3;y+=p[o+1];z+=p[o+2];}y/=3;z/=3;minY=Math.min(minY,y);maxY=Math.max(maxY,y);minZ=Math.min(minZ,z);maxZ=Math.max(maxZ,z);} for(const value of p){if(!Number.isFinite(value)) process.exit(1);} if(!(maxY-minY>1e-3 && maxZ-minZ>1e-3)) process.exit(1); })'
           node --input-type=module -e 'import("file:///tmp/mts-visual-three.bundle.mjs").then(m => { if (typeof m.createVisualThreeRenderer !== "function" || typeof m.createOctahedralThreeLiveRenderer !== "function" || typeof m.destroyOctahedralThreeLiveRenderer !== "function") process.exit(1); })'
 
-          grep -F 'import("./vendor/mts-visual-core.bundle.js")' experiments/browser-accelerator/web/i386-proof-view.mjs
-          grep -F 'import("./vendor/mts-visual-three.bundle.js")' experiments/browser-accelerator/web/i386-proof-view.mjs
-          grep -F 'createOctahedralLivePhysics3D' experiments/browser-accelerator/web/i386-proof-view.mjs
-          grep -F 'createOctahedralThreeLiveRenderer' experiments/browser-accelerator/web/i386-proof-view.mjs
-          if grep -Fq 'vendor/mts-visual/three/index.js' experiments/browser-accelerator/web/i386-proof-view.mjs; then
+          grep -F 'import("./vendor/mts-visual-core.bundle.js")' experiments/browser-accelerator/web/proof-view.mjs
+          grep -F 'import("./vendor/mts-visual-three.bundle.js")' experiments/browser-accelerator/web/proof-view.mjs
+          grep -F 'createOctahedralLivePhysics3D' experiments/browser-accelerator/web/proof-view.mjs
+          grep -F 'createOctahedralThreeLiveRenderer' experiments/browser-accelerator/web/proof-view.mjs
+          if grep -Fq 'vendor/mts-visual/three/index.js' experiments/browser-accelerator/web/proof-view.mjs; then
             echo "proof renderer still references the fragile unbundled 3D entrypoint" >&2
             exit 1
           fi

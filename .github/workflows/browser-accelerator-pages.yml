@@ -263,13 +263,18 @@ jobs:
               raise SystemExit("CI matrix script was not attached")
           PY
 
-      - name: Verify published 80386 lab payload
+      - name: Verify published Workbench payload
         run: |
           set -euo pipefail
 
-          test -s _site/i386-lab.js
-          test -s _site/i386-lab-view.mjs
-          test -s _site/i386-proof-view.mjs
+          test -s _site/workbench.mjs
+          test -s _site/proof-view.mjs
+          test -s _site/scenario-transport.mjs
+          test -s _site/scenario-presets.mjs
+          test ! -e _site/app.js
+          test ! -e _site/i386-lab.js
+          test ! -e _site/i386-lab-view.mjs
+          test ! -e _site/proof-view.mjs
           test -s _site/i386-blocks.json
           test -s _site/amemory_a_circuit.wasm
           test -s _site/mts-visual-lock.json
@@ -280,11 +285,11 @@ jobs:
           test -s _site/vendor/three/addons/controls/OrbitControls.js
           test -s _site/vendor/mts-visual-core.bundle.js
           test -s _site/vendor/mts-visual-three.bundle.js
-          grep -F 'import("./vendor/mts-visual-core.bundle.js")' _site/i386-proof-view.mjs
-          grep -F 'import("./vendor/mts-visual-three.bundle.js")' _site/i386-proof-view.mjs
-          grep -F 'createOctahedralLivePhysics3D' _site/i386-proof-view.mjs
-          grep -F 'createOctahedralThreeLiveRenderer' _site/i386-proof-view.mjs
-          if grep -Fq 'vendor/mts-visual/three/index.js' _site/i386-proof-view.mjs; then
+          grep -F 'import("./vendor/mts-visual-core.bundle.js")' _site/proof-view.mjs
+          grep -F 'import("./vendor/mts-visual-three.bundle.js")' _site/proof-view.mjs
+          grep -F 'createOctahedralLivePhysics3D' _site/proof-view.mjs
+          grep -F 'createOctahedralThreeLiveRenderer' _site/proof-view.mjs
+          if grep -Fq 'vendor/mts-visual/three/index.js' _site/proof-view.mjs; then
             echo "published proof renderer still references unbundled 3D entrypoint" >&2
             exit 1
           fi
@@ -293,15 +298,16 @@ jobs:
           node --input-type=module -e 'import("file:///tmp/pages-mts-visual-core.bundle.mjs").then(m => { if (typeof m.buildBlueprintSvgScene !== "function" || typeof m.createOctahedralLivePhysics3D !== "function" || typeof m.estimateOctahedralPerformance3D !== "function" || typeof m.createMonolithicLinkSpringPhysics3D !== "function" || typeof m.deriveMonolithicNetworkShape3D !== "function") process.exit(1); })'
           node --input-type=module -e 'import("file:///tmp/pages-mts-visual-core.bundle.mjs").then(m => { const network={links:Array.from({length:64},(_,i)=>({key:"L"+i,startKey:"L"+i,endKey:"L"+i}))}; const c=m.createOctahedralLivePhysics3D(network,{aspectRatio:2*Math.SQRT2,stiffness:1,simulationSpeed:1}); const t=c.template,p=c.positions; let minY=Infinity,maxY=-Infinity,minZ=Infinity,maxZ=-Infinity; for(let link=0;link<64;link++){let y=0,z=0;for(const v of t.centerTriangle){const o=(link*t.vertexCount+v)*3;y+=p[o+1];z+=p[o+2];}y/=3;z/=3;minY=Math.min(minY,y);maxY=Math.max(maxY,y);minZ=Math.min(minZ,z);maxZ=Math.max(maxZ,z);} for(const value of p){if(!Number.isFinite(value)) process.exit(1);} if(!(maxY-minY>1e-3 && maxZ-minZ>1e-3)) process.exit(1); })'
           node --input-type=module -e 'import("file:///tmp/pages-mts-visual-three.bundle.mjs").then(m => { if (typeof m.createVisualThreeRenderer !== "function" || typeof m.createOctahedralThreeLiveRenderer !== "function" || typeof m.destroyOctahedralThreeLiveRenderer !== "function") process.exit(1); })'
-          grep -F '<script type="importmap">' _site/index.html
-          grep -F '"three": "./vendor/three/three.module.js"' _site/index.html
-          grep -F '"three/addons/": "./vendor/three/addons/"' _site/index.html
-          grep -F '<script type="module" src="./i386-lab.js"></script>' _site/index.html
+          grep -F '<script type="module" src="./workbench.mjs"></script>' _site/index.html
+          if grep -Eq 'legacy-diagnostics|src="./app.js"|src="./i386-lab.js"' _site/index.html; then
+            echo "published page still contains obsolete parallel UI wiring" >&2
+            exit 1
+          fi
 
-          cp _site/i386-lab.js /tmp/i386-lab.mjs
-          node --check /tmp/i386-lab.mjs
-          node --check _site/i386-lab-view.mjs
-          node --check _site/i386-proof-view.mjs
+          node --check _site/workbench.mjs
+          node --check _site/proof-view.mjs
+          node --check _site/scenario-transport.mjs
+          node --check _site/scenario-presets.mjs
 
           python3 - <<'PY'
           from pathlib import Path
@@ -394,7 +400,7 @@ jobs:
           );
           NODE
 
-      - name: Cache-bust interactive lab modules
+      - name: Cache-bust Workbench modules
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -405,29 +411,22 @@ jobs:
           index = Path("_site/index.html")
           html = index.read_text(encoding="utf-8")
           html = html.replace(
-              'src="./i386-lab.js"',
-              f'src="./i386-lab.js?v={sha}"',
+              'src="./workbench.mjs"',
+              f'src="./workbench.mjs?v={sha}"',
           )
           index.write_text(html, encoding="utf-8")
 
-          lab = Path("_site/i386-lab.js")
-          source = lab.read_text(encoding="utf-8")
-          source = source.replace(
-              'from "./i386-lab-view.mjs"',
-              f'from "./i386-lab-view.mjs?v={sha}"',
-          )
-          source = source.replace(
-              'from "./i386-proof-view.mjs"',
-              f'from "./i386-proof-view.mjs?v={sha}"',
-          )
-          lab.write_text(source, encoding="utf-8")
+          workbench = Path("_site/workbench.mjs")
+          source = workbench.read_text(encoding="utf-8")
+          for module in ("scenario-transport.mjs", "scenario-presets.mjs", "proof-view.mjs"):
+              source = source.replace(
+                  f'from "./{module}"',
+                  f'from "./{module}?v={sha}"',
+              )
+          workbench.write_text(source, encoding="utf-8")
 
-          proof = Path("_site/i386-proof-view.mjs")
+          proof = Path("_site/proof-view.mjs")
           proof_source = proof.read_text(encoding="utf-8")
-          proof_source = proof_source.replace(
-              'from "./i386-lab-view.mjs"',
-              f'from "./i386-lab-view.mjs?v={sha}"',
-          )
           visual_commit = json.loads(Path("_site/mts-visual-lock.json").read_text(encoding="utf-8"))["commit"]
           proof_source = proof_source.replace(
               'import("./vendor/mts-visual-core.bundle.js")',
@@ -440,9 +439,11 @@ jobs:
           proof.write_text(proof_source, encoding="utf-8")
 
           if 'vendor/mts-visual/three/index.js' in proof_source:
-              raise SystemExit("cache-busted proof renderer still references legacy 3D module graph")
+              raise SystemExit("cache-busted proof renderer still references unbundled 3D module graph")
           if f'mts-visual-three.bundle.js?v={visual_commit}' not in proof_source:
               raise SystemExit("3D visual bundle cache-bust was not applied")
+          if f'proof-view.mjs?v={sha}' not in source:
+              raise SystemExit("Workbench proof-view cache-bust was not applied")
           PY
 
       - name: Configure Pages
@@ -483,7 +484,7 @@ jobs:
 
           fetch "build-info.json" /tmp/pages-live-smoke/build-info.json
           fetch "exact-evidence.json" /tmp/pages-live-smoke/exact-evidence.json
-          fetch "i386-proof-view.mjs" /tmp/pages-live-smoke/i386-proof-view.mjs
+          fetch "proof-view.mjs" /tmp/pages-live-smoke/proof-view.mjs
           fetch "vendor/mts-visual-core.bundle.js" /tmp/pages-live-smoke/mts-visual-core.bundle.js
           fetch "vendor/mts-visual-three.bundle.js" /tmp/pages-live-smoke/mts-visual-three.bundle.js
 
@@ -497,10 +498,10 @@ jobs:
           evidence_version="$(jq -r '.version' /tmp/pages-live-smoke/exact-evidence.json)"
           test -n "${build_version}"
           test "${build_version}" = "${evidence_version}"
-          grep -F 'mts-visual-core.bundle.js' /tmp/pages-live-smoke/i386-proof-view.mjs
-          grep -F 'mts-visual-three.bundle.js' /tmp/pages-live-smoke/i386-proof-view.mjs
-          grep -F 'createOctahedralLivePhysics3D' /tmp/pages-live-smoke/i386-proof-view.mjs
-          grep -F 'createOctahedralThreeLiveRenderer' /tmp/pages-live-smoke/i386-proof-view.mjs
+          grep -F 'mts-visual-core.bundle.js' /tmp/pages-live-smoke/proof-view.mjs
+          grep -F 'mts-visual-three.bundle.js' /tmp/pages-live-smoke/proof-view.mjs
+          grep -F 'createOctahedralLivePhysics3D' /tmp/pages-live-smoke/proof-view.mjs
+          grep -F 'createOctahedralThreeLiveRenderer' /tmp/pages-live-smoke/proof-view.mjs
 
           cp /tmp/pages-live-smoke/mts-visual-core.bundle.js /tmp/pages-live-smoke/mts-visual-core.bundle.mjs
           cp /tmp/pages-live-smoke/mts-visual-three.bundle.js /tmp/pages-live-smoke/mts-visual-three.bundle.mjs

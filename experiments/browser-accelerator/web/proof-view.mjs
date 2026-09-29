@@ -1,4 +1,11 @@
-import { escapeHtml } from "./i386-lab-view.mjs";
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
 
 function code(value) {
   return `<code>${escapeHtml(value)}</code>`;
