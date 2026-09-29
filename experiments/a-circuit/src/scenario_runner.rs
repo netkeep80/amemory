@@ -17,11 +17,14 @@ use super::{
     },
     observability::{
         run_pipeline_profile_v1, session_open_profile_v1, time_stage,
-        ObservedRunV1, RunPipelineProfileV1, SessionOpenProfileV1,
+        ObservedRunV1, RunObservationLevel, RunPipelineProfileV1,
+        SessionOpenProfileV1,
     },
     proof_n::{
         execute_session_observed_to_quiescence, load_runtime_session,
-        ProofRuntimeSession, WebProofLoadStage, WebProofPrepareStage,
+        ProofRuntimeSession, ProofRuntimeSessionState,
+        ProofRuntimeStepError, SessionReactionEvidenceV1,
+        WebProofLoadStage, WebProofPrepareStage,
     },
     shift32_n::{
         configure_shl32_session, prepare_shl32_session_program,
@@ -1488,6 +1491,218 @@ mod tests {
             after.current_link_count >= after.base_link_count,
             "CONFIGURE/EXECUTE may append runtime Links but must retain base",
         );
+    }
+
+    fn manual_step_first_run(
+        source: &str,
+        observation_level: RunObservationLevel,
+    ) -> (
+        ScenarioNormalizedResultV1,
+        Vec<(Handle, Handle)>,
+        Vec<SessionReactionEvidenceV1>,
+        ScenarioLiveSessionStatusV1,
+        ScenarioLiveSessionStatusV1,
+    ) {
+        let manifest = parse_and_validate_manifest_v1(source).unwrap();
+        let run = manifest.run_sequence[0].clone();
+        let mut live = open_cpu_scenario_session_v1(&manifest).unwrap();
+        let opened = live.status_v1();
+
+        assert_eq!(
+            live.session.execution_state(),
+            ProofRuntimeSessionState::Open,
+        );
+
+        let configured = (live.adapter.configure)(
+            &mut live.session,
+            &live.load,
+            &run.inputs,
+        )
+        .unwrap();
+        let run_id = live.session.begin_run(configured.initial).unwrap();
+        assert_eq!(run_id, 1);
+        assert_eq!(
+            live.session.execution_state(),
+            ProofRuntimeSessionState::Configured,
+        );
+
+        let mut evidence = Vec::new();
+        loop {
+            let step = live.session.step(observation_level).unwrap();
+            assert_eq!(step.evidence.session_id, opened.session_id);
+            assert_eq!(step.evidence.run_id, run_id);
+            assert_eq!(
+                step.evidence.reaction_index,
+                evidence.len() as u32,
+            );
+            assert!(
+                step.evidence.links_after >= step.evidence.links_before,
+                "a successful reaction must not shrink the canonical Store",
+            );
+            if let Some(previous) = evidence.last() {
+                assert_eq!(
+                    previous.scope_after,
+                    step.evidence.scope_before,
+                    "real Session.step Scope chain must be contiguous",
+                );
+            }
+
+            let quiescent = step.evidence.quiescent;
+            evidence.push(step.evidence);
+            if quiescent {
+                break;
+            }
+            assert_eq!(
+                live.session.execution_state(),
+                ProofRuntimeSessionState::Running,
+            );
+        }
+
+        assert_eq!(
+            live.session.execution_state(),
+            ProofRuntimeSessionState::Quiescent,
+        );
+        assert!(matches!(
+            live.session.step(observation_level),
+            Err(ProofRuntimeStepError::InvalidState(
+                ProofRuntimeSessionState::Quiescent
+            ))
+        ));
+
+        let result = (live.adapter.project)(&live.session, &live.load).unwrap();
+        let carrier = live.session.memory.store.export_packed_duplets();
+        let after = live.status_v1();
+        (result, carrier, evidence, opened, after)
+    }
+
+    fn wrapped_first_run(
+        source: &str,
+        observation_level: RunObservationLevel,
+    ) -> (
+        ScenarioNormalizedResultV1,
+        Vec<(Handle, Handle)>,
+        ObservedRunV1,
+        ScenarioLiveSessionStatusV1,
+        ScenarioLiveSessionStatusV1,
+    ) {
+        let mut manifest = parse_and_validate_manifest_v1(source).unwrap();
+        manifest.observation_level = observation_level;
+        let run = manifest.run_sequence[0].clone();
+        let mut live = open_cpu_scenario_session_v1(&manifest).unwrap();
+        let opened = live.status_v1();
+        let report =
+            run_cpu_scenario_session_once_v1(&mut live, &run).unwrap();
+        let carrier = live.session.memory.store.export_packed_duplets();
+        let after = live.status_v1();
+        (report.result, carrier, report.observed, opened, after)
+    }
+
+    #[test]
+    fn first_class_session_step_matches_run_to_quiescence() {
+        for (source, active_reactions) in [
+            (MUX1_LIFECYCLE, 7u32),
+            (XOR32_LIFECYCLE, 147u32),
+        ] {
+            let (step_result, step_carrier, steps, step_opened, step_after) =
+                manual_step_first_run(source, RunObservationLevel::Trace);
+            let (
+                wrapped_result,
+                wrapped_carrier,
+                observed,
+                wrapped_opened,
+                wrapped_after,
+            ) = wrapped_first_run(source, RunObservationLevel::Trace);
+
+            assert_eq!(step_result, wrapped_result);
+            assert_eq!(step_carrier, wrapped_carrier);
+            assert_eq!(
+                steps.len() as u32,
+                active_reactions + 1,
+                "terminal quiescent step is real reaction evidence",
+            );
+            assert_eq!(observed.active_reaction_count, active_reactions);
+            assert!(observed.final_quiescent);
+            assert_eq!(
+                steps.last().unwrap().scope_after,
+                observed.final_scope,
+            );
+            assert!(steps.last().unwrap().quiescent);
+
+            assert_eq!(
+                step_opened.store_instance_id,
+                step_after.store_instance_id,
+            );
+            assert_eq!(
+                step_opened.engine_instance_id,
+                step_after.engine_instance_id,
+            );
+            assert_eq!(
+                wrapped_opened.store_instance_id,
+                wrapped_after.store_instance_id,
+            );
+            assert_eq!(
+                wrapped_opened.engine_instance_id,
+                wrapped_after.engine_instance_id,
+            );
+        }
+    }
+
+    #[test]
+    fn observation_level_changes_evidence_not_step_semantics() {
+        let mut reference: Option<(
+            ScenarioNormalizedResultV1,
+            Vec<(Handle, Handle)>,
+            Vec<u32>,
+            usize,
+        )> = None;
+
+        for level in [
+            RunObservationLevel::Off,
+            RunObservationLevel::Profile,
+            RunObservationLevel::Trace,
+            RunObservationLevel::Full,
+        ] {
+            let (result, carrier, steps, opened, after) =
+                manual_step_first_run(MUX1_LIFECYCLE, level);
+            let final_scope = steps.last().unwrap().scope_after.clone();
+            let semantic = (
+                result,
+                carrier,
+                final_scope,
+                steps.len(),
+            );
+
+            if let Some(expected) = &reference {
+                assert_eq!(
+                    &semantic, expected,
+                    "observation level changed Session.step semantics",
+                );
+            } else {
+                reference = Some(semantic);
+            }
+
+            assert_eq!(opened.session_id, after.session_id);
+            assert_eq!(
+                opened.store_instance_id,
+                after.store_instance_id,
+            );
+            assert_eq!(
+                opened.engine_instance_id,
+                after.engine_instance_id,
+            );
+
+            if level.traces() {
+                assert!(steps.iter().any(|step| {
+                    step.structural_facts
+                        .as_ref()
+                        .is_some_and(|facts| !facts.is_empty())
+                }));
+            } else {
+                assert!(
+                    steps.iter().all(|step| step.structural_facts.is_none())
+                );
+            }
+        }
     }
 
     #[test]
