@@ -117,6 +117,9 @@ for (const required of [
   "loadScenarioPresetManifestByIndex",
   "openScenarioLiveSession",
   "runScenarioLiveSession",
+  "beginScenarioLiveStepRun",
+  "stepScenarioLiveSession",
+  "workbenchStepSnapshot",
   "refreshScenarioLiveHistoryStatus",
   "setScenarioLiveRetentionPolicy",
   "closeScenarioLiveSession",
@@ -143,7 +146,9 @@ for (const required of [
   "recursiveStructureHtml",
   "Готовый сценарий",
   "Открыть апамять",
-  "Выполнить",
+  "Выполнить полностью",
+  "Начать по шагам",
+  "UI не передаёт Scope обратно",
   "Простой",
   "Инженерный",
   "Доказательство",
@@ -256,12 +261,14 @@ Promise.all([
   },
   {
     createWorkbenchRun,
+    createWorkbenchStepRun,
     deriveWorkbenchPipeline,
     normalizeWorkbenchInputs,
     workbenchResultStatus,
     workbenchStageDetails,
     workbenchVerificationLevels,
     workbenchRecursiveStructure,
+    workbenchStepSnapshot,
   },
 ]) => {
   const w = instance.exports;
@@ -454,6 +461,73 @@ Promise.all([
       workbenchRunPipeline.some((stage) => stage.state !== "done")) {
     throw new Error("R4 Workbench pipeline is not driven by runtime evidence");
   }
+  const stepRequest = createWorkbenchStepRun(
+    scenarioManifest,
+    0,
+    scenarioManifest.runSequence[0].inputs,
+    1,
+    "preset"
+  );
+  if (stepRequest.executionMode !== "STEP" ||
+      stepRequest.runId !== "workbench-live-1") {
+    throw new Error("#333 Workbench did not build a STEP request");
+  }
+  const workbenchLiveStep = {
+    active: true,
+    begin: {
+      sessionRunId: 7,
+      linksBeforeConfigure: 123,
+      linksAfterConfigure: 130,
+    },
+    reports: [{
+      sessionRunId: 7,
+      activeReactionCount: 1,
+      completed: false,
+      evidence: {
+        scopeBefore: [11, 12],
+        scopeAfter: [21],
+        linksBefore: 130,
+        linksAfter: 133,
+        rawRuleMatches: 2,
+        transitionedMembers: 1,
+        handoffCount: 1,
+        quiescent: false,
+      },
+    }],
+  };
+  const workbenchStepState = workbenchStepSnapshot(workbenchLiveStep);
+  const workbenchStepPipeline = deriveWorkbenchPipeline(
+    { prepareCount: 1, loadCount: 1, baseLinkCount: 123 },
+    null,
+    workbenchLiveStep,
+  );
+  if (!workbenchStepState.active ||
+      workbenchStepState.sessionRunId !== 7 ||
+      workbenchStepState.reactionCount !== 1 ||
+      JSON.stringify(workbenchStepState.scopeBefore) !== "[11,12]" ||
+      JSON.stringify(workbenchStepState.scopeAfter) !== "[21]" ||
+      workbenchStepPipeline[2].state !== "done" ||
+      workbenchStepPipeline[3].state !== "done" ||
+      workbenchStepPipeline[4].state !== "waiting" ||
+      workbenchStepPipeline[5].state !== "done") {
+    throw new Error("#333 Workbench live step projection mismatch");
+  }
+  const stepOnceStart = workbenchSource.indexOf(
+    "async function stepOnce(state)"
+  );
+  const stepOnceEnd = workbenchSource.indexOf(
+    "function close(state)",
+    stepOnceStart
+  );
+  const stepOnceSource = workbenchSource.slice(stepOnceStart, stepOnceEnd);
+  if (!stepOnceSource.includes("stepScenarioLiveSession(state.wasm)") ||
+      stepOnceSource.includes("scopeBefore") ||
+      stepOnceSource.includes("scopeAfter")) {
+    throw new Error(
+      "#333 Workbench step action owns or feeds Scope instead of runtime"
+    );
+  }
+
   const workbenchReady = workbenchResultStatus(null);
   const workbenchManualStatus = workbenchResultStatus({
     assertionResults: [],
