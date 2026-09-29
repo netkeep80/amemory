@@ -23,7 +23,8 @@ use std::collections::HashSet;
 use super::{
     observability::{
         run_pipeline_profile_v1, session_open_profile_v1, time_stage,
-        RunEventKind, RunObservationLevel, RUN_OBSERVABILITY_SCHEMA_VERSION,
+        RunEventKind, RunObservationLevel, RunStructuralFactKind,
+        RUN_OBSERVABILITY_SCHEMA_VERSION,
     },
     proof_n::{
         execute_session_observed_to_quiescence, ProofRuntimeSession,
@@ -1628,6 +1629,10 @@ fn web_mux1_observation_levels_are_semantically_passive() {
             RunObservationLevel::Trace | RunObservationLevel::Full => {
                 let profile = observed.profile.as_ref().unwrap();
                 assert_eq!(profile.active_reaction_count, 7);
+                assert!(
+                    profile.trace_projection_ns > 0,
+                    "native trace collection/mapping must be charged to evidence",
+                );
                 assert_eq!(
                     observed.events.first().unwrap().kind,
                     RunEventKind::ExecuteBegin,
@@ -1646,12 +1651,79 @@ fn web_mux1_observation_levels_are_semantically_passive() {
                     .events
                     .iter()
                     .filter(|event| event.kind == RunEventKind::ReactionEnd)
-                    .count() as u32;
+                    .collect::<Vec<_>>();
                 assert_eq!(
-                    reaction_events,
+                    reaction_events.len() as u32,
                     observed.active_reaction_count + 1,
                     "trace must include the terminal quiescent reaction",
                 );
+
+                for event in reaction_events {
+                    let facts = event
+                        .structural_facts
+                        .as_ref()
+                        .expect("TRACE reaction must carry native facts");
+                    assert!(
+                        facts.iter().any(|fact| {
+                            fact.kind
+                                == RunStructuralFactKind::DiscoveryComplete
+                        }),
+                        "native discovery fact missing",
+                    );
+
+                    let matched = facts
+                        .iter()
+                        .filter(|fact| {
+                            fact.kind == RunStructuralFactKind::RuleMatched
+                        })
+                        .count() as u32;
+                    let instantiated = facts
+                        .iter()
+                        .filter(|fact| {
+                            fact.kind == RunStructuralFactKind::Instantiated
+                        })
+                        .count() as u32;
+                    assert_eq!(
+                        matched,
+                        event.raw_rule_matches.unwrap(),
+                        "Session match facts diverged from native reaction",
+                    );
+                    assert_eq!(
+                        instantiated, matched,
+                        "each real match must expose its real instantiation",
+                    );
+
+                    let commits = facts
+                        .iter()
+                        .filter(|fact| {
+                            fact.kind == RunStructuralFactKind::ScopeCommitted
+                        })
+                        .collect::<Vec<_>>();
+                    assert_eq!(
+                        commits.len(),
+                        1,
+                        "each generalized-MP reaction has one atomic Scope commit",
+                    );
+                    assert_eq!(
+                        commits[0].next_scope.as_ref(),
+                        event.scope_after.as_ref(),
+                        "native Scope commit diverged from Session reaction",
+                    );
+                    assert_eq!(
+                        commits[0].quiescent,
+                        event.quiescent,
+                        "native quiescence diverged from Session reaction",
+                    );
+
+                    if event.quiescent == Some(true) {
+                        assert_eq!(matched, 0);
+                        assert!(facts.iter().any(|fact| {
+                            fact.kind == RunStructuralFactKind::Published
+                                && fact.preserved == Some(true)
+                        }));
+                    }
+                }
+
                 assert!(
                     observed
                         .events
