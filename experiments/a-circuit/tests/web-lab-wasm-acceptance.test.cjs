@@ -132,8 +132,14 @@ for (const required of [
   "data-stage",
   '["timeline", "log", "profile", "compare"]',
   "workbenchResultStatus",
+  "workbenchVerificationLevels",
   "workbenchStageDetails",
   "workbenchRecursiveStructure",
+  "TRANSPORT_VALID",
+  "TRACE_CONSISTENT",
+  "SEMANTIC_REPLAY_VERIFIED",
+  "SCALAR_ORACLE_VERIFIED",
+  "FRESH_INSTANCE_MATCH",
   "recursiveStructureHtml",
   "Готовый сценарий",
   "Открыть апамять",
@@ -251,6 +257,7 @@ Promise.all([
     deriveWorkbenchPipeline,
     normalizeWorkbenchInputs,
     workbenchResultStatus,
+    workbenchVerificationLevels,
     workbenchStageDetails,
     workbenchRecursiveStructure,
   },
@@ -449,6 +456,28 @@ Promise.all([
   const workbenchManualStatus = workbenchResultStatus({
     assertionResults: [],
   });
+  const workbenchScenarioLevels = workbenchVerificationLevels({
+    assertionResults: [{ passed: true }],
+    freshInstanceMatches: true,
+    scalarOracleMatches: true,
+  });
+  const workbenchCompactLevels = workbenchVerificationLevels(
+    {
+      assertionResults: [{ passed: true }],
+      freshInstanceMatches: true,
+      scalarOracleMatches: true,
+    },
+    {
+      transportValid: true,
+      traceConsistent: true,
+      semanticReplayVerified: true,
+    },
+  );
+  const workbenchScalarFailure = workbenchResultStatus({
+    assertionResults: [{ passed: true }],
+    freshInstanceMatches: true,
+    scalarOracleMatches: false,
+  });
   const workbenchLoadDetails = workbenchStageDetails(
     {
       sessionId: "s",
@@ -460,8 +489,24 @@ Promise.all([
     null,
     "LOAD"
   );
+  const scenarioLevel = Object.fromEntries(
+    workbenchScenarioLevels.map((item) => [item.id, item]),
+  );
+  const compactLevel = Object.fromEntries(
+    workbenchCompactLevels.map((item) => [item.id, item]),
+  );
   if (workbenchReady.kind !== "ready" ||
       workbenchManualStatus.kind !== "neutral" ||
+      workbenchScalarFailure.kind !== "fail" ||
+      scenarioLevel.TRANSPORT_VALID?.state !== "not_checked" ||
+      scenarioLevel.TRACE_CONSISTENT?.state !== "not_checked" ||
+      scenarioLevel.SEMANTIC_REPLAY_VERIFIED?.state !== "not_checked" ||
+      scenarioLevel.SCALAR_ORACLE_VERIFIED?.state !== "verified" ||
+      scenarioLevel.FRESH_INSTANCE_MATCH?.state !== "verified" ||
+      scenarioLevel.FRESH_INSTANCE_MATCH?.independent !== false ||
+      compactLevel.TRANSPORT_VALID?.state !== "verified" ||
+      compactLevel.TRACE_CONSISTENT?.state !== "verified" ||
+      compactLevel.SEMANTIC_REPLAY_VERIFIED?.state !== "verified" ||
       workbenchLoadDetails?.loadCount !== 1 ||
       workbenchLoadDetails?.baseLinkCount !== 123) {
     throw new Error("R4 progressive-disclosure evidence projection mismatch");
