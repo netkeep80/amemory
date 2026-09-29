@@ -1756,6 +1756,8 @@ mod tests {
 
         let mut profiled_store = store.clone();
         let mut profiled_engine = engine.clone();
+        let mut traced_store = store.clone();
+        let mut traced_engine = engine.clone();
 
         let reaction = engine.run(&mut store).unwrap();
         let expected = store.ensure_pair(caller, output).unwrap();
@@ -1765,12 +1767,97 @@ mod tests {
         let profiled_expected =
             profiled_store.ensure_pair(caller, output).unwrap();
 
-        assert_eq!(profiled_reaction, reaction, "profiled path changed reaction semantics");
+        let (traced_reaction, traced_profile, trace) =
+            traced_engine.run_traced(&mut traced_store).unwrap();
+        let traced_expected =
+            traced_store.ensure_pair(caller, output).unwrap();
+
+        assert_eq!(
+            profiled_reaction, reaction,
+            "profiled path changed reaction semantics"
+        );
+        assert_eq!(
+            traced_reaction, reaction,
+            "traced path changed reaction semantics"
+        );
         assert_eq!(profiled_engine.current(), &[profiled_expected]);
+        assert_eq!(traced_engine.current(), &[traced_expected]);
         assert!(profile.trigger_incidence_candidates > 0);
         assert!(profile.unification_attempts > 0);
         assert_eq!(profile.unification_successes, 1);
         assert!(profile.total_ns > 0);
+        assert_eq!(
+            traced_profile.unification_successes,
+            profile.unification_successes,
+        );
+        assert!(traced_profile.total_ns > 0);
+
+        assert!(trace.events.iter().any(|event| matches!(
+            event,
+            StructuralTraceEvent::DiscoveryComplete {
+                active: traced_active,
+                matched_rules: 1,
+            } if *traced_active == active
+        )));
+        assert!(trace.events.iter().any(|event| matches!(
+            event,
+            StructuralTraceEvent::RuleMatched {
+                active: traced_active,
+                rule: traced_rule,
+                output_bundle_template,
+                bindings,
+            } if *traced_active == active
+                && *traced_rule == rule
+                && *output_bundle_template == bundle
+                && bindings
+                    == &vec![StructuralRoleBinding {
+                        role,
+                        value: caller,
+                    }]
+        )));
+        let grounded_bundle = trace
+            .events
+            .iter()
+            .find_map(|event| match event {
+                StructuralTraceEvent::Instantiated {
+                    active: traced_active,
+                    rule: traced_rule,
+                    output_bundle_template,
+                    grounded_bundle,
+                } if *traced_active == active
+                    && *traced_rule == rule
+                    && *output_bundle_template == bundle =>
+                {
+                    Some(*grounded_bundle)
+                }
+                _ => None,
+            })
+            .expect("real grounded bundle trace");
+        assert_eq!(
+            read_exact_sequence(&traced_store, grounded_bundle).unwrap(),
+            vec![traced_expected],
+        );
+        assert!(trace.events.iter().any(|event| matches!(
+            event,
+            StructuralTraceEvent::Published {
+                active: traced_active,
+                rule: Some(traced_rule),
+                outputs,
+                preserved: false,
+            } if *traced_active == active
+                && *traced_rule == rule
+                && outputs == &vec![traced_expected]
+        )));
+        assert!(trace.events.iter().any(|event| matches!(
+            event,
+            StructuralTraceEvent::ScopeCommitted {
+                old_members,
+                next_members,
+                quiescent: false,
+                handoff_count: 1,
+            } if old_members == &vec![active]
+                && next_members == &vec![traced_expected]
+        )));
 
         assert_eq!(reaction.raw_rule_matches, 1);
         assert_eq!(reaction.transitioned_members, 1);
@@ -1789,6 +1876,40 @@ mod tests {
         assert_eq!(quiescent.handoff_count, 0);
         assert_eq!(engine.current_bank(), stable);
         assert_eq!(engine.current(), &[expected]);
+
+        let traced_stable = traced_engine.current_bank();
+        let (traced_quiescent, _quiescent_profile, quiescent_trace) =
+            traced_engine.run_traced(&mut traced_store).unwrap();
+        assert_eq!(traced_quiescent, quiescent);
+        assert_eq!(traced_engine.current_bank(), traced_stable);
+        assert_eq!(traced_engine.current(), &[traced_expected]);
+        assert!(quiescent_trace.events.iter().any(|event| matches!(
+            event,
+            StructuralTraceEvent::DiscoveryComplete {
+                active: traced_active,
+                matched_rules: 0,
+            } if *traced_active == traced_expected
+        )));
+        assert!(quiescent_trace.events.iter().any(|event| matches!(
+            event,
+            StructuralTraceEvent::Published {
+                active: traced_active,
+                rule: None,
+                outputs,
+                preserved: true,
+            } if *traced_active == traced_expected
+                && outputs == &vec![traced_expected]
+        )));
+        assert!(quiescent_trace.events.iter().any(|event| matches!(
+            event,
+            StructuralTraceEvent::ScopeCommitted {
+                old_members,
+                next_members,
+                quiescent: true,
+                handoff_count: 0,
+            } if old_members == &vec![traced_expected]
+                && next_members == &vec![traced_expected]
+        )));
     }
 
     #[test]
