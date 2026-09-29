@@ -60,8 +60,10 @@ export function workbenchVerificationLevels(
   run,
   compactVerification = null,
 ) {
-  const compactEvidence =
-    compactVerification ?? run?.compactVerification ?? null;
+  // Compact-proof levels are trusted only when the caller explicitly
+  // passes the result of proof-verifier. Never infer verification from a
+  // similarly named field inside an ordinary Scenario report.
+  const compactEvidence = compactVerification;
   const assertions = Array.isArray(run?.assertionResults)
     ? run.assertionResults
     : [];
