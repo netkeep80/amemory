@@ -1,6 +1,7 @@
 use super::observability::{
     ns_u64, ObservedRunV1, RunEventKind, RunEventV1, RunObservationLevel,
-    RunProfileV1, RunStage, StructuralProfileV1, OPTIMIZED_CPU_BACKEND_ID,
+    RunProfileV1, RunStage, RunStructuralFactV1, StructuralProfileV1,
+    OPTIMIZED_CPU_BACKEND_ID,
     RUN_OBSERVABILITY_SCHEMA_VERSION,
 };
 use amemory_optimized_cpu_probe::{
@@ -826,6 +827,7 @@ pub(crate) fn execute_session_observed_to_quiescence(
             transitioned_members: None,
             handoff_count: None,
             quiescent: None,
+            structural_facts: None,
         });
         sequence = sequence.saturating_add(1);
         trace_projection_ns = trace_projection_ns
@@ -843,16 +845,40 @@ pub(crate) fn execute_session_observed_to_quiescence(
             None
         };
 
-        let reaction = if observation_level.profiles() {
-            let (reaction, profile) = session
-                .engine
-                .run_profiled(&mut session.memory.store)
-                .ok()?;
-            structural_profile.accumulate(&profile);
-            reaction
-        } else {
-            session.engine.run(&mut session.memory.store).ok()?
-        };
+        let (reaction, structural_facts) =
+            if observation_level.traces() {
+                let (reaction, profile, native_trace) = session
+                    .engine
+                    .run_traced(&mut session.memory.store)
+                    .ok()?;
+                structural_profile.accumulate(&profile);
+
+                let projection_started = Instant::now();
+                let collection_ns = native_trace.collection_ns;
+                let facts = native_trace
+                    .events
+                    .into_iter()
+                    .map(RunStructuralFactV1::from)
+                    .collect::<Vec<_>>();
+                trace_projection_ns = trace_projection_ns
+                    .saturating_add(collection_ns)
+                    .saturating_add(
+                        projection_started.elapsed().as_nanos(),
+                    );
+                (reaction, Some(facts))
+            } else if observation_level.profiles() {
+                let (reaction, profile) = session
+                    .engine
+                    .run_profiled(&mut session.memory.store)
+                    .ok()?;
+                structural_profile.accumulate(&profile);
+                (reaction, None)
+            } else {
+                (
+                    session.engine.run(&mut session.memory.store).ok()?,
+                    None,
+                )
+            };
 
         let quiescent = reaction.quiescent;
         if !quiescent {
@@ -879,6 +905,7 @@ pub(crate) fn execute_session_observed_to_quiescence(
                 transitioned_members: Some(reaction.transitioned_members),
                 handoff_count: Some(reaction.handoff_count),
                 quiescent: Some(quiescent),
+                structural_facts,
             });
             sequence = sequence.saturating_add(1);
 
@@ -900,6 +927,7 @@ pub(crate) fn execute_session_observed_to_quiescence(
                     transitioned_members: Some(reaction.transitioned_members),
                     handoff_count: Some(reaction.handoff_count),
                     quiescent: Some(true),
+                    structural_facts: None,
                 });
                 sequence = sequence.saturating_add(1);
             }
@@ -940,6 +968,7 @@ pub(crate) fn execute_session_observed_to_quiescence(
             transitioned_members: None,
             handoff_count: None,
             quiescent: Some(true),
+            structural_facts: None,
         });
         trace_projection_ns = trace_projection_ns
             .saturating_add(projection_started.elapsed().as_nanos());
