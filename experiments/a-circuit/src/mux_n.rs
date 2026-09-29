@@ -1381,7 +1381,8 @@ fn web_mux1_lifecycle_reconfigures_four_runs_in_one_loaded_memory() {
     // LOAD exactly once.
     let (mut memory, load) = load_runtime(&prepare).unwrap();
     let runtime_id = memory.id.clone();
-    let store_instance_id = memory.store.instance_id();
+    let store_address =
+        std::ptr::addr_of!(memory.store) as usize;
     let loaded_link_count = memory.store.link_count();
     let loaded_prefix = memory.store.export_packed_duplets();
     assert_eq!(loaded_prefix.len(), loaded_link_count);
@@ -1416,7 +1417,11 @@ fn web_mux1_lifecycle_reconfigures_four_runs_in_one_loaded_memory() {
         vectors.iter().enumerate()
     {
         assert_eq!(memory.id, runtime_id);
-        assert_eq!(memory.store.instance_id(), store_instance_id);
+        assert_eq!(
+            std::ptr::addr_of!(memory.store) as usize,
+            store_address,
+            "run {run_index} replaced the runtime store object",
+        );
 
         // Publish this run's configuration as normal immutable Links in the
         // already-loaded A-memory. No old Link is rewritten.
@@ -1501,7 +1506,11 @@ fn web_mux1_lifecycle_reconfigures_four_runs_in_one_loaded_memory() {
             "run {run_index} mutated the originally loaded Aset prefix",
         );
         assert_eq!(memory.id, runtime_id);
-        assert_eq!(memory.store.instance_id(), store_instance_id);
+        assert_eq!(
+            std::ptr::addr_of!(memory.store) as usize,
+            store_address,
+            "run {run_index} replaced the runtime store object",
+        );
 
         let result_wire = memory.store.export_anum(final_link).unwrap();
         if run_index == 0 {
