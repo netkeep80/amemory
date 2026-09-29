@@ -76,11 +76,34 @@ for (const required of [
   "amemory_i386_lab_gpu_carrier_prepare",
   "runGpuCarrierLookup",
   "runGpuCarrierReaction",
+  "deriveGpuCarrierReactionInput",
   "lab-run-gpu-carrier",
   "WebGPU discover → publish",
 ]) {
   if (!c4LabSource.includes(required)) {
     throw new Error("C4c2 workbench wiring missing: " + required);
+  }
+}
+const gpuCarrierSource = fs.readFileSync(
+  "experiments/browser-accelerator/web/gpu-carrier.mjs",
+  "utf8"
+);
+const c4InputStart = gpuCarrierSource.indexOf(
+  "export function deriveGpuCarrierReactionInput"
+);
+const c4InputEnd = gpuCarrierSource.indexOf(
+  "function carrierReactionCommonShader",
+  c4InputStart
+);
+const c4InputSource = gpuCarrierSource.slice(c4InputStart, c4InputEnd);
+for (const forbidden of [
+  "scopeAfter",
+  "scopeBefore",
+  "rawRuleMatches",
+  "execute?.reactions",
+]) {
+  if (c4InputSource.includes(forbidden)) {
+    throw new Error("C4c3 execution input leaked future proof data: " + forbidden);
   }
 }
 const proofViewSource = fs.readFileSync(
@@ -114,7 +137,7 @@ Promise.all([
   { inflateCompactProof },
   { recursiveStructureHtml },
   {
-    deriveGpuCarrierReactionWitness,
+    deriveGpuCarrierReactionInput,
     expectedGpuCarrierLookup,
     expectedGpuCarrierReaction,
     gpuCarrierLookupShaderSource,
@@ -414,22 +437,33 @@ Promise.all([
     }
   }
 
-  const c4ReactionWitness =
-    deriveGpuCarrierReactionWitness(gpuCarrier, gpuCarrierProof);
+  const c4ReactionInput =
+    deriveGpuCarrierReactionInput(gpuCarrier, gpuCarrierProof);
   const c4ReactionOracle = expectedGpuCarrierReaction(
     gpuCarrier,
-    c4ReactionWitness
+    c4ReactionInput
   );
-  if (c4ReactionOracle.candidateHandle !==
-        c4ReactionWitness.expectedHandle ||
+
+  // Only after independent carrier execution do we inspect the proof trace.
+  const c4FirstReaction = gpuCarrierProof.execute?.reactions?.[0];
+  if (!c4FirstReaction ||
+      c4FirstReaction.quiescent ||
+      c4FirstReaction.scopeBefore?.length !== 1 ||
+      c4FirstReaction.scopeAfter?.length !== 1 ||
+      (c4FirstReaction.scopeBefore[0] >>> 0) !==
+        c4ReactionInput.currentHandle ||
+      (c4FirstReaction.scopeAfter[0] >>> 0) >
+        gpuCarrier.layout.linkCount ||
+      c4ReactionOracle.candidateHandle !==
+        (c4FirstReaction.scopeAfter[0] >>> 0) ||
       c4ReactionOracle.rawRuleMatches !==
-        c4ReactionWitness.expectedRawRuleMatches) {
-    throw new Error("C4c3 CPU carrier oracle disagrees with MUX1 proof");
+        (c4FirstReaction.rawRuleMatches >>> 0)) {
+    throw new Error("C4c3 independent carrier step disagrees with MUX1 proof");
   }
   for (const mode of ["single", "sections"]) {
     const shader = gpuCarrierReactionShaderSource(mode, {
-      currentHandle: c4ReactionWitness.currentHandle,
-      interpreterHandle: c4ReactionWitness.interpreterHandle,
+      currentHandle: c4ReactionInput.currentHandle,
+      interpreterHandle: c4ReactionInput.interpreterHandle,
       linkCount: gpuCarrier.layout.linkCount,
       rootHandle: gpuCarrier.layout.rootHandle,
     });
