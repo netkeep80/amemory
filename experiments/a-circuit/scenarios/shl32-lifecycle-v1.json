@@ -38,34 +38,12 @@
       "executionMode": "TO_QUIESCENCE",
       "maxReactions": 128,
       "assertions": [
-        {
-          "kind": "RESULT_FIELD_EQUALS",
-          "field": "value",
-          "expected": "0x80000001"
-        },
-        {
-          "kind": "RESULT_FIELD_EQUALS",
-          "field": "definedMask",
-          "expected": "0x00000000"
-        },
-        {
-          "kind": "RESULT_FIELD_EQUALS",
-          "field": "undefinedMask",
-          "expected": "0x00000000"
-        },
-        {
-          "kind": "RESULT_FIELD_EQUALS",
-          "field": "preserveMask",
-          "expected": "0x000008d5"
-        },
-        {
-          "kind": "QUIESCENT_EQUALS",
-          "expected": true
-        },
-        {
-          "kind": "REACTION_COUNT_EQUALS",
-          "expected": 1
-        }
+        {"kind":"RESULT_FIELD_EQUALS","field":"value","expected":"0x80000001"},
+        {"kind":"RESULT_FIELD_EQUALS","field":"definedMask","expected":"0x00000000"},
+        {"kind":"RESULT_FIELD_EQUALS","field":"undefinedMask","expected":"0x00000000"},
+        {"kind":"RESULT_FIELD_EQUALS","field":"preserveMask","expected":"0x000008d5"},
+        {"kind":"QUIESCENT_EQUALS","expected":true},
+        {"kind":"REACTION_COUNT_EQUALS","expected":1}
       ]
     },
     {
@@ -77,39 +55,13 @@
       "executionMode": "TO_QUIESCENCE",
       "maxReactions": 128,
       "assertions": [
-        {
-          "kind": "RESULT_FIELD_EQUALS",
-          "field": "value",
-          "expected": "0x00000002"
-        },
-        {
-          "kind": "RESULT_FIELD_EQUALS",
-          "field": "definedMask",
-          "expected": "0x000008c5"
-        },
-        {
-          "kind": "RESULT_FIELD_EQUALS",
-          "field": "valueMask",
-          "expected": "0x00000801"
-        },
-        {
-          "kind": "RESULT_FIELD_EQUALS",
-          "field": "undefinedMask",
-          "expected": "0x00000010"
-        },
-        {
-          "kind": "RESULT_FIELD_EQUALS",
-          "field": "preserveMask",
-          "expected": "0x00000000"
-        },
-        {
-          "kind": "QUIESCENT_EQUALS",
-          "expected": true
-        },
-        {
-          "kind": "REACTION_COUNT_EQUALS",
-          "expected": 84
-        }
+        {"kind":"RESULT_FIELD_EQUALS","field":"value","expected":"0x00000002"},
+        {"kind":"RESULT_FIELD_EQUALS","field":"definedMask","expected":"0x000008c5"},
+        {"kind":"RESULT_FIELD_EQUALS","field":"valueMask","expected":"0x00000801"},
+        {"kind":"RESULT_FIELD_EQUALS","field":"undefinedMask","expected":"0x00000010"},
+        {"kind":"RESULT_FIELD_EQUALS","field":"preserveMask","expected":"0x00000000"},
+        {"kind":"QUIESCENT_EQUALS","expected":true},
+        {"kind":"REACTION_COUNT_EQUALS","expected":84}
       ]
     },
     {
@@ -121,39 +73,13 @@
       "executionMode": "TO_QUIESCENCE",
       "maxReactions": 128,
       "assertions": [
-        {
-          "kind": "RESULT_FIELD_EQUALS",
-          "field": "value",
-          "expected": "0x00000004"
-        },
-        {
-          "kind": "RESULT_FIELD_EQUALS",
-          "field": "definedMask",
-          "expected": "0x000000c5"
-        },
-        {
-          "kind": "RESULT_FIELD_EQUALS",
-          "field": "valueMask",
-          "expected": "0x00000000"
-        },
-        {
-          "kind": "RESULT_FIELD_EQUALS",
-          "field": "undefinedMask",
-          "expected": "0x00000810"
-        },
-        {
-          "kind": "RESULT_FIELD_EQUALS",
-          "field": "preserveMask",
-          "expected": "0x00000000"
-        },
-        {
-          "kind": "QUIESCENT_EQUALS",
-          "expected": true
-        },
-        {
-          "kind": "REACTION_COUNT_EQUALS",
-          "expected": 82
-        }
+        {"kind":"RESULT_FIELD_EQUALS","field":"value","expected":"0x00000004"},
+        {"kind":"RESULT_FIELD_EQUALS","field":"definedMask","expected":"0x000000c5"},
+        {"kind":"RESULT_FIELD_EQUALS","field":"valueMask","expected":"0x00000000"},
+        {"kind":"RESULT_FIELD_EQUALS","field":"undefinedMask","expected":"0x00000810"},
+        {"kind":"RESULT_FIELD_EQUALS","field":"preserveMask","expected":"0x00000000"},
+        {"kind":"QUIESCENT_EQUALS","expected":true},
+        {"kind":"REACTION_COUNT_EQUALS","expected":82}
       ]
     },
     {
@@ -165,39 +91,13 @@
       "executionMode": "TO_QUIESCENCE",
       "maxReactions": 128,
       "assertions": [
-        {
-          "kind": "RESULT_FIELD_EQUALS",
-          "field": "value",
-          "expected": "0x00000002"
-        },
-        {
-          "kind": "RESULT_FIELD_EQUALS",
-          "field": "definedMask",
-          "expected": "0x000008c5"
-        },
-        {
-          "kind": "RESULT_FIELD_EQUALS",
-          "field": "valueMask",
-          "expected": "0x00000801"
-        },
-        {
-          "kind": "RESULT_FIELD_EQUALS",
-          "field": "undefinedMask",
-          "expected": "0x00000010"
-        },
-        {
-          "kind": "RESULT_FIELD_EQUALS",
-          "field": "preserveMask",
-          "expected": "0x00000000"
-        },
-        {
-          "kind": "QUIESCENT_EQUALS",
-          "expected": true
-        },
-        {
-          "kind": "REACTION_COUNT_EQUALS",
-          "expected": 84
-        }
+        {"kind":"RESULT_FIELD_EQUALS","field":"value","expected":"0x00000002"},
+        {"kind":"RESULT_FIELD_EQUALS","field":"definedMask","expected":"0x000008c5"},
+        {"kind":"RESULT_FIELD_EQUALS","field":"valueMask","expected":"0x00000801"},
+        {"kind":"RESULT_FIELD_EQUALS","field":"undefinedMask","expected":"0x00000010"},
+        {"kind":"RESULT_FIELD_EQUALS","field":"preserveMask","expected":"0x00000000"},
+        {"kind":"QUIESCENT_EQUALS","expected":true},
+        {"kind":"REACTION_COUNT_EQUALS","expected":84}
       ]
     },
     {
@@ -209,40 +109,16 @@
       "executionMode": "TO_QUIESCENCE",
       "maxReactions": 128,
       "assertions": [
-        {
-          "kind": "RESULT_FIELD_EQUALS",
-          "field": "value",
-          "expected": "0x80000001"
-        },
-        {
-          "kind": "RESULT_FIELD_EQUALS",
-          "field": "definedMask",
-          "expected": "0x00000000"
-        },
-        {
-          "kind": "RESULT_FIELD_EQUALS",
-          "field": "undefinedMask",
-          "expected": "0x00000000"
-        },
-        {
-          "kind": "RESULT_FIELD_EQUALS",
-          "field": "preserveMask",
-          "expected": "0x000008d5"
-        },
-        {
-          "kind": "QUIESCENT_EQUALS",
-          "expected": true
-        },
-        {
-          "kind": "REACTION_COUNT_EQUALS",
-          "expected": 1
-        }
+        {"kind":"RESULT_FIELD_EQUALS","field":"value","expected":"0x80000001"},
+        {"kind":"RESULT_FIELD_EQUALS","field":"definedMask","expected":"0x00000000"},
+        {"kind":"RESULT_FIELD_EQUALS","field":"undefinedMask","expected":"0x00000000"},
+        {"kind":"RESULT_FIELD_EQUALS","field":"preserveMask","expected":"0x000008d5"},
+        {"kind":"QUIESCENT_EQUALS","expected":true},
+        {"kind":"REACTION_COUNT_EQUALS","expected":1}
       ]
     }
   ],
-  "supportedBackends": [
-    "optimized-cpu"
-  ],
+  "supportedBackends": ["optimized-cpu"],
   "oraclePolicy": "FRESH_INSTANCE",
   "invariants": [
     "prepare-once",
