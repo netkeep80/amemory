@@ -1,11 +1,17 @@
+use super::observability::{
+    ns_u64, ObservedRunV1, RunEventKind, RunEventV1, RunObservationLevel,
+    RunProfileV1, StructuralProfileV1, OPTIMIZED_CPU_BACKEND_ID,
+    RUN_OBSERVABILITY_SCHEMA_VERSION,
+};
 use amemory_optimized_cpu_probe::{
-    structural::OptimizedStructuralEngine,
+    structural::{OptimizedStructuralEngine, StructuralRunProfile},
     Handle, OptimizedLinkStore,
 };
 use serde::Serialize;
 use std::{
     collections::{HashMap, HashSet},
     sync::atomic::{AtomicU32, Ordering},
+    time::Instant,
 };
 
 static NEXT_PROOF_MEMORY_ID: AtomicU32 = AtomicU32::new(1);
@@ -507,6 +513,7 @@ pub(crate) struct ProofRuntimeSession {
     pub(crate) memory: ProofRuntimeMemory,
     pub(crate) engine: OptimizedStructuralEngine,
     pub(crate) base_link_count: usize,
+    next_run_id: u64,
 }
 
 pub(crate) fn export_packed_carrier(
@@ -756,6 +763,7 @@ pub(crate) fn load_runtime_session(
             memory,
             engine,
             base_link_count,
+            next_run_id: 1,
         },
         load,
     ))
@@ -772,6 +780,196 @@ pub(crate) fn execute_session_to_quiescence(
         initial,
         max_steps,
     )
+}
+
+pub(crate) fn execute_session_observed_to_quiescence(
+    session: &mut ProofRuntimeSession,
+    initial: Handle,
+    max_steps: u32,
+    observation_level: RunObservationLevel,
+) -> Option<ObservedRunV1> {
+    let run_id = session.next_run_id;
+    session.next_run_id = session.next_run_id.saturating_add(1);
+
+    let session_id = session.memory.id.clone();
+    let links_before_run = session.memory.store.link_count() as u32;
+    session
+        .engine
+        .set_current(&session.memory.store, &[initial])
+        .ok()?;
+    let scope_before_width = session.engine.current().len() as u32;
+
+    let run_started = Instant::now();
+    let mut sequence = 0u32;
+    let mut events = Vec::new();
+    let mut trace_projection_ns = 0u128;
+    let mut structural_profile = StructuralRunProfile::default();
+    let mut active_reaction_count = 0u32;
+    let mut final_quiescent = false;
+
+    if observation_level.traces() {
+        let projection_started = Instant::now();
+        events.push(RunEventV1 {
+            schema_version: RUN_OBSERVABILITY_SCHEMA_VERSION,
+            session_id: session_id.clone(),
+            run_id,
+            backend_id: OPTIMIZED_CPU_BACKEND_ID.to_owned(),
+            sequence,
+            elapsed_ns: ns_u64(run_started.elapsed().as_nanos()),
+            kind: RunEventKind::ExecuteBegin,
+            reaction_index: None,
+            scope_before: Some(session.engine.current().to_vec()),
+            scope_after: None,
+            links_after: links_before_run,
+            raw_rule_matches: None,
+            transitioned_members: None,
+            handoff_count: None,
+            quiescent: None,
+        });
+        sequence = sequence.saturating_add(1);
+        trace_projection_ns = trace_projection_ns
+            .saturating_add(projection_started.elapsed().as_nanos());
+    }
+
+    for reaction_index in 0..max_steps {
+        let scope_before = if observation_level.traces() {
+            let projection_started = Instant::now();
+            let scope = session.engine.current().to_vec();
+            trace_projection_ns = trace_projection_ns
+                .saturating_add(projection_started.elapsed().as_nanos());
+            Some(scope)
+        } else {
+            None
+        };
+
+        let reaction = if observation_level.profiles() {
+            let (reaction, profile) = session
+                .engine
+                .run_profiled(&mut session.memory.store)
+                .ok()?;
+            structural_profile.accumulate(&profile);
+            reaction
+        } else {
+            session.engine.run(&mut session.memory.store).ok()?
+        };
+
+        let quiescent = reaction.quiescent;
+        if !quiescent {
+            active_reaction_count = active_reaction_count.saturating_add(1);
+        }
+
+        if observation_level.traces() {
+            let projection_started = Instant::now();
+            let scope_after = session.engine.current().to_vec();
+            events.push(RunEventV1 {
+                schema_version: RUN_OBSERVABILITY_SCHEMA_VERSION,
+                session_id: session_id.clone(),
+                run_id,
+                backend_id: OPTIMIZED_CPU_BACKEND_ID.to_owned(),
+                sequence,
+                elapsed_ns: ns_u64(run_started.elapsed().as_nanos()),
+                kind: RunEventKind::ReactionEnd,
+                reaction_index: Some(reaction_index),
+                scope_before,
+                scope_after: Some(scope_after.clone()),
+                links_after: session.memory.store.link_count() as u32,
+                raw_rule_matches: Some(reaction.raw_rule_matches),
+                transitioned_members: Some(reaction.transitioned_members),
+                handoff_count: Some(reaction.handoff_count),
+                quiescent: Some(quiescent),
+            });
+            sequence = sequence.saturating_add(1);
+
+            if quiescent {
+                events.push(RunEventV1 {
+                    schema_version: RUN_OBSERVABILITY_SCHEMA_VERSION,
+                    session_id: session_id.clone(),
+                    run_id,
+                    backend_id: OPTIMIZED_CPU_BACKEND_ID.to_owned(),
+                    sequence,
+                    elapsed_ns: ns_u64(run_started.elapsed().as_nanos()),
+                    kind: RunEventKind::Quiescence,
+                    reaction_index: Some(reaction_index),
+                    scope_before: None,
+                    scope_after: Some(scope_after),
+                    links_after: session.memory.store.link_count() as u32,
+                    raw_rule_matches: Some(reaction.raw_rule_matches),
+                    transitioned_members: Some(reaction.transitioned_members),
+                    handoff_count: Some(reaction.handoff_count),
+                    quiescent: Some(true),
+                });
+                sequence = sequence.saturating_add(1);
+            }
+
+            trace_projection_ns = trace_projection_ns
+                .saturating_add(projection_started.elapsed().as_nanos());
+        }
+
+        if quiescent {
+            final_quiescent = true;
+            break;
+        }
+    }
+
+    if !final_quiescent {
+        return None;
+    }
+
+    let final_scope = session.engine.current().to_vec();
+    let links_after_run = session.memory.store.link_count() as u32;
+
+    if observation_level.traces() {
+        let projection_started = Instant::now();
+        events.push(RunEventV1 {
+            schema_version: RUN_OBSERVABILITY_SCHEMA_VERSION,
+            session_id: session_id.clone(),
+            run_id,
+            backend_id: OPTIMIZED_CPU_BACKEND_ID.to_owned(),
+            sequence,
+            elapsed_ns: ns_u64(run_started.elapsed().as_nanos()),
+            kind: RunEventKind::RunEnd,
+            reaction_index: None,
+            scope_before: None,
+            scope_after: Some(final_scope.clone()),
+            links_after: links_after_run,
+            raw_rule_matches: None,
+            transitioned_members: None,
+            handoff_count: None,
+            quiescent: Some(true),
+        });
+        trace_projection_ns = trace_projection_ns
+            .saturating_add(projection_started.elapsed().as_nanos());
+    }
+
+    let profile = observation_level.profiles().then(|| RunProfileV1 {
+        schema_version: RUN_OBSERVABILITY_SCHEMA_VERSION,
+        session_id: session_id.clone(),
+        run_id,
+        backend_id: OPTIMIZED_CPU_BACKEND_ID.to_owned(),
+        base_links: session.base_link_count as u32,
+        links_before_run,
+        links_after_run,
+        execution_link_delta: links_after_run.saturating_sub(links_before_run),
+        scope_before_width,
+        scope_after_width: final_scope.len() as u32,
+        active_reaction_count,
+        execute_ns: ns_u64(structural_profile.total_ns),
+        trace_projection_ns: ns_u64(trace_projection_ns),
+        structural: StructuralProfileV1::from(&structural_profile),
+    });
+
+    Some(ObservedRunV1 {
+        schema_version: RUN_OBSERVABILITY_SCHEMA_VERSION,
+        session_id,
+        run_id,
+        backend_id: OPTIMIZED_CPU_BACKEND_ID.to_owned(),
+        observation_level,
+        final_scope,
+        active_reaction_count,
+        final_quiescent,
+        events,
+        profile,
+    })
 }
 
 pub(crate) fn execute_to_quiescence(
