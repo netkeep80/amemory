@@ -628,6 +628,8 @@ mod tests {
 
     const MUX1_LIFECYCLE: &str =
         include_str!("../scenarios/mux1-lifecycle-v1.json");
+    const XOR32_LIFECYCLE: &str =
+        include_str!("../scenarios/xor32-lifecycle-v1.json");
 
     #[test]
     fn canonical_mux1_manifest_runs_four_times_on_one_session() {
@@ -683,6 +685,63 @@ mod tests {
         let decoded: ScenarioExecutionReportV1 =
             serde_json::from_str(&json).unwrap();
         assert_eq!(decoded, report);
+    }
+
+    #[test]
+    fn canonical_xor32_manifest_runs_four_times_on_one_session() {
+        let manifest =
+            parse_and_validate_manifest_v1(XOR32_LIFECYCLE).unwrap();
+        let report = run_scenario_manifest_v1(
+            &manifest,
+            ScenarioBackendV1::OptimizedCpu,
+        )
+        .unwrap();
+
+        assert!(report.overall_pass);
+        assert_eq!(report.runs.len(), 4);
+        assert!(report.runs.iter().all(|run| {
+            run.observed.session_id == report.session_id
+        }));
+        assert!(report.runs.iter().all(|run| {
+            run.observed.active_reaction_count == 147
+        }));
+        assert!(report.runs.iter().all(|run| {
+            run.observed.final_quiescent
+        }));
+        assert!(report.runs.iter().all(|run| {
+            run.oracle_matches == Some(true)
+        }));
+        assert_eq!(
+            report.runs[2].result.fields.get("value"),
+            Some(&Value::String("0x1d3b5687".to_owned())),
+        );
+        assert_eq!(report.runs[0].result, report.runs[3].result);
+        assert!(
+            report.runs[3].configuration_reused,
+            "returning to first XOR32 inputs must reuse canonical Links",
+        );
+    }
+
+    #[test]
+    fn reaction_budget_is_safety_only_and_never_partial_success() {
+        let mut manifest =
+            parse_and_validate_manifest_v1(XOR32_LIFECYCLE).unwrap();
+        manifest.run_sequence.truncate(1);
+        manifest.run_sequence[0].max_reactions = 1;
+
+        let error = run_scenario_manifest_v1(
+            &manifest,
+            ScenarioBackendV1::OptimizedCpu,
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            error,
+            ScenarioRunnerErrorV1::ExecuteFailed {
+                run_id: "run-1-zero-ones".to_owned(),
+                max_reactions: 1,
+            },
+        );
     }
 
     #[test]
