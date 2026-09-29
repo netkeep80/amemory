@@ -245,6 +245,64 @@ export function writeScenarioLiveRun(wasm, run) {
   return bytes.length >>> 0;
 }
 
+export function beginScenarioLiveStepRun(wasm, run) {
+  const length = writeScenarioLiveRun(wasm, run);
+  const begin = requireFunction(
+    wasm,
+    "amemory_scenario_live_step_begin_json",
+  );
+  const success = begin(length) >>> 0;
+  const payload = readScenarioLiveOutput(wasm);
+  const error = readScenarioError(wasm);
+  if (success === 1) {
+    if (payload === null || error !== null ||
+        payload.schemaVersion !== 1 ||
+        payload.status === null ||
+        payload.begin === null ||
+        payload.begin?.schemaVersion !== 1) {
+      throw new Error(
+        "scenario live step: begin success has invalid payload/error state",
+      );
+    }
+    return { ok: true, payload, error: null };
+  }
+  if (success !== 0 || payload !== null || error === null) {
+    throw new Error(
+      "scenario live step: begin failure must expose error only",
+    );
+  }
+  return { ok: false, payload: null, error };
+}
+
+export function stepScenarioLiveSession(wasm) {
+  const step = requireFunction(
+    wasm,
+    "amemory_scenario_live_step_json",
+  );
+  const success = step() >>> 0;
+  const payload = readScenarioLiveOutput(wasm);
+  const error = readScenarioError(wasm);
+  if (success === 1) {
+    if (payload === null || error !== null ||
+        payload.schemaVersion !== 1 ||
+        payload.status === null ||
+        payload.step === null ||
+        payload.step?.schemaVersion !== 1 ||
+        payload.step?.evidence?.schemaVersion !== 1) {
+      throw new Error(
+        "scenario live step: step success has invalid payload/error state",
+      );
+    }
+    return { ok: true, payload, error: null };
+  }
+  if (success !== 0 || payload !== null || error === null) {
+    throw new Error(
+      "scenario live step: step failure must expose error only",
+    );
+  }
+  return { ok: false, payload: null, error };
+}
+
 export function runScenarioLiveSession(wasm, run) {
   const length = writeScenarioLiveRun(wasm, run);
   const execute = requireFunction(

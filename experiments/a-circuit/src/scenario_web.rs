@@ -9,10 +9,12 @@ use super::{
         ScenarioPresetRegistryErrorV1,
     },
     scenario_runner::{
-        open_cpu_scenario_session_v1, run_cpu_scenario_session_once_v1,
-        run_scenario_manifest_v1, ScenarioCpuSessionV1,
+        begin_cpu_scenario_step_run_v1, open_cpu_scenario_session_v1,
+        run_cpu_scenario_session_once_v1, run_scenario_manifest_v1,
+        step_cpu_scenario_session_v1, ScenarioCpuSessionV1,
         ScenarioExecutionReportV1, ScenarioLiveSessionStatusV1,
-        ScenarioRunReportV1, ScenarioRunnerErrorV1,
+        ScenarioRunReportV1, ScenarioRunnerErrorV1, ScenarioStepBeginV1,
+        ScenarioStepReportV1,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -947,6 +949,22 @@ struct ScenarioLiveRunEnvelopeV1 {
     run: ScenarioRunReportV1,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ScenarioLiveStepBeginEnvelopeV1 {
+    schema_version: u32,
+    status: ScenarioLiveSessionStatusV1,
+    begin: ScenarioStepBeginV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ScenarioLiveStepEnvelopeV1 {
+    schema_version: u32,
+    status: ScenarioLiveSessionStatusV1,
+    step: ScenarioStepReportV1,
+}
+
 #[no_mangle]
 pub extern "C" fn amemory_scenario_live_session_available() -> u32 {
     let slot = SCENARIO_LIVE_SESSION
@@ -1348,6 +1366,91 @@ fn parse_live_run_bytes(
             message: error.to_string(),
         }
     })
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_live_step_begin_json(
+    length: u32,
+) -> u32 {
+    clear_live_output_and_error();
+    let run = match parse_live_run_bytes(length) {
+        Ok(run) => run,
+        Err(error) => {
+            store_error(error);
+            return 0;
+        }
+    };
+
+    let mut slot = SCENARIO_LIVE_SESSION
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let Some(session) = slot.as_mut() else {
+        store_error(ScenarioTransportErrorV1::LiveSessionNotOpen {
+            schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+        });
+        return 0;
+    };
+
+    let begin = match begin_cpu_scenario_step_run_v1(session, &run) {
+        Ok(begin) => begin,
+        Err(error) => {
+            store_error(ScenarioTransportErrorV1::Runner {
+                schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+                error,
+            });
+            return 0;
+        }
+    };
+    let envelope = ScenarioLiveStepBeginEnvelopeV1 {
+        schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+        status: session.status_v1(),
+        begin,
+    };
+    match store_live_output(&envelope) {
+        Ok(()) => 1,
+        Err(error) => {
+            store_error(error);
+            0
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_scenario_live_step_json() -> u32 {
+    clear_live_output_and_error();
+
+    let mut slot = SCENARIO_LIVE_SESSION
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let Some(session) = slot.as_mut() else {
+        store_error(ScenarioTransportErrorV1::LiveSessionNotOpen {
+            schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+        });
+        return 0;
+    };
+
+    let step = match step_cpu_scenario_session_v1(session) {
+        Ok(step) => step,
+        Err(error) => {
+            store_error(ScenarioTransportErrorV1::Runner {
+                schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+                error,
+            });
+            return 0;
+        }
+    };
+    let envelope = ScenarioLiveStepEnvelopeV1 {
+        schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+        status: session.status_v1(),
+        step,
+    };
+    match store_live_output(&envelope) {
+        Ok(()) => 1,
+        Err(error) => {
+            store_error(error);
+            0
+        }
+    }
 }
 
 #[no_mangle]
