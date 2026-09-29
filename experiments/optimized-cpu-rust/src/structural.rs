@@ -1187,8 +1187,6 @@ impl OptimizedStructuralEngine {
         profile: &mut Option<&mut StructuralRunProfile>,
         trace: &mut Option<&mut StructuralRunTrace>,
     ) -> Result<StructuralReactionResult, StructuralError> {
-        self.quiescent = false;
-
         let store_instance = store.instance_id();
         if self.metadata_store_instance != Some(store_instance) {
             self.rule_metadata_cache.clear();
@@ -1205,10 +1203,9 @@ impl OptimizedStructuralEngine {
             });
         }
 
-        // Phase 1 is read-only. Borrow only dense carrier/index slices, not
-        // canonical HashMaps, and discover every old Scope member before any
-        // publication mutates the store. This makes reaction observation
-        // atomic without cloning the whole carrier on every run().
+        // Phase 1 is strictly read-only. Borrow only dense carrier/index
+        // slices, not canonical HashMaps, and discover every old Scope member
+        // before publication can append a Link.
         let discovered = {
             let execution_view = store.packed_execution_ref();
             let authority =
@@ -1244,105 +1241,132 @@ impl OptimizedStructuralEngine {
             discovered
         };
 
-        // Phase 2 is the explicit mutation/publication boundary. The borrowed
-        // execution view is gone, so constructor/canonicalization writes are
-        // impossible during discovery and legal only from this point onward.
-        let mut next_members = Vec::new();
-        let mut next_seen = HashSet::new();
-        let mut raw_rule_matches = 0u32;
-        let mut transitioned_members = 0u32;
+        // Phase 2 is one physical Store transaction. OptimizedLinkStore is
+        // append-only, so an exact checkpoint is just the committed Link count;
+        // rollback unwinds canonical/index mutations in reverse allocation
+        // order. Scope/counters are committed only after this whole closure
+        // succeeds.
+        let checkpoint = store.append_checkpoint();
+        let cap = self.cap;
+        let publication = (|| -> Result<(Vec<Handle>, u32, u32), StructuralError> {
+            let mut next_members = Vec::new();
+            let mut next_seen = HashSet::new();
+            let mut raw_rule_matches = 0u32;
+            let mut transitioned_members = 0u32;
 
-        let mut add_next = |link: Handle| -> Result<(), StructuralError> {
-            if next_seen.insert(link) {
-                if next_members.len() >= self.cap {
-                    return Err(StructuralError::ScopeCapacity {
-                        requested: next_members.len() + 1,
-                        cap: self.cap,
-                    });
+            let mut add_next = |link: Handle| -> Result<(), StructuralError> {
+                if next_seen.insert(link) {
+                    if next_members.len() >= cap {
+                        return Err(StructuralError::ScopeCapacity {
+                            requested: next_members.len() + 1,
+                            cap,
+                        });
+                    }
+                    next_members.push(link);
                 }
-                next_members.push(link);
-            }
-            Ok(())
-        };
+                Ok(())
+            };
 
-        for (active, images) in discovered {
-            if images.is_empty() {
-                let publication_started = profile.as_ref().map(|_| ProfileTimer::start());
-                add_next(active)?;
-                if let Some(profile) = profile.as_deref_mut() {
-                    profile.publication_outputs += 1;
-                    if let Some(started) = publication_started {
-                        profile.publication_ns += started.elapsed_ns();
+            for (active, images) in discovered {
+                if images.is_empty() {
+                    let publication_started =
+                        profile.as_ref().map(|_| ProfileTimer::start());
+                    add_next(active)?;
+                    if let Some(profile) = profile.as_deref_mut() {
+                        profile.publication_outputs += 1;
+                        if let Some(started) = publication_started {
+                            profile.publication_ns += started.elapsed_ns();
+                        }
+                    }
+                    if let Some(trace) = trace.as_deref_mut() {
+                        let trace_started = ProfileTimer::start();
+                        trace.events.push(StructuralTraceEvent::Published {
+                            active,
+                            rule: None,
+                            outputs: vec![active],
+                            preserved: true,
+                        });
+                        trace.collection_ns += trace_started.elapsed_ns();
+                    }
+                    continue;
+                }
+
+                transitioned_members = transitioned_members.saturating_add(1);
+
+                for image in images {
+                    raw_rule_matches = raw_rule_matches.saturating_add(1);
+
+                    let instantiation_started =
+                        profile.as_ref().map(|_| ProfileTimer::start());
+                    let grounded_bundle = instantiate_structural_template_internal(
+                        store,
+                        image.output_bundle_template,
+                        &image.bindings,
+                        profile,
+                    )?;
+                    if let Some(profile) = profile.as_deref_mut() {
+                        if let Some(started) = instantiation_started {
+                            profile.instantiation_ns += started.elapsed_ns();
+                        }
+                    }
+                    if let Some(trace) = trace.as_deref_mut() {
+                        let trace_started = ProfileTimer::start();
+                        trace.events.push(StructuralTraceEvent::Instantiated {
+                            active,
+                            rule: image.rule,
+                            output_bundle_template:
+                                image.output_bundle_template,
+                            grounded_bundle,
+                        });
+                        trace.collection_ns += trace_started.elapsed_ns();
+                    }
+
+                    let publication_started =
+                        profile.as_ref().map(|_| ProfileTimer::start());
+                    let outputs = read_exact_sequence(store, grounded_bundle)?;
+                    if let Some(profile) = profile.as_deref_mut() {
+                        profile.publication_outputs += outputs.len() as u64;
+                    }
+                    for successor in outputs.iter().copied() {
+                        add_next(successor)?;
+                    }
+                    if let Some(profile) = profile.as_deref_mut() {
+                        if let Some(started) = publication_started {
+                            profile.publication_ns += started.elapsed_ns();
+                        }
+                    }
+                    if let Some(trace) = trace.as_deref_mut() {
+                        let trace_started = ProfileTimer::start();
+                        trace.events.push(StructuralTraceEvent::Published {
+                            active,
+                            rule: Some(image.rule),
+                            outputs,
+                            preserved: false,
+                        });
+                        trace.collection_ns += trace_started.elapsed_ns();
                     }
                 }
-                if let Some(trace) = trace.as_deref_mut() {
-                    let trace_started = ProfileTimer::start();
-                    trace.events.push(StructuralTraceEvent::Published {
-                        active,
-                        rule: None,
-                        outputs: vec![active],
-                        preserved: true,
-                    });
-                    trace.collection_ns += trace_started.elapsed_ns();
-                }
-                continue;
             }
 
-            transitioned_members = transitioned_members.saturating_add(1);
+            Ok((
+                next_members,
+                raw_rule_matches,
+                transitioned_members,
+            ))
+        })();
 
-            for image in images {
-                raw_rule_matches = raw_rule_matches.saturating_add(1);
+        let (next_members, raw_rule_matches, transitioned_members) =
+            match publication {
+                Ok(committed) => committed,
+                Err(error) => {
+                    store.rollback_append(checkpoint);
+                    return Err(error);
+                }
+            };
 
-                let instantiation_started = profile.as_ref().map(|_| ProfileTimer::start());
-                let grounded_bundle = instantiate_structural_template_internal(
-                    store,
-                    image.output_bundle_template,
-                    &image.bindings,
-                    profile,
-                )?;
-                if let Some(profile) = profile.as_deref_mut() {
-                    if let Some(started) = instantiation_started {
-                        profile.instantiation_ns += started.elapsed_ns();
-                    }
-                }
-                if let Some(trace) = trace.as_deref_mut() {
-                    let trace_started = ProfileTimer::start();
-                    trace.events.push(StructuralTraceEvent::Instantiated {
-                        active,
-                        rule: image.rule,
-                        output_bundle_template:
-                            image.output_bundle_template,
-                        grounded_bundle,
-                    });
-                    trace.collection_ns += trace_started.elapsed_ns();
-                }
-
-                let publication_started = profile.as_ref().map(|_| ProfileTimer::start());
-                let outputs = read_exact_sequence(store, grounded_bundle)?;
-                if let Some(profile) = profile.as_deref_mut() {
-                    profile.publication_outputs += outputs.len() as u64;
-                }
-                for successor in outputs.iter().copied() {
-                    add_next(successor)?;
-                }
-                if let Some(profile) = profile.as_deref_mut() {
-                    if let Some(started) = publication_started {
-                        profile.publication_ns += started.elapsed_ns();
-                    }
-                }
-                if let Some(trace) = trace.as_deref_mut() {
-                    let trace_started = ProfileTimer::start();
-                    trace.events.push(StructuralTraceEvent::Published {
-                        active,
-                        rule: Some(image.rule),
-                        outputs,
-                        preserved: false,
-                    });
-                    trace.collection_ns += trace_started.elapsed_ns();
-                }
-            }
-        }
-
+        // Engine-visible state commits only after the Store transaction has
+        // completed. A rejected reaction therefore preserves both physical
+        // Store state and the previously committed Scope/counters.
         self.raw_rule_matches = raw_rule_matches;
         self.transitioned_members = transitioned_members;
         self.handoff_count = 0;
@@ -1373,6 +1397,7 @@ impl OptimizedStructuralEngine {
         self.scope_banks[target_bank] = next_members.clone();
         self.current_bank = target_bank;
         self.handoff_count = 1;
+        self.quiescent = false;
 
         if let Some(trace) = trace.as_deref_mut() {
             let trace_started = ProfileTimer::start();
