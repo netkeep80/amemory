@@ -2,7 +2,38 @@ use crate::{
     Handle, OptimizedLinkStore, PackedExecutionRef, PackedExecutionView,
     StoreError, ROOT_HANDLE,
 };
-use std::{collections::{HashMap, HashSet}, time::Instant};
+use std::collections::{HashMap, HashSet};
+#[cfg(not(target_family = "wasm"))]
+use std::time::Instant;
+
+#[derive(Clone, Debug)]
+struct ProfileTimer {
+    #[cfg(not(target_family = "wasm"))]
+    started: Instant,
+}
+
+impl ProfileTimer {
+    fn start() -> Self {
+        Self {
+            #[cfg(not(target_family = "wasm"))]
+            started: ProfileTimer::start(),
+        }
+    }
+
+    fn elapsed_ns(&self) -> u128 {
+        #[cfg(not(target_family = "wasm"))]
+        {
+            self.started.elapsed_ns()
+        }
+        #[cfg(target_family = "wasm")]
+        {
+            0
+        }
+    }
+}
+
+pub const STRUCTURAL_PROFILE_TIMING_AVAILABLE: bool =
+    !cfg!(target_family = "wasm");
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StructuralError {
@@ -773,7 +804,7 @@ fn discover_triggered_rule_images_internal<R: StructuralRead + ?Sized>(
     metadata_cache: &mut HashMap<Handle, CompiledRuleMetadata>,
     profile: &mut Option<&mut StructuralRunProfile>,
 ) -> Result<Vec<StructuralImage>, StructuralError> {
-    let discovery_started = profile.as_ref().map(|_| Instant::now());
+    let discovery_started = profile.as_ref().map(|_| ProfileTimer::start());
     let (_, endpoint) = store.poles(active)?;
     let (trigger_key, _) = store.poles(endpoint)?;
 
@@ -832,13 +863,13 @@ fn discover_triggered_rule_images_internal<R: StructuralRead + ?Sized>(
                 continue;
             };
 
-            let role_started = profile.as_ref().map(|_| Instant::now());
+            let role_started = profile.as_ref().map(|_| ProfileTimer::start());
             let roles_result =
                 read_structural_role_dictionary_from(store, role_dictionary);
             if let Some(profile) = profile.as_deref_mut() {
                 profile.role_dictionary_decodes += 1;
                 if let Some(started) = role_started {
-                    profile.role_decode_ns += started.elapsed().as_nanos();
+                    profile.role_decode_ns += started.elapsed_ns();
                 }
             }
             let Ok(roles) = roles_result else {
@@ -920,7 +951,7 @@ fn discover_triggered_rule_images_internal<R: StructuralRead + ?Sized>(
         if let Some(profile) = profile.as_deref_mut() {
             profile.unification_attempts += 1;
         }
-        let unify_started = profile.as_ref().map(|_| Instant::now());
+        let unify_started = profile.as_ref().map(|_| ProfileTimer::start());
         let bindings_result = unify_structural_rule_template_internal(
             store,
             metadata.before,
@@ -930,7 +961,7 @@ fn discover_triggered_rule_images_internal<R: StructuralRead + ?Sized>(
         );
         if let Some(profile) = profile.as_deref_mut() {
             if let Some(started) = unify_started {
-                profile.unification_ns += started.elapsed().as_nanos();
+                profile.unification_ns += started.elapsed_ns();
             }
         }
         let Ok(bindings) = bindings_result else {
@@ -949,7 +980,7 @@ fn discover_triggered_rule_images_internal<R: StructuralRead + ?Sized>(
 
     if let Some(profile) = profile.as_deref_mut() {
         if let Some(started) = discovery_started {
-            profile.discovery_ns += started.elapsed().as_nanos();
+            profile.discovery_ns += started.elapsed_ns();
         }
     }
     Ok(images)
@@ -1051,14 +1082,14 @@ impl OptimizedStructuralEngine {
         &mut self,
         store: &mut OptimizedLinkStore,
     ) -> Result<(StructuralReactionResult, StructuralRunProfile), StructuralError> {
-        let started = Instant::now();
+        let started = ProfileTimer::start();
         let mut owned = StructuralRunProfile::default();
         let result = {
             let mut profile = Some(&mut owned);
             let mut trace = None;
             self.run_internal(store, &mut profile, &mut trace)?
         };
-        owned.total_ns = started.elapsed().as_nanos();
+        owned.total_ns = started.elapsed_ns();
         Ok((result, owned))
     }
 
@@ -1073,7 +1104,7 @@ impl OptimizedStructuralEngine {
         ),
         StructuralError,
     > {
-        let started = Instant::now();
+        let started = ProfileTimer::start();
         let mut owned_profile = StructuralRunProfile::default();
         let mut owned_trace = StructuralRunTrace::default();
         let result = {
@@ -1130,7 +1161,7 @@ impl OptimizedStructuralEngine {
                     profile,
                 )?;
                 if let Some(trace) = trace.as_deref_mut() {
-                    let trace_started = Instant::now();
+                    let trace_started = ProfileTimer::start();
                     trace.events.push(StructuralTraceEvent::DiscoveryComplete {
                         active,
                         matched_rules: images.len() as u32,
@@ -1144,7 +1175,7 @@ impl OptimizedStructuralEngine {
                             bindings: image.bindings.clone(),
                         });
                     }
-                    trace.collection_ns += trace_started.elapsed().as_nanos();
+                    trace.collection_ns += trace_started.elapsed_ns();
                 }
                 discovered.push((active, images));
             }
@@ -1174,23 +1205,23 @@ impl OptimizedStructuralEngine {
 
         for (active, images) in discovered {
             if images.is_empty() {
-                let publication_started = profile.as_ref().map(|_| Instant::now());
+                let publication_started = profile.as_ref().map(|_| ProfileTimer::start());
                 add_next(active)?;
                 if let Some(profile) = profile.as_deref_mut() {
                     profile.publication_outputs += 1;
                     if let Some(started) = publication_started {
-                        profile.publication_ns += started.elapsed().as_nanos();
+                        profile.publication_ns += started.elapsed_ns();
                     }
                 }
                 if let Some(trace) = trace.as_deref_mut() {
-                    let trace_started = Instant::now();
+                    let trace_started = ProfileTimer::start();
                     trace.events.push(StructuralTraceEvent::Published {
                         active,
                         rule: None,
                         outputs: vec![active],
                         preserved: true,
                     });
-                    trace.collection_ns += trace_started.elapsed().as_nanos();
+                    trace.collection_ns += trace_started.elapsed_ns();
                 }
                 continue;
             }
@@ -1200,7 +1231,7 @@ impl OptimizedStructuralEngine {
             for image in images {
                 raw_rule_matches = raw_rule_matches.saturating_add(1);
 
-                let instantiation_started = profile.as_ref().map(|_| Instant::now());
+                let instantiation_started = profile.as_ref().map(|_| ProfileTimer::start());
                 let grounded_bundle = instantiate_structural_template_internal(
                     store,
                     image.output_bundle_template,
@@ -1209,11 +1240,11 @@ impl OptimizedStructuralEngine {
                 )?;
                 if let Some(profile) = profile.as_deref_mut() {
                     if let Some(started) = instantiation_started {
-                        profile.instantiation_ns += started.elapsed().as_nanos();
+                        profile.instantiation_ns += started.elapsed_ns();
                     }
                 }
                 if let Some(trace) = trace.as_deref_mut() {
-                    let trace_started = Instant::now();
+                    let trace_started = ProfileTimer::start();
                     trace.events.push(StructuralTraceEvent::Instantiated {
                         active,
                         rule: image.rule,
@@ -1221,10 +1252,10 @@ impl OptimizedStructuralEngine {
                             image.output_bundle_template,
                         grounded_bundle,
                     });
-                    trace.collection_ns += trace_started.elapsed().as_nanos();
+                    trace.collection_ns += trace_started.elapsed_ns();
                 }
 
-                let publication_started = profile.as_ref().map(|_| Instant::now());
+                let publication_started = profile.as_ref().map(|_| ProfileTimer::start());
                 let outputs = read_exact_sequence(store, grounded_bundle)?;
                 if let Some(profile) = profile.as_deref_mut() {
                     profile.publication_outputs += outputs.len() as u64;
@@ -1234,18 +1265,18 @@ impl OptimizedStructuralEngine {
                 }
                 if let Some(profile) = profile.as_deref_mut() {
                     if let Some(started) = publication_started {
-                        profile.publication_ns += started.elapsed().as_nanos();
+                        profile.publication_ns += started.elapsed_ns();
                     }
                 }
                 if let Some(trace) = trace.as_deref_mut() {
-                    let trace_started = Instant::now();
+                    let trace_started = ProfileTimer::start();
                     trace.events.push(StructuralTraceEvent::Published {
                         active,
                         rule: Some(image.rule),
                         outputs,
                         preserved: false,
                     });
-                    trace.collection_ns += trace_started.elapsed().as_nanos();
+                    trace.collection_ns += trace_started.elapsed_ns();
                 }
             }
         }
@@ -1257,14 +1288,14 @@ impl OptimizedStructuralEngine {
         if raw_rule_matches == 0 {
             self.quiescent = true;
             if let Some(trace) = trace.as_deref_mut() {
-                let trace_started = Instant::now();
+                let trace_started = ProfileTimer::start();
                 trace.events.push(StructuralTraceEvent::ScopeCommitted {
                     old_members: old_members.clone(),
                     next_members: old_members.clone(),
                     quiescent: true,
                     handoff_count: 0,
                 });
-                trace.collection_ns += trace_started.elapsed().as_nanos();
+                trace.collection_ns += trace_started.elapsed_ns();
             }
             return Ok(StructuralReactionResult {
                 old_members: old_members.clone(),
@@ -1282,14 +1313,14 @@ impl OptimizedStructuralEngine {
         self.handoff_count = 1;
 
         if let Some(trace) = trace.as_deref_mut() {
-            let trace_started = Instant::now();
+            let trace_started = ProfileTimer::start();
             trace.events.push(StructuralTraceEvent::ScopeCommitted {
                 old_members: old_members.clone(),
                 next_members: next_members.clone(),
                 quiescent: false,
                 handoff_count: 1,
             });
-            trace.collection_ns += trace_started.elapsed().as_nanos();
+            trace.collection_ns += trace_started.elapsed_ns();
         }
 
         Ok(StructuralReactionResult {
