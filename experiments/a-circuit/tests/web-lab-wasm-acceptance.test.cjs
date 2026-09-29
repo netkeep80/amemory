@@ -383,6 +383,34 @@ Promise.all([
       workbenchManual.assertions.length !== 0) {
     throw new Error("R4 Workbench preset/manual Scenario-model mismatch");
   }
+
+  for (const bad of ["12garbage", "1e3", "0x10garbage", "-1", "+1", ""]) {
+    let rejected = false;
+    try {
+      normalizeWorkbenchInputs(
+        [{ key: "X", type: "WORD32" }],
+        { X: bad }
+      );
+    } catch {
+      rejected = true;
+    }
+    if (!rejected) {
+      throw new Error("R4 strict numeric parser accepted " + JSON.stringify(bad));
+    }
+  }
+  const strictNumbers = normalizeWorkbenchInputs(
+    [
+      { key: "B", type: "BIT" },
+      { key: "C", type: "COUNT8" },
+      { key: "W", type: "WORD32" },
+    ],
+    { B: "1", C: "0xff", W: "4294967295" }
+  );
+  if (JSON.stringify(strictNumbers) !==
+      JSON.stringify({ B: 1, C: 255, W: 0xffffffff })) {
+    throw new Error("R4 strict numeric parser changed valid typed inputs");
+  }
+
   const workbenchOpenPipeline = deriveWorkbenchPipeline(
     { prepareCount: 1, loadCount: 1, baseLinkCount: 123 },
     null
@@ -583,6 +611,24 @@ Promise.all([
     );
   }
 
+  // #332: the built-in program registry resolves the complete descriptor.
+  // A known profileId with contradictory provenance must fail before LOAD.
+  for (const [field, value] of [
+    ["family", "not-mux"],
+    ["programId", "not-mux1"],
+    ["asetSource", "audit:unknown-program"],
+  ]) {
+    const tamperedManifest = JSON.parse(JSON.stringify(scenarioManifest));
+    tamperedManifest.programProfile[field] = value;
+    const rejected = openScenarioLiveSession(w, tamperedManifest);
+    if (rejected.ok ||
+        rejected.status !== null ||
+        rejected.error?.code !== "RUNNER" ||
+        rejected.error?.error?.code !== "PROGRAM_PROFILE_MISMATCH") {
+      throw new Error("#332 contradictory " + field + " did not fail before LOAD");
+    }
+  }
+
   // R4a/R4b: separate browser Run calls reuse one retained CPU Session,
   // while observer history remains a bounded host-only concern.
   const liveOpened = openScenarioLiveSession(w, scenarioManifest);
@@ -596,7 +642,19 @@ Promise.all([
       liveOpened.status.engineInstanceId.length === 0 ||
       !PROGRAM_FINGERPRINT_RE.test(
         liveOpened.status?.programFingerprint ?? ""
-      )) {
+      ) ||
+      JSON.stringify(liveOpened.status?.programProfile) !==
+        JSON.stringify(scenarioManifest.programProfile) ||
+      liveOpened.status?.manifestFieldSemantics?.programProfile !==
+        "ENFORCED" ||
+      liveOpened.status?.manifestFieldSemantics?.typedInputs !==
+        "ENFORCED" ||
+      liveOpened.status?.manifestFieldSemantics?.invariants !==
+        "ADVISORY" ||
+      liveOpened.status?.manifestFieldSemantics?.profilingPolicy !==
+        "ADVISORY" ||
+      liveOpened.status?.manifestFieldSemantics?.visualizationProfile !==
+        "ADVISORY") {
     throw new Error("R4a retained Session open evidence mismatch");
   }
   const liveIdentity = {
@@ -618,6 +676,28 @@ Promise.all([
       ringPolicy.status?.retainedRuns !== 0 ||
       ringPolicy.status?.profilePoints !== 0) {
     throw new Error("R4b RING policy activation mismatch");
+  }
+
+  const invalidLiveRun = {
+    ...scenarioManifest.runSequence[0],
+    runId: "invalid-live-input",
+    inputs: {
+      ...scenarioManifest.runSequence[0].inputs,
+      S: "12garbage",
+    },
+  };
+  const linksBeforeInvalid = liveOpened.status.currentLinkCount;
+  const invalidLive = runScenarioLiveSession(w, invalidLiveRun);
+  const statusAfterInvalid = refreshScenarioLiveSessionStatus(w);
+  if (invalidLive.ok ||
+      invalidLive.error?.code !== "RUNNER" ||
+      invalidLive.error?.error?.code !== "VALIDATION" ||
+      !statusAfterInvalid.ok ||
+      statusAfterInvalid.status?.currentLinkCount !== linksBeforeInvalid ||
+      statusAfterInvalid.status?.completedRuns !== 0 ||
+      statusAfterInvalid.status?.prepareCount !== 1 ||
+      statusAfterInvalid.status?.loadCount !== 1) {
+    throw new Error("#332 invalid live input mutated Session before CONFIGURE");
   }
 
   const liveRun1 = {
@@ -1144,6 +1224,10 @@ Promise.all([
   const editedProvenance = editedCpu.report.provenance;
   if (editedProvenance?.amemoryVersion !== version ||
       editedProvenance?.buildSha !== sourceSha ||
+      JSON.stringify(editedCpu.report?.programProfile) !==
+        JSON.stringify(editedScenario.programProfile) ||
+      JSON.stringify(editedProvenance?.programProfile) !==
+        JSON.stringify(editedScenario.programProfile) ||
       !/^prepared-aset-fnv1a64-v1:[0-9a-f]{16}$/.test(
         editedProvenance?.programFingerprint ?? ""
       )) {
@@ -1200,6 +1284,19 @@ Promise.all([
   }
   if (!tamperRejected) {
     throw new Error("R3e replay provenance mismatch did not fail closed");
+  }
+
+  const descriptorTamper = JSON.parse(replayText);
+  descriptorTamper.provenance.programProfile.asetSource =
+    "audit:unknown-program";
+  let descriptorRejected = false;
+  try {
+    importScenarioReplayBundle(descriptorTamper);
+  } catch (error) {
+    descriptorRejected = String(error).includes("canonical programProfile");
+  }
+  if (!descriptorRejected) {
+    throw new Error("R3e full program descriptor tamper did not fail closed");
   }
 
   const scenarioGpu = executeScenarioManifest(
