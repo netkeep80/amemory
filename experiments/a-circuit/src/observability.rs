@@ -1,8 +1,39 @@
 use amemory_optimized_cpu_probe::structural::{
     StructuralRunProfile, StructuralTraceEvent,
+    STRUCTURAL_PROFILE_TIMING_AVAILABLE,
 };
 use serde::{Deserialize, Serialize};
+#[cfg(not(target_family = "wasm"))]
 use std::time::Instant;
+
+#[derive(Clone, Debug)]
+pub(crate) struct ObservationTimer {
+    #[cfg(not(target_family = "wasm"))]
+    started: Instant,
+}
+
+impl ObservationTimer {
+    pub(crate) fn start() -> Self {
+        Self {
+            #[cfg(not(target_family = "wasm"))]
+            started: Instant::now(),
+        }
+    }
+
+    pub(crate) fn elapsed_ns(&self) -> u128 {
+        #[cfg(not(target_family = "wasm"))]
+        {
+            self.started.elapsed().as_nanos()
+        }
+        #[cfg(target_family = "wasm")]
+        {
+            0
+        }
+    }
+}
+
+pub(crate) const OBSERVABILITY_TIMING_AVAILABLE: bool =
+    !cfg!(target_family = "wasm");
 
 pub(crate) const RUN_OBSERVABILITY_SCHEMA_VERSION: u32 = 1;
 pub(crate) const OPTIMIZED_CPU_BACKEND_ID: &str = "optimized-cpu";
@@ -239,6 +270,7 @@ pub(crate) struct RunEventV1 {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct StructuralProfileV1 {
+    pub(crate) timing_available: bool,
     pub(crate) trigger_incidence_candidates: u64,
     pub(crate) candidates_rejected_before_unification: u64,
     pub(crate) role_dictionary_decodes: u64,
@@ -267,6 +299,7 @@ pub(crate) struct StructuralProfileV1 {
 impl From<&StructuralRunProfile> for StructuralProfileV1 {
     fn from(value: &StructuralRunProfile) -> Self {
         Self {
+            timing_available: STRUCTURAL_PROFILE_TIMING_AVAILABLE,
             trigger_incidence_candidates: value.trigger_incidence_candidates,
             candidates_rejected_before_unification:
                 value.candidates_rejected_before_unification,
@@ -300,6 +333,7 @@ impl From<&StructuralRunProfile> for StructuralProfileV1 {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RunProfileV1 {
     pub(crate) schema_version: u32,
+    pub(crate) timing_available: bool,
     pub(crate) session_id: String,
     pub(crate) run_id: u64,
     pub(crate) backend_id: String,
@@ -318,6 +352,7 @@ pub(crate) struct RunProfileV1 {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SessionStageTimingsV1 {
+    pub(crate) timing_available: bool,
     pub(crate) prepare_ns: u64,
     pub(crate) load_ns: u64,
 }
@@ -336,6 +371,7 @@ pub(crate) struct SessionOpenProfileV1 {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RunStageTimingsV1 {
+    pub(crate) timing_available: bool,
     pub(crate) configure_ns: u64,
     pub(crate) execute_ns: u64,
     pub(crate) result_ns: u64,
@@ -357,9 +393,9 @@ pub(crate) struct RunPipelineProfileV1 {
 }
 
 pub(crate) fn time_stage<T>(work: impl FnOnce() -> T) -> (T, u64) {
-    let started = Instant::now();
+    let started = ObservationTimer::start();
     let value = work();
-    (value, ns_u64(started.elapsed().as_nanos()))
+    (value, ns_u64(started.elapsed_ns()))
 }
 
 pub(crate) fn session_open_profile_v1(
@@ -374,6 +410,7 @@ pub(crate) fn session_open_profile_v1(
         session_id,
         backend_id: OPTIMIZED_CPU_BACKEND_ID.to_owned(),
         stages: SessionStageTimingsV1 {
+            timing_available: OBSERVABILITY_TIMING_AVAILABLE,
             prepare_ns,
             load_ns,
         },
@@ -401,6 +438,8 @@ pub(crate) fn run_pipeline_profile_v1(
         run_id: observed.run_id,
         backend_id: observed.backend_id.clone(),
         stages: RunStageTimingsV1 {
+            timing_available:
+                observed.timing_available && execute_profile.timing_available,
             configure_ns,
             execute_ns: execute_profile.execute_ns,
             result_ns,
@@ -417,6 +456,7 @@ pub(crate) fn run_pipeline_profile_v1(
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ObservedRunV1 {
     pub(crate) schema_version: u32,
+    pub(crate) timing_available: bool,
     pub(crate) session_id: String,
     pub(crate) run_id: u64,
     pub(crate) backend_id: String,
@@ -441,6 +481,7 @@ mod tests {
     fn observed_run_v1_json_round_trip_is_versioned() {
         let run = ObservedRunV1 {
             schema_version: RUN_OBSERVABILITY_SCHEMA_VERSION,
+            timing_available: OBSERVABILITY_TIMING_AVAILABLE,
             session_id: "A-memory#test".to_owned(),
             run_id: 7,
             backend_id: OPTIMIZED_CPU_BACKEND_ID.to_owned(),
@@ -474,6 +515,10 @@ mod tests {
         assert!(json.contains("\"schemaVersion\":1"));
         assert!(json.contains("\"observationLevel\":\"TRACE\""));
         assert!(json.contains("\"stage\":\"EXECUTE\""));
+        assert!(json.contains(&format!(
+            "\"timingAvailable\":{}",
+            OBSERVABILITY_TIMING_AVAILABLE
+        )));
         let decoded: ObservedRunV1 = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded, run);
     }
@@ -482,6 +527,7 @@ mod tests {
     fn pipeline_profiles_round_trip_and_keep_session_run_split() {
         let execute = RunProfileV1 {
             schema_version: RUN_OBSERVABILITY_SCHEMA_VERSION,
+            timing_available: OBSERVABILITY_TIMING_AVAILABLE,
             session_id: "A-memory#pipeline".to_owned(),
             run_id: 3,
             backend_id: OPTIMIZED_CPU_BACKEND_ID.to_owned(),
@@ -494,10 +540,14 @@ mod tests {
             active_reaction_count: 7,
             execute_ns: 100,
             trace_projection_ns: 9,
-            structural: StructuralProfileV1::default(),
+            structural: StructuralProfileV1 {
+                timing_available: STRUCTURAL_PROFILE_TIMING_AVAILABLE,
+                ..StructuralProfileV1::default()
+            },
         };
         let observed = ObservedRunV1 {
             schema_version: RUN_OBSERVABILITY_SCHEMA_VERSION,
+            timing_available: OBSERVABILITY_TIMING_AVAILABLE,
             session_id: execute.session_id.clone(),
             run_id: execute.run_id,
             backend_id: execute.backend_id.clone(),
@@ -570,6 +620,28 @@ mod tests {
         let json = serde_json::to_string(&fact).unwrap();
         assert!(json.contains("\"kind\":\"RULE_MATCHED\""));
         assert!(json.contains("\"rule\":12"));
+    }
+
+    #[test]
+    fn timing_availability_matches_target_clock_capability() {
+        assert_eq!(
+            OBSERVABILITY_TIMING_AVAILABLE,
+            !cfg!(target_family = "wasm"),
+        );
+        assert_eq!(
+            STRUCTURAL_PROFILE_TIMING_AVAILABLE,
+            OBSERVABILITY_TIMING_AVAILABLE,
+        );
+
+        let timer = ObservationTimer::start();
+        let elapsed = timer.elapsed_ns();
+        if OBSERVABILITY_TIMING_AVAILABLE {
+            // A monotonic clock can legitimately report 0 for a very short
+            // interval; availability is the truth bit, not the magnitude.
+            assert!(elapsed <= u128::MAX);
+        } else {
+            assert_eq!(elapsed, 0);
+        }
     }
 
     #[test]
