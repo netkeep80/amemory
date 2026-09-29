@@ -19,6 +19,17 @@ use amemory_optimized_cpu_probe::{
 };
 use std::collections::HashSet;
 
+#[cfg(test)]
+use super::{
+    observability::{
+        RunEventKind, RunObservationLevel, RUN_OBSERVABILITY_SCHEMA_VERSION,
+    },
+    proof_n::{
+        execute_session_observed_to_quiescence, ProofRuntimeSession,
+        WebProofLoadStage, WebProofPrepareStage,
+    },
+};
+
 const WIDTH: usize = 32;
 
 struct AnchorGen {
@@ -1341,11 +1352,8 @@ pub(crate) fn web_prove_mux1(
     })
 }
 
-#[test]
-fn web_mux1_lifecycle_reconfigures_four_runs_in_one_loaded_memory() {
-    // PREPARE the static program/Theory only. No concrete invocation/current
-    // Link is part of the packed image: every input configuration below is
-    // published after LOAD into this one runtime store.
+#[cfg(test)]
+fn prepare_static_mux1_runtime() -> WebProofPrepareStage {
     let compiler = build_proof_mux_fixture();
     let prepared_roots = vec![
         semantic_source(&compiler.store, "function.mux1", compiler.mux1),
@@ -1375,8 +1383,48 @@ fn web_mux1_lifecycle_reconfigures_four_runs_in_one_loaded_memory() {
     ];
     let admissions =
         theory_admissions(&compiler.store, compiler.theory).unwrap();
-    let prepare =
-        prepare_stage(&compiler.store, prepared_roots, admissions);
+    prepare_stage(&compiler.store, prepared_roots, admissions)
+}
+
+#[cfg(test)]
+fn publish_mux1_configuration(
+    session: &mut ProofRuntimeSession,
+    load: &WebProofLoadStage,
+    select: usize,
+    a: usize,
+    b: usize,
+) -> (Handle, usize, usize) {
+    let mux1 = loaded_handle(load, "function.mux1").unwrap();
+    let apply = loaded_handle(load, "execution.apply").unwrap();
+    let caller = loaded_handle(load, "context.caller").unwrap();
+    let zero = loaded_handle(load, "data.zero").unwrap();
+    let one = loaded_handle(load, "data.one").unwrap();
+    let bits = [zero, one];
+
+    let before = session.memory.store.link_count();
+    let args = materialize_exact_sequence(
+        &mut session.memory.store,
+        &[bits[select], bits[a], bits[b]],
+    )
+    .unwrap();
+    let invocation =
+        call(&mut session.memory.store, apply, mux1, args);
+    let initial = session
+        .memory
+        .store
+        .ensure_pair(caller, invocation)
+        .unwrap();
+    let after = session.memory.store.link_count();
+
+    (initial, before, after)
+}
+
+#[test]
+fn web_mux1_lifecycle_reconfigures_four_runs_in_one_loaded_memory() {
+    // PREPARE the static program/Theory only. No concrete invocation/current
+    // Link is part of the packed image: every input configuration below is
+    // published after LOAD into this one runtime store.
+    let prepare = prepare_static_mux1_runtime();
 
     // LOAD exactly once and create one engine owned by the runtime Session.
     let (mut session, load) =
@@ -1395,13 +1443,10 @@ fn web_mux1_lifecycle_reconfigures_four_runs_in_one_loaded_memory() {
         "Session base boundary must equal the one-time LOAD boundary",
     );
 
-    let mux1 = loaded_handle(&load, "function.mux1").unwrap();
-    let apply = loaded_handle(&load, "execution.apply").unwrap();
     let caller = loaded_handle(&load, "context.caller").unwrap();
     let result_tag = loaded_handle(&load, "result.tag").unwrap();
     let zero = loaded_handle(&load, "data.zero").unwrap();
     let one = loaded_handle(&load, "data.one").unwrap();
-    let bits = [zero, one];
 
     let vectors = [
         (0usize, 0usize, 1usize, 0u32),
@@ -1429,20 +1474,8 @@ fn web_mux1_lifecycle_reconfigures_four_runs_in_one_loaded_memory() {
 
         // CONFIGURE: publish this run's input as normal immutable Links in the
         // already-loaded A-memory. No old Link is rewritten.
-        let before_config = session.memory.store.link_count();
-        let args = materialize_exact_sequence(
-            &mut session.memory.store,
-            &[bits[select], bits[a], bits[b]],
-        )
-        .unwrap();
-        let invocation =
-            call(&mut session.memory.store, apply, mux1, args);
-        let initial = session
-            .memory
-            .store
-            .ensure_pair(caller, invocation)
-            .unwrap();
-        let after_config = session.memory.store.link_count();
+        let (initial, before_config, after_config) =
+            publish_mux1_configuration(&mut session, &load, select, a, b);
 
         if run_index < 3 {
             assert!(
@@ -1525,6 +1558,106 @@ fn web_mux1_lifecycle_reconfigures_four_runs_in_one_loaded_memory() {
                 first_result_wire,
                 "returning to the first configuration changed its semantic result",
             );
+        }
+    }
+}
+
+#[test]
+fn web_mux1_observation_levels_are_semantically_passive() {
+    let prepare = prepare_static_mux1_runtime();
+    let levels = [
+        RunObservationLevel::Off,
+        RunObservationLevel::Profile,
+        RunObservationLevel::Trace,
+        RunObservationLevel::Full,
+    ];
+    let mut baseline_scope = None;
+
+    for level in levels {
+        let (mut session, load) =
+            load_runtime_session(&prepare, 32).unwrap();
+        let (initial, _, _) =
+            publish_mux1_configuration(&mut session, &load, 1, 0, 1);
+
+        let observed = execute_session_observed_to_quiescence(
+            &mut session,
+            initial,
+            64,
+            level,
+        )
+        .unwrap();
+
+        assert_eq!(
+            observed.schema_version,
+            RUN_OBSERVABILITY_SCHEMA_VERSION,
+        );
+        assert!(observed.final_quiescent);
+        assert_eq!(observed.active_reaction_count, 7);
+        assert_eq!(observed.final_scope, session.engine.current());
+
+        let mut semantic_scope = observed
+            .final_scope
+            .iter()
+            .map(|handle| session.memory.store.export_anum(*handle).unwrap())
+            .collect::<Vec<_>>();
+        semantic_scope.sort();
+        if let Some(expected) = &baseline_scope {
+            assert_eq!(
+                &semantic_scope, expected,
+                "observation level changed semantic final Scope",
+            );
+        } else {
+            baseline_scope = Some(semantic_scope);
+        }
+
+        match level {
+            RunObservationLevel::Off => {
+                assert!(observed.profile.is_none());
+                assert!(observed.events.is_empty());
+            }
+            RunObservationLevel::Profile => {
+                let profile = observed.profile.as_ref().unwrap();
+                assert_eq!(profile.active_reaction_count, 7);
+                assert_eq!(
+                    profile.base_links,
+                    load.links_after_load,
+                );
+                assert!(observed.events.is_empty());
+            }
+            RunObservationLevel::Trace | RunObservationLevel::Full => {
+                let profile = observed.profile.as_ref().unwrap();
+                assert_eq!(profile.active_reaction_count, 7);
+                assert_eq!(
+                    observed.events.first().unwrap().kind,
+                    RunEventKind::ExecuteBegin,
+                );
+                assert_eq!(
+                    observed.events.last().unwrap().kind,
+                    RunEventKind::RunEnd,
+                );
+                assert!(
+                    observed
+                        .events
+                        .iter()
+                        .any(|event| event.kind == RunEventKind::Quiescence),
+                );
+                let reaction_events = observed
+                    .events
+                    .iter()
+                    .filter(|event| event.kind == RunEventKind::ReactionEnd)
+                    .count() as u32;
+                assert_eq!(
+                    reaction_events,
+                    observed.active_reaction_count + 1,
+                    "trace must include the terminal quiescent reaction",
+                );
+                assert!(
+                    observed
+                        .events
+                        .windows(2)
+                        .all(|pair| pair[0].sequence < pair[1].sequence),
+                );
+            }
         }
     }
 }

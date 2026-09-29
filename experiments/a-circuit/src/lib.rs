@@ -20,6 +20,7 @@ mod shift32_n;
 mod rotate32_n;
 mod rotate_carry32_n;
 mod mux_n;
+mod observability;
 mod proof_n;
 mod unary_arith_n;
 mod wide64_n;
