@@ -11,6 +11,12 @@ const BACKENDS = new Map([
   ["linksdb", 2],
 ]);
 
+const LIVE_RETENTION_MODES = new Map([
+  ["LATEST", 0],
+  ["RING", 1],
+  ["EXPLICIT_EXPORT", 2],
+]);
+
 const REPORT_ABI = {
   available: "amemory_scenario_report_available",
   length: "amemory_scenario_report_json_len",
@@ -39,6 +45,20 @@ const LIVE_OUTPUT_ABI = {
   byte: "amemory_scenario_live_output_json_byte",
 };
 
+const LIVE_HISTORY_ABI = {
+  available: "amemory_scenario_live_history_available",
+  length: "amemory_scenario_live_history_json_len",
+  pointer: "amemory_scenario_live_history_json_ptr",
+  byte: "amemory_scenario_live_history_json_byte",
+};
+
+const LIVE_HISTORY_EXPORT_ABI = {
+  available: "amemory_scenario_live_history_export_json_available",
+  length: "amemory_scenario_live_history_export_json_len",
+  pointer: "amemory_scenario_live_history_export_json_ptr",
+  byte: "amemory_scenario_live_history_export_json_byte",
+};
+
 function requireFunction(wasm, name) {
   const fn = wasm[name];
   if (typeof fn !== "function") {
@@ -65,7 +85,23 @@ export function readScenarioTransportLimits(wasm) {
       limits.maxRetainedErrors !== 1 ||
       limits.retentionMode !== "LATEST" ||
       limits.liveSessionRetained !== true ||
-      limits.batchSessionRetained !== false) {
+      limits.batchSessionRetained !== false ||
+      limits.liveObserver?.schemaVersion !== 1 ||
+      limits.liveObserver?.defaultRetentionMode !== "RING" ||
+      JSON.stringify(limits.liveObserver?.supportedRetentionModes) !==
+        JSON.stringify(["LATEST", "RING", "EXPLICIT_EXPORT"]) ||
+      !Number.isInteger(limits.liveObserver?.maxRetainedRuns) ||
+      !Number.isInteger(limits.liveObserver?.maxRetainedEvents) ||
+      !Number.isInteger(limits.liveObserver?.maxRetainedBytes) ||
+      !Number.isInteger(limits.liveObserver?.maxSingleReportBytes) ||
+      !Number.isInteger(limits.liveObserver?.maxProfilePoints) ||
+      !Number.isInteger(limits.liveObserver?.maxExportBytes) ||
+      limits.liveObserver.maxRetainedRuns <= 0 ||
+      limits.liveObserver.maxRetainedEvents <= 0 ||
+      limits.liveObserver.maxRetainedBytes <= 0 ||
+      limits.liveObserver.maxSingleReportBytes <= 0 ||
+      limits.liveObserver.maxProfilePoints <= 0 ||
+      limits.liveObserver.maxExportBytes <= 0) {
     throw new Error("scenario transport: invalid limits/capability envelope");
   }
   return limits;
@@ -259,6 +295,202 @@ export function refreshScenarioLiveSessionStatus(wasm) {
     );
   }
   return { ok: false, status: null, error };
+}
+
+
+export function readScenarioLiveHistoryStatus(wasm) {
+  return readJsonAbi(wasm, LIVE_HISTORY_ABI, "scenario live history");
+}
+
+export function readScenarioLiveHistoryExport(wasm) {
+  return readJsonAbi(
+    wasm,
+    LIVE_HISTORY_EXPORT_ABI,
+    "scenario live history export",
+  );
+}
+
+function requireLiveHistoryStatus(wasm, label) {
+  const status = readScenarioLiveHistoryStatus(wasm);
+  const error = readScenarioError(wasm);
+  if (status === null || error !== null || status.schemaVersion !== 1) {
+    throw new Error(`${label}: invalid status/error state`);
+  }
+  return status;
+}
+
+export function setScenarioLiveRetentionPolicy(
+  wasm,
+  {
+    retentionMode,
+    maxRetainedRuns,
+    maxRetainedEvents,
+    maxRetainedBytes,
+  },
+) {
+  const modeCode = LIVE_RETENTION_MODES.get(retentionMode);
+  if (modeCode === undefined) {
+    throw new Error(
+      `scenario live history: unknown retention mode ${retentionMode}`,
+    );
+  }
+  for (const [name, value] of Object.entries({
+    maxRetainedRuns,
+    maxRetainedEvents,
+    maxRetainedBytes,
+  })) {
+    if (!Number.isInteger(value) || value <= 0) {
+      throw new Error(
+        `scenario live history: invalid ${name} ${value}`,
+      );
+    }
+  }
+  const setPolicy = requireFunction(
+    wasm,
+    "amemory_scenario_live_history_policy_set",
+  );
+  const success = setPolicy(
+    modeCode,
+    maxRetainedRuns >>> 0,
+    maxRetainedEvents >>> 0,
+    maxRetainedBytes >>> 0,
+  ) >>> 0;
+  if (success !== 1) {
+    return {
+      ok: false,
+      status: null,
+      error: readScenarioError(wasm),
+    };
+  }
+  return {
+    ok: true,
+    status: requireLiveHistoryStatus(
+      wasm,
+      "scenario live history policy",
+    ),
+    error: null,
+  };
+}
+
+export function refreshScenarioLiveHistoryStatus(wasm) {
+  const refresh = requireFunction(
+    wasm,
+    "amemory_scenario_live_history_status_refresh",
+  );
+  const success = refresh() >>> 0;
+  if (success !== 1) {
+    return {
+      ok: false,
+      status: null,
+      error: readScenarioError(wasm),
+    };
+  }
+  return {
+    ok: true,
+    status: requireLiveHistoryStatus(
+      wasm,
+      "scenario live history refresh",
+    ),
+    error: null,
+  };
+}
+
+export function clearScenarioLiveHistory(wasm) {
+  const clear = requireFunction(
+    wasm,
+    "amemory_scenario_live_history_clear",
+  );
+  const success = clear() >>> 0;
+  if (success !== 1) {
+    return {
+      ok: false,
+      status: null,
+      error: readScenarioError(wasm),
+    };
+  }
+  const refreshed = refreshScenarioLiveHistoryStatus(wasm);
+  if (!refreshed.ok) {
+    return refreshed;
+  }
+  return refreshed;
+}
+
+function requireHistoryExport(wasm, label) {
+  const exported = readScenarioLiveHistoryExport(wasm);
+  const error = readScenarioError(wasm);
+  if (exported === null ||
+      error !== null ||
+      exported.schemaVersion !== 1 ||
+      exported.representationId !==
+        "amemory-live-observer-history-json" ||
+      exported.representationVersion !== "0.1.0" ||
+      !Array.isArray(exported.runs)) {
+    throw new Error(`${label}: invalid export/error state`);
+  }
+  return exported;
+}
+
+export function exportScenarioLiveRun(wasm, sessionRunId) {
+  if (!Number.isInteger(sessionRunId) ||
+      sessionRunId <= 0 ||
+      sessionRunId > 0xffffffff) {
+    throw new Error(
+      `scenario live history: invalid sessionRunId ${sessionRunId}`,
+    );
+  }
+  const exportRun = requireFunction(
+    wasm,
+    "amemory_scenario_live_history_export_run",
+  );
+  const success = exportRun(sessionRunId >>> 0) >>> 0;
+  if (success !== 1) {
+    return {
+      ok: false,
+      export: null,
+      error: readScenarioError(wasm),
+    };
+  }
+  return {
+    ok: true,
+    export: requireHistoryExport(
+      wasm,
+      "scenario live selected-run export",
+    ),
+    error: null,
+  };
+}
+
+export function exportScenarioLiveHistory(wasm) {
+  const exportAvailable = requireFunction(
+    wasm,
+    "amemory_scenario_live_history_export_available",
+  );
+  const success = exportAvailable() >>> 0;
+  if (success !== 1) {
+    return {
+      ok: false,
+      export: null,
+      error: readScenarioError(wasm),
+    };
+  }
+  return {
+    ok: true,
+    export: requireHistoryExport(
+      wasm,
+      "scenario live available-history export",
+    ),
+    error: null,
+  };
+}
+
+export function clearScenarioLiveHistoryExport(wasm) {
+  requireFunction(
+    wasm,
+    "amemory_scenario_live_history_export_clear",
+  )();
+  if (readScenarioLiveHistoryExport(wasm) !== null) {
+    throw new Error("scenario live history: export clear failed");
+  }
 }
 
 export function closeScenarioLiveSession(wasm) {
