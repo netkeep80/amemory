@@ -199,8 +199,8 @@ Promise.all([
     "utf8"
   );
   const presetRegistry = refreshScenarioPresetRegistry(w);
-  if (presetRegistry.entries.length !== 4) {
-    throw new Error("R3d3 preset registry count mismatch");
+  if (presetRegistry.entries.length !== 5) {
+    throw new Error("R3d4 preset registry count mismatch");
   }
   const presetSummary = presetRegistry.entries.find(
     (entry) => entry.scenarioId === "mux1-lifecycle"
@@ -258,6 +258,20 @@ Promise.all([
     throw new Error("R3d3 manifest-derived SHL32 preset summary mismatch");
   }
 
+
+  const mulPresetSummary = presetRegistry.entries.find(
+    (entry) => entry.scenarioId === "mul32-lifecycle"
+  );
+  if (!mulPresetSummary ||
+      mulPresetSummary.scenarioVersion !== "1.0.0" ||
+      mulPresetSummary.programProfileId !== "a-circuit:mul32" ||
+      mulPresetSummary.family !== "mul" ||
+      mulPresetSummary.programId !== "mul32" ||
+      mulPresetSummary.runCount !== 4 ||
+      !Array.isArray(mulPresetSummary.inputSchema) ||
+      mulPresetSummary.inputSchema.length !== 2) {
+    throw new Error("R3d4 manifest-derived MUL32 preset summary mismatch");
+  }
 
 
   if (loadScenarioPresetManifestByIndex(w, 99) !== null ||
@@ -612,6 +626,62 @@ Promise.all([
       legacyResultBeforeScenario) {
     throw new Error(
       "R3d3 SHL32 generic Scenario path mutated legacy LabInstanceState"
+    );
+  }
+
+  // R3d4: raw MUL32 Wide64 uses the same generic preset/Scenario path.
+  const canonicalMulSource = fs.readFileSync(
+    "experiments/a-circuit/scenarios/mul32-lifecycle-v1.json",
+    "utf8"
+  );
+  const mulPreset = loadScenarioPresetManifest(
+    w,
+    presetRegistry,
+    "mul32-lifecycle",
+    "1.0.0"
+  );
+  if (mulPreset === null || mulPreset.source !== canonicalMulSource) {
+    throw new Error("R3d4 MUL32 canonical preset round-trip mismatch");
+  }
+  const mulScenario = JSON.parse(mulPreset.source);
+  const mulCpu = executeScenarioManifest(
+    w,
+    mulScenario,
+    "optimized-cpu"
+  );
+  if (!mulCpu.ok ||
+      mulCpu.error !== null ||
+      mulCpu.report?.scenarioId !== "mul32-lifecycle" ||
+      mulCpu.report?.overallPass !== true ||
+      mulCpu.report?.runs?.length !== 4) {
+    throw new Error("R3d4 generic MUL32 Scenario execution failed");
+  }
+  const expectedMulReactions = [33, 1071, 1071, 33];
+  for (let index = 0; index < mulCpu.report.runs.length; index += 1) {
+    const run = mulCpu.report.runs[index];
+    if ((run.sessionRunId >>> 0) !== index + 1 ||
+        run.observed?.sessionId !== mulCpu.report.sessionId ||
+        run.observed?.finalQuiescent !== true ||
+        run.observed?.activeReactionCount !== expectedMulReactions[index] ||
+        run.oracleMatches !== true ||
+        !run.pipelineProfile ||
+        run.observed?.profile?.structural?.unificationAttempts <= 0) {
+      throw new Error(
+        "R3d4 MUL32 persistent-session evidence mismatch at run " + index
+      );
+    }
+  }
+  if (mulCpu.report.runs[2].result?.fields?.lo !== "0x00000000" ||
+      mulCpu.report.runs[2].result?.fields?.hi !== "0x00000001" ||
+      mulCpu.report.runs[3].configurationReused !== true ||
+      JSON.stringify(mulCpu.report.runs[3].inputs) !==
+        JSON.stringify(mulCpu.report.runs[0].inputs)) {
+    throw new Error("R3d4 MUL32 Wide64/canonical reuse mismatch");
+  }
+  if ((w.amemory_i386_lab_result_available() >>> 0) !==
+      legacyResultBeforeScenario) {
+    throw new Error(
+      "R3d4 MUL32 generic Scenario path mutated legacy LabInstanceState"
     );
   }
 
