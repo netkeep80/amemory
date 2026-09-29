@@ -22,6 +22,7 @@ use std::collections::HashSet;
 #[cfg(test)]
 use super::{
     observability::{
+        run_pipeline_profile_v1, session_open_profile_v1, time_stage,
         RunEventKind, RunObservationLevel, RUN_OBSERVABILITY_SCHEMA_VERSION,
     },
     proof_n::{
@@ -1660,6 +1661,137 @@ fn web_mux1_observation_levels_are_semantically_passive() {
             }
         }
     }
+}
+
+#[test]
+fn web_mux1_pipeline_profile_separates_session_open_from_run_stages() {
+    // Session-open lifecycle: PREPARE and LOAD happen exactly once.
+    let (prepare, prepare_ns) = time_stage(prepare_static_mux1_runtime);
+    let prepared_links = prepare.compiled_links;
+    let ((mut session, load), load_ns) =
+        time_stage(|| load_runtime_session(&prepare, 32).unwrap());
+    let open_profile = session_open_profile_v1(
+        session.memory.id.clone(),
+        prepare_ns,
+        load_ns,
+        prepared_links,
+        session.base_link_count as u32,
+    );
+
+    assert_eq!(open_profile.prepared_links, prepared_links);
+    assert_eq!(open_profile.base_links, load.links_after_load);
+
+    // Per-run lifecycle starts only at CONFIGURE. PREPARE/LOAD are not
+    // charged again for this persistent Session.
+    let ((initial, links_before_configure, links_after_configure), configure_ns) =
+        time_stage(|| {
+            publish_mux1_configuration(&mut session, &load, 1, 0, 1)
+        });
+    assert_eq!(
+        links_before_configure as u32,
+        open_profile.base_links,
+        "first run must start from the one-time loaded base boundary",
+    );
+    assert!(links_after_configure > links_before_configure);
+
+    let observed = execute_session_observed_to_quiescence(
+        &mut session,
+        initial,
+        64,
+        RunObservationLevel::Trace,
+    )
+    .unwrap();
+    assert!(observed.final_quiescent);
+    assert_eq!(observed.active_reaction_count, 7);
+    let links_after_execute = session.memory.store.link_count();
+
+    // RESULT is a read-only projection over the already-computed carrier.
+    let caller = loaded_handle(&load, "context.caller").unwrap();
+    let result_tag = loaded_handle(&load, "result.tag").unwrap();
+    let zero = loaded_handle(&load, "data.zero").unwrap();
+    let one = loaded_handle(&load, "data.one").unwrap();
+    let links_before_result = session.memory.store.link_count();
+    let ((decoded, result_wire), result_ns) = time_stage(|| {
+        assert_eq!(session.engine.current().len(), 1);
+        let final_link = session.engine.current()[0];
+        let (final_caller, endpoint) =
+            session.memory.store.poles(final_link).unwrap();
+        assert_eq!(final_caller, caller);
+        let (tag, payload) = session.memory.store.poles(endpoint).unwrap();
+        assert_eq!(tag, result_tag);
+        let values =
+            read_exact_sequence(&session.memory.store, payload).unwrap();
+        assert_eq!(values.len(), 1);
+        let decoded = if values[0] == one {
+            1
+        } else if values[0] == zero {
+            0
+        } else {
+            panic!("pipeline RESULT returned a non-bit MUX1 result");
+        };
+        let wire = session.memory.store.export_anum(final_link).unwrap();
+        (decoded, wire)
+    });
+    assert_eq!(decoded, 1);
+    assert_eq!(
+        session.memory.store.link_count(),
+        links_before_result,
+        "RESULT projection mutated the A-memory carrier",
+    );
+
+    // EVIDENCE is likewise read-only. Trace material was already charged to
+    // evidence by R2a; this timer covers visual + JSON projection here.
+    let links_before_evidence = session.memory.store.link_count();
+    let ((visual_count, evidence_json), external_evidence_ns) =
+        time_stage(|| {
+            let visual =
+                visual_snapshot(&session.memory, &load.semantic_roots);
+            let json =
+                serde_json::to_string(&(&open_profile, &observed, &visual))
+                    .unwrap();
+            (visual.len(), json)
+        });
+    assert_eq!(
+        session.memory.store.link_count(),
+        links_before_evidence,
+        "EVIDENCE projection mutated the A-memory carrier",
+    );
+    assert_eq!(visual_count, links_before_evidence);
+    assert!(evidence_json.contains("\"prepareNs\""));
+    assert!(evidence_json.contains("\"loadNs\""));
+
+    let run_profile = run_pipeline_profile_v1(
+        &observed,
+        configure_ns,
+        result_ns,
+        external_evidence_ns,
+        links_before_configure as u32,
+        links_after_configure as u32,
+    )
+    .unwrap();
+
+    assert_eq!(run_profile.session_id, open_profile.session_id);
+    assert_eq!(run_profile.run_id, observed.run_id);
+    assert_eq!(
+        run_profile.links_after_execute,
+        links_after_execute as u32,
+    );
+    assert_eq!(
+        run_profile.stages.execute_ns,
+        observed.profile.as_ref().unwrap().execute_ns,
+        "EXECUTE stage must be the semantic kernel profile, not wall time",
+    );
+    assert!(
+        run_profile.stages.evidence_ns
+            >= observed.profile.as_ref().unwrap().trace_projection_ns,
+        "R2a trace projection must be charged to EVIDENCE",
+    );
+
+    // Independent fresh execution remains oracle only and runs after the
+    // persistent pipeline has already produced its result.
+    let fresh = web_prove_mux1(1, 0, 1).unwrap();
+    assert_eq!(fresh.result.decoded_value, decoded);
+    assert_eq!(fresh.result.result_anum, result_wire);
 }
 
 #[test]
