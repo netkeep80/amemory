@@ -124,6 +124,7 @@ for (const forbiddenSeed of [
   }
 }
 for (const forbidden of [
+  "compactProof",
   "scopeAfter",
   "scopeBefore",
   "rawRuleMatches",
@@ -465,7 +466,7 @@ Promise.all([
   }
 
   const c4ReactionInput =
-    deriveGpuCarrierReactionInput(gpuCarrier, gpuCarrierProof);
+    deriveGpuCarrierReactionInput(gpuCarrier, gpuCarrierProof.roots);
   const c4ReactionOracle = expectedGpuCarrierReaction(
     gpuCarrier,
     c4ReactionInput
