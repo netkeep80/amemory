@@ -1206,7 +1206,7 @@ fn scalar_mux1_result(
     let mut fields = BTreeMap::new();
     fields.insert(
         "value".to_owned(),
-        Value::from(if select == 0 { a } else { b } as u32),
+        Value::from((if select == 0 { a } else { b }) as u32),
     );
     Ok(fields)
 }
