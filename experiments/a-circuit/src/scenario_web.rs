@@ -596,8 +596,13 @@ mod tests {
         );
         let registry: ScenarioPresetRegistryV1 =
             serde_json::from_str(&registry_json).unwrap();
-        assert_eq!(registry.entries.len(), 1);
+        assert_eq!(registry.entries.len(), 2);
         assert_eq!(registry.entries[0].scenario_id, "mux1-lifecycle");
+        assert_eq!(registry.entries[1].scenario_id, "xor32-lifecycle");
+        assert_eq!(
+            registry.entries[1].program_profile_id,
+            "a-circuit:logic-xor32"
+        );
 
         assert_eq!(amemory_scenario_preset_manifest_load(0), 1);
         let manifest_json = read_buffer(

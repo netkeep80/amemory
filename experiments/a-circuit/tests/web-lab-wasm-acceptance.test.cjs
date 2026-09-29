@@ -199,11 +199,13 @@ Promise.all([
     "utf8"
   );
   const presetRegistry = refreshScenarioPresetRegistry(w);
-  if (presetRegistry.entries.length !== 1) {
-    throw new Error("R3c preset registry count mismatch");
+  if (presetRegistry.entries.length !== 2) {
+    throw new Error("R3d1 preset registry count mismatch");
   }
-  const presetSummary = presetRegistry.entries[0];
-  if (presetSummary.scenarioId !== "mux1-lifecycle" ||
+  const presetSummary = presetRegistry.entries.find(
+    (entry) => entry.scenarioId === "mux1-lifecycle"
+  );
+  if (!presetSummary ||
       presetSummary.scenarioVersion !== "1.0.0" ||
       presetSummary.programProfileId !== "a-circuit:mux1" ||
       presetSummary.family !== "mux" ||
@@ -211,7 +213,21 @@ Promise.all([
       presetSummary.runCount !== 4 ||
       !Array.isArray(presetSummary.inputSchema) ||
       presetSummary.inputSchema.length !== 3) {
-    throw new Error("R3c manifest-derived preset summary mismatch");
+    throw new Error("R3c manifest-derived MUX1 preset summary mismatch");
+  }
+
+  const xorPresetSummary = presetRegistry.entries.find(
+    (entry) => entry.scenarioId === "xor32-lifecycle"
+  );
+  if (!xorPresetSummary ||
+      xorPresetSummary.scenarioVersion !== "1.0.0" ||
+      xorPresetSummary.programProfileId !== "a-circuit:logic-xor32" ||
+      xorPresetSummary.family !== "logic-effect" ||
+      xorPresetSummary.programId !== "xor32" ||
+      xorPresetSummary.runCount !== 4 ||
+      !Array.isArray(xorPresetSummary.inputSchema) ||
+      xorPresetSummary.inputSchema.length !== 2) {
+    throw new Error("R3d1 manifest-derived XOR32 preset summary mismatch");
   }
 
   if (loadScenarioPresetManifestByIndex(w, 99) !== null ||
@@ -394,6 +410,61 @@ Promise.all([
         "R2e observer cleanup changed semantic rerun at run " + index
       );
     }
+  }
+
+  // R3d1: the second preset uses the exact same registry and Scenario
+  // transport. There is intentionally no XOR-specific browser runner.
+  const canonicalXorSource = fs.readFileSync(
+    "experiments/a-circuit/scenarios/xor32-lifecycle-v1.json",
+    "utf8"
+  );
+  const xorPreset = loadScenarioPresetManifest(
+    w,
+    presetRegistry,
+    "xor32-lifecycle",
+    "1.0.0"
+  );
+  if (xorPreset === null || xorPreset.source !== canonicalXorSource) {
+    throw new Error("R3d1 XOR32 canonical preset round-trip mismatch");
+  }
+  const xorScenario = JSON.parse(xorPreset.source);
+  const xorCpu = executeScenarioManifest(
+    w,
+    xorScenario,
+    "optimized-cpu"
+  );
+  if (!xorCpu.ok ||
+      xorCpu.error !== null ||
+      xorCpu.report?.scenarioId !== "xor32-lifecycle" ||
+      xorCpu.report?.overallPass !== true ||
+      xorCpu.report?.runs?.length !== 4) {
+    throw new Error("R3d1 generic XOR32 Scenario execution failed");
+  }
+  for (let index = 0; index < xorCpu.report.runs.length; index += 1) {
+    const run = xorCpu.report.runs[index];
+    if ((run.sessionRunId >>> 0) !== index + 1 ||
+        run.observed?.sessionId !== xorCpu.report.sessionId ||
+        run.observed?.finalQuiescent !== true ||
+        run.observed?.activeReactionCount !== 147 ||
+        run.oracleMatches !== true ||
+        !run.pipelineProfile ||
+        run.observed?.profile?.structural?.unificationAttempts <= 0) {
+      throw new Error(
+        "R3d1 XOR32 persistent-session evidence mismatch at run " + index
+      );
+    }
+  }
+  if (xorCpu.report.runs[2].result?.fields?.value !== "0x1d3b5687" ||
+      xorCpu.report.runs[3].configurationReused !== true ||
+      JSON.stringify(xorCpu.report.runs[3].inputs) !==
+        JSON.stringify(xorCpu.report.runs[0].inputs)) {
+    throw new Error("R3d1 XOR32 result/canonical reuse mismatch");
+  }
+  if ((w.amemory_i386_lab_result_available() >>> 0) !==
+      legacyResultBeforeScenario) {
+    throw new Error(
+      "R3d1 XOR32 generic Scenario path mutated legacy LabInstanceState"
+    );
   }
 
   const scenarioGpu = executeScenarioManifest(

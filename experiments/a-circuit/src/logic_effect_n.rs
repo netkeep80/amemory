@@ -10,7 +10,8 @@ use super::{
     proof_n::{
         execute_to_quiescence, identical_rerun, load_runtime, loaded_handle,
         prepare_stage, semantic_source, theory_admissions, visual_snapshot,
-        ProofRuntimeMemory, WebProofResultStage, WebStructuralProof,
+        ProofRuntimeMemory, ProofRuntimeSession, WebProofLoadStage,
+        WebProofPrepareStage, WebProofResultStage, WebStructuralProof,
     },
 };
 use amemory_optimized_cpu_probe::{
@@ -1158,6 +1159,230 @@ fn decode_runtime_effect(
     };
 
     Some((outcome, payload))
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Xor32SessionProjection {
+    pub(crate) value: u32,
+    pub(crate) writeback: u8,
+    pub(crate) defined_mask: u32,
+    pub(crate) value_mask: u32,
+    pub(crate) undefined_mask: u32,
+    pub(crate) preserve_mask: u32,
+    pub(crate) result_recursive_wire: String,
+}
+
+pub(crate) fn prepare_xor32_session_program(
+) -> Option<WebProofPrepareStage> {
+    let mut compiler = FullFixture::new();
+    let program = LogicEffectProgram::install(&mut compiler, 32);
+
+    // Static program only. Concrete A/B words, invocation and initial Scope
+    // are deliberately absent and are published after LOAD by CONFIGURE.
+    let prepared_roots = vec![
+        semantic_source(
+            &compiler.store,
+            "function.effect.binary",
+            program.binary_effect,
+        ),
+        semantic_source(
+            &compiler.store,
+            "function.word_binary",
+            program.logic.word_binary,
+        ),
+        semantic_source(
+            &compiler.store,
+            "function.gate.xor2",
+            program.logic.gates.xor2,
+        ),
+        semantic_source(
+            &compiler.store,
+            "data.bit.zero",
+            compiler.zero,
+        ),
+        semantic_source(
+            &compiler.store,
+            "data.bit.one",
+            compiler.one,
+        ),
+        semantic_source(
+            &compiler.store,
+            "execution.interpreter",
+            compiler.interpreter,
+        ),
+        semantic_source(
+            &compiler.store,
+            "execution.theory",
+            compiler.theory,
+        ),
+        semantic_source(
+            &compiler.store,
+            "execution.apply",
+            compiler.apply,
+        ),
+        semantic_source(
+            &compiler.store,
+            "context.caller",
+            compiler.k,
+        ),
+        semantic_source(
+            &compiler.store,
+            "result.tag",
+            program.result_tag,
+        ),
+        semantic_source(
+            &compiler.store,
+            "result.flag.set_tag",
+            program.schema.set_tag,
+        ),
+        semantic_source(
+            &compiler.store,
+            "result.flag.undefined_tag",
+            program.schema.undefined_tag,
+        ),
+        semantic_source(
+            &compiler.store,
+            "result.flag.cf",
+            program.schema.cf,
+        ),
+        semantic_source(
+            &compiler.store,
+            "result.flag.pf",
+            program.schema.pf,
+        ),
+        semantic_source(
+            &compiler.store,
+            "result.flag.af",
+            program.schema.af,
+        ),
+        semantic_source(
+            &compiler.store,
+            "result.flag.zf",
+            program.schema.zf,
+        ),
+        semantic_source(
+            &compiler.store,
+            "result.flag.sf",
+            program.schema.sf,
+        ),
+        semantic_source(
+            &compiler.store,
+            "result.flag.of",
+            program.schema.of,
+        ),
+    ];
+    let admissions =
+        theory_admissions(&compiler.store, compiler.theory)?;
+    Some(prepare_stage(
+        &compiler.store,
+        prepared_roots,
+        admissions,
+    ))
+}
+
+pub(crate) fn configure_xor32_session(
+    session: &mut ProofRuntimeSession,
+    load: &WebProofLoadStage,
+    a: u32,
+    b: u32,
+) -> Option<(Handle, usize, usize)> {
+    let effect =
+        loaded_handle(load, "function.effect.binary")?;
+    let gate = loaded_handle(load, "function.gate.xor2")?;
+    let apply = loaded_handle(load, "execution.apply")?;
+    let caller = loaded_handle(load, "context.caller")?;
+    let zero = loaded_handle(load, "data.bit.zero")?;
+    let one = loaded_handle(load, "data.bit.one")?;
+
+    let word = |store: &mut OptimizedLinkStore, value: u32| {
+        let bits = (0..32)
+            .map(|bit| {
+                if (value >> bit) & 1 == 1 { one } else { zero }
+            })
+            .collect::<Vec<_>>();
+        materialize_exact_sequence(store, &bits).ok()
+    };
+
+    let before = session.memory.store.link_count();
+    let aword = word(&mut session.memory.store, a)?;
+    let bword = word(&mut session.memory.store, b)?;
+    let args = materialize_exact_sequence(
+        &mut session.memory.store,
+        &[gate, aword, bword, one],
+    )
+    .ok()?;
+    let invocation =
+        call(&mut session.memory.store, apply, effect, args);
+    let initial = session
+        .memory
+        .store
+        .ensure_pair(caller, invocation)
+        .ok()?;
+    let after = session.memory.store.link_count();
+
+    Some((initial, before, after))
+}
+
+pub(crate) fn project_xor32_session_result(
+    session: &ProofRuntimeSession,
+    load: &WebProofLoadStage,
+) -> Option<Xor32SessionProjection> {
+    if session.engine.current().len() != 1 {
+        return None;
+    }
+
+    let caller = loaded_handle(load, "context.caller")?;
+    let result_tag = loaded_handle(load, "result.tag")?;
+    let zero = loaded_handle(load, "data.bit.zero")?;
+    let one = loaded_handle(load, "data.bit.one")?;
+    let set_tag = loaded_handle(load, "result.flag.set_tag")?;
+    let undefined_tag =
+        loaded_handle(load, "result.flag.undefined_tag")?;
+    let cf_flag = loaded_handle(load, "result.flag.cf")?;
+    let pf_flag = loaded_handle(load, "result.flag.pf")?;
+    let af_flag = loaded_handle(load, "result.flag.af")?;
+    let zf_flag = loaded_handle(load, "result.flag.zf")?;
+    let sf_flag = loaded_handle(load, "result.flag.sf")?;
+    let of_flag = loaded_handle(load, "result.flag.of")?;
+    let final_link = session.engine.current()[0];
+
+    let (outcome, _) = decode_runtime_effect(
+        &session.memory,
+        final_link,
+        caller,
+        result_tag,
+        zero,
+        one,
+        set_tag,
+        undefined_tag,
+        cf_flag,
+        pf_flag,
+        af_flag,
+        zf_flag,
+        sf_flag,
+        of_flag,
+        32,
+    )?;
+    let (
+        defined_mask,
+        value_mask,
+        undefined_mask,
+        preserve_mask,
+    ) = web_logic_masks(outcome);
+
+    Some(Xor32SessionProjection {
+        value: outcome.value,
+        writeback: outcome.writeback,
+        defined_mask,
+        value_mask,
+        undefined_mask,
+        preserve_mask,
+        result_recursive_wire: session
+            .memory
+            .store
+            .export_anum(final_link)
+            .ok()?,
+    })
 }
 
 pub(crate) fn web_prove_logic(

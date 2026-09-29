@@ -1,4 +1,8 @@
 use super::{
+    logic_effect_n::{
+        configure_xor32_session, prepare_xor32_session_program,
+        project_xor32_session_result, web_prove_logic,
+    },
     mux_n::{
         configure_mux1_session, prepare_mux1_session_program,
         project_mux1_session_result, web_prove_mux1,
@@ -54,13 +58,22 @@ struct ConfiguredRun {
     links_after: u32,
 }
 
-const CPU_SCENARIO_ADAPTERS: &[CpuScenarioAdapter] = &[CpuScenarioAdapter {
-    profile_id: "a-circuit:mux1",
-    prepare: prepare_mux1_session_program,
-    configure: configure_mux1_from_inputs,
-    project: project_mux1_result,
-    oracle: oracle_mux1_result,
-}];
+const CPU_SCENARIO_ADAPTERS: &[CpuScenarioAdapter] = &[
+    CpuScenarioAdapter {
+        profile_id: "a-circuit:mux1",
+        prepare: prepare_mux1_session_program,
+        configure: configure_mux1_from_inputs,
+        project: project_mux1_result,
+        oracle: oracle_mux1_result,
+    },
+    CpuScenarioAdapter {
+        profile_id: "a-circuit:logic-xor32",
+        prepare: prepare_xor32_session_program,
+        configure: configure_xor32_from_inputs,
+        project: project_xor32_result,
+        oracle: oracle_xor32_result,
+    },
+];
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -157,6 +170,7 @@ pub(crate) enum ScenarioRunnerErrorV1 {
     },
     ExecuteFailed {
         run_id: String,
+        max_reactions: u32,
     },
     ProjectResultFailed {
         run_id: String,
@@ -254,11 +268,12 @@ pub(crate) fn run_scenario_manifest_v1(
         let observed = execute_session_observed_to_quiescence(
             &mut session,
             configured.initial,
-            64,
+            run.max_reactions,
             manifest.observation_level,
         )
         .ok_or_else(|| ScenarioRunnerErrorV1::ExecuteFailed {
             run_id: run.run_id.clone(),
+            max_reactions: run.max_reactions,
         })?;
 
         let links_before_result = session.memory.store.link_count();
@@ -474,6 +489,124 @@ fn oracle_mux1_result(
     })
 }
 
+fn canonical_word32(value: u32) -> Value {
+    Value::String(format!("0x{value:08x}"))
+}
+
+fn word32_input(
+    inputs: &BTreeMap<String, Value>,
+    key: &str,
+) -> Result<u32, String> {
+    let value = inputs
+        .get(key)
+        .ok_or_else(|| format!("missing WORD32 input {key}"))?;
+    if let Some(number) = value.as_u64() {
+        return u32::try_from(number)
+            .map_err(|_| format!("WORD32 input {key} outside 0..2^32-1"));
+    }
+    let text = value
+        .as_str()
+        .ok_or_else(|| format!("WORD32 input {key} must be integer or canonical hex"))?;
+    if text.len() != 10
+        || !text.starts_with("0x")
+        || !text[2..].bytes().all(|byte| {
+            byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()
+        })
+    {
+        return Err(format!(
+            "WORD32 input {key} must be canonical lowercase 0x........"
+        ));
+    }
+    u32::from_str_radix(&text[2..], 16)
+        .map_err(|_| format!("WORD32 input {key} is invalid"))
+}
+
+fn xor32_normalized(
+    value: u32,
+    writeback: u8,
+    defined_mask: u32,
+    value_mask: u32,
+    undefined_mask: u32,
+    preserve_mask: u32,
+    result_recursive_wire: String,
+) -> ScenarioNormalizedResultV1 {
+    let mut fields = BTreeMap::new();
+    fields.insert("value".to_owned(), canonical_word32(value));
+    fields.insert("writeback".to_owned(), Value::from(writeback));
+    fields.insert(
+        "definedMask".to_owned(),
+        canonical_word32(defined_mask),
+    );
+    fields.insert(
+        "valueMask".to_owned(),
+        canonical_word32(value_mask),
+    );
+    fields.insert(
+        "undefinedMask".to_owned(),
+        canonical_word32(undefined_mask),
+    );
+    fields.insert(
+        "preserveMask".to_owned(),
+        canonical_word32(preserve_mask),
+    );
+    ScenarioNormalizedResultV1 {
+        fields,
+        result_recursive_wire: Some(result_recursive_wire),
+    }
+}
+
+fn configure_xor32_from_inputs(
+    session: &mut ProofRuntimeSession,
+    load: &WebProofLoadStage,
+    inputs: &BTreeMap<String, Value>,
+) -> Result<ConfiguredRun, String> {
+    let a = word32_input(inputs, "A")?;
+    let b = word32_input(inputs, "B")?;
+    let (initial, before, after) =
+        configure_xor32_session(session, load, a, b)
+            .ok_or_else(|| "XOR32 configuration failed".to_owned())?;
+    Ok(ConfiguredRun {
+        initial,
+        links_before: before as u32,
+        links_after: after as u32,
+    })
+}
+
+fn project_xor32_result(
+    session: &ProofRuntimeSession,
+    load: &WebProofLoadStage,
+) -> Result<ScenarioNormalizedResultV1, String> {
+    let projected = project_xor32_session_result(session, load)
+        .ok_or_else(|| "XOR32 result projection failed".to_owned())?;
+    Ok(xor32_normalized(
+        projected.value,
+        projected.writeback,
+        projected.defined_mask,
+        projected.value_mask,
+        projected.undefined_mask,
+        projected.preserve_mask,
+        projected.result_recursive_wire,
+    ))
+}
+
+fn oracle_xor32_result(
+    inputs: &BTreeMap<String, Value>,
+) -> Result<ScenarioNormalizedResultV1, String> {
+    let a = word32_input(inputs, "A")?;
+    let b = word32_input(inputs, "B")?;
+    let proof = web_prove_logic(3, a, b)
+        .ok_or_else(|| "fresh XOR32 oracle failed".to_owned())?;
+    Ok(xor32_normalized(
+        proof.outcome.value,
+        proof.outcome.writeback,
+        proof.outcome.defined_mask,
+        proof.outcome.value_mask,
+        proof.outcome.undefined_mask,
+        proof.outcome.preserve_mask,
+        proof.proof.result.result_anum,
+    ))
+}
+
 fn bit_input(
     inputs: &BTreeMap<String, Value>,
     key: &str,
@@ -495,6 +628,8 @@ mod tests {
 
     const MUX1_LIFECYCLE: &str =
         include_str!("../scenarios/mux1-lifecycle-v1.json");
+    const XOR32_LIFECYCLE: &str =
+        include_str!("../scenarios/xor32-lifecycle-v1.json");
 
     #[test]
     fn canonical_mux1_manifest_runs_four_times_on_one_session() {
@@ -550,6 +685,63 @@ mod tests {
         let decoded: ScenarioExecutionReportV1 =
             serde_json::from_str(&json).unwrap();
         assert_eq!(decoded, report);
+    }
+
+    #[test]
+    fn canonical_xor32_manifest_runs_four_times_on_one_session() {
+        let manifest =
+            parse_and_validate_manifest_v1(XOR32_LIFECYCLE).unwrap();
+        let report = run_scenario_manifest_v1(
+            &manifest,
+            ScenarioBackendV1::OptimizedCpu,
+        )
+        .unwrap();
+
+        assert!(report.overall_pass);
+        assert_eq!(report.runs.len(), 4);
+        assert!(report.runs.iter().all(|run| {
+            run.observed.session_id == report.session_id
+        }));
+        assert!(report.runs.iter().all(|run| {
+            run.observed.active_reaction_count == 147
+        }));
+        assert!(report.runs.iter().all(|run| {
+            run.observed.final_quiescent
+        }));
+        assert!(report.runs.iter().all(|run| {
+            run.oracle_matches == Some(true)
+        }));
+        assert_eq!(
+            report.runs[2].result.fields.get("value"),
+            Some(&Value::String("0x1d3b5687".to_owned())),
+        );
+        assert_eq!(report.runs[0].result, report.runs[3].result);
+        assert!(
+            report.runs[3].configuration_reused,
+            "returning to first XOR32 inputs must reuse canonical Links",
+        );
+    }
+
+    #[test]
+    fn reaction_budget_is_safety_only_and_never_partial_success() {
+        let mut manifest =
+            parse_and_validate_manifest_v1(XOR32_LIFECYCLE).unwrap();
+        manifest.run_sequence.truncate(1);
+        manifest.run_sequence[0].max_reactions = 1;
+
+        let error = run_scenario_manifest_v1(
+            &manifest,
+            ScenarioBackendV1::OptimizedCpu,
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            error,
+            ScenarioRunnerErrorV1::ExecuteFailed {
+                run_id: "run-1-zero-ones".to_owned(),
+                max_reactions: 1,
+            },
+        );
     }
 
     #[test]
