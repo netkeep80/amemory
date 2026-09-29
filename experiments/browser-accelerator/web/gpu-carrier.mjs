@@ -951,9 +951,6 @@ export function expectedGpuCarrierReaction(
 }
 
 export function deriveGpuCarrierReactionInput(parsed, compactProof) {
-  if (!compactProof || compactProof.block !== "MUX1") {
-    throw new Error("C4c3 requires the real MUX1 compact proof");
-  }
   const currentHandle = compactRootHandle(compactProof, "scope.initial");
   const interpreterHandle = compactRootHandle(
     compactProof,
