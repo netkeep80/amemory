@@ -158,6 +158,9 @@ const workbenchSource = fs.readFileSync(
 for (const required of [
   'id="workbench-root"',
   'src="./workbench.mjs"',
+  'main { width: 100%; max-width: none;',
+  'id="legacy-diagnostics"',
+  'Compatibility witnesses · collapsed by default',
 ]) {
   if (!workbenchPageSource.includes(required)) {
     throw new Error("R4 Workbench page wiring missing: " + required);
@@ -179,6 +182,11 @@ for (const required of [
   "EVIDENCE",
   "configurationReused",
   "timing unavailable",
+  "wb-levels",
+  "data-stage",
+  '["timeline", "log", "profile", "compare"]',
+  "workbenchResultStatus",
+  "workbenchStageDetails",
 ]) {
   if (!workbenchSource.includes(required)) {
     throw new Error("R4 Workbench runtime wiring missing: " + required);
@@ -245,6 +253,8 @@ Promise.all([
     createWorkbenchRun,
     deriveWorkbenchPipeline,
     normalizeWorkbenchInputs,
+    workbenchResultStatus,
+    workbenchStageDetails,
   },
 ]) => {
   const w = instance.exports;
@@ -408,6 +418,32 @@ Promise.all([
       ) ||
       workbenchRunPipeline.some((stage) => stage.state !== "done")) {
     throw new Error("R4 Workbench pipeline is not driven by runtime evidence");
+  }
+  const workbenchReady = workbenchResultStatus(null);
+  const workbenchManualStatus = workbenchResultStatus({
+    assertionResults: [],
+  });
+  const workbenchLoadDetails = workbenchStageDetails(
+    {
+      sessionId: "s",
+      loadCount: 1,
+      baseLinkCount: 123,
+      currentLinkCount: 130,
+      sessionOpenProfile: { stages: { timingAvailable: false } },
+    },
+    null,
+    "LOAD"
+  );
+  if (workbenchReady.kind !== "ready" ||
+      workbenchManualStatus.kind !== "neutral" ||
+      workbenchLoadDetails?.loadCount !== 1 ||
+      workbenchLoadDetails?.baseLinkCount !== 123) {
+    throw new Error("R4 progressive-disclosure evidence projection mismatch");
+  }
+  if (/<details[^>]*id="legacy-diagnostics"[^>]*\bopen\b/.test(
+        workbenchPageSource
+      )) {
+    throw new Error("R4 legacy diagnostics must stay collapsed by default");
   }
 
   // R2d: browser transport must consume the generic Scenario Runner report,
