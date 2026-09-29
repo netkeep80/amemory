@@ -1839,30 +1839,54 @@ impl OptimizedLinkStore {
         visiting: &mut HashSet<Handle>,
         output: &mut String,
     ) -> Result<(), StoreError> {
-        let (start, end) = self.poles(handle)?;
-
-        if start == handle && end == handle {
-            output.push('8');
-            return Ok(());
+        #[derive(Clone, Copy)]
+        enum Frame {
+            Enter(Handle),
+            Exit(Handle),
         }
 
-        if !visiting.insert(handle) {
-            return Err(StoreError::NonWellFounded(handle));
+        // Recursive wire depth is a property of the represented structure,
+        // not a reason to consume the host call stack. Keep the historical
+        // path-based cycle semantics explicitly on the heap instead.
+        let mut pending = vec![Frame::Enter(handle)];
+
+        while let Some(frame) = pending.pop() {
+            match frame {
+                Frame::Exit(handle) => {
+                    visiting.remove(&handle);
+                }
+                Frame::Enter(handle) => {
+                    let (start, end) = self.poles(handle)?;
+
+                    if start == handle && end == handle {
+                        output.push('8');
+                        continue;
+                    }
+
+                    if !visiting.insert(handle) {
+                        return Err(StoreError::NonWellFounded(handle));
+                    }
+
+                    if start == handle {
+                        output.push('9');
+                        pending.push(Frame::Exit(handle));
+                        pending.push(Frame::Enter(end));
+                    } else if end == handle {
+                        output.push('6');
+                        pending.push(Frame::Exit(handle));
+                        pending.push(Frame::Enter(start));
+                    } else {
+                        output.push('1');
+                        // LIFO: END is pushed first so START is serialized
+                        // first, exactly matching the historical recursion.
+                        pending.push(Frame::Exit(handle));
+                        pending.push(Frame::Enter(end));
+                        pending.push(Frame::Enter(start));
+                    }
+                }
+            }
         }
 
-        if start == handle {
-            output.push('9');
-            self.write_node(end, visiting, output)?;
-        } else if end == handle {
-            output.push('6');
-            self.write_node(start, visiting, output)?;
-        } else {
-            output.push('1');
-            self.write_node(start, visiting, output)?;
-            self.write_node(end, visiting, output)?;
-        }
-
-        visiting.remove(&handle);
         Ok(())
     }
 }
@@ -2309,6 +2333,25 @@ mod tests {
             .set_theory(store, &optimized_handles(map, theory))
             .unwrap();
         engine.snapshot_theory(store).unwrap();
+    }
+
+    #[test]
+    fn direct_recursive_wire_export_is_stack_safe_for_deep_valid_structure() {
+        let mut store = OptimizedLinkStore::new();
+        let depth = 50_000usize;
+        let mut current = ROOT_HANDLE;
+
+        for _ in 0..depth {
+            current = store.ensure_start_self_closed(current).unwrap();
+        }
+
+        let wire = store.export_direct_recursive_wire(current).unwrap();
+        assert_eq!(wire.len(), depth + 1);
+        assert!(wire[..depth].bytes().all(|token| token == b'9'));
+        assert_eq!(wire.as_bytes()[depth], b'8');
+
+        // Compatibility facade must remain exactly the same representation.
+        assert_eq!(store.export_anum(current).unwrap(), wire);
     }
 
     #[test]
