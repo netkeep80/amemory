@@ -14,7 +14,6 @@ use amemory_optimized_cpu_probe::{
     structural::{
         define_structural_interpreter, define_structural_role_dictionary,
         materialize_exact_sequence, read_exact_sequence,
-        OptimizedStructuralEngine,
     },
     Handle, OptimizedLinkStore, ROOT_HANDLE,
 };
