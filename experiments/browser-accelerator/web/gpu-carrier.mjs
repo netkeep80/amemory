@@ -280,3 +280,65 @@ export function planGpuCarrierWordsUpload(words, limits) {
   const parsed = parseGpuCarrierWords(words);
   return planGpuCarrierUpload(parsed.layout, limits);
 }
+
+
+export const DEFAULT_GPU_CARRIER_WASM_ABI = Object.freeze({
+  available: "amemory_i386_lab_gpu_carrier_available",
+  length: "amemory_i386_lab_gpu_carrier_word_len",
+  pointer: "amemory_i386_lab_gpu_carrier_words_ptr",
+  word: "amemory_i386_lab_gpu_carrier_word",
+});
+
+function wasmAbiFail(label, message) {
+  throw new Error(`${label} ABI: ${message}`);
+}
+
+export function readGpuCarrierWordsAbi(
+  wasm,
+  names = DEFAULT_GPU_CARRIER_WASM_ABI,
+  label = "GPU carrier",
+) {
+  const available = wasm?.[names.available];
+  if (typeof available !== "function" || available() !== 1) {
+    return null;
+  }
+
+  const length = wasm[names.length];
+  if (typeof length !== "function") {
+    wasmAbiFail(label, "word-length function missing");
+  }
+  const wordLength = length() >>> 0;
+  if (wordLength < PACKED_GPU_CARRIER_HEADER_WORDS) {
+    wasmAbiFail(label, "reported carrier shorter than header");
+  }
+
+  let words;
+  const pointer = wasm[names.pointer];
+  if (wasm.memory && typeof pointer === "function") {
+    const ptr = pointer() >>> 0;
+    if ((ptr & 3) !== 0) {
+      wasmAbiFail(label, "u32 pointer is not 4-byte aligned");
+    }
+    const byteLength = wordLength * 4;
+    if (ptr > wasm.memory.buffer.byteLength ||
+        byteLength > wasm.memory.buffer.byteLength - ptr) {
+      wasmAbiFail(label, "pointer outside WASM memory");
+    }
+    // Own the snapshot: a later WASM memory.grow must not invalidate the
+    // carrier evidence that is about to be planned/uploaded.
+    words = new Uint32Array(
+      new Uint32Array(wasm.memory.buffer, ptr, wordLength),
+    );
+  } else {
+    const word = wasm[names.word];
+    if (typeof word !== "function") {
+      wasmAbiFail(label, "word fallback function missing");
+    }
+    words = new Uint32Array(wordLength);
+    for (let index = 0; index < wordLength; index += 1) {
+      words[index] = word(index) >>> 0;
+    }
+  }
+
+  return parseGpuCarrierWords(words);
+}

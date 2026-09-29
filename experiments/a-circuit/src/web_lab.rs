@@ -18,7 +18,7 @@ use crate::{
     rotate_carry32_n::{web_prove_rotate_carry32, web_run_rotate_carry32},
     shift32_n::{web_prove_shift32, web_run_shift32},
     unary_arith_n::{web_prove_unary32, web_run_unary32},
-    proof_n::WebStructuralProof,
+    proof_n::{packed_gpu_carrier_words, WebStructuralProof},
 };
 use serde::Serialize;
 use std::sync::Mutex;
@@ -89,6 +89,7 @@ struct LabInstanceState {
     active: bool,
     result_json: String,
     compact_proof_json: String,
+    gpu_carrier_words: Vec<u32>,
 }
 
 impl LabInstanceState {
@@ -97,6 +98,7 @@ impl LabInstanceState {
             active: true,
             result_json: String::new(),
             compact_proof_json: String::new(),
+            gpu_carrier_words: Vec::new(),
         }
     }
 }
@@ -179,6 +181,7 @@ fn clear_compact_proof_for_instance(instance_id: u32) {
 
     let _ = with_lab_instance_mut(instance_id, |state| {
         state.compact_proof_json.clear();
+        state.gpu_carrier_words.clear();
     });
 }
 
@@ -960,6 +963,132 @@ pub extern "C" fn amemory_i386_stack_run(
         return 0;
     }
     1
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_lab_instance_gpu_carrier_prepare(
+    instance_id: u32,
+) -> u32 {
+    if !lab_instance_active(instance_id) {
+        return 0;
+    }
+    clear_result_for_instance(instance_id);
+    clear_compact_proof_for_instance(instance_id);
+
+    let Some(proof) = web_prove_mux1(1, 0, 1) else {
+        return 0;
+    };
+    let Some(words) = packed_gpu_carrier_words(&proof) else {
+        return 0;
+    };
+    let Ok(word_len) = u32::try_from(words.len()) else {
+        return 0;
+    };
+    let link_count = proof.prepare.compiled_links;
+    let block = proof.block.clone();
+
+    if set_compact_proof_for_instance(instance_id, &proof).is_none() {
+        return 0;
+    }
+    if with_lab_instance_mut(instance_id, |state| {
+        state.gpu_carrier_words = words;
+    })
+    .is_none()
+    {
+        clear_compact_proof_for_instance(instance_id);
+        return 0;
+    }
+
+    if set_witness_result_for_instance(
+        instance_id,
+        "gpu-carrier",
+        serde_json::json!({
+            "block": block,
+            "linkCount": link_count,
+            "wordLength": word_len,
+            "rootHandle": 1
+        }),
+    )
+    .is_none()
+    {
+        clear_compact_proof_for_instance(instance_id);
+        return 0;
+    }
+
+    1
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_lab_instance_gpu_carrier_available(
+    instance_id: u32,
+) -> u32 {
+    with_lab_instance(instance_id, |state| {
+        u32::from(!state.gpu_carrier_words.is_empty())
+    })
+    .unwrap_or(0)
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_lab_instance_gpu_carrier_word_len(
+    instance_id: u32,
+) -> u32 {
+    with_lab_instance(instance_id, |state| {
+        u32::try_from(state.gpu_carrier_words.len()).unwrap_or(0)
+    })
+    .unwrap_or(0)
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_lab_instance_gpu_carrier_words_ptr(
+    instance_id: u32,
+) -> u32 {
+    with_lab_instance(instance_id, |state| {
+        state.gpu_carrier_words.as_ptr() as usize as u32
+    })
+    .unwrap_or(0)
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_lab_instance_gpu_carrier_word(
+    instance_id: u32,
+    index: u32,
+) -> u32 {
+    with_lab_instance(instance_id, |state| {
+        state
+            .gpu_carrier_words
+            .get(index as usize)
+            .copied()
+            .unwrap_or(u32::MAX)
+    })
+    .unwrap_or(u32::MAX)
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_lab_gpu_carrier_prepare() -> u32 {
+    amemory_i386_lab_instance_gpu_carrier_prepare(DEFAULT_LAB_INSTANCE_ID)
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_lab_gpu_carrier_available() -> u32 {
+    amemory_i386_lab_instance_gpu_carrier_available(DEFAULT_LAB_INSTANCE_ID)
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_lab_gpu_carrier_word_len() -> u32 {
+    amemory_i386_lab_instance_gpu_carrier_word_len(DEFAULT_LAB_INSTANCE_ID)
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_lab_gpu_carrier_words_ptr() -> u32 {
+    amemory_i386_lab_instance_gpu_carrier_words_ptr(DEFAULT_LAB_INSTANCE_ID)
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_i386_lab_gpu_carrier_word(index: u32) -> u32 {
+    amemory_i386_lab_instance_gpu_carrier_word(
+        DEFAULT_LAB_INSTANCE_ID,
+        index,
+    )
 }
 
 #[no_mangle]

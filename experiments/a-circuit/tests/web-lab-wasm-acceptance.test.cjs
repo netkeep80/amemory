@@ -33,6 +33,7 @@ for (const required of [
   "renderProofPipeline",
   "amemory_i386_lab_result_available",
   "amemory-i386-lab-result-json",
+  "amemory_i386_lab_gpu_carrier_prepare",
 ]) {
   if (!labPageSource.includes(required)) {
     throw new Error("Pages witness wiring missing: " + required);
@@ -92,7 +93,13 @@ Promise.all([
   WebAssembly.instantiate(bytes, {}),
   import("../../browser-accelerator/web/i386-proof-transport.mjs"),
   import("../../browser-accelerator/web/i386-proof-view.mjs"),
-]).then(([{instance}, { inflateCompactProof }, { recursiveStructureHtml }]) => {
+  import("../../browser-accelerator/web/gpu-carrier.mjs"),
+]).then(([
+  {instance},
+  { inflateCompactProof },
+  { recursiveStructureHtml },
+  { readGpuCarrierWordsAbi },
+]) => {
   const w = instance.exports;
   const recursiveUiSample = "8916<>&".repeat(256);
   const recursiveUiHtml = recursiveStructureHtml(recursiveUiSample);
@@ -317,6 +324,62 @@ Promise.all([
     }
     return result.payload;
   };
+  if (w.amemory_i386_lab_gpu_carrier_prepare() !== 1) {
+    throw new Error("C4c1 real-WASM GPU carrier producer rejected");
+  }
+  const gpuCarrier = readGpuCarrierWordsAbi(
+    w,
+    undefined,
+    "C4c1 real-WASM carrier"
+  );
+  if (!gpuCarrier) {
+    throw new Error("C4c1 real-WASM GPU carrier missing");
+  }
+  const gpuCarrierProof = readCurrentCompactProof("C4c1 GPU carrier");
+  const gpuCarrierPayload =
+    readCurrentWitnessPayload("C4c1 GPU carrier", "gpu-carrier");
+  const gpuBase = gpuCarrierProof.topology?.base;
+  if (!gpuBase ||
+      !Array.isArray(gpuBase.starts) ||
+      !Array.isArray(gpuBase.ends) ||
+      gpuBase.starts.length !== gpuBase.ends.length) {
+    throw new Error("C4c1 compact base topology missing");
+  }
+  if ((gpuCarrier.layout.linkCount >>> 0) !==
+        (gpuCarrierProof.prepare.compiledLinks >>> 0) ||
+      (gpuCarrier.layout.linkCount >>> 0) !==
+        (gpuCarrierPayload.linkCount >>> 0) ||
+      (gpuCarrier.words.length >>> 0) !==
+        (gpuCarrierPayload.wordLength >>> 0) ||
+      gpuCarrier.layout.rootHandle !== 1) {
+    throw new Error("C4c1 carrier/proof metadata identity mismatch");
+  }
+  if (gpuCarrier.sections.starts.length !== gpuBase.starts.length ||
+      gpuCarrier.sections.ends.length !== gpuBase.ends.length) {
+    throw new Error("C4c1 carrier/proof topology length mismatch");
+  }
+  for (let index = 0; index < gpuBase.starts.length; index += 1) {
+    if ((gpuCarrier.sections.starts[index] >>> 0) !==
+          (gpuBase.starts[index] >>> 0) ||
+        (gpuCarrier.sections.ends[index] >>> 0) !==
+          (gpuBase.ends[index] >>> 0)) {
+      throw new Error(
+        "C4c1 carrier/proof topology mismatch at Link " + (index + 1)
+      );
+    }
+  }
+
+  const carrierInstance = w.amemory_i386_lab_instance_create() >>> 0;
+  if (carrierInstance === 0xffffffff ||
+      w.amemory_i386_lab_instance_gpu_carrier_prepare(carrierInstance) !== 1 ||
+      w.amemory_i386_lab_instance_gpu_carrier_available(carrierInstance) !== 1) {
+    throw new Error("C4c1 instance-scoped carrier prepare failed");
+  }
+  if (w.amemory_i386_lab_instance_destroy(carrierInstance) !== 1 ||
+      w.amemory_i386_lab_instance_gpu_carrier_available(carrierInstance) !== 0) {
+    throw new Error("C4c1 destroyed instance retained carrier state");
+  }
+
   const proofMetrics = (proof, registryBlock) => {
     const { visualLinks, ...resultMetadata } = proof.result;
     const memoryId = proof.result.memoryInstanceId;
