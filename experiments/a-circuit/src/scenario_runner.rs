@@ -278,10 +278,10 @@ pub(crate) fn run_scenario_manifest_v1(
             );
         }
 
+        // Assertions are evaluated only after semantic execution and RESULT
+        // projection. Their expected values never enter CONFIGURE/EXECUTE.
         let assertion_results =
             evaluate_assertions(&run.assertions, &result, &observed);
-        let assertions_pass =
-            assertion_results.iter().all(|assertion| assertion.passed);
 
         let oracle_matches = match manifest.oracle_policy {
             ScenarioOraclePolicyV1::FreshInstance => {
@@ -342,11 +342,6 @@ pub(crate) fn run_scenario_manifest_v1(
             observed,
             pipeline_profile,
         });
-
-        if !assertions_pass {
-            // Assertion failure is recorded only. It never retries, rewrites
-            // or otherwise influences execution of this or later runs.
-        }
     }
 
     let overall_pass = reports.iter().all(|run| {
