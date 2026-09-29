@@ -1,4 +1,6 @@
-use amemory_optimized_cpu_probe::structural::StructuralRunProfile;
+use amemory_optimized_cpu_probe::structural::{
+    StructuralRunProfile, StructuralTraceEvent,
+};
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
 
@@ -44,6 +46,166 @@ pub(crate) enum RunEventKind {
     RunEnd,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub(crate) enum RunStructuralFactKind {
+    DiscoveryComplete,
+    RuleMatched,
+    Instantiated,
+    Published,
+    ScopeCommitted,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RunBindingV1 {
+    pub(crate) role: u32,
+    pub(crate) value: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RunStructuralFactV1 {
+    pub(crate) kind: RunStructuralFactKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) active: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) rule: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) matched_rules: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) output_bundle_template: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) grounded_bundle: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) bindings: Option<Vec<RunBindingV1>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) outputs: Option<Vec<u32>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) preserved: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) old_scope: Option<Vec<u32>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) next_scope: Option<Vec<u32>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) quiescent: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) handoff_count: Option<u32>,
+}
+
+impl From<StructuralTraceEvent> for RunStructuralFactV1 {
+    fn from(event: StructuralTraceEvent) -> Self {
+        match event {
+            StructuralTraceEvent::DiscoveryComplete {
+                active,
+                matched_rules,
+            } => Self {
+                kind: RunStructuralFactKind::DiscoveryComplete,
+                active: Some(active),
+                rule: None,
+                matched_rules: Some(matched_rules),
+                output_bundle_template: None,
+                grounded_bundle: None,
+                bindings: None,
+                outputs: None,
+                preserved: None,
+                old_scope: None,
+                next_scope: None,
+                quiescent: None,
+                handoff_count: None,
+            },
+            StructuralTraceEvent::RuleMatched {
+                active,
+                rule,
+                output_bundle_template,
+                bindings,
+            } => Self {
+                kind: RunStructuralFactKind::RuleMatched,
+                active: Some(active),
+                rule: Some(rule),
+                matched_rules: None,
+                output_bundle_template: Some(output_bundle_template),
+                grounded_bundle: None,
+                bindings: Some(
+                    bindings
+                        .into_iter()
+                        .map(|binding| RunBindingV1 {
+                            role: binding.role,
+                            value: binding.value,
+                        })
+                        .collect(),
+                ),
+                outputs: None,
+                preserved: None,
+                old_scope: None,
+                next_scope: None,
+                quiescent: None,
+                handoff_count: None,
+            },
+            StructuralTraceEvent::Instantiated {
+                active,
+                rule,
+                output_bundle_template,
+                grounded_bundle,
+            } => Self {
+                kind: RunStructuralFactKind::Instantiated,
+                active: Some(active),
+                rule: Some(rule),
+                matched_rules: None,
+                output_bundle_template: Some(output_bundle_template),
+                grounded_bundle: Some(grounded_bundle),
+                bindings: None,
+                outputs: None,
+                preserved: None,
+                old_scope: None,
+                next_scope: None,
+                quiescent: None,
+                handoff_count: None,
+            },
+            StructuralTraceEvent::Published {
+                active,
+                rule,
+                outputs,
+                preserved,
+            } => Self {
+                kind: RunStructuralFactKind::Published,
+                active: Some(active),
+                rule,
+                matched_rules: None,
+                output_bundle_template: None,
+                grounded_bundle: None,
+                bindings: None,
+                outputs: Some(outputs),
+                preserved: Some(preserved),
+                old_scope: None,
+                next_scope: None,
+                quiescent: None,
+                handoff_count: None,
+            },
+            StructuralTraceEvent::ScopeCommitted {
+                old_members,
+                next_members,
+                quiescent,
+                handoff_count,
+            } => Self {
+                kind: RunStructuralFactKind::ScopeCommitted,
+                active: None,
+                rule: None,
+                matched_rules: None,
+                output_bundle_template: None,
+                grounded_bundle: None,
+                bindings: None,
+                outputs: None,
+                preserved: None,
+                old_scope: Some(old_members),
+                next_scope: Some(next_members),
+                quiescent: Some(quiescent),
+                handoff_count: Some(handoff_count),
+            },
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RunEventV1 {
@@ -70,6 +232,8 @@ pub(crate) struct RunEventV1 {
     pub(crate) handoff_count: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) quiescent: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) structural_facts: Option<Vec<RunStructuralFactV1>>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -301,6 +465,7 @@ mod tests {
                 transitioned_members: None,
                 handoff_count: None,
                 quiescent: None,
+                structural_facts: None,
             }],
             profile: None,
         };
@@ -373,6 +538,38 @@ mod tests {
         let decoded: (SessionOpenProfileV1, RunPipelineProfileV1) =
             serde_json::from_str(&json).unwrap();
         assert_eq!(decoded, (open, run));
+    }
+
+    #[test]
+    fn native_structural_fact_projection_preserves_runtime_handles() {
+        let native = StructuralTraceEvent::RuleMatched {
+            active: 11,
+            rule: 12,
+            output_bundle_template: 13,
+            bindings: vec![
+                amemory_optimized_cpu_probe::structural::StructuralRoleBinding {
+                    role: 14,
+                    value: 15,
+                },
+            ],
+        };
+        let fact = RunStructuralFactV1::from(native);
+
+        assert_eq!(fact.kind, RunStructuralFactKind::RuleMatched);
+        assert_eq!(fact.active, Some(11));
+        assert_eq!(fact.rule, Some(12));
+        assert_eq!(fact.output_bundle_template, Some(13));
+        assert_eq!(
+            fact.bindings,
+            Some(vec![RunBindingV1 {
+                role: 14,
+                value: 15,
+            }]),
+        );
+
+        let json = serde_json::to_string(&fact).unwrap();
+        assert!(json.contains("\"kind\":\"RULE_MATCHED\""));
+        assert!(json.contains("\"rule\":12"));
     }
 
     #[test]
