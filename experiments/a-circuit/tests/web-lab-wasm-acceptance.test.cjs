@@ -205,13 +205,67 @@ Promise.all([
       scenarioReport.sessionOpenProfile?.sessionId !== scenarioReport.sessionId) {
     throw new Error("R2d scenario report envelope mismatch");
   }
+  const openStages = scenarioReport.sessionOpenProfile?.stages;
+  if (openStages?.timingAvailable !== false ||
+      openStages?.prepareNs !== 0 ||
+      openStages?.loadNs !== 0) {
+    throw new Error(
+      "R2d bare-WASM session-open timing must be explicitly unavailable"
+    );
+  }
+
   for (let index = 0; index < scenarioReport.runs.length; index += 1) {
     const run = scenarioReport.runs[index];
+    const observed = run.observed;
+    const profile = observed?.profile;
+    const structural = profile?.structural;
+    const stages = run.pipelineProfile?.stages;
+    const reactionEvents = Array.isArray(observed?.events)
+      ? observed.events.filter((event) => event.kind === "REACTION_END")
+      : [];
+    const nativeFacts = reactionEvents.flatMap(
+      (event) => Array.isArray(event.structuralFacts)
+        ? event.structuralFacts
+        : []
+    );
+
     if ((run.sessionRunId >>> 0) !== index + 1 ||
-        run.observed?.sessionId !== scenarioReport.sessionId ||
-        run.observed?.finalQuiescent !== true ||
-        !run.pipelineProfile) {
+        observed?.sessionId !== scenarioReport.sessionId ||
+        observed?.finalQuiescent !== true ||
+        observed?.activeReactionCount !== 7 ||
+        !run.pipelineProfile ||
+        reactionEvents.length !== 8 ||
+        nativeFacts.length === 0) {
       throw new Error("R2d run/session correlation mismatch at run " + index);
+    }
+
+    if (observed.timingAvailable !== false ||
+        profile?.timingAvailable !== false ||
+        structural?.timingAvailable !== false ||
+        stages?.timingAvailable !== false ||
+        profile?.executeNs !== 0 ||
+        profile?.traceProjectionNs !== 0 ||
+        structural?.discoveryNs !== 0 ||
+        structural?.roleDecodeNs !== 0 ||
+        structural?.unificationNs !== 0 ||
+        structural?.instantiationNs !== 0 ||
+        structural?.publicationNs !== 0 ||
+        structural?.totalNs !== 0 ||
+        stages?.configureNs !== 0 ||
+        stages?.executeNs !== 0 ||
+        stages?.resultNs !== 0 ||
+        stages?.evidenceNs !== 0) {
+      throw new Error(
+        "R2d bare-WASM internal timings must be zero and explicitly unavailable"
+      );
+    }
+
+    if (!(structural.triggerIncidenceCandidates > 0) ||
+        !(structural.unificationAttempts > 0) ||
+        !(structural.publicationOutputs > 0)) {
+      throw new Error(
+        "R2d bare-WASM profile lost real structural counters at run " + index
+      );
     }
   }
   if (scenarioReport.runs[3].configurationReused !== true ||
