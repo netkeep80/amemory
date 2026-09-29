@@ -1113,8 +1113,7 @@ impl OptimizedStructuralEngine {
             self.run_internal(store, &mut profile, &mut trace)?
         };
         owned_profile.total_ns = started
-            .elapsed()
-            .as_nanos()
+            .elapsed_ns()
             .saturating_sub(owned_trace.collection_ns);
         Ok((result, owned_profile, owned_trace))
     }
