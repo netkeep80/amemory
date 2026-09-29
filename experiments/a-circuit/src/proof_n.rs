@@ -496,6 +496,13 @@ pub(crate) struct ProofRuntimeMemory {
     pub(crate) store: OptimizedLinkStore,
 }
 
+#[derive(Debug)]
+pub(crate) struct ProofRuntimeSession {
+    pub(crate) memory: ProofRuntimeMemory,
+    pub(crate) engine: OptimizedStructuralEngine,
+    pub(crate) base_link_count: usize,
+}
+
 pub(crate) fn export_packed_carrier(
     store: &OptimizedLinkStore,
 ) -> Vec<WebProofDuplet> {
@@ -679,17 +686,12 @@ pub(crate) fn loaded_handle(
         .map(|root| root.local_handle)
 }
 
-pub(crate) fn execute_to_quiescence(
+fn run_engine_to_quiescence(
     memory: &mut ProofRuntimeMemory,
-    interpreter: Handle,
+    engine: &mut OptimizedStructuralEngine,
     initial: Handle,
-    cap: usize,
     max_steps: u32,
-) -> Option<(OptimizedStructuralEngine, WebProofExecuteStage)> {
-    let mut engine = OptimizedStructuralEngine::new(cap);
-    engine
-        .set_interpreter(&memory.store, interpreter)
-        .ok()?;
+) -> Option<WebProofExecuteStage> {
     engine.set_current(&memory.store, &[initial]).ok()?;
 
     let mut reactions = Vec::new();
@@ -725,13 +727,58 @@ pub(crate) fn execute_to_quiescence(
     let active_reaction_count =
         reactions.iter().filter(|step| !step.quiescent).count() as u32;
 
-    let execute = WebProofExecuteStage {
+    Some(WebProofExecuteStage {
         memory_instance_id: memory.id.clone(),
         reactions,
         active_reaction_count,
         final_quiescent: true,
-    };
+    })
+}
 
+pub(crate) fn load_runtime_session(
+    prepare: &WebProofPrepareStage,
+    cap: usize,
+) -> Option<(ProofRuntimeSession, WebProofLoadStage)> {
+    let (memory, load) = load_runtime(prepare)?;
+    let interpreter = loaded_handle(&load, "execution.interpreter")?;
+    let mut engine = OptimizedStructuralEngine::new(cap);
+    engine.set_interpreter(&memory.store, interpreter).ok()?;
+    let base_link_count = memory.store.link_count();
+
+    Some((
+        ProofRuntimeSession {
+            memory,
+            engine,
+            base_link_count,
+        },
+        load,
+    ))
+}
+
+pub(crate) fn execute_session_to_quiescence(
+    session: &mut ProofRuntimeSession,
+    initial: Handle,
+    max_steps: u32,
+) -> Option<WebProofExecuteStage> {
+    run_engine_to_quiescence(
+        &mut session.memory,
+        &mut session.engine,
+        initial,
+        max_steps,
+    )
+}
+
+pub(crate) fn execute_to_quiescence(
+    memory: &mut ProofRuntimeMemory,
+    interpreter: Handle,
+    initial: Handle,
+    cap: usize,
+    max_steps: u32,
+) -> Option<(OptimizedStructuralEngine, WebProofExecuteStage)> {
+    let mut engine = OptimizedStructuralEngine::new(cap);
+    engine.set_interpreter(&memory.store, interpreter).ok()?;
+    let execute =
+        run_engine_to_quiescence(memory, &mut engine, initial, max_steps)?;
     Some((engine, execute))
 }
 
