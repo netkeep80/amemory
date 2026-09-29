@@ -950,60 +950,18 @@ export function expectedGpuCarrierReaction(
   });
 }
 
-export function deriveGpuCarrierReactionWitness(parsed, compactProof) {
+export function deriveGpuCarrierReactionInput(parsed, compactProof) {
   if (!compactProof || compactProof.block !== "MUX1") {
     throw new Error("C4c3 requires the real MUX1 compact proof");
   }
+  const currentHandle = compactRootHandle(compactProof, "scope.initial");
   const interpreterHandle = compactRootHandle(
     compactProof,
     "execution.interpreter",
   );
-  const reactions = compactProof.execute?.reactions;
-  if (!Array.isArray(reactions)) {
-    throw new Error("compact proof reactions missing");
-  }
-  for (let index = 0; index < reactions.length; index += 1) {
-    const step = reactions[index];
-    if (step?.quiescent ||
-        (step?.rawRuleMatches >>> 0) === 0 ||
-        !Array.isArray(step?.scopeBefore) ||
-        !Array.isArray(step?.scopeAfter) ||
-        step.scopeBefore.length !== 1 ||
-        step.scopeAfter.length !== 1) {
-      continue;
-    }
-    const currentHandle = step.scopeBefore[0] >>> 0;
-    const expectedHandle = step.scopeAfter[0] >>> 0;
-    if (!currentHandle || !expectedHandle ||
-        currentHandle > parsed.layout.linkCount ||
-        expectedHandle > parsed.layout.linkCount) {
-      continue;
-    }
-    let oracle;
-    try {
-      oracle = expectedGpuCarrierReaction(parsed, {
-        currentHandle,
-        interpreterHandle,
-      });
-    } catch {
-      continue;
-    }
-    if (oracle.candidateHandle !== expectedHandle ||
-        oracle.rawRuleMatches !== (step.rawRuleMatches >>> 0)) {
-      continue;
-    }
-    return Object.freeze({
-      stepIndex: index,
-      currentHandle,
-      interpreterHandle,
-      expectedHandle,
-      expectedRawRuleMatches: step.rawRuleMatches >>> 0,
-      cpuOracle: oracle,
-    });
-  }
-  throw new Error(
-    "no bounded pre-materialized MUX1 reaction suitable for C4c3",
-  );
+  requireLookupHandle(parsed, currentHandle, "initial scope handle");
+  requireLookupHandle(parsed, interpreterHandle, "interpreter handle");
+  return Object.freeze({ currentHandle, interpreterHandle });
 }
 
 function carrierReactionCommonShader(args) {
