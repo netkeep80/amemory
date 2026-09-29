@@ -484,6 +484,17 @@ Promise.all([
       workbenchScenarioLevels.SCALAR_ORACLE_VERIFIED !== "verified") {
     throw new Error("R4 Scenario verification levels are not fail-closed");
   }
+  const wrongProfileLevels = workbenchVerificationLevels(null, {
+    profileId: "unsupported-profile",
+    transportValid: true,
+    traceConsistent: true,
+    semanticReplayVerified: true,
+  });
+  if (wrongProfileLevels.slice(0, 3).some(
+        (item) => item.state !== "unavailable"
+      )) {
+    throw new Error("R4 unsupported compact verifier profile did not fail closed");
+  }
   const workbenchResultDetails = workbenchStageDetails(
     null,
     {
