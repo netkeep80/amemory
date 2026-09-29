@@ -5,7 +5,8 @@ use super::{
     proof_n::{
         execute_to_quiescence, identical_rerun, load_runtime, loaded_handle,
         prepare_stage, semantic_source, theory_admissions, visual_snapshot,
-        ProofRuntimeMemory, WebProofResultStage, WebStructuralProof,
+        ProofRuntimeMemory, ProofRuntimeSession, WebProofLoadStage,
+        WebProofPrepareStage, WebProofResultStage, WebStructuralProof,
     },
     wide64_n::Wide64Program,
 };
@@ -410,6 +411,117 @@ fn decode_runtime_mul_result(
     }
 
     Some((runtime_mul_wide(memory, values[0], zero, one)?, payload))
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Mul32SessionProjection {
+    pub(crate) lo: u32,
+    pub(crate) hi: u32,
+    pub(crate) result_recursive_wire: String,
+}
+
+pub(crate) fn prepare_mul32_session_program() -> Option<WebProofPrepareStage> {
+    let mut compiler = FullFixture::new();
+    let program = Mul32Program::install(&mut compiler);
+
+    // Static MUL32 program only. Concrete A/B words and invocation are
+    // published after LOAD by CONFIGURE.
+    let prepared_roots = vec![
+        semantic_source(&compiler.store, "function.mul32", program.mul32),
+        semantic_source(
+            &compiler.store,
+            "function.dependency.add64",
+            program.add64.add64,
+        ),
+        semantic_source(
+            &compiler.store,
+            "result.dependency.add64_tag",
+            program.add64.result_tag,
+        ),
+        semantic_source(&compiler.store, "data.bit.zero", compiler.zero),
+        semantic_source(&compiler.store, "data.bit.one", compiler.one),
+        semantic_source(
+            &compiler.store,
+            "execution.interpreter",
+            compiler.interpreter,
+        ),
+        semantic_source(&compiler.store, "execution.theory", compiler.theory),
+        semantic_source(&compiler.store, "execution.apply", compiler.apply),
+        semantic_source(&compiler.store, "context.caller", compiler.k),
+        semantic_source(&compiler.store, "result.tag", program.result_tag),
+    ];
+
+    let admissions = theory_admissions(&compiler.store, compiler.theory)?;
+    Some(prepare_stage(
+        &compiler.store,
+        prepared_roots,
+        admissions,
+    ))
+}
+
+pub(crate) fn configure_mul32_session(
+    session: &mut ProofRuntimeSession,
+    load: &WebProofLoadStage,
+    a: u32,
+    b: u32,
+) -> Option<(Handle, usize, usize)> {
+    let function = loaded_handle(load, "function.mul32")?;
+    let apply = loaded_handle(load, "execution.apply")?;
+    let caller = loaded_handle(load, "context.caller")?;
+    let zero = loaded_handle(load, "data.bit.zero")?;
+    let one = loaded_handle(load, "data.bit.one")?;
+
+    let word = |store: &mut OptimizedLinkStore, raw: u32| {
+        let bits = (0..WIDTH)
+            .map(|bit| if (raw >> bit) & 1 == 1 { one } else { zero })
+            .collect::<Vec<_>>();
+        materialize_exact_sequence(store, &bits).ok()
+    };
+
+    let before = session.memory.store.link_count();
+    let aword = word(&mut session.memory.store, a)?;
+    let bword = word(&mut session.memory.store, b)?;
+    let args =
+        materialize_exact_sequence(&mut session.memory.store, &[aword, bword])
+            .ok()?;
+    let invocation =
+        call(&mut session.memory.store, apply, function, args);
+    let initial =
+        session.memory.store.ensure_pair(caller, invocation).ok()?;
+    let after = session.memory.store.link_count();
+
+    Some((initial, before, after))
+}
+
+pub(crate) fn project_mul32_session_result(
+    session: &ProofRuntimeSession,
+    load: &WebProofLoadStage,
+) -> Option<Mul32SessionProjection> {
+    if session.engine.current().len() != 1 {
+        return None;
+    }
+
+    let caller = loaded_handle(load, "context.caller")?;
+    let result_tag = loaded_handle(load, "result.tag")?;
+    let zero = loaded_handle(load, "data.bit.zero")?;
+    let one = loaded_handle(load, "data.bit.one")?;
+    let final_link = session.engine.current()[0];
+
+    let (actual, _) = decode_runtime_mul_result(
+        &session.memory,
+        final_link,
+        caller,
+        result_tag,
+        zero,
+        one,
+    )?;
+
+    Some(Mul32SessionProjection {
+        lo: actual as u32,
+        hi: (actual >> 32) as u32,
+        result_recursive_wire:
+            session.memory.store.export_anum(final_link).ok()?,
+    })
 }
 
 pub(crate) fn web_prove_mul32(
