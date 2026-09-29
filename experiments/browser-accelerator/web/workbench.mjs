@@ -48,7 +48,15 @@ const sameInputs = (a, b) => JSON.stringify(a || {}) === JSON.stringify(b || {})
 
 function parseUnsigned(raw, max, label) {
   const text = String(raw).trim();
-  const value = /^0x[0-9a-f]+$/i.test(text)
+  const isHex = /^0x[0-9a-f]+$/i.test(text);
+  const isDecimal = /^\d+$/.test(text);
+  if (!isHex && !isDecimal) {
+    throw new Error(
+      label + ": требуется целое число от 0 до " + max +
+      " без лишних символов",
+    );
+  }
+  const value = isHex
     ? Number.parseInt(text.slice(2), 16)
     : Number.parseInt(text, 10);
   if (!Number.isSafeInteger(value) || value < 0 || value > max) {
@@ -63,9 +71,7 @@ export function normalizeWorkbenchInputs(schema, raw) {
     const type = String(field.type || "").toUpperCase();
     const value = raw ? raw[field.key] : undefined;
     if (type === "BIT") {
-      const bit = Number(value);
-      if (bit !== 0 && bit !== 1) throw new Error(field.key + ": допустимы только 0 или 1");
-      out[field.key] = bit;
+      out[field.key] = parseUnsigned(value, 1, field.key);
     } else if (type === "COUNT8" || type === "U8") {
       out[field.key] = parseUnsigned(value, 0xff, field.key);
     } else if (type === "WORD32" || type === "U32" || type === "UINT32") {

@@ -57,10 +57,44 @@ type OracleFn = fn(
 
 struct CpuScenarioAdapter {
     profile_id: &'static str,
+    family: &'static str,
+    program_id: &'static str,
+    aset_source: &'static str,
     prepare: PrepareFn,
     configure: ConfigureFn,
     project: ProjectFn,
     oracle: OracleFn,
+}
+
+impl CpuScenarioAdapter {
+    fn canonical_program_profile(&self) -> ScenarioProgramProfileV1 {
+        ScenarioProgramProfileV1 {
+            profile_id: self.profile_id.to_owned(),
+            family: self.family.to_owned(),
+            program_id: self.program_id.to_owned(),
+            aset_source: self.aset_source.to_owned(),
+        }
+    }
+}
+
+fn resolve_cpu_scenario_adapter(
+    requested: &ScenarioProgramProfileV1,
+) -> Result<&'static CpuScenarioAdapter, ScenarioRunnerErrorV1> {
+    let adapter = CPU_SCENARIO_ADAPTERS
+        .iter()
+        .find(|adapter| adapter.profile_id == requested.profile_id)
+        .ok_or_else(|| ScenarioRunnerErrorV1::UnsupportedProgramProfile {
+            profile_id: requested.profile_id.clone(),
+        })?;
+
+    let canonical = adapter.canonical_program_profile();
+    if &canonical != requested {
+        return Err(ScenarioRunnerErrorV1::ProgramProfileMismatch {
+            requested: requested.clone(),
+            canonical,
+        });
+    }
+    Ok(adapter)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -73,6 +107,9 @@ struct ConfiguredRun {
 const CPU_SCENARIO_ADAPTERS: &[CpuScenarioAdapter] = &[
     CpuScenarioAdapter {
         profile_id: "a-circuit:mux1",
+        family: "mux",
+        program_id: "mux1",
+        aset_source: "builtin:a-circuit/mux1",
         prepare: prepare_mux1_session_program,
         configure: configure_mux1_from_inputs,
         project: project_mux1_result,
@@ -80,6 +117,9 @@ const CPU_SCENARIO_ADAPTERS: &[CpuScenarioAdapter] = &[
     },
     CpuScenarioAdapter {
         profile_id: "a-circuit:logic-xor32",
+        family: "logic-effect",
+        program_id: "xor32",
+        aset_source: "builtin:a-circuit/logic-effect/xor32",
         prepare: prepare_xor32_session_program,
         configure: configure_xor32_from_inputs,
         project: project_xor32_result,
@@ -87,6 +127,9 @@ const CPU_SCENARIO_ADAPTERS: &[CpuScenarioAdapter] = &[
     },
     CpuScenarioAdapter {
         profile_id: "a-circuit:arithmetic-add32",
+        family: "arithmetic-effect",
+        program_id: "add32",
+        aset_source: "builtin:a-circuit/arithmetic-effect/add32",
         prepare: prepare_add32_session_program,
         configure: configure_add32_from_inputs,
         project: project_add32_result,
@@ -94,6 +137,9 @@ const CPU_SCENARIO_ADAPTERS: &[CpuScenarioAdapter] = &[
     },
     CpuScenarioAdapter {
         profile_id: "a-circuit:shift-shl32",
+        family: "shift-effect",
+        program_id: "shl32",
+        aset_source: "builtin:a-circuit/shift32/shl",
         prepare: prepare_shl32_session_program,
         configure: configure_shl32_from_inputs,
         project: project_shl32_result,
@@ -101,6 +147,9 @@ const CPU_SCENARIO_ADAPTERS: &[CpuScenarioAdapter] = &[
     },
     CpuScenarioAdapter {
         profile_id: "a-circuit:mul32",
+        family: "mul",
+        program_id: "mul32",
+        aset_source: "builtin:a-circuit/mul32",
         prepare: prepare_mul32_session_program,
         configure: configure_mul32_from_inputs,
         project: project_mul32_result,
@@ -148,6 +197,43 @@ pub(crate) struct ScenarioRunReportV1 {
     pub(crate) pipeline_profile: Option<RunPipelineProfileV1>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub(crate) enum ScenarioManifestFieldAuthorityV1 {
+    Enforced,
+    Advisory,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ScenarioManifestFieldSemanticsV1 {
+    pub(crate) schema_version: u32,
+    pub(crate) program_profile: ScenarioManifestFieldAuthorityV1,
+    pub(crate) typed_inputs: ScenarioManifestFieldAuthorityV1,
+    pub(crate) supported_backends: ScenarioManifestFieldAuthorityV1,
+    pub(crate) execution_mode: ScenarioManifestFieldAuthorityV1,
+    pub(crate) observation_level: ScenarioManifestFieldAuthorityV1,
+    pub(crate) oracle_policy: ScenarioManifestFieldAuthorityV1,
+    pub(crate) invariants: ScenarioManifestFieldAuthorityV1,
+    pub(crate) profiling_policy: ScenarioManifestFieldAuthorityV1,
+    pub(crate) visualization_profile: ScenarioManifestFieldAuthorityV1,
+}
+
+fn scenario_manifest_field_semantics_v1() -> ScenarioManifestFieldSemanticsV1 {
+    ScenarioManifestFieldSemanticsV1 {
+        schema_version: 1,
+        program_profile: ScenarioManifestFieldAuthorityV1::Enforced,
+        typed_inputs: ScenarioManifestFieldAuthorityV1::Enforced,
+        supported_backends: ScenarioManifestFieldAuthorityV1::Enforced,
+        execution_mode: ScenarioManifestFieldAuthorityV1::Enforced,
+        observation_level: ScenarioManifestFieldAuthorityV1::Enforced,
+        oracle_policy: ScenarioManifestFieldAuthorityV1::Enforced,
+        invariants: ScenarioManifestFieldAuthorityV1::Advisory,
+        profiling_policy: ScenarioManifestFieldAuthorityV1::Advisory,
+        visualization_profile: ScenarioManifestFieldAuthorityV1::Advisory,
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ScenarioProvenanceV1 {
@@ -156,6 +242,7 @@ pub(crate) struct ScenarioProvenanceV1 {
     pub(crate) build_sha: Option<String>,
     pub(crate) scenario_version: String,
     pub(crate) program_profile_id: String,
+    pub(crate) program_profile: ScenarioProgramProfileV1,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) program_fingerprint: Option<String>,
 }
@@ -167,6 +254,7 @@ pub(crate) struct ScenarioExecutionReportV1 {
     pub(crate) scenario_id: String,
     pub(crate) scenario_version: String,
     pub(crate) program_profile: ScenarioProgramProfileV1,
+    pub(crate) manifest_field_semantics: ScenarioManifestFieldSemanticsV1,
     pub(crate) backend: ScenarioBackendV1,
     pub(crate) session_id: String,
     pub(crate) session_open_profile: SessionOpenProfileV1,
@@ -186,6 +274,10 @@ pub(crate) enum ScenarioRunnerErrorV1 {
     },
     UnsupportedProgramProfile {
         profile_id: String,
+    },
+    ProgramProfileMismatch {
+        requested: ScenarioProgramProfileV1,
+        canonical: ScenarioProgramProfileV1,
     },
     UnsupportedExecutionMode {
         run_id: String,
@@ -288,6 +380,7 @@ fn prepared_aset_fingerprint_v1(
 
 pub(crate) struct ScenarioCpuSessionV1 {
     manifest: ScenarioManifestV1,
+    program_profile: ScenarioProgramProfileV1,
     adapter: &'static CpuScenarioAdapter,
     session: ProofRuntimeSession,
     load: WebProofLoadStage,
@@ -309,6 +402,7 @@ pub(crate) struct ScenarioLiveSessionStatusV1 {
     pub(crate) store_instance_id: String,
     pub(crate) engine_instance_id: String,
     pub(crate) program_profile: ScenarioProgramProfileV1,
+    pub(crate) manifest_field_semantics: ScenarioManifestFieldSemanticsV1,
     pub(crate) program_fingerprint: String,
     pub(crate) base_link_count: u32,
     pub(crate) current_link_count: u32,
@@ -326,7 +420,8 @@ impl ScenarioCpuSessionV1 {
             session_id: self.session.memory.id.clone(),
             store_instance_id: self.store_instance_id.clone(),
             engine_instance_id: self.engine_instance_id.clone(),
-            program_profile: self.manifest.program_profile.clone(),
+            program_profile: self.program_profile.clone(),
+            manifest_field_semantics: scenario_manifest_field_semantics_v1(),
             program_fingerprint: self.program_fingerprint.clone(),
             base_link_count: self.loaded_link_count as u32,
             current_link_count:
@@ -358,14 +453,11 @@ pub(crate) fn open_cpu_scenario_session_v1(
         });
     }
 
-    let adapter = CPU_SCENARIO_ADAPTERS
-        .iter()
-        .find(|adapter| {
-            adapter.profile_id == manifest.program_profile.profile_id
-        })
-        .ok_or_else(|| ScenarioRunnerErrorV1::UnsupportedProgramProfile {
-            profile_id: manifest.program_profile.profile_id.clone(),
-        })?;
+    // Resolve the complete descriptor before PREPARE. The adapter registry,
+    // not caller-provided provenance text, is authority for the built-in
+    // program that will actually be loaded.
+    let adapter = resolve_cpu_scenario_adapter(&manifest.program_profile)?;
+    let program_profile = adapter.canonical_program_profile();
 
     let (prepare, prepare_ns) = time_stage(|| (adapter.prepare)());
     let prepare = prepare.ok_or_else(|| {
@@ -401,6 +493,7 @@ pub(crate) fn open_cpu_scenario_session_v1(
 
     Ok(ScenarioCpuSessionV1 {
         manifest: manifest.clone(),
+        program_profile,
         adapter,
         session,
         load,
@@ -565,6 +658,7 @@ pub(crate) fn run_scenario_manifest_v1(
     let session_id = live.session.memory.id.clone();
     let session_open_profile = live.session_open_profile.clone();
     let program_fingerprint = live.program_fingerprint.clone();
+    let program_profile = live.program_profile.clone();
     let mut reports = Vec::with_capacity(manifest.run_sequence.len());
 
     for run in &manifest.run_sequence {
@@ -585,7 +679,8 @@ pub(crate) fn run_scenario_manifest_v1(
         schema_version: SCENARIO_REPORT_SCHEMA_VERSION,
         scenario_id: manifest.scenario_id.clone(),
         scenario_version: manifest.scenario_version.clone(),
-        program_profile: manifest.program_profile.clone(),
+        program_profile: program_profile.clone(),
+        manifest_field_semantics: scenario_manifest_field_semantics_v1(),
         backend,
         session_id,
         session_open_profile,
@@ -600,7 +695,8 @@ pub(crate) fn run_scenario_manifest_v1(
                 .or(option_env!("GITHUB_SHA"))
                 .map(str::to_owned),
             scenario_version: manifest.scenario_version.clone(),
-            program_profile_id: manifest.program_profile.profile_id.clone(),
+            program_profile_id: program_profile.profile_id.clone(),
+            program_profile,
             program_fingerprint: Some(program_fingerprint),
         },
     })
@@ -1052,6 +1148,77 @@ mod tests {
     }
 
     #[test]
+    fn built_in_program_descriptor_is_resolved_as_one_exact_registry_tuple() {
+        let canonical =
+            parse_and_validate_manifest_v1(MUX1_LIFECYCLE).unwrap();
+
+        for (field, mutate) in [
+            ("family", 0u8),
+            ("programId", 1u8),
+            ("asetSource", 2u8),
+        ] {
+            let mut manifest = canonical.clone();
+            match mutate {
+                0 => manifest.program_profile.family = "not-mux".to_owned(),
+                1 => manifest.program_profile.program_id = "not-mux1".to_owned(),
+                2 => manifest.program_profile.aset_source =
+                    "audit:unknown-program".to_owned(),
+                _ => unreachable!(),
+            }
+
+            let error = match open_cpu_scenario_session_v1(&manifest) {
+                Err(error) => error,
+                Ok(_) => panic!("{field} mismatch unexpectedly opened Session"),
+            };
+            match error {
+                ScenarioRunnerErrorV1::ProgramProfileMismatch {
+                    requested,
+                    canonical: actual,
+                } => {
+                    assert_eq!(requested, manifest.program_profile);
+                    assert_eq!(actual, canonical.program_profile);
+                }
+                other => panic!(
+                    "{field} mismatch returned wrong error: {other:?}"
+                ),
+            }
+        }
+
+        let mut unknown = canonical;
+        unknown.program_profile.profile_id =
+            "a-circuit:does-not-exist".to_owned();
+        assert!(matches!(
+            open_cpu_scenario_session_v1(&unknown),
+            Err(ScenarioRunnerErrorV1::UnsupportedProgramProfile { .. })
+        ));
+    }
+
+    #[test]
+    fn invalid_live_run_is_rejected_before_configure_without_link_delta() {
+        let manifest =
+            parse_and_validate_manifest_v1(MUX1_LIFECYCLE).unwrap();
+        let mut live = open_cpu_scenario_session_v1(&manifest).unwrap();
+        let before = live.status_v1();
+
+        let mut invalid = manifest.run_sequence[0].clone();
+        invalid.run_id = "invalid-prefix-input".to_owned();
+        invalid
+            .inputs
+            .insert("S".to_owned(), Value::String("12garbage".to_owned()));
+
+        let error =
+            run_cpu_scenario_session_once_v1(&mut live, &invalid).unwrap_err();
+        assert!(matches!(error, ScenarioRunnerErrorV1::Validation { .. }));
+
+        let after = live.status_v1();
+        assert_eq!(after.session_id, before.session_id);
+        assert_eq!(after.current_link_count, before.current_link_count);
+        assert_eq!(after.completed_runs, before.completed_runs);
+        assert_eq!(after.prepare_count, 1);
+        assert_eq!(after.load_count, 1);
+    }
+
+    #[test]
     fn retained_cpu_session_runs_separate_mux1_actions_without_reload() {
         let manifest =
             parse_and_validate_manifest_v1(MUX1_LIFECYCLE).unwrap();
@@ -1091,6 +1258,24 @@ mod tests {
         assert_eq!(opened.engine_instance_id, after.engine_instance_id);
         assert_eq!(opened.base_link_count, after.base_link_count);
         assert_eq!(opened.program_fingerprint, after.program_fingerprint);
+        assert_eq!(opened.program_profile, manifest.program_profile);
+        assert_eq!(after.program_profile, manifest.program_profile);
+        assert_eq!(
+            opened.manifest_field_semantics.invariants,
+            ScenarioManifestFieldAuthorityV1::Advisory
+        );
+        assert_eq!(
+            opened.manifest_field_semantics.profiling_policy,
+            ScenarioManifestFieldAuthorityV1::Advisory
+        );
+        assert_eq!(
+            opened.manifest_field_semantics.visualization_profile,
+            ScenarioManifestFieldAuthorityV1::Advisory
+        );
+        assert_eq!(
+            opened.manifest_field_semantics.program_profile,
+            ScenarioManifestFieldAuthorityV1::Enforced
+        );
         assert_eq!(opened.prepare_count, 1);
         assert_eq!(opened.load_count, 1);
         assert_eq!(after.prepare_count, 1);
@@ -1170,6 +1355,12 @@ mod tests {
         assert_eq!(
             report.provenance.program_fingerprint.as_deref(),
             Some(expected_fingerprint.as_str()),
+        );
+        assert_eq!(report.program_profile, manifest.program_profile);
+        assert_eq!(report.provenance.program_profile, manifest.program_profile);
+        assert_eq!(
+            report.manifest_field_semantics.invariants,
+            ScenarioManifestFieldAuthorityV1::Advisory
         );
     }
 
