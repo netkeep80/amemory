@@ -13,6 +13,10 @@ import {
 import { renderProofPipeline } from "./i386-proof-view.mjs";
 import { collectBrowserProof } from "./i386-proof-transport.mjs";
 import { readJsonAbi } from "./i386-wasm-json.mjs";
+import {
+  readGpuCarrierWordsAbi,
+  runGpuCarrierLookup,
+} from "./gpu-carrier.mjs";
 
 function parseWord(text) {
   const value = String(text).trim();
@@ -159,6 +163,8 @@ function styleLab() {
     .lab-table input,.lab-table select { width:100%; min-width:95px; box-sizing:border-box; background:var(--surface-2); color:var(--text); border:1px solid var(--line); border-radius:7px; padding:7px; }
     .lab-vector-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
     .lab-trace { margin-top:12px; padding:10px 12px; border:1px solid var(--line); border-radius:10px; }
+    .lab-gpu-carrier-result { margin-top:12px; display:grid; gap:8px; }
+    .lab-gpu-carrier-result code { overflow-wrap:anywhere; }
     .proof-pipeline { margin-top:18px; border-top:2px solid var(--text); padding-top:18px; }
     .proof-title { display:flex; justify-content:space-between; gap:16px; align-items:flex-start; }
     .proof-title h3 { margin:0 0 4px; font-size:1.15rem; }
@@ -334,6 +340,17 @@ function buildLab(registry) {
       <div class="notice" id="lab-m6d-status">M6d WASM witness ready check pending…</div>
       <div id="lab-m6d-result"></div>
       <div id="lab-m6d-proof"></div>
+    </div>
+    <div class="lab-state-shell" id="lab-gpu-carrier-witness">
+      <div class="lab-state-head">
+        <div>
+          <h3>C4 packed carrier → WebGPU lookup witness</h3>
+          <p>The real A-Circuit WASM exports the exact packed PREPARE carrier. WebGPU reads only integer local handles and the C4 carrier/index sections; JavaScript compares GPU Link poles and ROOT start-incidence against that same logical carrier.</p>
+        </div>
+        <button class="lab-run" id="lab-run-gpu-carrier" type="button">Run WebGPU carrier lookup</button>
+      </div>
+      <div class="notice" id="lab-gpu-carrier-status">C4 WebGPU lookup not run yet.</div>
+      <div class="lab-gpu-carrier-result" id="lab-gpu-carrier-result"></div>
     </div>
     <div class="lab-layout">
       <aside class="lab-catalog-shell">
@@ -1333,6 +1350,79 @@ function renderSweep(section, block, wasm) {
   });
 }
 
+function setupGpuCarrierWitness(section, wasm) {
+  const status = section.querySelector("#lab-gpu-carrier-status");
+  const result = section.querySelector("#lab-gpu-carrier-result");
+  const run = section.querySelector("#lab-run-gpu-carrier");
+  if (!status || !result || !run) return;
+
+  const producerReady =
+    typeof wasm.amemory_i386_lab_gpu_carrier_prepare === "function" &&
+    typeof wasm.amemory_i386_lab_gpu_carrier_available === "function";
+  if (!producerReady) {
+    status.textContent =
+      "C4 carrier WASM ABI is missing; refusing to fake GPU evidence.";
+    status.className = "notice lab-error";
+    run.disabled = true;
+    return;
+  }
+
+  const execute = async () => {
+    run.disabled = true;
+    result.innerHTML = "";
+    try {
+      if (!globalThis.navigator?.gpu) {
+        throw new Error("WebGPU is unavailable in this browser");
+      }
+      const adapter = await navigator.gpu.requestAdapter();
+      if (!adapter) throw new Error("WebGPU adapter is unavailable");
+      const device = await adapter.requestDevice();
+      try {
+        if (wasm.amemory_i386_lab_gpu_carrier_prepare() !== 1) {
+          throw new Error("real WASM C4 carrier preparation failed");
+        }
+        const carrier = readGpuCarrierWordsAbi(
+          wasm,
+          undefined,
+          "i386 C4 carrier",
+        );
+        if (!carrier) throw new Error("real WASM C4 carrier is unavailable");
+
+        const handle = Math.min(2, carrier.layout.linkCount);
+        const lookup = await runGpuCarrierLookup(device, carrier, {
+          handle,
+          pole: carrier.layout.rootHandle,
+        });
+        const observed = lookup.observed;
+        result.innerHTML = `
+          <div class="lab-state-grid">
+            <div class="lab-state-snapshot"><strong>Logical carrier</strong><code>${carrier.layout.linkCount} Links · ${carrier.layout.totalBytes} bytes</code></div>
+            <div class="lab-state-snapshot"><strong>Physical projection</strong><code>${escapeHtml(lookup.plan.mode)} · ${lookup.plan.storageBufferCount} storage buffer(s)</code></div>
+            <div class="lab-state-snapshot"><strong>GPU Link L${observed.handle}</strong><code>(L${observed.start}, L${observed.end})</code></div>
+            <div class="lab-state-snapshot"><strong>ROOT start-incidence</strong><code>[${observed.incidence.map((value) => "L" + value).join(", ")}]</code></div>
+          </div>
+          <small>carrier fingerprint: <code>0x${observed.logicalFingerprint.toString(16).padStart(8, "0")}</code></small>`;
+        status.textContent =
+          "PASS: real WASM carrier → WebGPU integer lookup → exact CPU differential.";
+        status.className = "notice lab-ok";
+      } finally {
+        device.destroy?.();
+      }
+    } catch (error) {
+      status.textContent = "C4 WebGPU lookup: " + error.message;
+      status.className = "notice lab-error";
+    } finally {
+      run.disabled = false;
+    }
+  };
+
+  run.addEventListener("click", execute);
+  status.textContent =
+    globalThis.navigator?.gpu
+      ? "C4 carrier producer ready; run the real WebGPU lookup witness."
+      : "C4 carrier producer ready; WebGPU is unavailable in this browser.";
+}
+
 function renderMode(section, block, wasm, mode) {
   if (mode === "single") renderSingle(section, block, wasm);
   else if (mode === "vectors") renderVectors(section, block, wasm);
@@ -1389,6 +1479,7 @@ async function bootLab() {
   setupArchitecturalStateWitness(section, wasm);
   setupMemoryWitness(section, wasm);
   setupM6dWitness(section, wasm);
+  setupGpuCarrierWitness(section, wasm);
   const byId = new Map(registry.blocks.map((block) => [block.id, block]));
   const selectBlock = (id) => {
     const block = byId.get(id);
