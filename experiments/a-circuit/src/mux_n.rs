@@ -4,7 +4,8 @@ use super::{
     },
     logic_n::{install_gate_basis, GateSet},
     proof_n::{
-        execute_to_quiescence, identical_rerun, load_runtime, loaded_handle,
+        execute_session_to_quiescence, execute_to_quiescence,
+        identical_rerun, load_runtime, load_runtime_session, loaded_handle,
         prepare_stage, semantic_source, theory_admissions, visual_snapshot,
         WebMux1Proof, WebProofResultStage, WebStructuralProof,
     },
@@ -13,7 +14,6 @@ use amemory_optimized_cpu_probe::{
     structural::{
         define_structural_interpreter, define_structural_role_dictionary,
         materialize_exact_sequence, read_exact_sequence,
-        OptimizedStructuralEngine,
     },
     Handle, OptimizedLinkStore, ROOT_HANDLE,
 };
@@ -1378,17 +1378,23 @@ fn web_mux1_lifecycle_reconfigures_four_runs_in_one_loaded_memory() {
     let prepare =
         prepare_stage(&compiler.store, prepared_roots, admissions);
 
-    // LOAD exactly once.
-    let (mut memory, load) = load_runtime(&prepare).unwrap();
-    let runtime_id = memory.id.clone();
+    // LOAD exactly once and create one engine owned by the runtime Session.
+    let (mut session, load) =
+        load_runtime_session(&prepare, 32).unwrap();
+    let runtime_id = session.memory.id.clone();
     let store_address =
-        std::ptr::addr_of!(memory.store) as usize;
-    let loaded_link_count = memory.store.link_count();
-    let loaded_prefix = memory.store.export_packed_duplets();
+        std::ptr::addr_of!(session.memory.store) as usize;
+    let engine_address =
+        std::ptr::addr_of!(session.engine) as usize;
+    let loaded_link_count = session.base_link_count;
+    let loaded_prefix = session.memory.store.export_packed_duplets();
     assert_eq!(loaded_prefix.len(), loaded_link_count);
+    assert_eq!(
+        loaded_link_count,
+        load.links_after_load as usize,
+        "Session base boundary must equal the one-time LOAD boundary",
+    );
 
-    let interpreter =
-        loaded_handle(&load, "execution.interpreter").unwrap();
     let mux1 = loaded_handle(&load, "function.mux1").unwrap();
     let apply = loaded_handle(&load, "execution.apply").unwrap();
     let caller = loaded_handle(&load, "context.caller").unwrap();
@@ -1396,13 +1402,6 @@ fn web_mux1_lifecycle_reconfigures_four_runs_in_one_loaded_memory() {
     let zero = loaded_handle(&load, "data.zero").unwrap();
     let one = loaded_handle(&load, "data.one").unwrap();
     let bits = [zero, one];
-
-    // One engine for the complete lifecycle. In particular, its inactive
-    // scope bank and metadata cache survive between the four runs.
-    let mut engine = OptimizedStructuralEngine::new(32);
-    engine
-        .set_interpreter(&memory.store, interpreter)
-        .unwrap();
 
     let vectors = [
         (0usize, 0usize, 1usize, 0u32),
@@ -1416,26 +1415,34 @@ fn web_mux1_lifecycle_reconfigures_four_runs_in_one_loaded_memory() {
     for (run_index, &(select, a, b, expected)) in
         vectors.iter().enumerate()
     {
-        assert_eq!(memory.id, runtime_id);
+        assert_eq!(session.memory.id, runtime_id);
         assert_eq!(
-            std::ptr::addr_of!(memory.store) as usize,
+            std::ptr::addr_of!(session.memory.store) as usize,
             store_address,
             "run {run_index} replaced the runtime store object",
         );
+        assert_eq!(
+            std::ptr::addr_of!(session.engine) as usize,
+            engine_address,
+            "run {run_index} replaced the persistent executor",
+        );
 
-        // Publish this run's configuration as normal immutable Links in the
+        // CONFIGURE: publish this run's input as normal immutable Links in the
         // already-loaded A-memory. No old Link is rewritten.
-        let before_config = memory.store.link_count();
+        let before_config = session.memory.store.link_count();
         let args = materialize_exact_sequence(
-            &mut memory.store,
+            &mut session.memory.store,
             &[bits[select], bits[a], bits[b]],
         )
         .unwrap();
         let invocation =
-            call(&mut memory.store, apply, mux1, args);
-        let initial =
-            memory.store.ensure_pair(caller, invocation).unwrap();
-        let after_config = memory.store.link_count();
+            call(&mut session.memory.store, apply, mux1, args);
+        let initial = session
+            .memory
+            .store
+            .ensure_pair(caller, invocation)
+            .unwrap();
+        let after_config = session.memory.store.link_count();
 
         if run_index < 3 {
             assert!(
@@ -1453,31 +1460,26 @@ fn web_mux1_lifecycle_reconfigures_four_runs_in_one_loaded_memory() {
             first_initial = Some(initial);
         }
 
-        // set_current selects the Link that was just published; all input data
-        // remains structural. Execution itself is only engine.run().
-        engine.set_current(&memory.store, &[initial]).unwrap();
-        let mut active_reactions = 0u32;
-        for _ in 0..64 {
-            let reaction = engine.run(&mut memory.store).unwrap();
-            if reaction.quiescent {
-                break;
-            }
-            active_reactions += 1;
-        }
-        assert!(engine.quiescent(), "run {run_index} did not quiesce");
+        // EXECUTE: common Session API owns the same engine and invokes only
+        // the generic generalized-MP engine.run() loop until quiescence.
+        let execute =
+            execute_session_to_quiescence(&mut session, initial, 64).unwrap();
+        assert!(execute.final_quiescent);
         assert_eq!(
-            active_reactions, 7,
+            execute.active_reaction_count, 7,
             "run {run_index} changed the proven MUX1 reaction count",
         );
-        assert_eq!(engine.current().len(), 1);
+        assert_eq!(session.engine.current().len(), 1);
 
-        let final_link = engine.current()[0];
+        // RESULT projection is read-only over the same runtime carrier.
+        let final_link = session.engine.current()[0];
         let (final_caller, endpoint) =
-            memory.store.poles(final_link).unwrap();
+            session.memory.store.poles(final_link).unwrap();
         assert_eq!(final_caller, caller);
-        let (tag, payload) = memory.store.poles(endpoint).unwrap();
+        let (tag, payload) = session.memory.store.poles(endpoint).unwrap();
         assert_eq!(tag, result_tag);
-        let values = read_exact_sequence(&memory.store, payload).unwrap();
+        let values =
+            read_exact_sequence(&session.memory.store, payload).unwrap();
         assert_eq!(values.len(), 1);
         let decoded = if values[0] == one {
             1
@@ -1489,30 +1491,32 @@ fn web_mux1_lifecycle_reconfigures_four_runs_in_one_loaded_memory() {
         assert_eq!(decoded, expected);
 
         // Fresh-instance execution is an oracle only. It cannot influence
-        // this runtime's input, matching or result.
-        let fresh = web_prove_mux1(
-            select as u32,
-            a as u32,
-            b as u32,
-        )
-        .unwrap();
+        // this Session's input, matching or result.
+        let fresh =
+            web_prove_mux1(select as u32, a as u32, b as u32).unwrap();
         assert_ne!(fresh.load.memory_instance_id, runtime_id);
         assert_eq!(fresh.result.decoded_value, decoded);
 
-        let carrier = memory.store.export_packed_duplets();
+        let carrier = session.memory.store.export_packed_duplets();
         assert_eq!(
             &carrier[..loaded_link_count],
             loaded_prefix.as_slice(),
             "run {run_index} mutated the originally loaded Aset prefix",
         );
-        assert_eq!(memory.id, runtime_id);
+        assert_eq!(session.memory.id, runtime_id);
         assert_eq!(
-            std::ptr::addr_of!(memory.store) as usize,
+            std::ptr::addr_of!(session.memory.store) as usize,
             store_address,
             "run {run_index} replaced the runtime store object",
         );
+        assert_eq!(
+            std::ptr::addr_of!(session.engine) as usize,
+            engine_address,
+            "run {run_index} replaced the persistent executor",
+        );
 
-        let result_wire = memory.store.export_anum(final_link).unwrap();
+        let result_wire =
+            session.memory.store.export_anum(final_link).unwrap();
         if run_index == 0 {
             first_result_wire = Some(result_wire);
         } else if run_index == 3 {
