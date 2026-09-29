@@ -104,6 +104,25 @@ const c4InputEnd = gpuCarrierSource.indexOf(
   c4InputStart
 );
 const c4InputSource = gpuCarrierSource.slice(c4InputStart, c4InputEnd);
+const c4RunStart = gpuCarrierSource.indexOf(
+  "export async function runGpuCarrierReaction"
+);
+const c4RunSource = gpuCarrierSource.slice(c4RunStart);
+const c4GpuReadback = c4RunSource.indexOf("const [d, o] = await Promise.all");
+const c4CpuOracle = c4RunSource.indexOf(
+  "const expected = expectedGpuCarrierReaction"
+);
+if (c4GpuReadback < 0 || c4CpuOracle < 0 || c4CpuOracle <= c4GpuReadback) {
+  throw new Error("C4c3 CPU oracle must be computed only after GPU readback");
+}
+for (const forbiddenSeed of [
+  "currentHandle: expected.currentHandle",
+  "interpreterHandle: expected.interpreterHandle",
+]) {
+  if (c4RunSource.includes(forbiddenSeed)) {
+    throw new Error("C4c3 CPU oracle leaked into shader input: " + forbiddenSeed);
+  }
+}
 for (const forbidden of [
   "scopeAfter",
   "scopeBefore",
@@ -498,6 +517,8 @@ Promise.all([
       "ensure_pair_overlay",
       "ensure_start_self_overlay",
       "ensure_end_self_overlay",
+      "read_single_output_bundle",
+      "grounded_bundle",
     ]) {
       if (!shader.includes(marker)) {
         throw new Error("C4c3 " + mode + " shader missing " + marker);
