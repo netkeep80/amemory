@@ -213,6 +213,46 @@ pub(crate) struct ScenarioRunReportV1 {
     pub(crate) pipeline_profile: Option<RunPipelineProfileV1>,
 }
 
+#[derive(Clone, Debug)]
+struct ScenarioActiveStepRunV1 {
+    run: ScenarioRunV1,
+    configured: ConfiguredRun,
+    session_run_id: u64,
+    steps_taken: u32,
+    active_reaction_count: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ScenarioStepBeginV1 {
+    pub(crate) schema_version: u32,
+    pub(crate) manifest_run_id: String,
+    pub(crate) session_run_id: u64,
+    pub(crate) configuration_reused: bool,
+    pub(crate) links_before_configure: u32,
+    pub(crate) links_after_configure: u32,
+    pub(crate) max_reactions: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ScenarioStepReportV1 {
+    pub(crate) schema_version: u32,
+    pub(crate) manifest_run_id: String,
+    pub(crate) session_run_id: u64,
+    pub(crate) evidence: SessionReactionEvidenceV1,
+    pub(crate) completed: bool,
+    pub(crate) active_reaction_count: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) result: Option<ScenarioNormalizedResultV1>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) assertion_results: Vec<ScenarioAssertionResultV1>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) fresh_instance_matches: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) scalar_oracle_matches: Option<bool>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub(crate) enum ScenarioManifestFieldAuthorityV1 {
@@ -330,6 +370,14 @@ pub(crate) enum ScenarioRunnerErrorV1 {
         run_id: String,
         message: String,
     },
+    StepRunAlreadyActive {
+        run_id: String,
+    },
+    StepRunNotActive,
+    StepControlFailed {
+        run_id: String,
+        message: String,
+    },
 }
 
 const PREPARED_ASET_FINGERPRINT_ID: &str =
@@ -407,6 +455,7 @@ pub(crate) struct ScenarioCpuSessionV1 {
     store_instance_id: String,
     engine_instance_id: String,
     completed_runs: u64,
+    active_step_run: Option<ScenarioActiveStepRunV1>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -520,6 +569,7 @@ pub(crate) fn open_cpu_scenario_session_v1(
         store_instance_id,
         engine_instance_id,
         completed_runs: 0,
+        active_step_run: None,
     })
 }
 
@@ -527,6 +577,12 @@ pub(crate) fn run_cpu_scenario_session_once_v1(
     live: &mut ScenarioCpuSessionV1,
     run: &ScenarioRunV1,
 ) -> Result<ScenarioRunReportV1, ScenarioRunnerErrorV1> {
+    if let Some(active) = live.active_step_run.as_ref() {
+        return Err(ScenarioRunnerErrorV1::StepRunAlreadyActive {
+            run_id: active.run.run_id.clone(),
+        });
+    }
+
     let mut validation_manifest = live.manifest.clone();
     validation_manifest.run_sequence = vec![run.clone()];
     let validation = validate_manifest_v1(&validation_manifest);
@@ -672,6 +728,200 @@ pub(crate) fn run_cpu_scenario_session_once_v1(
     Ok(report)
 }
 
+pub(crate) fn begin_cpu_scenario_step_run_v1(
+    live: &mut ScenarioCpuSessionV1,
+    run: &ScenarioRunV1,
+) -> Result<ScenarioStepBeginV1, ScenarioRunnerErrorV1> {
+    if let Some(active) = live.active_step_run.as_ref() {
+        return Err(ScenarioRunnerErrorV1::StepRunAlreadyActive {
+            run_id: active.run.run_id.clone(),
+        });
+    }
+
+    let mut validation_manifest = live.manifest.clone();
+    validation_manifest.run_sequence = vec![run.clone()];
+    let validation = validate_manifest_v1(&validation_manifest);
+    if !validation.is_empty() {
+        return Err(ScenarioRunnerErrorV1::Validation {
+            errors: validation,
+        });
+    }
+    if run.execution_mode != ScenarioExecutionModeV1::Step {
+        return Err(ScenarioRunnerErrorV1::UnsupportedExecutionMode {
+            run_id: run.run_id.clone(),
+            mode: run.execution_mode,
+        });
+    }
+
+    let configured = (live.adapter.configure)(
+        &mut live.session,
+        &live.load,
+        &run.inputs,
+    )
+    .map_err(|message| ScenarioRunnerErrorV1::ConfigureFailed {
+        run_id: run.run_id.clone(),
+        message,
+    })?;
+
+    let session_run_id =
+        live.session.begin_run(configured.initial).map_err(|error| {
+            ScenarioRunnerErrorV1::StepControlFailed {
+                run_id: run.run_id.clone(),
+                message: format!("{error:?}"),
+            }
+        })?;
+
+    let begin = ScenarioStepBeginV1 {
+        schema_version: SCENARIO_REPORT_SCHEMA_VERSION,
+        manifest_run_id: run.run_id.clone(),
+        session_run_id,
+        configuration_reused:
+            configured.links_after == configured.links_before,
+        links_before_configure: configured.links_before,
+        links_after_configure: configured.links_after,
+        max_reactions: run.max_reactions,
+    };
+    live.active_step_run = Some(ScenarioActiveStepRunV1 {
+        run: run.clone(),
+        configured,
+        session_run_id,
+        steps_taken: 0,
+        active_reaction_count: 0,
+    });
+    Ok(begin)
+}
+
+pub(crate) fn step_cpu_scenario_session_v1(
+    live: &mut ScenarioCpuSessionV1,
+) -> Result<ScenarioStepReportV1, ScenarioRunnerErrorV1> {
+    let mut active = live
+        .active_step_run
+        .take()
+        .ok_or(ScenarioRunnerErrorV1::StepRunNotActive)?;
+
+    if active.steps_taken >= active.run.max_reactions {
+        live.session.fail_active_run();
+        return Err(ScenarioRunnerErrorV1::ExecuteFailed {
+            run_id: active.run.run_id,
+            max_reactions: active.run.max_reactions,
+        });
+    }
+
+    let step = live
+        .session
+        .step(live.manifest.observation_level)
+        .map_err(|error| ScenarioRunnerErrorV1::StepControlFailed {
+            run_id: active.run.run_id.clone(),
+            message: format!("{error:?}"),
+        })?;
+    active.steps_taken = active.steps_taken.saturating_add(1);
+    if !step.evidence.quiescent {
+        active.active_reaction_count =
+            active.active_reaction_count.saturating_add(1);
+    }
+
+    let evidence = step.evidence;
+    if !evidence.quiescent {
+        let report = ScenarioStepReportV1 {
+            schema_version: SCENARIO_REPORT_SCHEMA_VERSION,
+            manifest_run_id: active.run.run_id.clone(),
+            session_run_id: active.session_run_id,
+            evidence,
+            completed: false,
+            active_reaction_count: active.active_reaction_count,
+            result: None,
+            assertion_results: Vec::new(),
+            fresh_instance_matches: None,
+            scalar_oracle_matches: None,
+        };
+        live.active_step_run = Some(active);
+        return Ok(report);
+    }
+
+    let finalized = (|| {
+        let links_before_result = live.session.memory.store.link_count();
+        let result = (live.adapter.project)(&live.session, &live.load)
+            .map_err(|message| {
+                ScenarioRunnerErrorV1::ProjectResultFailed {
+                    run_id: active.run.run_id.clone(),
+                    message,
+                }
+            })?;
+        if live.session.memory.store.link_count() != links_before_result {
+            return Err(
+                ScenarioRunnerErrorV1::ResultProjectionMutatedCarrier {
+                    run_id: active.run.run_id.clone(),
+                },
+            );
+        }
+
+        let assertion_results = evaluate_assertions_with_state(
+            &active.run.assertions,
+            &result,
+            true,
+            active.active_reaction_count,
+        );
+
+        let scalar_oracle =
+            (live.adapter.scalar_oracle)(&active.run.inputs).map_err(
+                |message| ScenarioRunnerErrorV1::OracleFailed {
+                    run_id: active.run.run_id.clone(),
+                    message,
+                },
+            )?;
+        let scalar_oracle_matches = scalar_oracle == result.fields;
+
+        let fresh_instance_matches = match live.manifest.oracle_policy {
+            ScenarioOraclePolicyV1::FreshInstance => {
+                let fresh = (live.adapter.fresh_instance)(
+                    &active.run.inputs,
+                )
+                .map_err(|message| ScenarioRunnerErrorV1::OracleFailed {
+                    run_id: active.run.run_id.clone(),
+                    message,
+                })?;
+                Some(fresh == result)
+            }
+            ScenarioOraclePolicyV1::None
+            | ScenarioOraclePolicyV1::ExpectedAssertions => None,
+        };
+
+        let carrier = live.session.memory.store.export_packed_duplets();
+        if carrier.len() < live.loaded_link_count
+            || &carrier[..live.loaded_link_count]
+                != live.loaded_prefix.as_slice()
+        {
+            return Err(ScenarioRunnerErrorV1::LoadedBaseMutated {
+                run_id: active.run.run_id.clone(),
+            });
+        }
+
+        Ok(ScenarioStepReportV1 {
+            schema_version: SCENARIO_REPORT_SCHEMA_VERSION,
+            manifest_run_id: active.run.run_id.clone(),
+            session_run_id: active.session_run_id,
+            evidence,
+            completed: true,
+            active_reaction_count: active.active_reaction_count,
+            result: Some(result),
+            assertion_results,
+            fresh_instance_matches,
+            scalar_oracle_matches: Some(scalar_oracle_matches),
+        })
+    })();
+
+    match finalized {
+        Ok(report) => {
+            live.completed_runs = active.session_run_id;
+            Ok(report)
+        }
+        Err(error) => {
+            live.session.fail_active_run();
+            Err(error)
+        }
+    }
+}
+
 pub(crate) fn run_scenario_manifest_v1(
     manifest: &ScenarioManifestV1,
     backend: ScenarioBackendV1,
@@ -743,6 +993,20 @@ fn evaluate_assertions(
     result: &ScenarioNormalizedResultV1,
     observed: &ObservedRunV1,
 ) -> Vec<ScenarioAssertionResultV1> {
+    evaluate_assertions_with_state(
+        assertions,
+        result,
+        observed.final_quiescent,
+        observed.active_reaction_count,
+    )
+}
+
+fn evaluate_assertions_with_state(
+    assertions: &[ScenarioAssertionV1],
+    result: &ScenarioNormalizedResultV1,
+    final_quiescent: bool,
+    active_reaction_count: u32,
+) -> Vec<ScenarioAssertionResultV1> {
     assertions
         .iter()
         .enumerate()
@@ -759,22 +1023,22 @@ fn evaluate_assertions(
                 }
             }
             ScenarioAssertionV1::QuiescentEquals { expected } => {
-                let actual = Value::Bool(observed.final_quiescent);
+                let actual = Value::Bool(final_quiescent);
                 ScenarioAssertionResultV1 {
                     assertion_index: index as u32,
                     kind: "QUIESCENT_EQUALS".to_owned(),
-                    passed: observed.final_quiescent == *expected,
+                    passed: final_quiescent == *expected,
                     field: None,
                     expected: Some(Value::Bool(*expected)),
                     actual: Some(actual),
                 }
             }
             ScenarioAssertionV1::ReactionCountEquals { expected } => {
-                let actual = Value::from(observed.active_reaction_count);
+                let actual = Value::from(active_reaction_count);
                 ScenarioAssertionResultV1 {
                     assertion_index: index as u32,
                     kind: "REACTION_COUNT_EQUALS".to_owned(),
-                    passed: observed.active_reaction_count == *expected,
+                    passed: active_reaction_count == *expected,
                     field: None,
                     expected: Some(Value::from(*expected)),
                     actual: Some(actual),
@@ -1620,8 +1884,8 @@ mod tests {
                 active_reactions + 1,
                 "terminal quiescent step is real reaction evidence",
             );
-            assert_eq!(observed.active_reaction_count, active_reactions);
-            assert!(observed.final_quiescent);
+            assert_eq!(active_reaction_count, active_reactions);
+            assert!(final_quiescent);
             assert_eq!(
                 steps.last().unwrap().scope_after,
                 observed.final_scope,
@@ -1735,13 +1999,13 @@ mod tests {
             report
                 .runs
                 .iter()
-                .all(|run| run.observed.active_reaction_count == 7)
+                .all(|run| run.active_reaction_count == 7)
         );
         assert!(
             report
                 .runs
                 .iter()
-                .all(|run| run.observed.final_quiescent)
+                .all(|run| run.final_quiescent)
         );
         assert!(
             report
@@ -1792,10 +2056,10 @@ mod tests {
             run.observed.session_id == report.session_id
         }));
         assert!(report.runs.iter().all(|run| {
-            run.observed.active_reaction_count == 147
+            run.active_reaction_count == 147
         }));
         assert!(report.runs.iter().all(|run| {
-            run.observed.final_quiescent
+            run.final_quiescent
         }));
         assert!(report.runs.iter().all(|run| {
             run.oracle_matches == Some(true)
@@ -1829,10 +2093,10 @@ mod tests {
             run.observed.session_id == report.session_id
         }));
         assert!(report.runs.iter().all(|run| {
-            run.observed.active_reaction_count == 609
+            run.active_reaction_count == 609
         }));
         assert!(report.runs.iter().all(|run| {
-            run.observed.final_quiescent
+            run.final_quiescent
         }));
         assert!(report.runs.iter().all(|run| {
             run.oracle_matches == Some(true)
@@ -1873,12 +2137,12 @@ mod tests {
             report
                 .runs
                 .iter()
-                .map(|run| run.observed.active_reaction_count)
+                .map(|run| run.active_reaction_count)
                 .collect::<Vec<_>>(),
             vec![1, 84, 82, 84, 1],
         );
         assert!(report.runs.iter().all(|run| {
-            run.observed.final_quiescent
+            run.final_quiescent
                 && run.oracle_matches == Some(true)
                 && run.fresh_instance_matches == Some(true)
                 && run.scalar_oracle_matches
@@ -1913,7 +2177,7 @@ mod tests {
         assert_eq!(report.runs.len(), 4);
         assert!(report.runs.iter().all(|run| {
             run.observed.session_id == report.session_id
-                && run.observed.final_quiescent
+                && run.final_quiescent
                 && run.oracle_matches == Some(true)
                 && run.fresh_instance_matches == Some(true)
                 && run.scalar_oracle_matches
@@ -1922,7 +2186,7 @@ mod tests {
             report
                 .runs
                 .iter()
-                .map(|run| run.observed.active_reaction_count)
+                .map(|run| run.active_reaction_count)
                 .collect::<Vec<_>>(),
             vec![33, 1071, 1071, 33],
         );
