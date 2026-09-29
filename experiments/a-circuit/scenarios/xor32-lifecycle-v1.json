@@ -137,7 +137,7 @@
     "link-only-reconfiguration",
     "return-to-first-configuration"
   ],
-  "observationLevel": "TRACE",
+  "observationLevel": "PROFILE",
   "profilingPolicy": "FULL",
   "visualizationProfile": "engineering"
 }
