@@ -23,6 +23,7 @@ mod mux_n;
 mod observability;
 mod proof_n;
 mod scenario;
+mod scenario_runner;
 mod unary_arith_n;
 mod wide64_n;
 mod mul32_n;
