@@ -145,14 +145,12 @@ fn backend_from_code(code: u32) -> Option<ScenarioBackendV1> {
 }
 
 fn clear_report_and_error() {
-    SCENARIO_REPORT_JSON
+    *SCENARIO_REPORT_JSON
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clear();
-    SCENARIO_ERROR_JSON
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = String::new();
+    *SCENARIO_ERROR_JSON
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clear();
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = String::new();
 }
 
 fn store_error(error: ScenarioTransportErrorV1) {
@@ -257,10 +255,9 @@ fn execute_manifest_bytes(
 
 #[no_mangle]
 pub extern "C" fn amemory_scenario_manifest_clear() {
-    SCENARIO_MANIFEST_BYTES
+    *SCENARIO_MANIFEST_BYTES
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .clear();
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Vec::new();
     clear_report_and_error();
 }
 
