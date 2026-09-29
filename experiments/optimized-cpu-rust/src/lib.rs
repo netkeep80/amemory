@@ -1298,6 +1298,11 @@ impl PackedExecutionView {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct StoreAppendCheckpoint {
+    link_count: usize,
+}
+
 #[derive(Debug)]
 pub struct OptimizedLinkStore {
     // Non-semantic runtime identity used only to scope executor caches. It is
@@ -1384,6 +1389,66 @@ impl OptimizedLinkStore {
         self.instance_id
     }
 
+    /// Starts a lightweight transaction over the store's append-only mutation
+    /// surface. The checkpoint is intentionally just the committed Link count:
+    /// canonical maps and intrusive incidence heads can be unwound exactly in
+    /// reverse allocation order.
+    pub(crate) fn append_checkpoint(&self) -> StoreAppendCheckpoint {
+        StoreAppendCheckpoint {
+            link_count: self.link_count(),
+        }
+    }
+
+    /// Rolls back every Link appended after `checkpoint`, including all
+    /// canonical constructor entries and intrusive incidence-index mutations.
+    ///
+    /// OptimizedLinkStore never mutates or deletes pre-existing records in
+    /// place, so reverse append unwind restores the exact physical Store state
+    /// without cloning it.
+    pub(crate) fn rollback_append(&mut self, checkpoint: StoreAppendCheckpoint) {
+        debug_assert!(checkpoint.link_count >= 1);
+        debug_assert!(checkpoint.link_count <= self.link_count());
+
+        while self.link_count() > checkpoint.link_count {
+            let handle = self.link_count() as Handle;
+            let hi = handle as usize;
+            let start = self.starts[hi];
+            let end = self.ends[hi];
+
+            if start == handle {
+                debug_assert_eq!(self.start_forms.remove(&end), Some(handle));
+            } else if end == handle {
+                debug_assert_eq!(self.end_forms.remove(&start), Some(handle));
+            } else {
+                debug_assert_eq!(
+                    self.canonical_by_pair.remove(&Pair { start, end }),
+                    Some(handle)
+                );
+            }
+
+            // Later appended records have already been unwound, therefore the
+            // record being removed must currently head both incidence lists.
+            // Restore the predecessor heads captured in next_by_*.
+            debug_assert_eq!(self.start_head[start as usize], handle);
+            debug_assert_eq!(self.end_head[end as usize], handle);
+            self.start_head[start as usize] = self.next_by_start[hi];
+            self.end_head[end as usize] = self.next_by_end[hi];
+
+            self.starts.pop();
+            self.ends.pop();
+            self.next_by_start.pop();
+            self.next_by_end.pop();
+        }
+
+        // Self-closed forms can extend head arrays with their own new handle.
+        // Dense carrier ordering guarantees no committed pole beyond this size.
+        let dense_len = self.starts.len();
+        self.start_head.truncate(dense_len);
+        self.end_head.truncate(dense_len);
+        self.next_by_start.truncate(dense_len);
+        self.next_by_end.truncate(dense_len);
+    }
+
     pub fn is_valid(&self, handle: Handle) -> bool {
         handle > 0 && (handle as usize) < self.starts.len()
     }
@@ -1422,14 +1487,14 @@ impl OptimizedLinkStore {
         &mut self,
         source: &str,
     ) -> Result<Handle, StoreError> {
-        // Whole-source import is transactional. Parsing/canonicalization happens
-        // against a staging clone; only complete success replaces live state.
-        let runtime_instance_id = self.instance_id;
-        let mut staging = self.clone();
-        staging.instance_id = runtime_instance_id;
-        let handle = staging.import_direct_recursive_wire_in_place(source)?;
-        *self = staging;
-        Ok(handle)
+        let checkpoint = self.append_checkpoint();
+        match self.import_direct_recursive_wire_in_place(source) {
+            Ok(handle) => Ok(handle),
+            Err(error) => {
+                self.rollback_append(checkpoint);
+                Err(error)
+            }
+        }
     }
 
     /// Historical direct-gauge compatibility name.
@@ -1442,8 +1507,9 @@ impl OptimizedLinkStore {
 
     /// Transactionally import direct-gauge recursive Link wires in source order.
     ///
-    /// The whole batch uses one staging clone and is published atomically.
-    /// Any malformed/capacity failure leaves the live store unchanged.
+    /// The whole batch uses one append checkpoint and is published atomically.
+    /// Any malformed/capacity failure unwinds only newly appended records and
+    /// leaves the live store unchanged.
     pub fn import_direct_recursive_wires(
         &mut self,
         sources: &[String],
@@ -1452,16 +1518,19 @@ impl OptimizedLinkStore {
             return Ok(Vec::new());
         }
 
-        let runtime_instance_id = self.instance_id;
-        let mut staging = self.clone();
-        staging.instance_id = runtime_instance_id;
-
+        let checkpoint = self.append_checkpoint();
         let mut handles = Vec::with_capacity(sources.len());
+
         for source in sources {
-            handles.push(staging.import_direct_recursive_wire_in_place(source)?);
+            match self.import_direct_recursive_wire_in_place(source) {
+                Ok(handle) => handles.push(handle),
+                Err(error) => {
+                    self.rollback_append(checkpoint);
+                    return Err(error);
+                }
+            }
         }
 
-        *self = staging;
         Ok(handles)
     }
 
