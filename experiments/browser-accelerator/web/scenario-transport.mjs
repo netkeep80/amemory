@@ -562,6 +562,10 @@ function requireReplayProvenance(manifest, backend, provenance) {
       manifest.programProfile?.profileId) {
     throw new Error("scenario replay: programProfileId provenance mismatch");
   }
+  if (JSON.stringify(provenance.programProfile) !==
+      JSON.stringify(manifest.programProfile)) {
+    throw new Error("scenario replay: canonical programProfile provenance mismatch");
+  }
 }
 
 export function exportScenarioReplayBundle(manifest, report) {
@@ -571,9 +575,9 @@ export function exportScenarioReplayBundle(manifest, report) {
     throw new Error("scenario replay: execution report is required");
   }
   if (report.scenarioVersion !== normalizedManifest.scenarioVersion ||
-      report.programProfile?.profileId !==
-        normalizedManifest.programProfile?.profileId) {
-    throw new Error("scenario replay: report does not match manifest");
+      JSON.stringify(report.programProfile) !==
+        JSON.stringify(normalizedManifest.programProfile)) {
+    throw new Error("scenario replay: report does not match canonical manifest program");
   }
 
   const backend = report.backend;
