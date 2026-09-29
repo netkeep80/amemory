@@ -502,12 +502,7 @@ pub(crate) struct ProofRuntimeMemory {
     pub(crate) store: OptimizedLinkStore,
 }
 
-/// Long-lived CPU execution session over one loaded A-memory.
-///
-/// The store and structural engine intentionally survive CONFIGURE/EXECUTE
-/// cycles so derived caches and inactive Scope banks are lifecycle state rather
-/// than reconstructed test fixtures. Program semantics still live only in
-/// loaded Links/Theory/data.
+/// Execution-control state of one long-lived CPU A-memory Session.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub(crate) enum ProofRuntimeSessionState {
@@ -617,10 +612,13 @@ impl ProofRuntimeSession {
             ));
         }
 
-        let run_id = self.active_run_id.ok_or_else(|| {
-            self.execution_state = ProofRuntimeSessionState::Failed;
-            ProofRuntimeStepError::EngineFailure
-        })?;
+        let run_id = match self.active_run_id {
+            Some(run_id) => run_id,
+            None => {
+                self.execution_state = ProofRuntimeSessionState::Failed;
+                return Err(ProofRuntimeStepError::EngineFailure);
+            }
+        };
         let reaction_index = self.next_reaction_index;
         let links_before = self.memory.store.link_count() as u32;
 
