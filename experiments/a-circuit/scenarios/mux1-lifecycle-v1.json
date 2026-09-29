@@ -1,0 +1,150 @@
+{
+  "schemaVersion": 1,
+  "scenarioId": "mux1-lifecycle",
+  "scenarioVersion": "1.0.0",
+  "title": "MUX1: четыре запуска в одной A-memory",
+  "description": "Один MUX1 Aset загружается один раз; четыре конфигурации входов публикуются Links-ами и исполняются в одной persistent Session.",
+  "programProfile": {
+    "profileId": "a-circuit:mux1",
+    "family": "mux",
+    "programId": "mux1",
+    "asetSource": "builtin:a-circuit/mux1"
+  },
+  "inputSchema": [
+    {
+      "key": "S",
+      "type": "BIT",
+      "description": "Выбор входа: 0 -> A, 1 -> B",
+      "default": 0
+    },
+    {
+      "key": "A",
+      "type": "BIT",
+      "description": "Первый вход MUX1",
+      "default": 0
+    },
+    {
+      "key": "B",
+      "type": "BIT",
+      "description": "Второй вход MUX1",
+      "default": 1
+    }
+  ],
+  "initialInputs": {
+    "S": 0,
+    "A": 0,
+    "B": 1
+  },
+  "runSequence": [
+    {
+      "runId": "run-1-select-a",
+      "inputs": {
+        "S": 0,
+        "A": 0,
+        "B": 1
+      },
+      "executionMode": "TO_QUIESCENCE",
+      "assertions": [
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "value",
+          "expected": 0
+        },
+        {
+          "kind": "QUIESCENT_EQUALS",
+          "expected": true
+        },
+        {
+          "kind": "REACTION_COUNT_EQUALS",
+          "expected": 7
+        }
+      ]
+    },
+    {
+      "runId": "run-2-select-b",
+      "inputs": {
+        "S": 1,
+        "A": 0,
+        "B": 1
+      },
+      "executionMode": "TO_QUIESCENCE",
+      "assertions": [
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "value",
+          "expected": 1
+        },
+        {
+          "kind": "QUIESCENT_EQUALS",
+          "expected": true
+        },
+        {
+          "kind": "REACTION_COUNT_EQUALS",
+          "expected": 7
+        }
+      ]
+    },
+    {
+      "runId": "run-3-select-a",
+      "inputs": {
+        "S": 0,
+        "A": 1,
+        "B": 0
+      },
+      "executionMode": "TO_QUIESCENCE",
+      "assertions": [
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "value",
+          "expected": 1
+        },
+        {
+          "kind": "QUIESCENT_EQUALS",
+          "expected": true
+        },
+        {
+          "kind": "REACTION_COUNT_EQUALS",
+          "expected": 7
+        }
+      ]
+    },
+    {
+      "runId": "run-4-return-first",
+      "inputs": {
+        "S": 0,
+        "A": 0,
+        "B": 1
+      },
+      "executionMode": "TO_QUIESCENCE",
+      "assertions": [
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "value",
+          "expected": 0
+        },
+        {
+          "kind": "QUIESCENT_EQUALS",
+          "expected": true
+        },
+        {
+          "kind": "REACTION_COUNT_EQUALS",
+          "expected": 7
+        }
+      ]
+    }
+  ],
+  "supportedBackends": [
+    "optimized-cpu"
+  ],
+  "oraclePolicy": "FRESH_INSTANCE",
+  "invariants": [
+    "prepare-once",
+    "load-once",
+    "same-session",
+    "link-only-reconfiguration",
+    "return-to-first-configuration"
+  ],
+  "observationLevel": "TRACE",
+  "profilingPolicy": "FULL",
+  "visualizationProfile": "engineering"
+}
