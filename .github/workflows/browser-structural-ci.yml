@@ -46,6 +46,7 @@ jobs:
           node --check experiments/browser-accelerator/web/canonicalization.mjs
           node --check experiments/browser-accelerator/web/differential.mjs
           node --check experiments/browser-accelerator/web/reaction.mjs
+          node --check experiments/browser-accelerator/web/workbench.mjs
 
       - name: MTS v0.14 public terminology surface
         run: |
@@ -115,6 +116,9 @@ jobs:
 
       - name: Reaction R1-R7 witnesses
         run: node experiments/browser-accelerator/tests/reaction.test.mjs
+
+      - name: Workbench shell structural witness
+        run: node experiments/browser-accelerator/tests/workbench.test.mjs
 
       - name: Install Rust + wasm32 once
         run: |
