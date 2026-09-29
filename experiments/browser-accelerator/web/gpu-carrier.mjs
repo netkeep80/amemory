@@ -835,49 +835,7 @@ function unifyCarrierTemplate(parsed, template, claimed, roles) {
   return bindings;
 }
 
-function instantiateCarrierTemplate(
-  parsed,
-  source,
-  bindings,
-  memo = new Map(),
-  visiting = new Set(),
-  depth = 0,
-) {
-  if (depth > 128) throw new Error("bounded carrier instantiation exceeded");
-  if (bindings.has(source)) return bindings.get(source);
-  if (memo.has(source)) return memo.get(source);
-  if (visiting.has(source)) return 0;
-  const root = parsed.layout.rootHandle;
-  const poles = carrierPoles(parsed, source, "template source");
-  let value = 0;
-  if (poles.start === source && poles.end === source) {
-    value = root;
-  } else if (poles.start === source) {
-    const child = instantiateCarrierTemplate(
-      parsed, poles.end, bindings, memo, visiting, depth + 1,
-    );
-    value = child ? findCarrierStartSelf(parsed, child) : 0;
-  } else if (poles.end === source) {
-    const child = instantiateCarrierTemplate(
-      parsed, poles.start, bindings, memo, visiting, depth + 1,
-    );
-    value = child ? findCarrierEndSelf(parsed, child) : 0;
-  } else {
-    visiting.add(source);
-    const start = instantiateCarrierTemplate(
-      parsed, poles.start, bindings, memo, visiting, depth + 1,
-    );
-    const end = instantiateCarrierTemplate(
-      parsed, poles.end, bindings, memo, visiting, depth + 1,
-    );
-    visiting.delete(source);
-    value = start && end ? findCarrierPair(parsed, start, end) : 0;
-  }
-  if (value) memo.set(source, value);
-  return value;
-}
-
-function applyCarrierRule(parsed, rule, active) {
+function discoverCarrierRule(parsed, rule, active) {
   const rulePoles = carrierPoles(parsed, rule, "rule");
   const roles = readCarrierRoleDictionary(parsed, rulePoles.start);
   const body = carrierPoles(parsed, rulePoles.end, "rule body");
@@ -885,9 +843,12 @@ function applyCarrierRule(parsed, rule, active) {
   if (!bindings) return null;
   const outputs = readCarrierExactSequence(parsed, body.end, 2);
   if (outputs.length !== 1) return null;
-  const candidate = instantiateCarrierTemplate(parsed, outputs[0], bindings);
-  if (!candidate) return null;
-  return Object.freeze({ candidate, rule, roles: roles.length });
+  return Object.freeze({
+    rule,
+    roles,
+    bindings,
+    outputTemplate: outputs[0],
+  });
 }
 
 function compactRootHandle(compactProof, role) {
@@ -896,7 +857,7 @@ function compactRootHandle(compactProof, role) {
   return root.carrierRef >>> 0;
 }
 
-export function expectedGpuCarrierReaction(
+function discoverCarrierReaction(
   parsed,
   { currentHandle, interpreterHandle } = {},
 ) {
@@ -904,48 +865,240 @@ export function expectedGpuCarrierReaction(
   requireLookupHandle(parsed, interpreterHandle, "interpreter handle");
   const interpreter = carrierPoles(parsed, interpreterHandle);
   const grammarTheory = carrierPoles(parsed, interpreter.end);
-  const theory = grammarTheory.end;
+  const theoryHandle = grammarTheory.end;
   const current = carrierPoles(parsed, currentHandle);
   const endpoint = carrierPoles(parsed, current.end);
   const triggerKey = endpoint.start;
-  const candidates = [];
-  let rawRuleMatches = 0;
-  let firstRule = 0;
-  let firstAdmission = 0;
+  const matches = [];
+
   for (const trigger of carrierIncidence(parsed, triggerKey, true)) {
     if (trigger === triggerKey) continue;
     const triggerPoles = carrierPoles(parsed, trigger);
     if (triggerPoles.start !== triggerKey) continue;
     const admission = triggerPoles.end;
     const admissionPoles = carrierPoles(parsed, admission);
-    if (admissionPoles.start !== theory || admissionPoles.end === admission) {
+    if (admissionPoles.start !== theoryHandle ||
+        admissionPoles.end === admission) {
       continue;
     }
-    const applied = applyCarrierRule(parsed, admissionPoles.end, currentHandle);
-    if (!applied) continue;
-    rawRuleMatches += 1;
-    if (!firstRule) {
-      firstRule = applied.rule;
-      firstAdmission = admission;
-    }
-    candidates.push(applied.candidate);
+    const discovered = discoverCarrierRule(
+      parsed,
+      admissionPoles.end,
+      currentHandle,
+    );
+    if (!discovered) continue;
+    matches.push(Object.freeze({
+      ...discovered,
+      admission,
+    }));
   }
-  if (!rawRuleMatches || !candidates.length) {
-    throw new Error("CPU carrier oracle found no applicable structural rule");
+
+  if (matches.length !== 1) {
+    throw new Error(
+      "bounded C4c3 discovery requires exactly one Rule image; got " +
+      matches.length,
+    );
   }
-  const candidateHandle = candidates[0];
-  if (candidates.some((candidate) => candidate !== candidateHandle)) {
-    throw new Error("bounded C4c3 witness has divergent rule outputs");
-  }
+  const match = matches[0];
   return Object.freeze({
     currentHandle,
     interpreterHandle,
-    theoryHandle: theory,
+    theoryHandle,
     triggerKey,
-    admissionHandle: firstAdmission,
-    ruleHandle: firstRule,
-    rawRuleMatches,
+    admissionHandle: match.admission,
+    ruleHandle: match.rule,
+    rawRuleMatches: 1,
+    outputTemplate: match.outputTemplate,
+    roleBindings: match.roles.map(
+      (role) => Object.freeze({
+        role,
+        value: match.bindings.get(role),
+      }),
+    ),
+  });
+}
+
+function createVirtualOverlay(parsed) {
+  return {
+    baseCount: parsed.layout.linkCount,
+    starts: [],
+    ends: [],
+  };
+}
+
+function virtualPair(store, handle) {
+  if (handle <= store.baseCount) return null;
+  const index = handle - store.baseCount - 1;
+  if (index < 0 || index >= store.starts.length) return null;
+  return { start: store.starts[index], end: store.ends[index] };
+}
+
+function virtualFindPair(parsed, store, start, end) {
+  for (let i = 0; i < store.starts.length; i += 1) {
+    if (store.starts[i] === start && store.ends[i] === end) {
+      return store.baseCount + i + 1;
+    }
+  }
+  if (start <= store.baseCount && end <= store.baseCount) {
+    return findCarrierPair(parsed, start, end);
+  }
+  return 0;
+}
+
+function virtualFindStartSelf(parsed, store, child) {
+  for (let i = 0; i < store.starts.length; i += 1) {
+    const handle = store.baseCount + i + 1;
+    if (store.starts[i] === handle && store.ends[i] === child) {
+      return handle;
+    }
+  }
+  return child <= store.baseCount
+    ? findCarrierStartSelf(parsed, child)
+    : 0;
+}
+
+function virtualFindEndSelf(parsed, store, child) {
+  for (let i = 0; i < store.starts.length; i += 1) {
+    const handle = store.baseCount + i + 1;
+    if (store.starts[i] === child && store.ends[i] === handle) {
+      return handle;
+    }
+  }
+  return child <= store.baseCount
+    ? findCarrierEndSelf(parsed, child)
+    : 0;
+}
+
+function virtualAppendPair(store, start, end, maxAppend) {
+  if (store.starts.length >= maxAppend) return 0;
+  const handle = store.baseCount + store.starts.length + 1;
+  store.starts.push(start === -1 ? handle : start);
+  store.ends.push(end === -1 ? handle : end);
+  return handle;
+}
+
+function instantiateVirtualTemplate(
+  parsed,
+  source,
+  bindings,
+  store,
+  maxAppend,
+  memo = new Map(),
+  visiting = new Set(),
+  depth = 0,
+) {
+  if (depth > 128) throw new Error("bounded C4c3 instantiation exceeded");
+  if (bindings.has(source)) return bindings.get(source);
+  if (memo.has(source)) return memo.get(source);
+  if (visiting.has(source)) return 0;
+
+  const poles = carrierPoles(parsed, source, "publication template");
+  let value = 0;
+  if (poles.start === source && poles.end === source) {
+    value = parsed.layout.rootHandle;
+  } else if (poles.start === source) {
+    const child = instantiateVirtualTemplate(
+      parsed,
+      poles.end,
+      bindings,
+      store,
+      maxAppend,
+      memo,
+      visiting,
+      depth + 1,
+    );
+    value = child
+      ? virtualFindStartSelf(parsed, store, child) ||
+        virtualAppendPair(store, -1, child, maxAppend)
+      : 0;
+  } else if (poles.end === source) {
+    const child = instantiateVirtualTemplate(
+      parsed,
+      poles.start,
+      bindings,
+      store,
+      maxAppend,
+      memo,
+      visiting,
+      depth + 1,
+    );
+    value = child
+      ? virtualFindEndSelf(parsed, store, child) ||
+        virtualAppendPair(store, child, -1, maxAppend)
+      : 0;
+  } else {
+    visiting.add(source);
+    const start = instantiateVirtualTemplate(
+      parsed,
+      poles.start,
+      bindings,
+      store,
+      maxAppend,
+      memo,
+      visiting,
+      depth + 1,
+    );
+    const end = instantiateVirtualTemplate(
+      parsed,
+      poles.end,
+      bindings,
+      store,
+      maxAppend,
+      memo,
+      visiting,
+      depth + 1,
+    );
+    visiting.delete(source);
+    value = start && end
+      ? virtualFindPair(parsed, store, start, end) ||
+        virtualAppendPair(store, start, end, maxAppend)
+      : 0;
+  }
+  if (value) memo.set(source, value);
+  return value;
+}
+
+function publishCarrierReaction(
+  parsed,
+  discovery,
+  { maxAppend = 64 } = {},
+) {
+  const bindings = new Map(
+    discovery.roleBindings.map(({ role, value }) => [role, value]),
+  );
+  const store = createVirtualOverlay(parsed);
+  const candidateHandle = instantiateVirtualTemplate(
+    parsed,
+    discovery.outputTemplate,
+    bindings,
+    store,
+    maxAppend,
+  );
+  if (!candidateHandle) {
+    throw new Error("bounded C4c3 publication failed");
+  }
+  return Object.freeze({
     candidateHandle,
+    appendCount: store.starts.length,
+    appendStarts: Object.freeze([...store.starts]),
+    appendEnds: Object.freeze([...store.ends]),
+  });
+}
+
+export function expectedGpuCarrierReaction(
+  parsed,
+  witness,
+  options = {},
+) {
+  const discovery = discoverCarrierReaction(parsed, witness);
+  const publication = publishCarrierReaction(
+    parsed,
+    discovery,
+    options,
+  );
+  return Object.freeze({
+    ...discovery,
+    ...publication,
     logicalFingerprint: gpuCarrierLogicalFingerprint(parsed),
   });
 }
@@ -969,32 +1122,36 @@ function carrierReactionCommonShader(args) {
     "const ROOT_HANDLE: u32 = " + args.rootHandle + "u;",
     "const MAX_ROLES: u32 = 16u;",
     "const MAX_STACK: u32 = 128u;",
-    "fn valid(h: u32) -> bool { return h > 0u && h <= LINK_COUNT; }",
-    "fn find_pair(a: u32, b: u32) -> u32 {",
+    "const MAX_APPEND: u32 = 64u;",
+    "fn valid_base(h: u32) -> bool { return h > 0u && h <= LINK_COUNT; }",
+    "fn find_pair_base(a: u32, b: u32) -> u32 {",
+    "  if (!valid_base(a) || !valid_base(b)) { return 0u; }",
     "  var h = start_head(a); var n = 0u;",
-    "  loop { if (h == 0u) { break; } if (!valid(h) || n >= LINK_COUNT) { return 0u; } if (s(h) == a && e(h) == b) { return h; } h = next_start(h); n = n + 1u; }",
+    "  loop { if (h == 0u) { break; } if (!valid_base(h) || n >= LINK_COUNT) { return 0u; } if (s(h) == a && e(h) == b) { return h; } h = next_start(h); n = n + 1u; }",
     "  return 0u;",
     "}",
-    "fn find_start_self(child: u32) -> u32 {",
+    "fn find_start_self_base(child: u32) -> u32 {",
+    "  if (!valid_base(child)) { return 0u; }",
     "  var h = end_head(child); var n = 0u;",
-    "  loop { if (h == 0u) { break; } if (!valid(h) || n >= LINK_COUNT) { return 0u; } if (s(h) == h && e(h) == child) { return h; } h = next_end(h); n = n + 1u; }",
+    "  loop { if (h == 0u) { break; } if (!valid_base(h) || n >= LINK_COUNT) { return 0u; } if (s(h) == h && e(h) == child) { return h; } h = next_end(h); n = n + 1u; }",
     "  return 0u;",
     "}",
-    "fn find_end_self(child: u32) -> u32 {",
+    "fn find_end_self_base(child: u32) -> u32 {",
+    "  if (!valid_base(child)) { return 0u; }",
     "  var h = start_head(child); var n = 0u;",
-    "  loop { if (h == 0u) { break; } if (!valid(h) || n >= LINK_COUNT) { return 0u; } if (s(h) == child && e(h) == h) { return h; } h = next_start(h); n = n + 1u; }",
+    "  loop { if (h == 0u) { break; } if (!valid_base(h) || n >= LINK_COUNT) { return 0u; } if (s(h) == child && e(h) == h) { return h; } h = next_start(h); n = n + 1u; }",
     "  return 0u;",
     "}",
-    "fn apply_rule(rule: u32, active: u32) -> u32 {",
-    "  if (!valid(rule) || !valid(active)) { return 0u; }",
+    "fn discover_rule(rule: u32, active: u32) -> u32 {",
+    "  if (!valid_base(rule) || !valid_base(active)) { return 0u; }",
     "  let dictionary = s(rule); let body = e(rule);",
-    "  if (!valid(dictionary) || !valid(body) || s(dictionary) != dictionary || e(dictionary) == dictionary) { return 0u; }",
+    "  if (!valid_base(dictionary) || !valid_base(body) || s(dictionary) != dictionary || e(dictionary) == dictionary) { return 0u; }",
     "  var roles: array<u32, 16>; var bound: array<u32, 16>; var bound_set: array<u32, 16>;",
     "  var role_count = 0u; var seq = e(dictionary); var seq_guard = 0u;",
     "  loop {",
     "    if (seq == ROOT_HANDLE) { break; }",
-    "    if (!valid(seq) || seq_guard >= 64u || s(seq) != seq || e(seq) == seq || role_count >= MAX_ROLES) { return 0u; }",
-    "    let cell = e(seq); if (!valid(cell)) { return 0u; }",
+    "    if (!valid_base(seq) || seq_guard >= 64u || s(seq) != seq || e(seq) == seq || role_count >= MAX_ROLES) { return 0u; }",
+    "    let cell = e(seq); if (!valid_base(cell)) { return 0u; }",
     "    let role = e(cell); var duplicate = false; var ri = 0u;",
     "    loop { if (ri >= role_count) { break; } if (roles[ri] == role) { duplicate = true; break; } ri = ri + 1u; }",
     "    if (duplicate) { return 0u; } roles[role_count] = role; role_count = role_count + 1u; seq = s(cell); seq_guard = seq_guard + 1u;",
@@ -1003,7 +1160,7 @@ function carrierReactionCommonShader(args) {
     "  var ts: array<u32, 128>; var cs: array<u32, 128>; var sp = 1u; var visited = 0u; ts[0] = before; cs[0] = active;",
     "  loop {",
     "    if (sp == 0u) { break; } if (visited >= MAX_STACK) { return 0u; }",
-    "    sp = sp - 1u; let t = ts[sp]; let c = cs[sp]; visited = visited + 1u; if (!valid(t) || !valid(c)) { return 0u; }",
+    "    sp = sp - 1u; let t = ts[sp]; let c = cs[sp]; visited = visited + 1u; if (!valid_base(t) || !valid_base(c)) { return 0u; }",
     "    var role_index = 0xffffffffu; var r = 0u; loop { if (r >= role_count) { break; } if (roles[r] == t) { role_index = r; break; } r = r + 1u; }",
     "    if (role_index != 0xffffffffu) { if (bound_set[role_index] != 0u && bound[role_index] != c) { return 0u; } bound[role_index] = c; bound_set[role_index] = 1u; continue; }",
     "    let ta = s(t); let tb = e(t); let ca = s(c); let cb = e(c);",
@@ -1012,19 +1169,46 @@ function carrierReactionCommonShader(args) {
     "    if (ta != t) { if (sp >= MAX_STACK) { return 0u; } ts[sp] = ta; cs[sp] = ca; sp = sp + 1u; }",
     "  }",
     "  var rr = 0u; loop { if (rr >= role_count) { break; } if (bound_set[rr] == 0u) { return 0u; } rr = rr + 1u; }",
-    "  if (bundle == ROOT_HANDLE || !valid(bundle) || s(bundle) != bundle || e(bundle) == bundle) { return 0u; }",
-    "  let bundle_cell = e(bundle); if (!valid(bundle_cell) || s(bundle_cell) != ROOT_HANDLE) { return 0u; } let output_template = e(bundle_cell);",
+    "  if (bundle == ROOT_HANDLE || !valid_base(bundle) || s(bundle) != bundle || e(bundle) == bundle) { return 0u; }",
+    "  let bundle_cell = e(bundle); if (!valid_base(bundle_cell) || s(bundle_cell) != ROOT_HANDLE) { return 0u; }",
+    "  let output_template = e(bundle_cell);",
+    "  discovery[8] = role_count; discovery[9] = output_template;",
+    "  var wi = 0u; loop { if (wi >= role_count) { break; } discovery[10u + wi * 2u] = roles[wi]; discovery[11u + wi * 2u] = bound[wi]; wi = wi + 1u; }",
+    "  return output_template;",
+    "}",
+    "fn overlay_start(i: u32) -> u32 { return overlay[4u + i * 2u]; }",
+    "fn overlay_end(i: u32) -> u32 { return overlay[5u + i * 2u]; }",
+    "fn overlay_handle(i: u32) -> u32 { return LINK_COUNT + i + 1u; }",
+    "fn valid_value(h: u32) -> bool { return h > 0u && h <= LINK_COUNT + overlay[0]; }",
+    "fn ensure_pair_overlay(a: u32, b: u32) -> u32 {",
+    "  var i = 0u; loop { if (i >= overlay[0]) { break; } if (overlay_start(i) == a && overlay_end(i) == b) { return overlay_handle(i); } i = i + 1u; }",
+    "  let base = find_pair_base(a, b); if (base != 0u) { return base; }",
+    "  let count = overlay[0]; if (count >= MAX_APPEND || !valid_value(a) || !valid_value(b)) { return 0u; }",
+    "  let h = overlay_handle(count); overlay[4u + count * 2u] = a; overlay[5u + count * 2u] = b; overlay[0] = count + 1u; return h;",
+    "}",
+    "fn ensure_start_self_overlay(child: u32) -> u32 {",
+    "  var i = 0u; loop { if (i >= overlay[0]) { break; } let h = overlay_handle(i); if (overlay_start(i) == h && overlay_end(i) == child) { return h; } i = i + 1u; }",
+    "  let base = find_start_self_base(child); if (base != 0u) { return base; }",
+    "  let count = overlay[0]; if (count >= MAX_APPEND || !valid_value(child)) { return 0u; } let h = overlay_handle(count); overlay[4u + count * 2u] = h; overlay[5u + count * 2u] = child; overlay[0] = count + 1u; return h;",
+    "}",
+    "fn ensure_end_self_overlay(child: u32) -> u32 {",
+    "  var i = 0u; loop { if (i >= overlay[0]) { break; } let h = overlay_handle(i); if (overlay_start(i) == child && overlay_end(i) == h) { return h; } i = i + 1u; }",
+    "  let base = find_end_self_base(child); if (base != 0u) { return base; }",
+    "  let count = overlay[0]; if (count >= MAX_APPEND || !valid_value(child)) { return 0u; } let h = overlay_handle(count); overlay[4u + count * 2u] = child; overlay[5u + count * 2u] = h; overlay[0] = count + 1u; return h;",
+    "}",
+    "fn instantiate_output(source: u32) -> u32 {",
+    "  let role_count = discovery[8]; if (role_count > MAX_ROLES || !valid_base(source)) { return 0u; }",
     "  var nodes: array<u32, 128>; var states: array<u32, 128>; var isp = 1u;",
     "  var memo_node: array<u32, 128>; var memo_value: array<u32, 128>; var memo_count = 0u;",
-    "  nodes[0] = output_template; states[0] = 0u; var inst_guard = 0u;",
+    "  nodes[0] = source; states[0] = 0u; var inst_guard = 0u;",
     "  loop {",
     "    if (isp == 0u) { break; } if (inst_guard >= 512u) { return 0u; } inst_guard = inst_guard + 1u;",
     "    let ix = isp - 1u; let node = nodes[ix]; var existing = 0u; var mi = 0u;",
     "    loop { if (mi >= memo_count) { break; } if (memo_node[mi] == node) { existing = memo_value[mi]; break; } mi = mi + 1u; }",
     "    if (existing != 0u) { isp = isp - 1u; continue; }",
-    "    var role_value = 0u; var bri = 0u; loop { if (bri >= role_count) { break; } if (roles[bri] == node) { role_value = bound[bri]; break; } bri = bri + 1u; }",
+    "    var role_value = 0u; var ri = 0u; loop { if (ri >= role_count) { break; } if (discovery[10u + ri * 2u] == node) { role_value = discovery[11u + ri * 2u]; break; } ri = ri + 1u; }",
     "    if (role_value != 0u) { if (memo_count >= MAX_STACK) { return 0u; } memo_node[memo_count] = node; memo_value[memo_count] = role_value; memo_count = memo_count + 1u; isp = isp - 1u; continue; }",
-    "    if (!valid(node)) { return 0u; } let na = s(node); let nb = e(node);",
+    "    if (!valid_base(node)) { return 0u; } let na = s(node); let nb = e(node);",
     "    if (states[ix] == 0u) {",
     "      states[ix] = 1u;",
     "      if (nb != node) { if (isp >= MAX_STACK) { return 0u; } nodes[isp] = nb; states[isp] = 0u; isp = isp + 1u; }",
@@ -1033,31 +1217,41 @@ function carrierReactionCommonShader(args) {
     "    var av = node; var bv = node;",
     "    if (na != node) { av = 0u; var ai = 0u; loop { if (ai >= memo_count) { break; } if (memo_node[ai] == na) { av = memo_value[ai]; break; } ai = ai + 1u; } if (av == 0u) { return 0u; } }",
     "    if (nb != node) { bv = 0u; var bi = 0u; loop { if (bi >= memo_count) { break; } if (memo_node[bi] == nb) { bv = memo_value[bi]; break; } bi = bi + 1u; } if (bv == 0u) { return 0u; } }",
-    "    var value = 0u; if (na == node && nb == node) { value = ROOT_HANDLE; } else if (na == node) { value = find_start_self(bv); } else if (nb == node) { value = find_end_self(av); } else { value = find_pair(av, bv); }",
+    "    var value = 0u;",
+    "    if (na == node && nb == node) { value = ROOT_HANDLE; } else if (na == node) { value = ensure_start_self_overlay(bv); } else if (nb == node) { value = ensure_end_self_overlay(av); } else { value = ensure_pair_overlay(av, bv); }",
     "    if (value == 0u || memo_count >= MAX_STACK) { return 0u; } memo_node[memo_count] = node; memo_value[memo_count] = value; memo_count = memo_count + 1u; isp = isp - 1u;",
     "  }",
-    "  var result = 0u; var oi = 0u; loop { if (oi >= memo_count) { break; } if (memo_node[oi] == output_template) { result = memo_value[oi]; break; } oi = oi + 1u; } return result;",
+    "  var result = 0u; var oi = 0u; loop { if (oi >= memo_count) { break; } if (memo_node[oi] == source) { result = memo_value[oi]; break; } oi = oi + 1u; } return result;",
     "}",
     "@compute @workgroup_size(1)",
     "fn discover(@builtin(global_invocation_id) id: vec3<u32>) {",
-    "  if (id.x != 0u) { return; } var z = 0u; loop { if (z >= 10u) { break; } discovery[z] = 0u; z = z + 1u; }",
-    "  if (!valid(CURRENT) || !valid(INTERPRETER)) { discovery[0] = 2u; return; }",
-    "  let grammar_theory = e(INTERPRETER); if (!valid(grammar_theory)) { discovery[0] = 3u; return; } let theory = e(grammar_theory); let endpoint = e(CURRENT);",
-    "  if (!valid(theory) || !valid(endpoint)) { discovery[0] = 4u; return; } let trigger_key = s(endpoint); if (!valid(trigger_key)) { discovery[0] = 5u; return; }",
-    "  var trigger = start_head(trigger_key); var guard = 0u; var matches = 0u; var candidate = 0u; var matched_rule = 0u; var matched_admission = 0u;",
+    "  if (id.x != 0u) { return; } var z = 0u; loop { if (z >= 42u) { break; } discovery[z] = 0u; z = z + 1u; }",
+    "  if (!valid_base(CURRENT) || !valid_base(INTERPRETER)) { discovery[0] = 2u; return; }",
+    "  let grammar_theory = e(INTERPRETER); if (!valid_base(grammar_theory)) { discovery[0] = 3u; return; }",
+    "  let theory = e(grammar_theory); let endpoint = e(CURRENT); if (!valid_base(theory) || !valid_base(endpoint)) { discovery[0] = 4u; return; }",
+    "  let trigger_key = s(endpoint); if (!valid_base(trigger_key)) { discovery[0] = 5u; return; }",
+    "  var trigger = start_head(trigger_key); var guard = 0u; var matches = 0u; var matched_rule = 0u; var matched_admission = 0u;",
     "  loop {",
-    "    if (trigger == 0u) { break; } if (!valid(trigger) || guard >= LINK_COUNT) { discovery[0] = 6u; return; }",
+    "    if (trigger == 0u) { break; } if (!valid_base(trigger) || guard >= LINK_COUNT) { discovery[0] = 6u; return; }",
     "    if (trigger != trigger_key && s(trigger) == trigger_key) {",
     "      let admission = e(trigger);",
-    "      if (valid(admission) && s(admission) == theory && e(admission) != admission) { let rule = e(admission); let out = apply_rule(rule, CURRENT); if (out != 0u) { matches = matches + 1u; if (candidate == 0u) { candidate = out; matched_rule = rule; matched_admission = admission; } else if (candidate != out) { discovery[0] = 7u; return; } } }",
+    "      if (valid_base(admission) && s(admission) == theory && e(admission) != admission) {",
+    "        let rule = e(admission); let output_template = discover_rule(rule, CURRENT);",
+    "        if (output_template != 0u) { matches = matches + 1u; if (matches > 1u) { discovery[0] = 9u; return; } matched_rule = rule; matched_admission = admission; }",
+    "      }",
     "    }",
     "    trigger = next_start(trigger); guard = guard + 1u;",
     "  }",
-    "  if (matches == 0u || candidate == 0u) { discovery[0] = 8u; return; }",
-    "  discovery[1] = candidate; discovery[2] = matches; discovery[3] = CURRENT; discovery[4] = INTERPRETER; discovery[5] = theory; discovery[6] = trigger_key; discovery[7] = matched_rule; discovery[8] = matched_admission; discovery[0] = 1u;",
+    "  if (matches != 1u) { discovery[0] = 8u; return; }",
+    "  discovery[1] = matches; discovery[2] = CURRENT; discovery[3] = INTERPRETER; discovery[4] = theory; discovery[5] = trigger_key; discovery[6] = matched_rule; discovery[7] = matched_admission; discovery[0] = 1u;",
     "}",
     "@compute @workgroup_size(1)",
-    "fn publish(@builtin(global_invocation_id) id: vec3<u32>) { if (id.x != 0u) { return; } published[0] = 0u; published[1] = 0u; if (discovery[0] != 1u || discovery[1] == 0u) { return; } published[1] = discovery[1]; published[0] = 1u; }",
+    "fn publish(@builtin(global_invocation_id) id: vec3<u32>) {",
+    "  if (id.x != 0u) { return; } overlay[0] = 0u; overlay[1] = 0u; overlay[2] = 0u; overlay[3] = 0u;",
+    "  if (discovery[0] != 1u || discovery[9] == 0u) { return; }",
+    "  let candidate = instantiate_output(discovery[9]); if (candidate == 0u) { overlay[2] = 2u; return; }",
+    "  overlay[1] = candidate; overlay[2] = 1u;",
+    "}",
   ].join("\n");
 }
 
@@ -1065,7 +1259,7 @@ function singleReactionShader(args) {
   return [
     "@group(0) @binding(0) var<storage, read> carrier: array<u32>;",
     "@group(0) @binding(1) var<storage, read_write> discovery: array<u32>;",
-    "@group(0) @binding(2) var<storage, read_write> published: array<u32>;",
+    "@group(0) @binding(2) var<storage, read_write> overlay: array<u32>;",
     "fn s(h: u32) -> u32 { return carrier[carrier[6] + h - 1u]; }",
     "fn e(h: u32) -> u32 { return carrier[carrier[7] + h - 1u]; }",
     "fn start_head(h: u32) -> u32 { return carrier[carrier[8] + h]; }",
@@ -1084,7 +1278,7 @@ function sectionReactionShader(args) {
     "@group(0) @binding(4) var<storage, read> next_starts: array<u32>;",
     "@group(0) @binding(5) var<storage, read> next_ends: array<u32>;",
     "@group(0) @binding(6) var<storage, read_write> discovery: array<u32>;",
-    "@group(0) @binding(7) var<storage, read_write> published: array<u32>;",
+    "@group(0) @binding(7) var<storage, read_write> overlay: array<u32>;",
     "fn s(h: u32) -> u32 { return starts[h - 1u]; }",
     "fn e(h: u32) -> u32 { return ends[h - 1u]; }",
     "fn start_head(h: u32) -> u32 { return start_heads[h]; }",
@@ -1112,44 +1306,59 @@ export async function runGpuCarrierReaction(
   device,
   parsed,
   input,
-  { maxDiagnosticLinks = 16_384 } = {},
+  { maxDiagnosticLinks = 16_384, maxAppend = 64 } = {},
 ) {
   if (!device?.createBuffer || !device?.queue) {
     throw new TypeError("WebGPU device is required");
   }
   checkedInteger(maxDiagnosticLinks, "maxDiagnosticLinks", { min: 1 });
+  checkedInteger(maxAppend, "maxAppend", { min: 1 });
+  if (maxAppend !== 64) {
+    throw new Error("C4c3 shader currently fixes maxAppend at 64");
+  }
   if (parsed.layout.linkCount > maxDiagnosticLinks) {
     throw new RangeError("bounded GPU reaction carrier too large");
   }
-  requireLookupHandle(parsed, input?.currentHandle, "current handle");
-  requireLookupHandle(parsed, input?.interpreterHandle, "interpreter handle");
+
+  const expected = expectedGpuCarrierReaction(
+    parsed,
+    input,
+    { maxAppend },
+  );
   const plan = planGpuCarrierUpload(parsed.layout, device.limits);
   if (plan.mode === "unsupported") {
     throw new Error("WebGPU carrier upload unsupported: " + plan.reason);
   }
-  if (plan.storageBufferCount + 1 >
+  if (plan.storageBufferCount + 2 >
       Number(device.limits.maxStorageBuffersPerShaderStage)) {
-    throw new Error("WebGPU carrier reaction needs one discovery binding");
+    throw new Error(
+      "WebGPU carrier reaction needs discovery + append overlay bindings",
+    );
   }
 
   const usage = gpuLookupUsage();
   const inputUsage = usage.STORAGE | usage.COPY_DST;
   const outputUsage = usage.STORAGE | usage.COPY_SRC | usage.COPY_DST;
   const inputs = [];
-  const discovery = createLookupBuffer(device, new Uint32Array(10), outputUsage);
-  const published = createLookupBuffer(device, new Uint32Array(2), outputUsage);
+  const discovery = createLookupBuffer(
+    device,
+    new Uint32Array(42),
+    outputUsage,
+  );
+  const overlay = createLookupBuffer(
+    device,
+    new Uint32Array(4 + maxAppend * 2),
+    outputUsage,
+  );
   device.pushErrorScope?.("validation");
   try {
-    let discoverEntries;
+    let baseEntries;
     if (plan.mode === "single") {
       const carrier = createLookupBuffer(device, parsed.words, inputUsage);
       inputs.push(carrier);
-      discoverEntries = [
-        { binding: 0, resource: { buffer: carrier } },
-        { binding: 1, resource: { buffer: discovery } },
-      ];
+      baseEntries = [{ binding: 0, resource: { buffer: carrier } }];
     } else {
-      discoverEntries = plan.buffers.map((part) => {
+      baseEntries = plan.buffers.map((part) => {
         const buffer = createLookupBuffer(
           device,
           parsed.sections[part.name],
@@ -1158,13 +1367,14 @@ export async function runGpuCarrierReaction(
         inputs.push(buffer);
         return { binding: part.binding, resource: { buffer } };
       });
-      discoverEntries.push({ binding: 6, resource: { buffer: discovery } });
     }
+    const discoveryBinding = plan.mode === "single" ? 1 : 6;
+    const overlayBinding = plan.mode === "single" ? 2 : 7;
 
     const shader = device.createShaderModule({
       code: gpuCarrierReactionShaderSource(plan.mode, {
-        currentHandle: input.currentHandle,
-        interpreterHandle: input.interpreterHandle,
+        currentHandle: expected.currentHandle,
+        interpreterHandle: expected.interpreterHandle,
         linkCount: parsed.layout.linkCount,
         rootHandle: parsed.layout.rootHandle,
       }),
@@ -1192,15 +1402,17 @@ export async function runGpuCarrierReaction(
     const publishPipeline = await makePipeline("publish");
     const discoverGroup = device.createBindGroup({
       layout: discoverPipeline.getBindGroupLayout(0),
-      entries: discoverEntries,
+      entries: [
+        ...baseEntries,
+        { binding: discoveryBinding, resource: { buffer: discovery } },
+      ],
     });
-    const discoveryBinding = plan.mode === "single" ? 1 : 6;
-    const publishedBinding = plan.mode === "single" ? 2 : 7;
     const publishGroup = device.createBindGroup({
       layout: publishPipeline.getBindGroupLayout(0),
       entries: [
+        ...baseEntries,
         { binding: discoveryBinding, resource: { buffer: discovery } },
-        { binding: publishedBinding, resource: { buffer: published } },
+        { binding: overlayBinding, resource: { buffer: overlay } },
       ],
     });
 
@@ -1210,53 +1422,73 @@ export async function runGpuCarrierReaction(
     discoverPass.setBindGroup(0, discoverGroup);
     discoverPass.dispatchWorkgroups(1);
     discoverPass.end();
+
     const publishPass = encoder.beginComputePass();
     publishPass.setPipeline(publishPipeline);
     publishPass.setBindGroup(0, publishGroup);
     publishPass.dispatchWorkgroups(1);
     publishPass.end();
+
     device.queue.submit([encoder.finish()]);
     await device.queue.onSubmittedWorkDone();
 
-    const [d, p] = await Promise.all([
-      readLookupWords(device, discovery, 10),
-      readLookupWords(device, published, 2),
+    const [d, o] = await Promise.all([
+      readLookupWords(device, discovery, 42),
+      readLookupWords(device, overlay, 4 + maxAppend * 2),
     ]);
+    const appendCount = o[0] >>> 0;
+    const appendStarts = [];
+    const appendEnds = [];
+    for (let i = 0; i < appendCount; i += 1) {
+      appendStarts.push(o[4 + i * 2] >>> 0);
+      appendEnds.push(o[5 + i * 2] >>> 0);
+    }
     const observed = Object.freeze({
       discoveryStatus: d[0] >>> 0,
-      candidateHandle: d[1] >>> 0,
-      rawRuleMatches: d[2] >>> 0,
-      currentHandle: d[3] >>> 0,
-      interpreterHandle: d[4] >>> 0,
-      theoryHandle: d[5] >>> 0,
-      triggerKey: d[6] >>> 0,
-      ruleHandle: d[7] >>> 0,
-      admissionHandle: d[8] >>> 0,
-      publishStatus: p[0] >>> 0,
-      publishedHandle: p[1] >>> 0,
+      rawRuleMatches: d[1] >>> 0,
+      currentHandle: d[2] >>> 0,
+      interpreterHandle: d[3] >>> 0,
+      theoryHandle: d[4] >>> 0,
+      triggerKey: d[5] >>> 0,
+      ruleHandle: d[6] >>> 0,
+      admissionHandle: d[7] >>> 0,
+      roleCount: d[8] >>> 0,
+      outputTemplate: d[9] >>> 0,
+      appendCount,
+      appendStarts: Object.freeze(appendStarts),
+      appendEnds: Object.freeze(appendEnds),
+      publishedHandle: o[1] >>> 0,
+      publishStatus: o[2] >>> 0,
     });
-
-    // Independent oracle is intentionally computed only after GPU readback.
-    // It cannot seed shader constants, candidate discovery, or publication.
-    const expected = expectedGpuCarrierReaction(parsed, input);
+    const sameAppend =
+      observed.appendCount === expected.appendCount &&
+      observed.appendStarts.every(
+        (value, i) => value === expected.appendStarts[i],
+      ) &&
+      observed.appendEnds.every(
+        (value, i) => value === expected.appendEnds[i],
+      );
     if (observed.discoveryStatus !== 1 ||
         observed.publishStatus !== 1 ||
-        observed.candidateHandle !== expected.candidateHandle ||
-        observed.publishedHandle !== expected.candidateHandle ||
         observed.rawRuleMatches !== expected.rawRuleMatches ||
         observed.currentHandle !== expected.currentHandle ||
         observed.interpreterHandle !== expected.interpreterHandle ||
         observed.theoryHandle !== expected.theoryHandle ||
-        observed.triggerKey !== expected.triggerKey) {
+        observed.triggerKey !== expected.triggerKey ||
+        observed.ruleHandle !== expected.ruleHandle ||
+        observed.admissionHandle !== expected.admissionHandle ||
+        observed.outputTemplate !== expected.outputTemplate ||
+        observed.publishedHandle !== expected.candidateHandle ||
+        !sameAppend) {
       throw new Error(
-        "WebGPU structural reaction diverged from CPU carrier oracle",
+        "WebGPU structural reaction diverged from CPU virtual-overlay oracle",
       );
     }
     return Object.freeze({ plan, expected, observed, differential: true });
   } finally {
     for (const buffer of inputs) buffer.destroy();
     discovery.destroy();
-    published.destroy();
+    overlay.destroy();
     if (typeof device.popErrorScope === "function") {
       const validationError = await device.popErrorScope();
       if (validationError) {

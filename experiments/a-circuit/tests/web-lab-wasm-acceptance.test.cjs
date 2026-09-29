@@ -454,19 +454,33 @@ Promise.all([
 
   // Only after independent carrier execution do we inspect the proof trace.
   const c4FirstReaction = gpuCarrierProof.execute?.reactions?.[0];
+  const c4ProofAppend = gpuCarrierProof.topology?.append;
+  const c4ProofAppendCount = c4FirstReaction
+    ? (c4FirstReaction.linksAfter >>> 0) -
+      (gpuCarrierProof.load.linksAfterLoad >>> 0)
+    : -1;
+  const c4SameAppend =
+    c4ProofAppendCount === c4ReactionOracle.appendCount &&
+    Array.isArray(c4ProofAppend?.starts) &&
+    Array.isArray(c4ProofAppend?.ends) &&
+    c4ReactionOracle.appendStarts.every(
+      (value, index) => value === (c4ProofAppend.starts[index] >>> 0)
+    ) &&
+    c4ReactionOracle.appendEnds.every(
+      (value, index) => value === (c4ProofAppend.ends[index] >>> 0)
+    );
   if (!c4FirstReaction ||
       c4FirstReaction.quiescent ||
       c4FirstReaction.scopeBefore?.length !== 1 ||
       c4FirstReaction.scopeAfter?.length !== 1 ||
       (c4FirstReaction.scopeBefore[0] >>> 0) !==
         c4ReactionInput.currentHandle ||
-      (c4FirstReaction.scopeAfter[0] >>> 0) >
-        gpuCarrier.layout.linkCount ||
       c4ReactionOracle.candidateHandle !==
         (c4FirstReaction.scopeAfter[0] >>> 0) ||
       c4ReactionOracle.rawRuleMatches !==
-        (c4FirstReaction.rawRuleMatches >>> 0)) {
-    throw new Error("C4c3 independent carrier step disagrees with MUX1 proof");
+        (c4FirstReaction.rawRuleMatches >>> 0) ||
+      !c4SameAppend) {
+    throw new Error("C4c3 independent publish/append disagrees with MUX1 proof");
   }
   for (const mode of ["single", "sections"]) {
     const shader = gpuCarrierReactionShaderSource(mode, {
@@ -476,13 +490,14 @@ Promise.all([
       rootHandle: gpuCarrier.layout.rootHandle,
     });
     for (const marker of [
-      "fn apply_rule",
+      "fn discover_rule",
       "fn discover",
       "fn publish",
       "start_head",
       "next_start",
-      "find_start_self",
-      "find_end_self",
+      "ensure_pair_overlay",
+      "ensure_start_self_overlay",
+      "ensure_end_self_overlay",
     ]) {
       if (!shader.includes(marker)) {
         throw new Error("C4c3 " + mode + " shader missing " + marker);

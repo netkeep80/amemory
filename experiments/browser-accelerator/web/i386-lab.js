@@ -1422,13 +1422,25 @@ function setupGpuCarrierWitness(section, wasm) {
           throw new Error("C4c3 proof trace does not start from scope.initial");
         }
         const proofAfter = firstReaction.scopeAfter[0] >>> 0;
-        if (proofAfter > carrier.layout.linkCount) {
-          throw new Error("C4c3 first result is not canonical in PREPARE carrier");
-        }
+        const proofAppendCount =
+          (firstReaction.linksAfter >>> 0) -
+          (compactProof.load.linksAfterLoad >>> 0);
+        const proofAppend = compactProof.topology?.append;
+        const sameAppend =
+          proofAppendCount === reaction.observed.appendCount &&
+          Array.isArray(proofAppend?.starts) &&
+          Array.isArray(proofAppend?.ends) &&
+          reaction.observed.appendStarts.every(
+            (value, index) => value === (proofAppend.starts[index] >>> 0),
+          ) &&
+          reaction.observed.appendEnds.every(
+            (value, index) => value === (proofAppend.ends[index] >>> 0),
+          );
         if (reaction.observed.publishedHandle !== proofAfter ||
             reaction.observed.rawRuleMatches !==
-              (firstReaction.rawRuleMatches >>> 0)) {
-          throw new Error("C4c3 GPU result disagrees with post-execution WASM oracle");
+              (firstReaction.rawRuleMatches >>> 0) ||
+            !sameAppend) {
+          throw new Error("C4c3 GPU publish/append disagrees with post-execution WASM oracle");
         }
         result.innerHTML = `
           <div class="lab-state-grid">
@@ -1438,6 +1450,7 @@ function setupGpuCarrierWitness(section, wasm) {
             <div class="lab-state-snapshot"><strong>ROOT start-incidence</strong><code>[${observed.incidence.map((value) => "L" + value).join(", ")}]</code></div>
             <div class="lab-state-snapshot"><strong>C4c3 discover</strong><code>L${reaction.observed.currentHandle} → Rule L${reaction.observed.ruleHandle} → L${reaction.observed.candidateHandle}</code></div>
             <div class="lab-state-snapshot"><strong>C4c3 publish</strong><code>GPU L${reaction.observed.publishedHandle} = WASM L${proofAfter}</code></div>
+            <div class="lab-state-snapshot"><strong>C4c3 append overlay</strong><code>${reaction.observed.appendCount} new Link(s) · PREPARE immutable</code></div>
           </div>
           <small>carrier fingerprint: <code>0x${observed.logicalFingerprint.toString(16).padStart(8, "0")}</code> · raw matches: <code>${reaction.observed.rawRuleMatches}</code> · reaction projection: <code>${escapeHtml(reaction.plan.mode)}</code></small>`;
         status.textContent =
