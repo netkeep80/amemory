@@ -566,6 +566,9 @@ Promise.all([
         observed?.sessionId !== scenarioReport.sessionId ||
         observed?.finalQuiescent !== true ||
         observed?.activeReactionCount !== 7 ||
+        run.oracleMatches !== true ||
+        run.freshInstanceMatches !== true ||
+        run.scalarOracleMatches !== true ||
         !run.pipelineProfile ||
         reactionEvents.length !== 8 ||
         nativeFacts.length === 0) {
@@ -996,6 +999,8 @@ Promise.all([
         run.observed?.finalQuiescent !== true ||
         run.observed?.activeReactionCount !== 147 ||
         run.oracleMatches !== true ||
+        run.freshInstanceMatches !== true ||
+        run.scalarOracleMatches !== true ||
         !run.pipelineProfile ||
         run.observed?.profile?.structural?.unificationAttempts <= 0) {
       throw new Error(
@@ -1051,6 +1056,8 @@ Promise.all([
         run.observed?.finalQuiescent !== true ||
         run.observed?.activeReactionCount !== 609 ||
         run.oracleMatches !== true ||
+        run.freshInstanceMatches !== true ||
+        run.scalarOracleMatches !== true ||
         !run.pipelineProfile ||
         run.observed?.profile?.structural?.unificationAttempts <= 0) {
       throw new Error(
@@ -1111,6 +1118,8 @@ Promise.all([
         run.observed?.finalQuiescent !== true ||
         run.observed?.activeReactionCount !== expectedShlReactions[index] ||
         run.oracleMatches !== true ||
+        run.freshInstanceMatches !== true ||
+        run.scalarOracleMatches !== true ||
         !run.pipelineProfile ||
         run.observed?.profile?.structural?.unificationAttempts <= 0) {
       throw new Error(
@@ -1169,6 +1178,8 @@ Promise.all([
         run.observed?.finalQuiescent !== true ||
         run.observed?.activeReactionCount !== expectedMulReactions[index] ||
         run.oracleMatches !== true ||
+        run.freshInstanceMatches !== true ||
+        run.scalarOracleMatches !== true ||
         !run.pipelineProfile ||
         run.observed?.profile?.structural?.unificationAttempts <= 0) {
       throw new Error(

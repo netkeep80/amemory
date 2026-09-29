@@ -51,9 +51,11 @@ type ProjectFn = fn(
     &ProofRuntimeSession,
     &WebProofLoadStage,
 ) -> Result<ScenarioNormalizedResultV1, String>;
-type OracleFn = fn(
+type FreshInstanceFn = fn(
     &BTreeMap<String, Value>,
 ) -> Result<ScenarioNormalizedResultV1, String>;
+type ScalarOracleFn =
+    fn(&BTreeMap<String, Value>) -> Result<BTreeMap<String, Value>, String>;
 
 struct CpuScenarioAdapter {
     profile_id: &'static str,
@@ -63,7 +65,8 @@ struct CpuScenarioAdapter {
     prepare: PrepareFn,
     configure: ConfigureFn,
     project: ProjectFn,
-    oracle: OracleFn,
+    fresh_instance: FreshInstanceFn,
+    scalar_oracle: ScalarOracleFn,
 }
 
 impl CpuScenarioAdapter {
@@ -113,7 +116,8 @@ const CPU_SCENARIO_ADAPTERS: &[CpuScenarioAdapter] = &[
         prepare: prepare_mux1_session_program,
         configure: configure_mux1_from_inputs,
         project: project_mux1_result,
-        oracle: oracle_mux1_result,
+        fresh_instance: fresh_instance_mux1_result,
+        scalar_oracle: scalar_mux1_result,
     },
     CpuScenarioAdapter {
         profile_id: "a-circuit:logic-xor32",
@@ -123,7 +127,8 @@ const CPU_SCENARIO_ADAPTERS: &[CpuScenarioAdapter] = &[
         prepare: prepare_xor32_session_program,
         configure: configure_xor32_from_inputs,
         project: project_xor32_result,
-        oracle: oracle_xor32_result,
+        fresh_instance: fresh_instance_xor32_result,
+        scalar_oracle: scalar_xor32_result,
     },
     CpuScenarioAdapter {
         profile_id: "a-circuit:arithmetic-add32",
@@ -133,7 +138,8 @@ const CPU_SCENARIO_ADAPTERS: &[CpuScenarioAdapter] = &[
         prepare: prepare_add32_session_program,
         configure: configure_add32_from_inputs,
         project: project_add32_result,
-        oracle: oracle_add32_result,
+        fresh_instance: fresh_instance_add32_result,
+        scalar_oracle: scalar_add32_result,
     },
     CpuScenarioAdapter {
         profile_id: "a-circuit:shift-shl32",
@@ -143,7 +149,8 @@ const CPU_SCENARIO_ADAPTERS: &[CpuScenarioAdapter] = &[
         prepare: prepare_shl32_session_program,
         configure: configure_shl32_from_inputs,
         project: project_shl32_result,
-        oracle: oracle_shl32_result,
+        fresh_instance: fresh_instance_shl32_result,
+        scalar_oracle: scalar_shl32_result,
     },
     CpuScenarioAdapter {
         profile_id: "a-circuit:mul32",
@@ -153,7 +160,8 @@ const CPU_SCENARIO_ADAPTERS: &[CpuScenarioAdapter] = &[
         prepare: prepare_mul32_session_program,
         configure: configure_mul32_from_inputs,
         project: project_mul32_result,
-        oracle: oracle_mul32_result,
+        fresh_instance: fresh_instance_mul32_result,
+        scalar_oracle: scalar_mul32_result,
     },
 ];
 
@@ -190,8 +198,13 @@ pub(crate) struct ScenarioRunReportV1 {
     pub(crate) links_after_configure: u32,
     pub(crate) result: ScenarioNormalizedResultV1,
     pub(crate) assertion_results: Vec<ScenarioAssertionResultV1>,
+    // Compatibility alias for the historical fresh-instance comparison.
+    // It is NOT an independent oracle; E3 must not present it as such.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) oracle_matches: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) fresh_instance_matches: Option<bool>,
+    pub(crate) scalar_oracle_matches: bool,
     pub(crate) observed: ObservedRunV1,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) pipeline_profile: Option<RunPipelineProfileV1>,
@@ -572,19 +585,36 @@ pub(crate) fn run_cpu_scenario_session_once_v1(
     let assertion_results =
         evaluate_assertions(&run.assertions, &result, &observed);
 
-    let oracle_matches = match live.manifest.oracle_policy {
+    // Independent scalar semantics see only typed Scenario inputs and
+    // ordinary host integers. They do not call the structural executor,
+    // inspect the Link Store, consume trace data, or reproduce recursive wire.
+    let scalar_oracle =
+        (adapter.scalar_oracle)(&run.inputs).map_err(|message| {
+            ScenarioRunnerErrorV1::OracleFailed {
+                run_id: run.run_id.clone(),
+                message,
+            }
+        })?;
+    let scalar_oracle_matches = scalar_oracle == result.fields;
+
+    // A fresh instance of the same structural implementation is still useful
+    // for detecting retained-session leakage, but is a separate evidence
+    // class and must not be called an independent semantic oracle.
+    let fresh_instance_matches = match live.manifest.oracle_policy {
         ScenarioOraclePolicyV1::FreshInstance => {
-            let oracle = (adapter.oracle)(&run.inputs).map_err(|message| {
-                ScenarioRunnerErrorV1::OracleFailed {
-                    run_id: run.run_id.clone(),
-                    message,
-                }
-            })?;
-            Some(oracle == result)
+            let fresh =
+                (adapter.fresh_instance)(&run.inputs).map_err(|message| {
+                    ScenarioRunnerErrorV1::OracleFailed {
+                        run_id: run.run_id.clone(),
+                        message,
+                    }
+                })?;
+            Some(fresh == result)
         }
         ScenarioOraclePolicyV1::None
         | ScenarioOraclePolicyV1::ExpectedAssertions => None,
     };
+    let oracle_matches = fresh_instance_matches;
 
     let links_before_evidence = live.session.memory.store.link_count();
     let (_, external_evidence_ns) = time_stage(|| {
@@ -630,6 +660,8 @@ pub(crate) fn run_cpu_scenario_session_once_v1(
         result,
         assertion_results,
         oracle_matches,
+        fresh_instance_matches,
+        scalar_oracle_matches,
         observed,
         pipeline_profile,
     };
@@ -673,6 +705,7 @@ pub(crate) fn run_scenario_manifest_v1(
             .iter()
             .all(|assertion| assertion.passed)
             && run.oracle_matches != Some(false)
+            && run.scalar_oracle_matches
     });
 
     Ok(ScenarioExecutionReportV1 {
@@ -780,7 +813,7 @@ fn project_mux1_result(
     })
 }
 
-fn oracle_mux1_result(
+fn fresh_instance_mux1_result(
     inputs: &BTreeMap<String, Value>,
 ) -> Result<ScenarioNormalizedResultV1, String> {
     let select = bit_input(inputs, "S")? as u32;
@@ -913,7 +946,7 @@ fn project_xor32_result(
     ))
 }
 
-fn oracle_xor32_result(
+fn fresh_instance_xor32_result(
     inputs: &BTreeMap<String, Value>,
 ) -> Result<ScenarioNormalizedResultV1, String> {
     let a = word32_input(inputs, "A")?;
@@ -965,7 +998,7 @@ fn project_add32_result(
     ))
 }
 
-fn oracle_add32_result(
+fn fresh_instance_add32_result(
     inputs: &BTreeMap<String, Value>,
 ) -> Result<ScenarioNormalizedResultV1, String> {
     let a = word32_input(inputs, "A")?;
@@ -1029,7 +1062,7 @@ fn project_shl32_result(
     ))
 }
 
-fn oracle_shl32_result(
+fn fresh_instance_shl32_result(
     inputs: &BTreeMap<String, Value>,
 ) -> Result<ScenarioNormalizedResultV1, String> {
     let value = word32_input(inputs, "VALUE")?;
@@ -1077,7 +1110,7 @@ fn project_mul32_result(
     ))
 }
 
-fn oracle_mul32_result(
+fn fresh_instance_mul32_result(
     inputs: &BTreeMap<String, Value>,
 ) -> Result<ScenarioNormalizedResultV1, String> {
     let a = word32_input(inputs, "A")?;
@@ -1103,6 +1136,168 @@ fn bit_input(
         return Err(format!("BIT input {key} outside 0..1"));
     }
     Ok(value as usize)
+}
+
+
+const SCALAR_CF: u32 = 1 << 0;
+const SCALAR_PF: u32 = 1 << 2;
+const SCALAR_AF: u32 = 1 << 4;
+const SCALAR_ZF: u32 = 1 << 6;
+const SCALAR_SF: u32 = 1 << 7;
+const SCALAR_OF: u32 = 1 << 11;
+const SCALAR_STATUS_FLAGS: u32 =
+    SCALAR_CF | SCALAR_PF | SCALAR_AF | SCALAR_ZF | SCALAR_SF | SCALAR_OF;
+
+fn scalar_effect32_fields(
+    value: u32,
+    writeback: u8,
+    defined_mask: u32,
+    value_mask: u32,
+    undefined_mask: u32,
+    preserve_mask: u32,
+) -> BTreeMap<String, Value> {
+    let mut fields = BTreeMap::new();
+    fields.insert("value".to_owned(), canonical_word32(value));
+    fields.insert("writeback".to_owned(), Value::from(writeback));
+    fields.insert("definedMask".to_owned(), canonical_word32(defined_mask));
+    fields.insert("valueMask".to_owned(), canonical_word32(value_mask));
+    fields.insert(
+        "undefinedMask".to_owned(),
+        canonical_word32(undefined_mask),
+    );
+    fields.insert("preserveMask".to_owned(), canonical_word32(preserve_mask));
+    fields
+}
+
+fn scalar_status_value_mask(
+    cf: bool,
+    pf: bool,
+    af: bool,
+    zf: bool,
+    sf: bool,
+    of: bool,
+) -> u32 {
+    let mut mask = 0u32;
+    for (flag, set) in [
+        (SCALAR_CF, cf),
+        (SCALAR_PF, pf),
+        (SCALAR_AF, af),
+        (SCALAR_ZF, zf),
+        (SCALAR_SF, sf),
+        (SCALAR_OF, of),
+    ] {
+        if set {
+            mask |= flag;
+        }
+    }
+    mask
+}
+
+fn scalar_even_parity_low_byte(value: u32) -> bool {
+    (value as u8).count_ones() % 2 == 0
+}
+
+fn scalar_mux1_result(
+    inputs: &BTreeMap<String, Value>,
+) -> Result<BTreeMap<String, Value>, String> {
+    let select = bit_input(inputs, "S")?;
+    let a = bit_input(inputs, "A")?;
+    let b = bit_input(inputs, "B")?;
+    let mut fields = BTreeMap::new();
+    fields.insert(
+        "value".to_owned(),
+        Value::from((if select == 0 { a } else { b }) as u32),
+    );
+    Ok(fields)
+}
+
+fn scalar_xor32_result(
+    inputs: &BTreeMap<String, Value>,
+) -> Result<BTreeMap<String, Value>, String> {
+    let a = word32_input(inputs, "A")?;
+    let b = word32_input(inputs, "B")?;
+    let value = a ^ b;
+    let defined =
+        SCALAR_CF | SCALAR_PF | SCALAR_ZF | SCALAR_SF | SCALAR_OF;
+    let value_mask = scalar_status_value_mask(
+        false,
+        scalar_even_parity_low_byte(value),
+        false,
+        value == 0,
+        value >> 31 != 0,
+        false,
+    ) & defined;
+    Ok(scalar_effect32_fields(
+        value, 1, defined, value_mask, SCALAR_AF, 0,
+    ))
+}
+
+fn scalar_add32_result(
+    inputs: &BTreeMap<String, Value>,
+) -> Result<BTreeMap<String, Value>, String> {
+    let a = word32_input(inputs, "A")?;
+    let b = word32_input(inputs, "B")?;
+    let total = u64::from(a) + u64::from(b);
+    let value = total as u32;
+    let cf = total > u64::from(u32::MAX);
+    let af = (a & 0x0f) + (b & 0x0f) > 0x0f;
+    let of = (!(a ^ b) & (a ^ value) & 0x8000_0000) != 0;
+    let value_mask = scalar_status_value_mask(
+        cf,
+        scalar_even_parity_low_byte(value),
+        af,
+        value == 0,
+        value >> 31 != 0,
+        of,
+    );
+    Ok(scalar_effect32_fields(
+        value, 1, SCALAR_STATUS_FLAGS, value_mask, 0, 0,
+    ))
+}
+
+fn scalar_shl32_result(
+    inputs: &BTreeMap<String, Value>,
+) -> Result<BTreeMap<String, Value>, String> {
+    let value = word32_input(inputs, "VALUE")?;
+    let count = count8_input(inputs, "COUNT")?;
+    let masked = u32::from(count & 31);
+    if masked == 0 {
+        return Ok(scalar_effect32_fields(
+            value, 1, 0, 0, 0, SCALAR_STATUS_FLAGS,
+        ));
+    }
+
+    let result = value.wrapping_shl(masked);
+    let cf = ((value >> (32 - masked)) & 1) != 0;
+    let pf = scalar_even_parity_low_byte(result);
+    let zf = result == 0;
+    let sf = result >> 31 != 0;
+    let of = masked == 1 && (sf ^ cf);
+
+    let mut defined = SCALAR_CF | SCALAR_PF | SCALAR_ZF | SCALAR_SF;
+    let mut undefined = SCALAR_AF;
+    if masked == 1 {
+        defined |= SCALAR_OF;
+    } else {
+        undefined |= SCALAR_OF;
+    }
+    let value_mask =
+        scalar_status_value_mask(cf, pf, false, zf, sf, of) & defined;
+    Ok(scalar_effect32_fields(
+        result, 1, defined, value_mask, undefined, 0,
+    ))
+}
+
+fn scalar_mul32_result(
+    inputs: &BTreeMap<String, Value>,
+) -> Result<BTreeMap<String, Value>, String> {
+    let a = word32_input(inputs, "A")?;
+    let b = word32_input(inputs, "B")?;
+    let product = u64::from(a) * u64::from(b);
+    let mut fields = BTreeMap::new();
+    fields.insert("lo".to_owned(), canonical_word32(product as u32));
+    fields.insert("hi".to_owned(), canonical_word32((product >> 32) as u32));
+    Ok(fields)
 }
 
 #[cfg(test)]
@@ -1337,7 +1532,9 @@ mod tests {
             report
                 .runs
                 .iter()
-                .all(|run| run.oracle_matches == Some(true))
+                .all(|run| run.oracle_matches == Some(true)
+                && run.fresh_instance_matches == Some(true)
+                && run.scalar_oracle_matches)
         );
         assert_eq!(report.runs[0].result, report.runs[3].result);
         assert!(
@@ -1387,6 +1584,8 @@ mod tests {
         }));
         assert!(report.runs.iter().all(|run| {
             run.oracle_matches == Some(true)
+                && run.fresh_instance_matches == Some(true)
+                && run.scalar_oracle_matches
         }));
         assert_eq!(
             report.runs[2].result.fields.get("value"),
@@ -1422,6 +1621,8 @@ mod tests {
         }));
         assert!(report.runs.iter().all(|run| {
             run.oracle_matches == Some(true)
+                && run.fresh_instance_matches == Some(true)
+                && run.scalar_oracle_matches
         }));
         assert_eq!(
             report.runs[1].result.fields.get("value"),
@@ -1464,6 +1665,8 @@ mod tests {
         assert!(report.runs.iter().all(|run| {
             run.observed.final_quiescent
                 && run.oracle_matches == Some(true)
+                && run.fresh_instance_matches == Some(true)
+                && run.scalar_oracle_matches
         }));
         assert_eq!(
             report.runs[1].result,
@@ -1497,6 +1700,8 @@ mod tests {
             run.observed.session_id == report.session_id
                 && run.observed.final_quiescent
                 && run.oracle_matches == Some(true)
+                && run.fresh_instance_matches == Some(true)
+                && run.scalar_oracle_matches
         }));
         assert_eq!(
             report
@@ -1568,6 +1773,8 @@ mod tests {
         );
         assert!(!report.runs[0].assertion_results[0].passed);
         assert_eq!(report.runs[0].oracle_matches, Some(true));
+        assert_eq!(report.runs[0].fresh_instance_matches, Some(true));
+        assert!(report.runs[0].scalar_oracle_matches);
     }
 
     #[test]
