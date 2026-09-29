@@ -216,7 +216,6 @@ pub(crate) struct ScenarioRunReportV1 {
 #[derive(Clone, Debug)]
 struct ScenarioActiveStepRunV1 {
     run: ScenarioRunV1,
-    configured: ConfiguredRun,
     session_run_id: u64,
     steps_taken: u32,
     active_reaction_count: u32,
@@ -783,7 +782,6 @@ pub(crate) fn begin_cpu_scenario_step_run_v1(
     };
     live.active_step_run = Some(ScenarioActiveStepRunV1 {
         run: run.clone(),
-        configured,
         session_run_id,
         steps_taken: 0,
         active_reaction_count: 0,
@@ -1884,8 +1882,11 @@ mod tests {
                 active_reactions + 1,
                 "terminal quiescent step is real reaction evidence",
             );
-            assert_eq!(active_reaction_count, active_reactions);
-            assert!(final_quiescent);
+            assert_eq!(
+                observed.active_reaction_count,
+                active_reactions,
+            );
+            assert!(observed.final_quiescent);
             assert_eq!(
                 steps.last().unwrap().scope_after,
                 observed.final_scope,
@@ -1999,13 +2000,13 @@ mod tests {
             report
                 .runs
                 .iter()
-                .all(|run| run.active_reaction_count == 7)
+                .all(|run| run.observed.active_reaction_count == 7)
         );
         assert!(
             report
                 .runs
                 .iter()
-                .all(|run| run.final_quiescent)
+                .all(|run| run.observed.final_quiescent)
         );
         assert!(
             report
@@ -2056,10 +2057,10 @@ mod tests {
             run.observed.session_id == report.session_id
         }));
         assert!(report.runs.iter().all(|run| {
-            run.active_reaction_count == 147
+            run.observed.active_reaction_count == 147
         }));
         assert!(report.runs.iter().all(|run| {
-            run.final_quiescent
+            run.observed.final_quiescent
         }));
         assert!(report.runs.iter().all(|run| {
             run.oracle_matches == Some(true)
@@ -2093,10 +2094,10 @@ mod tests {
             run.observed.session_id == report.session_id
         }));
         assert!(report.runs.iter().all(|run| {
-            run.active_reaction_count == 609
+            run.observed.active_reaction_count == 609
         }));
         assert!(report.runs.iter().all(|run| {
-            run.final_quiescent
+            run.observed.final_quiescent
         }));
         assert!(report.runs.iter().all(|run| {
             run.oracle_matches == Some(true)
@@ -2137,12 +2138,12 @@ mod tests {
             report
                 .runs
                 .iter()
-                .map(|run| run.active_reaction_count)
+                .map(|run| run.observed.active_reaction_count)
                 .collect::<Vec<_>>(),
             vec![1, 84, 82, 84, 1],
         );
         assert!(report.runs.iter().all(|run| {
-            run.final_quiescent
+            run.observed.final_quiescent
                 && run.oracle_matches == Some(true)
                 && run.fresh_instance_matches == Some(true)
                 && run.scalar_oracle_matches
@@ -2177,7 +2178,7 @@ mod tests {
         assert_eq!(report.runs.len(), 4);
         assert!(report.runs.iter().all(|run| {
             run.observed.session_id == report.session_id
-                && run.final_quiescent
+                && run.observed.final_quiescent
                 && run.oracle_matches == Some(true)
                 && run.fresh_instance_matches == Some(true)
                 && run.scalar_oracle_matches
@@ -2186,7 +2187,7 @@ mod tests {
             report
                 .runs
                 .iter()
-                .map(|run| run.active_reaction_count)
+                .map(|run| run.observed.active_reaction_count)
                 .collect::<Vec<_>>(),
             vec![33, 1071, 1071, 33],
         );
