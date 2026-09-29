@@ -13,10 +13,35 @@ import {
 import { recursiveStructureHtml } from "./proof-view.mjs";
 
 const BACKENDS = [
-  ["optimized-cpu", "CPU / optimized"],
+  ["optimized-cpu", "CPU · оптимизированный"],
   ["webgpu", "WebGPU"],
   ["linksdb", "LinksDB"],
 ];
+
+const STAGE_LABELS = Object.freeze({
+  PREPARE: "Подготовка",
+  LOAD: "Загрузка",
+  CONFIGURE: "Настройка",
+  EXECUTE: "Исполнение",
+  RESULT: "Результат",
+  EVIDENCE: "Доказательства",
+});
+const LEVEL_LABELS = Object.freeze({
+  simple: "Простой",
+  engineering: "Инженерный",
+  proof: "Доказательство",
+});
+const TAB_LABELS = Object.freeze({
+  timeline: "Хронология",
+  log: "Журнал",
+  profile: "Профиль",
+  compare: "Сравнение",
+  proof: "Доказательство",
+});
+const stageLabel = (id) => STAGE_LABELS[id] || id;
+const levelLabel = (id) => LEVEL_LABELS[id] || id;
+const tabLabel = (id) => TAB_LABELS[id] || id;
+const errorText = (error) => error && error.message ? error.message : String(error);
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const sameInputs = (a, b) => JSON.stringify(a || {}) === JSON.stringify(b || {});
@@ -27,7 +52,7 @@ function parseUnsigned(raw, max, label) {
     ? Number.parseInt(text.slice(2), 16)
     : Number.parseInt(text, 10);
   if (!Number.isSafeInteger(value) || value < 0 || value > max) {
-    throw new Error(label + " must be 0.." + max);
+    throw new Error(label + ": требуется число от 0 до " + max);
   }
   return value;
 }
@@ -39,7 +64,7 @@ export function normalizeWorkbenchInputs(schema, raw) {
     const value = raw ? raw[field.key] : undefined;
     if (type === "BIT") {
       const bit = Number(value);
-      if (bit !== 0 && bit !== 1) throw new Error(field.key + " must be 0 or 1");
+      if (bit !== 0 && bit !== 1) throw new Error(field.key + ": допустимы только 0 или 1");
       out[field.key] = bit;
     } else if (type === "COUNT8" || type === "U8") {
       out[field.key] = parseUnsigned(value, 0xff, field.key);
@@ -79,12 +104,12 @@ export function deriveWorkbenchPipeline(status, run) {
   const stages = run && run.pipelineProfile && run.pipelineProfile.stages;
   const done = Boolean(run && stages);
   return [
-    ["PREPARE", open && status.prepareCount === 1, open ? "prepareCount=" + status.prepareCount : "Session not open"],
-    ["LOAD", open && status.loadCount === 1, open ? "base Links=" + status.baseLinkCount : "Session not open"],
-    ["CONFIGURE", done, done ? "Links " + run.linksBeforeConfigure + " → " + run.linksAfterConfigure : "Run not executed"],
-    ["EXECUTE", done, done ? "reactions=" + (run.observed && run.observed.activeReactionCount) : "Run not executed"],
-    ["RESULT", done, done ? "runtime result projected" : "Run not executed"],
-    ["EVIDENCE", done, done ? "events=" + ((run.observed && run.observed.events || []).length) : "Run not executed"],
+    ["PREPARE", open && status.prepareCount === 1, open ? "prepareCount=" + status.prepareCount : "сессия не открыта"],
+    ["LOAD", open && status.loadCount === 1, open ? "базовых связей Links=" + status.baseLinkCount : "сессия не открыта"],
+    ["CONFIGURE", done, done ? "связи Links " + run.linksBeforeConfigure + " → " + run.linksAfterConfigure : "запуск ещё не выполнен"],
+    ["EXECUTE", done, done ? "реакций=" + (run.observed && run.observed.activeReactionCount) : "запуск ещё не выполнен"],
+    ["RESULT", done, done ? "получен реальный результат исполнения" : "запуск ещё не выполнен"],
+    ["EVIDENCE", done, done ? "событий=" + ((run.observed && run.observed.events || []).length) : "запуск ещё не выполнен"],
   ].map(([id, complete, detail]) => ({ id, state: complete ? "done" : "waiting", detail }));
 }
 
@@ -93,8 +118,8 @@ export function workbenchResultStatus(run) {
   if (!run) {
     return {
       kind: "ready",
-      label: "Ready",
-      explanation: "The program is loaded once. Press Run to execute it in this A-memory Session.",
+      label: "ГОТОВО",
+      explanation: "Программа загружена один раз. Нажмите «Выполнить», чтобы запустить её в этой же сессии апамяти.",
     };
   }
   const assertions = Array.isArray(run.assertionResults)
@@ -103,17 +128,17 @@ export function workbenchResultStatus(run) {
   if (assertions.length === 0) {
     return {
       kind: "neutral",
-      label: "Result",
-      explanation: "A runtime Result was produced. This manual input has no preset assertion, so the UI does not invent pass/fail.",
+      label: "РЕЗУЛЬТАТ",
+      explanation: "Получен реальный результат исполнения. Для этого ручного набора входов нет эталонной проверки, поэтому интерфейс не придумывает статус «пройдено/не пройдено».",
     };
   }
   const passed = assertions.every((item) => item.passed === true);
   return {
     kind: passed ? "pass" : "fail",
-    label: passed ? "PASS" : "FAIL",
+    label: passed ? "ПРОЙДЕНО" : "НЕ ПРОЙДЕНО",
     explanation: passed
-      ? "The runtime Result satisfies every assertion declared by this preset."
-      : "At least one declared preset assertion does not match the runtime Result.",
+      ? "Результат исполнения удовлетворяет всем проверкам, заданным этим готовым сценарием."
+      : "Хотя бы одна проверка готового сценария не совпала с реальным результатом исполнения.",
   };
 }
 
@@ -185,22 +210,22 @@ const compact = (value) => {
 };
 
 function timing(stages, key) {
-  if (!stages || stages.timingAvailable === false) return "timing unavailable";
-  return Number.isFinite(stages[key]) ? stages[key] + " ns" : "n/a";
+  if (!stages || stages.timingAvailable === false) return "время недоступно";
+  return Number.isFinite(stages[key]) ? stages[key] + " ns" : "нет данных";
 }
 
 function resultText(run) {
-  if (!run) return "No result yet";
+  if (!run) return "Результата ещё нет";
   const result = run.result;
   if (result == null || typeof result !== "object") return String(result);
-  if ("valueHi" in result && "value" in result) return "hi=" + result.valueHi + " · lo=" + result.value;
+  if ("valueHi" in result && "value" in result) return "старшая=" + result.valueHi + " · младшая=" + result.value;
   return "value" in result ? String(result.value) : JSON.stringify(result);
 }
 
 function assertionText(run) {
   const items = Array.isArray(run && run.assertionResults) ? run.assertionResults : [];
-  if (!items.length) return "no preset assertion for this manual input";
-  return items.filter((item) => item.passed === true).length + "/" + items.length + " assertions passed";
+  if (!items.length) return "для этого ручного ввода нет эталонной проверки";
+  return items.filter((item) => item.passed === true).length + "/" + items.length + " проверок пройдено";
 }
 
 function styles() {
@@ -232,7 +257,7 @@ function styles() {
 
 async function wasm() {
   const response = await fetch("./amemory_a_circuit.wasm", { cache: "no-store" });
-  if (!response.ok) throw new Error("A-Circuit WASM HTTP " + response.status);
+  if (!response.ok) throw new Error("Не удалось загрузить A-Circuit WASM: HTTP " + response.status);
   const bytes = await response.arrayBuffer();
   const loaded = await WebAssembly.instantiate(bytes, {});
   const w = loaded.instance.exports;
@@ -242,7 +267,7 @@ async function wasm() {
     "amemory_scenario_live_execute_json",
     "amemory_scenario_live_close",
   ]) {
-    if (typeof w[name] !== "function") throw new Error("Workbench WASM ABI missing " + name);
+    if (typeof w[name] !== "function") throw new Error("В WASM отсутствует функция ABI лаборатории: " + name);
   }
   return w;
 }
@@ -251,9 +276,9 @@ async function buildInfo() {
   try {
     const response = await fetch("./build-info.json", { cache: "no-store" });
     const info = response.ok ? await response.json() : {};
-    return { version: info.version || "unknown", sha: info.mainSha || "unknown" };
+    return { version: info.version || "неизвестно", sha: info.mainSha || "неизвестно" };
   } catch {
-    return { version: "unknown", sha: "unknown" };
+    return { version: "неизвестно", sha: "неизвестно" };
   }
 }
 
@@ -265,12 +290,12 @@ function presetInputs(state) {
 function loadManifest(state, index) {
   if (state.session) closeScenarioLiveSession(state.wasm);
   const source = loadScenarioPresetManifestByIndex(state.wasm, index);
-  if (source == null) throw new Error("Scenario manifest missing at index " + index);
+  if (source == null) throw new Error("Не найден манифест сценария с индексом " + index);
   state.scenarioIndex = index;
   state.manifest = JSON.parse(source);
   state.presetIndex = 0;
   state.mode = "preset";
-  state.backend = (state.manifest.supportedBackends || [])[0] || "optimized-cpu";
+  state.backend = (state.manifest.supportedИсполнительs || [])[0] || "optimized-cpu";
   state.session = null;
   state.run = null;
   state.history = null;
@@ -300,7 +325,7 @@ async function open(state) {
     await history(state);
   } catch (error) {
     state.session = null; state.run = null; state.history = null;
-    state.error = error && error.message || String(error);
+    state.error = "Не удалось открыть апамять: " + errorText(error);
   }
   state.loading = false; render(state);
 }
@@ -318,7 +343,7 @@ async function execute(state) {
     state.run = result.payload.run;
     await history(state);
   } catch (error) {
-    state.error = error && error.message || String(error);
+    state.error = "Ошибка исполнения: " + errorText(error);
   }
   state.loading = false; render(state);
 }
@@ -346,33 +371,33 @@ function tab(state) {
     const events = run && run.observed && Array.isArray(run.observed.events) ? run.observed.events : [];
     return events.length
       ? '<div class="wb-log">' + events.map((event, i) =>
-          '<div class="wb-log-row"><strong>#' + i + " " + esc(event.kind || "EVENT") +
+          '<div class="wb-log-row"><strong>Событие #' + i + " · " + esc(event.kind || "EVENT") +
           '</strong><br><code>' + esc(JSON.stringify(event)) + '</code></div>').join("") + '</div>'
-      : '<div class="wb-help">No runtime events yet.</div>';
+      : '<div class="wb-help">Событий исполнения пока нет.</div>';
   }
   if (state.tab === "profile") {
     const stages = run && run.pipelineProfile && run.pipelineProfile.stages;
     const structural = run && run.observed && run.observed.profile && run.observed.profile.structural;
-    if (!stages) return '<div class="wb-help">Run once to populate the real profile.</div>';
+    if (!stages) return '<div class="wb-help">Выполните хотя бы один запуск, чтобы появился реальный профиль.</div>';
     return '<table class="wb-table"><tbody>' +
-      '<tr><th>CONFIGURE</th><td>' + timing(stages, "configureNs") + '</td></tr>' +
-      '<tr><th>EXECUTE</th><td>' + timing(stages, "executeNs") + '</td></tr>' +
-      '<tr><th>RESULT</th><td>' + timing(stages, "resultNs") + '</td></tr>' +
-      '<tr><th>EVIDENCE</th><td>' + timing(stages, "evidenceNs") + '</td></tr>' +
-      '<tr><th>trigger candidates</th><td>' + esc(structural && structural.triggerIncidenceCandidates || "n/a") + '</td></tr>' +
-      '<tr><th>unification attempts</th><td>' + esc(structural && structural.unificationAttempts || "n/a") + '</td></tr>' +
-      '<tr><th>published outputs</th><td>' + esc(structural && structural.publicationOutputs || "n/a") + '</td></tr></tbody></table>';
+      '<tr><th>Настройка</th><td>' + timing(stages, "configureNs") + '</td></tr>' +
+      '<tr><th>Исполнение</th><td>' + timing(stages, "executeNs") + '</td></tr>' +
+      '<tr><th>Результат</th><td>' + timing(stages, "resultNs") + '</td></tr>' +
+      '<tr><th>Доказательства</th><td>' + timing(stages, "evidenceNs") + '</td></tr>' +
+      '<tr><th>Кандидаты запуска</th><td>' + esc(structural && structural.triggerIncidenceCandidates || "нет данных") + '</td></tr>' +
+      '<tr><th>Попытки унификации</th><td>' + esc(structural && structural.unificationAttempts || "нет данных") + '</td></tr>' +
+      '<tr><th>Опубликованные выходы</th><td>' + esc(structural && structural.publicationOutputs || "нет данных") + '</td></tr></tbody></table>';
   }
   if (state.tab === "timeline") {
     const h = state.history;
     const trend = Array.isArray(h?.profileTrend) ? h.profileTrend : [];
-    if (!h) return '<div class="wb-help">Timeline appears after Session open.</div>';
-    return '<div class="wb-help">Observer-only ' + esc(h.retentionMode) +
-      " · retained runs=" + h.retainedRuns + " · events=" + h.retainedEvents +
-      " · profile points=" + h.profilePoints + '</div>' +
+    if (!h) return '<div class="wb-help">Хронология появится после открытия сессии.</div>';
+    return '<div class="wb-help">Данные наблюдателя · режим ' + esc(h.retentionMode) +
+      " · сохранено запусков=" + h.retainedRuns + " · событий=" + h.retainedEvents +
+      " · точек профиля=" + h.profilePoints + '</div>' +
       (trend.length === 0
-        ? '<div class="wb-help">No completed runs yet.</div>'
-        : '<table class="wb-table"><thead><tr><th>Run</th><th>Backend</th><th>Links before</th><th>Configured</th><th>After execute</th></tr></thead><tbody>' +
+        ? '<div class="wb-help">Завершённых запусков пока нет.</div>'
+        : '<table class="wb-table"><thead><tr><th>Запуск</th><th>Исполнитель</th><th>Связей до</th><th>После настройки</th><th>После исполнения</th></tr></thead><tbody>' +
           trend.map((profile) =>
             '<tr><td>' + esc(profile.runId) + '</td><td>' + esc(profile.backendId) +
             '</td><td>' + esc(profile.linksBeforeConfigure) + '</td><td>' +
@@ -381,28 +406,27 @@ function tab(state) {
           ).join("") + '</tbody></table>');
   }
   if (state.tab === "compare") {
-    const supported = new Set(state.manifest.supportedBackends || []);
-    return '<div class="wb-help">No differential result is fabricated. Compare becomes executable only when at least two retained backend adapters support this same Scenario.</div>' +
-      '<table class="wb-table"><thead><tr><th>Backend</th><th>Scenario capability</th><th>Current state</th></tr></thead><tbody>' +
+    const supported = new Set(state.manifest.supportedИсполнительs || []);
+    return '<div class="wb-help">Интерфейс не выдумывает дифференциальный результат. Сравнение станет исполняемым, когда один и тот же сценарий будут поддерживать как минимум два постоянных адаптера.</div>' +
+      '<table class="wb-table"><thead><tr><th>Исполнитель</th><th>Поддержка сценарием</th><th>Текущее состояние</th></tr></thead><tbody>' +
       BACKENDS.map(([id, label]) =>
         '<tr><td>' + esc(label) + '</td><td>' +
-        esc(supported.has(id) ? "declared supported" : "not declared") +
-        '</td><td>' + esc(id === state.backend && state.session ? "active Session" :
-          supported.has(id) ? "available when adapter exists" : "unsupported") +
+        esc(supported.has(id) ? "заявлена поддержка" : "не заявлена") +
+        '</td><td>' + esc(id === state.backend && state.session ? "активная сессия" :
+          supported.has(id) ? "доступен после реализации адаптера" : "не поддерживается") +
         '</td></tr>'
       ).join("") + '</tbody></table>' +
-      '<div class="wb-help">Retained WebGPU / LinksDB adapters are tracked by #279 / #280; differential comparison by #281.</div>';
+      '<div class="wb-help">Постоянные адаптеры WebGPU / LinksDB отслеживаются в #279 / #280; дифференциальное сравнение — в #281.</div>';
   }
   const recursive = workbenchRecursiveStructure(run);
-  return '<div class="wb-help">Proof/raw structures are collapsed by default.</div>' +
+  return '<div class="wb-help">Доказательства и сырые структуры по умолчанию свёрнуты.</div>' +
     (recursive
-      ? '<div class="wb-proof-structure"><strong>Portable recursive structure · ' + esc(recursive.key) +
+      ? '<div class="wb-proof-structure"><strong>Переносимая рекурсивная структура · ' + esc(recursive.key) +
         '</strong>' + recursiveStructureHtml(recursive.value) + '</div>'
-      : '<div class="wb-help">This run does not expose a portable recursive structure in its normalized Result.</div>') +
-    '<details class="wb-raw"><summary>Current run report</summary><pre>' + json(run || {}) + '</pre></details>' +
-    '<details class="wb-raw"><summary>Scenario manifest</summary><pre>' + json(state.manifest || {}) + '</pre></details>';
+      : '<div class="wb-help">В нормализованном результате этого запуска нет переносимой рекурсивной структуры.</div>') +
+    '<details class="wb-raw"><summary>Полный отчёт текущего запуска</summary><pre>' + json(run || {}) + '</pre></details>' +
+    '<details class="wb-raw"><summary>Манифест сценария</summary><pre>' + json(state.manifest || {}) + '</pre></details>';
 }
-
 function syncInputs(state) {
   for (const node of state.root.querySelectorAll("[data-input-key]")) {
     state.inputs[node.dataset.inputKey] = node.value;
@@ -423,41 +447,42 @@ function render(state) {
 
   state.root.innerHTML =
     '<div class="wb">' +
-    '<section class="wb-card wb-top"><strong>A-memory Workbench</strong>' +
+    '<section class="wb-card wb-top"><strong>Рабочая лаборатория апамяти</strong>' +
     '<span class="wb-chip">v' + esc(state.build.version) + '</span>' +
     '<span class="wb-chip" title="' + esc(state.build.sha) + '">SHA ' + esc(compact(state.build.sha)) + '</span>' +
-    '<span class="wb-chip">backend ' + esc(state.backend) + '</span>' +
-    '<span class="wb-chip">session ' + esc(compact(status && status.sessionId)) + '</span>' +
-    '<span class="wb-chip">run ' + esc(run && run.sessionRunId || 0) + '</span>' +
+    '<span class="wb-chip">исполнитель ' + esc(state.backend) + '</span>' +
+    '<span class="wb-chip">сессия ' + esc(compact(status && status.sessionId)) + '</span>' +
+    '<span class="wb-chip">запуск ' + esc(run && run.sessionRunId || 0) + '</span>' +
     '<span class="wb-chip ' + (state.error ? "bad" : openSession ? "good" : "") + '">' +
-    esc(state.error ? "ERROR" : openSession ? "SESSION OPEN" : state.loading ? "LOADING" : "CLOSED") +
-    '</span><div class="wb-levels" aria-label="Disclosure level">' +
+    esc(state.error ? "ОШИБКА" : openSession ? "СЕССИЯ ОТКРЫТА" : state.loading ? "ЗАГРУЗКА" : "ЗАКРЫТО") +
+    '</span><div class="wb-levels" aria-label="Уровень подробности">' +
     ["simple", "engineering", "proof"].map((name) =>
       '<button data-level="' + name + '" aria-pressed="' + (level === name) + '">' +
-      esc(name[0].toUpperCase() + name.slice(1)) + '</button>').join("") +
+      esc(levelLabel(name)) + '</button>').join("") +
     '</div></section>' +
 
     '<section class="wb-pipe">' + pipeline.map((stage) =>
       '<button type="button" data-stage="' + stage.id + '" class="wb-stage ' + stage.state + '"' +
-      ' aria-pressed="' + (state.stage === stage.id) + '"><strong>' + esc(stage.id) +
+      ' aria-pressed="' + (state.stage === stage.id) + '" title="' + esc(stage.id) + '"><strong>' + esc(stageLabel(stage.id)) +
       '</strong><small>' + esc(stage.detail) + '</small></button>').join("") + '</section>' +
 
-    '<section class="wb-grid"><div class="wb-card wb-controls"><h3>Scenario / constructor</h3>' +
-    '<div class="wb-field"><label>Scenario preset</label><select id="wb-scenario"' +
+    '<section class="wb-grid"><div class="wb-card wb-controls"><h3>Сценарий / конструктор</h3>' +
+    '<div class="wb-field"><label>Готовый сценарий</label><select id="wb-scenario"' +
     (openSession ? " disabled" : "") + '>' +
     (state.registry.entries || []).map((entry, i) =>
       '<option value="' + i + '"' + (i === state.scenarioIndex ? " selected" : "") + '>' +
-      esc((entry.title || entry.scenarioId || "Scenario") +
-      (entry.scenarioVersion ? " @" + entry.scenarioVersion : "")) + '</option>').join("") + '</select></div>' +
+      esc((entry.title || ("Сценарий " + entry.scenarioId)) +
+      (entry.scenarioVersion ? " @" + entry.scenarioVersion : "")) + '</option>').join("") +
+    '</select><div class="wb-help">' + esc(state.manifest.description || "") + '</div></div>' +
 
     '<div class="wb-mode"><button data-mode="preset" aria-pressed="' + (state.mode === "preset") +
-    '">Preset</button><button data-mode="manual" aria-pressed="' + (state.mode === "manual") +
-    '">Manual</button></div>' +
+    '">Готовый</button><button data-mode="manual" aria-pressed="' + (state.mode === "manual") +
+    '">Ручной</button></div>' +
 
-    '<div class="wb-field"><label>Preset run</label><select id="wb-preset-run">' +
+    '<div class="wb-field"><label>Готовый запуск</label><select id="wb-preset-run">' +
     (state.manifest.runSequence || []).map((item, i) =>
       '<option value="' + i + '"' + (i === state.presetIndex ? " selected" : "") + '>' +
-      esc(item.runId || "run-" + (i + 1)) + '</option>').join("") + '</select></div>' +
+      esc("Запуск " + (i + 1) + " · " + (item.runId || ("run-" + (i + 1)))) + '</option>').join("") + '</select></div>' +
 
     (state.manifest.inputSchema || []).map((field) => {
       const value = state.inputs[field.key];
@@ -471,59 +496,59 @@ function render(state) {
         '</label>' + control + '<div class="wb-help">' + esc(field.description || "") + '</div></div>';
     }).join("") +
 
-    '<div class="wb-field"><label>Backend</label><select id="wb-backend"' + (openSession ? " disabled" : "") + '>' +
+    '<div class="wb-field"><label>Исполнитель</label><select id="wb-backend"' + (openSession ? " disabled" : "") + '>' +
     BACKENDS.map(([id, label]) => {
-      const supported = (state.manifest.supportedBackends || []).includes(id);
+      const supported = (state.manifest.supportedИсполнительs || []).includes(id);
       return '<option value="' + id + '"' + (id === state.backend ? " selected" : "") +
-        (supported ? "" : " disabled") + '>' + esc(label + (supported ? "" : " — unsupported")) + '</option>';
-    }).join("") + '</select><div class="wb-help">Unsupported backends stay explicit; there is no silent fallback.</div></div>' +
+        (supported ? "" : " disabled") + '>' + esc(label + (supported ? "" : " — не поддерживается")) + '</option>';
+    }).join("") + '</select><div class="wb-help">Неподдерживаемые исполнители показаны явно; скрытого переключения на другой исполнитель нет.</div></div>' +
 
     '<div class="wb-actions"><button id="wb-open"' + (openSession || state.loading ? " disabled" : "") +
-    '>Open A-memory</button><button id="wb-run" class="primary"' + (!openSession || state.loading ? " disabled" : "") +
-    '>Run</button><button id="wb-close"' + (!openSession || state.loading ? " disabled" : "") + '>Close</button></div>' +
-    '<div class="wb-help">Preset and Manual use the same Scenario manifest. Editing inputs keeps this Session and loaded A-memory.</div>' +
+    '>Открыть апамять</button><button id="wb-run" class="primary"' + (!openSession || state.loading ? " disabled" : "") +
+    '>Выполнить</button><button id="wb-close"' + (!openSession || state.loading ? " disabled" : "") + '>Закрыть</button></div>' +
+    '<div class="wb-help">Готовый и ручной режим используют один и тот же манифест сценария. Изменение входов сохраняет эту же сессию и уже загруженную апамять.</div>' +
     (state.error ? '<p class="wb-error">' + esc(state.error) + '</p>' : '') + '</div>' +
 
-    '<div class="wb-card wb-main"><h3>One persistent A-memory</h3>' +
+    '<div class="wb-card wb-main"><h3>Одна постоянная апамять</h3>' +
     '<div class="wb-simple-grid">' +
-    '<div class="wb-simple-item"><small>Loaded</small><strong>' +
-      esc(state.manifest.title || state.manifest.scenarioId || state.manifest.programProfileId || "Scenario") +
+    '<div class="wb-simple-item"><small>Загружено</small><strong>' +
+      esc(state.manifest.title || state.manifest.scenarioId || state.manifest.programProfileId || "Сценарий") +
     '</strong></div>' +
-    '<div class="wb-simple-item"><small>Inputs</small><code>' + esc(JSON.stringify(state.inputs)) + '</code></div>' +
-    '<div class="wb-simple-item"><small>Current action</small><strong>' +
-      esc(!status ? "A-memory closed" : run ? "Run #" + run.sessionRunId + " completed" : "Loaded once · ready to Run") +
+    '<div class="wb-simple-item"><small>Входы</small><code>' + esc(JSON.stringify(state.inputs)) + '</code></div>' +
+    '<div class="wb-simple-item"><small>Текущее состояние</small><strong>' +
+      esc(!status ? "апамять закрыта" : run ? "запуск №" + run.sessionRunId + " завершён" : "загружено один раз · готово к выполнению") +
     '</strong></div></div>' +
     (level === "simple" ? "" :
       '<div class="wb-memory">' +
-      '<div class="wb-metric"><small>Session</small><code>' + esc(status && status.sessionId || "closed") + '</code></div>' +
-      '<div class="wb-metric"><small>Store / engine</small><code>' + esc(compact(status && status.storeInstanceId)) +
+      '<div class="wb-metric"><small>Сессия</small><code>' + esc(status && status.sessionId || "закрыта") + '</code></div>' +
+      '<div class="wb-metric"><small>Хранилище / движок</small><code>' + esc(compact(status && status.storeInstanceId)) +
       " / " + esc(compact(status && status.engineInstanceId)) + '</code></div>' +
-      '<div class="wb-metric"><small>Links base / current</small><strong>' + esc(status && status.baseLinkCount || "—") +
+      '<div class="wb-metric"><small>Связи Links: база / сейчас</small><strong>' + esc(status && status.baseLinkCount || "—") +
       " / " + esc(currentLinks) + '</strong></div>' +
-      '<div class="wb-metric"><small>Prepare / load / runs</small><strong>' + esc(status && status.prepareCount || 0) +
+      '<div class="wb-metric"><small>Подготовка / загрузка / запуски</small><strong>' + esc(status && status.prepareCount || 0) +
       " / " + esc(status && status.loadCount || 0) + " / " + esc(status && status.completedRuns || 0) + '</strong></div>' +
       '</div>') +
     '<div class="wb-result ' + (run ? resultStatus.kind : "") + '"><h4>' + esc(resultStatus.label) + '</h4><div class="wb-result-value">' +
     esc(resultText(run)) + '</div><div class="wb-help">' +
     esc(resultStatus.explanation +
       (level === "simple" || !run ? "" :
-        " · " + (run.configurationReused ? "canonical configuration reused" : "configuration Links published") +
-        " · quiescent=" + String(run.observed && run.observed.finalQuiescent))) +
-    '</div>' + (run && level !== "simple" ? '<details class="wb-raw"><summary>Normalized result</summary><pre>' + json(run.result) +
+        " · " + (run.configurationReused ? "каноническая конфигурация использована повторно" : "опубликованы связи Links конфигурации") +
+        " · достигнут покой=" + String(run.observed && run.observed.finalQuiescent))) +
+    '</div>' + (run && level !== "simple" ? '<details class="wb-raw"><summary>Нормализованный результат</summary><pre>' + json(run.result) +
     '</pre></details>' : '') + '</div>' +
-    (level === "simple" ? '<div class="wb-help">Open Engineering for Links, Scope, reactions and profiler; Proof for raw structural evidence.</div>' :
-      stageDetail ? '<details class="wb-raw" open><summary>Stage ' + esc(state.stage) + ' · real evidence</summary><pre>' +
-        json(stageDetail) + '</pre></details>' : '<div class="wb-help">Select a completed pipeline stage to inspect its evidence.</div>') +
+    (level === "simple" ? '<div class="wb-help">Откройте «Инженерный» режим для связей Links, области Scope, реакций и профиля; «Доказательство» — для сырых структурных данных.</div>' :
+      stageDetail ? '<details class="wb-raw" open><summary>Стадия «' + esc(stageLabel(state.stage)) + '» · реальные данные</summary><pre>' +
+        json(stageDetail) + '</pre></details>' : '<div class="wb-help">Выберите завершённую стадию конвейера, чтобы посмотреть её реальные данные.</div>') +
     '</div></section>' +
 
     (level === "simple"
-      ? '<section class="wb-card wb-tabs"><div class="wb-help">Simple view deliberately hides engineering/proof noise. The result above is still the real runtime Result.</div></section>'
+      ? '<section class="wb-card wb-tabs"><div class="wb-help">Простой режим скрывает инженерные и доказательные подробности. Результат выше всё равно получен реальным исполнением.</div></section>'
       : '<section class="wb-card wb-tabs"><div class="wb-tabbar">' +
         (level === "proof"
           ? ["timeline", "log", "profile", "compare", "proof"]
           : ["timeline", "log", "profile", "compare"]).map((name) =>
           '<button data-tab="' + name + '" aria-selected="' + (state.tab === name) + '">' +
-          esc(name[0].toUpperCase() + name.slice(1)) + '</button>').join("") +
+          esc(tabLabel(name)) + '</button>').join("") +
         '</div><div class="wb-tab">' + tab(state) + '</div></section>') +
     '</div>';
 
@@ -545,7 +570,7 @@ function render(state) {
   }
   root.querySelector("#wb-scenario")?.addEventListener("change", (event) => {
     try { loadManifest(state, Number(event.target.value)); } catch (error) {
-      state.error = error && error.message || String(error);
+      state.error = "Не удалось загрузить сценарий: " + errorText(error);
     }
     render(state);
   });
@@ -580,9 +605,9 @@ export async function mountWorkbench(root) {
     scenarioIndex: 0, presetIndex: 0, inputs: {}, mode: "preset", backend: "optimized-cpu",
     session: null, run: null, history: null, tab: "timeline",
     level: "simple", stage: "RESULT",
-    build: { version: "loading", sha: "loading" }, loading: true, error: null,
+    build: { version: "загрузка", sha: "загрузка" }, loading: true, error: null,
   };
-  root.innerHTML = '<div class="notice">Loading real A-memory Workbench…</div>';
+  root.innerHTML = '<div class="notice">Загрузка реальной рабочей лаборатории апамяти…</div>';
   try {
     const loaded = await Promise.all([wasm(), buildInfo()]);
     state.wasm = loaded[0]; state.build = loaded[1];
@@ -593,7 +618,7 @@ export async function mountWorkbench(root) {
     state.loading = false; render(state);
     await open(state);
   } catch (error) {
-    state.loading = false; state.error = error && error.message || String(error); render(state);
+    state.loading = false; state.error = "Не удалось запустить рабочую лабораторию: " + errorText(error); render(state);
   }
   return state;
 }
