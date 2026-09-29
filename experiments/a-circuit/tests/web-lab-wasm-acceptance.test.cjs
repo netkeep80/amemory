@@ -173,7 +173,15 @@ Promise.all([
     gpuCarrierReactionShaderSource,
     readGpuCarrierWordsAbi,
   },
-  { executeScenarioManifest },
+  {
+    clearScenarioTransportOutput,
+    executeLoadedScenarioManifest,
+    executeScenarioManifest,
+    readScenarioError,
+    readScenarioReport,
+    readScenarioTransportLimits,
+    writeScenarioManifest,
+  },
 ]) => {
   const w = instance.exports;
 
@@ -186,9 +194,36 @@ Promise.all([
   ));
   const legacyResultBeforeScenario =
     w.amemory_i386_lab_result_available() >>> 0;
-  const scenarioCpu = executeScenarioManifest(
+  const scenarioLimits = readScenarioTransportLimits(w);
+  if (scenarioLimits.maxManifestBytes !== 1024 * 1024 ||
+      scenarioLimits.maxSingleReportBytes !== 8 * 1024 * 1024 ||
+      scenarioLimits.maxErrorBytes !== 512 * 1024 ||
+      scenarioLimits.maxRetainedReports !== 1 ||
+      scenarioLimits.maxRetainedErrors !== 1 ||
+      scenarioLimits.retentionMode !== "LATEST" ||
+      scenarioLimits.liveSessionRetained !== false) {
+    throw new Error("R2e scenario transport limits/policy mismatch");
+  }
+
+  const oversizedManifest =
+    "x".repeat(scenarioLimits.maxManifestBytes + 1);
+  let oversizedRejected = false;
+  try {
+    writeScenarioManifest(w, oversizedManifest);
+  } catch (error) {
+    oversizedRejected =
+      String(error).includes("exceeds") &&
+      String(error).includes(String(scenarioLimits.maxManifestBytes));
+  }
+  if (!oversizedRejected) {
+    throw new Error("R2e oversized manifest was not rejected client-side");
+  }
+
+  const scenarioManifestLength =
+    writeScenarioManifest(w, scenarioManifest);
+  const scenarioCpu = executeLoadedScenarioManifest(
     w,
-    scenarioManifest,
+    scenarioManifestLength,
     "optimized-cpu"
   );
   if (!scenarioCpu.ok || scenarioCpu.error !== null) {
@@ -278,6 +313,44 @@ Promise.all([
     throw new Error(
       "R2d generic scenario transport mutated legacy LabInstanceState result slot"
     );
+  }
+
+  // R2e: observer-output cleanup is separate from manifest/runtime input.
+  // Clearing the latest report/error must not alter legacy state and the same
+  // already-loaded manifest must remain executable.
+  clearScenarioTransportOutput(w);
+  if (readScenarioReport(w) !== null ||
+      readScenarioError(w) !== null ||
+      (w.amemory_i386_lab_result_available() >>> 0) !==
+        legacyResultBeforeScenario) {
+    throw new Error("R2e output cleanup leaked into semantic/legacy state");
+  }
+
+  // A rejected oversized manifest must not have overwritten the valid
+  // manifest that was already loaded before observer-output cleanup.
+  const scenarioCpuRerun = executeLoadedScenarioManifest(
+    w,
+    scenarioManifestLength,
+    "optimized-cpu"
+  );
+  if (!scenarioCpuRerun.ok ||
+      scenarioCpuRerun.report?.overallPass !== true ||
+      scenarioCpuRerun.report?.runs?.length !== 4) {
+    throw new Error("R2e cleared-output manifest rerun failed");
+  }
+  for (let index = 0; index < scenarioReport.runs.length; index += 1) {
+    const before = scenarioReport.runs[index];
+    const after = scenarioCpuRerun.report.runs[index];
+    if (JSON.stringify(before.inputs) !== JSON.stringify(after.inputs) ||
+        JSON.stringify(before.result) !== JSON.stringify(after.result) ||
+        before.observed?.activeReactionCount !==
+          after.observed?.activeReactionCount ||
+        before.observed?.finalQuiescent !==
+          after.observed?.finalQuiescent) {
+      throw new Error(
+        "R2e observer cleanup changed semantic rerun at run " + index
+      );
+    }
   }
 
   const scenarioGpu = executeScenarioManifest(

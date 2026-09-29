@@ -20,6 +20,13 @@ const ERROR_ABI = {
   byte: "amemory_scenario_error_json_byte",
 };
 
+const LIMITS_ABI = {
+  available: "amemory_scenario_transport_limits_available",
+  length: "amemory_scenario_transport_limits_json_len",
+  pointer: "amemory_scenario_transport_limits_json_ptr",
+  byte: "amemory_scenario_transport_limits_json_byte",
+};
+
 function requireFunction(wasm, name) {
   const fn = wasm[name];
   if (typeof fn !== "function") {
@@ -28,11 +35,45 @@ function requireFunction(wasm, name) {
   return fn;
 }
 
+export function readScenarioTransportLimits(wasm) {
+  const limits = readJsonAbi(
+    wasm,
+    LIMITS_ABI,
+    "scenario transport limits",
+  );
+  if (limits === null ||
+      limits.schemaVersion !== 1 ||
+      !Number.isInteger(limits.maxManifestBytes) ||
+      !Number.isInteger(limits.maxSingleReportBytes) ||
+      !Number.isInteger(limits.maxErrorBytes) ||
+      limits.maxManifestBytes <= 0 ||
+      limits.maxSingleReportBytes <= 0 ||
+      limits.maxErrorBytes <= 0 ||
+      limits.maxRetainedReports !== 1 ||
+      limits.maxRetainedErrors !== 1 ||
+      limits.retentionMode !== "LATEST" ||
+      limits.liveSessionRetained !== false) {
+    throw new Error("scenario transport: invalid limits/capability envelope");
+  }
+  return limits;
+}
+
+export function clearScenarioTransportOutput(wasm) {
+  requireFunction(wasm, "amemory_scenario_transport_clear_output")();
+}
+
 export function writeScenarioManifest(wasm, manifest) {
   const text = typeof manifest === "string"
     ? manifest
     : JSON.stringify(manifest);
   const bytes = new TextEncoder().encode(text);
+  const limits = readScenarioTransportLimits(wasm);
+  if (bytes.length > limits.maxManifestBytes) {
+    throw new Error(
+      `scenario transport: manifest ${bytes.length} bytes exceeds ` +
+      `${limits.maxManifestBytes}`,
+    );
+  }
 
   requireFunction(wasm, "amemory_scenario_manifest_clear")();
   const setByte = requireFunction(wasm, "amemory_scenario_manifest_set_byte");
@@ -44,30 +85,31 @@ export function writeScenarioManifest(wasm, manifest) {
   return bytes.length >>> 0;
 }
 
-export function executeScenarioManifest(
+export function readScenarioReport(wasm) {
+  return readJsonAbi(wasm, REPORT_ABI, "scenario report");
+}
+
+export function readScenarioError(wasm) {
+  return readJsonAbi(wasm, ERROR_ABI, "scenario error");
+}
+
+export function executeLoadedScenarioManifest(
   wasm,
-  manifest,
+  length,
   backend = "optimized-cpu",
 ) {
   const backendCode = BACKENDS.get(backend);
   if (backendCode === undefined) {
     throw new Error(`scenario transport: unknown backend ${backend}`);
   }
+  if (!Number.isInteger(length) || length < 0) {
+    throw new Error(`scenario transport: invalid manifest length ${length}`);
+  }
 
-  const length = writeScenarioManifest(wasm, manifest);
   const execute = requireFunction(wasm, "amemory_scenario_execute_json");
-  const success = execute(length, backendCode) >>> 0;
-
-  const report = readJsonAbi(
-    wasm,
-    REPORT_ABI,
-    "scenario report",
-  );
-  const error = readJsonAbi(
-    wasm,
-    ERROR_ABI,
-    "scenario error",
-  );
+  const success = execute(length >>> 0, backendCode) >>> 0;
+  const report = readScenarioReport(wasm);
+  const error = readScenarioError(wasm);
 
   if (success === 1) {
     if (report === null || error !== null) {
@@ -84,4 +126,13 @@ export function executeScenarioManifest(
     );
   }
   return { ok: false, report: null, error };
+}
+
+export function executeScenarioManifest(
+  wasm,
+  manifest,
+  backend = "optimized-cpu",
+) {
+  const length = writeScenarioManifest(wasm, manifest);
+  return executeLoadedScenarioManifest(wasm, length, backend);
 }
