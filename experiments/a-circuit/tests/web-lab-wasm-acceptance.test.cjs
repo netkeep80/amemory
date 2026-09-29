@@ -161,6 +161,7 @@ Promise.all([
   import("../../browser-accelerator/web/i386-proof-view.mjs"),
   import("../../browser-accelerator/web/gpu-carrier.mjs"),
   import("../../browser-accelerator/web/scenario-transport.mjs"),
+  import("../../browser-accelerator/web/scenario-presets.mjs"),
 ]).then(([
   {instance},
   { inflateCompactProof },
@@ -182,16 +183,58 @@ Promise.all([
     readScenarioTransportLimits,
     writeScenarioManifest,
   },
+  {
+    loadScenarioPresetManifest,
+    loadScenarioPresetManifestByIndex,
+    refreshScenarioPresetRegistry,
+  },
 ]) => {
   const w = instance.exports;
+
+  // R3c: ready-made scenarios come from the canonical manifest registry.
+  // The raw manifest exposed through WASM must be byte-for-byte the same
+  // document that native tests and the Scenario Runner consume.
+  const canonicalScenarioSource = fs.readFileSync(
+    "experiments/a-circuit/scenarios/mux1-lifecycle-v1.json",
+    "utf8"
+  );
+  const presetRegistry = refreshScenarioPresetRegistry(w);
+  if (presetRegistry.entries.length !== 1) {
+    throw new Error("R3c preset registry count mismatch");
+  }
+  const presetSummary = presetRegistry.entries[0];
+  if (presetSummary.scenarioId !== "mux1-lifecycle" ||
+      presetSummary.scenarioVersion !== "1.0.0" ||
+      presetSummary.programProfileId !== "a-circuit:mux1" ||
+      presetSummary.family !== "mux" ||
+      presetSummary.programId !== "mux1" ||
+      presetSummary.runCount !== 4 ||
+      !Array.isArray(presetSummary.inputSchema) ||
+      presetSummary.inputSchema.length !== 3) {
+    throw new Error("R3c manifest-derived preset summary mismatch");
+  }
+
+  if (loadScenarioPresetManifestByIndex(w, 99) !== null ||
+      readScenarioError(w)?.code !== "PRESET_REGISTRY") {
+    throw new Error("R3c unknown preset index did not fail closed");
+  }
+
+  const preset = loadScenarioPresetManifest(
+    w,
+    presetRegistry,
+    "mux1-lifecycle",
+    "1.0.0"
+  );
+  if (preset === null ||
+      preset.index !== 0 ||
+      preset.source !== canonicalScenarioSource) {
+    throw new Error("R3c canonical preset manifest round-trip mismatch");
+  }
+  const scenarioManifest = JSON.parse(preset.source);
 
   // R2d: browser transport must consume the generic Scenario Runner report,
   // not the legacy block-result slot. The manifest itself contains four runs
   // that execute on one real persistent CPU Session.
-  const scenarioManifest = JSON.parse(fs.readFileSync(
-    "experiments/a-circuit/scenarios/mux1-lifecycle-v1.json",
-    "utf8"
-  ));
   const legacyResultBeforeScenario =
     w.amemory_i386_lab_result_available() >>> 0;
   const scenarioLimits = readScenarioTransportLimits(w);

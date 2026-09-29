@@ -2,13 +2,13 @@ function fail(label, message) {
   throw new Error(`${label} ABI: ${message}`);
 }
 
-export function readJsonAbi(wasm, names, label) {
+export function readUtf8Abi(wasm, names, label) {
   const available = wasm[names.available];
   if (typeof available !== "function" || available() !== 1) return null;
   const length = wasm[names.length];
   if (typeof length !== "function") fail(label, "length function missing");
   const len = length() >>> 0;
-  if (!len) fail(label, "reported empty JSON");
+  if (!len) fail(label, "reported empty UTF-8 payload");
 
   let bytes;
   const pointer = wasm[names.pointer];
@@ -30,8 +30,15 @@ export function readJsonAbi(wasm, names, label) {
     }
   }
 
+  return new TextDecoder().decode(bytes);
+}
+
+export function readJsonAbi(wasm, names, label) {
+  const text = readUtf8Abi(wasm, names, label);
+  if (text === null) return null;
+
   try {
-    return JSON.parse(new TextDecoder().decode(bytes));
+    return JSON.parse(text);
   } catch (error) {
     fail(label, `JSON parse failed: ${error.message}`);
   }
