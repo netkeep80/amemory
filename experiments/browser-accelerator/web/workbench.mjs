@@ -11,6 +11,7 @@ import {
   refreshScenarioPresetRegistry,
 } from "./scenario-presets.mjs";
 import { recursiveStructureHtml } from "./proof-view.mjs";
+import { PROOF_VERIFICATION_PROFILE_ID } from "./proof-verifier.mjs";
 
 const BACKENDS = [
   ["optimized-cpu", "CPU · оптимизированный"],
@@ -55,12 +56,16 @@ const verificationState = (value) =>
   value === true ? "verified" : value === false ? "failed" : "unavailable";
 
 export function workbenchVerificationLevels(run, compactVerification = null) {
+  const supportedCompactProfile =
+    compactVerification?.profileId === PROOF_VERIFICATION_PROFILE_ID;
   const levels = VERIFICATION_LEVEL_SPECS.map(([id, field, detail]) => ({
     id,
-    state: verificationState(compactVerification?.[field]),
+    state: verificationState(
+      supportedCompactProfile ? compactVerification?.[field] : undefined
+    ),
     detail,
     source: "compact-proof",
-    profileId: compactVerification?.profileId ?? null,
+    profileId: supportedCompactProfile ? compactVerification.profileId : null,
   }));
   levels.push({
     id: "SCALAR_ORACLE_VERIFIED",
