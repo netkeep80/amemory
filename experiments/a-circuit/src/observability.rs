@@ -25,6 +25,17 @@ impl RunObservationLevel {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub(crate) enum RunStage {
+    Prepare,
+    Load,
+    Configure,
+    Execute,
+    Result,
+    Evidence,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub(crate) enum RunEventKind {
     ExecuteBegin,
     ReactionEnd,
@@ -41,6 +52,7 @@ pub(crate) struct RunEventV1 {
     pub(crate) backend_id: String,
     pub(crate) sequence: u32,
     pub(crate) elapsed_ns: u64,
+    pub(crate) stage: RunStage,
     pub(crate) kind: RunEventKind,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) reaction_index: Option<u32>,
@@ -180,6 +192,7 @@ mod tests {
                 backend_id: OPTIMIZED_CPU_BACKEND_ID.to_owned(),
                 sequence: 0,
                 elapsed_ns: 1,
+                stage: RunStage::Execute,
                 kind: RunEventKind::ExecuteBegin,
                 reaction_index: None,
                 scope_before: Some(vec![10]),
@@ -196,6 +209,7 @@ mod tests {
         let json = serde_json::to_string(&run).unwrap();
         assert!(json.contains("\"schemaVersion\":1"));
         assert!(json.contains("\"observationLevel\":\"TRACE\""));
+        assert!(json.contains("\"stage\":\"EXECUTE\""));
         let decoded: ObservedRunV1 = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded, run);
     }
