@@ -1402,7 +1402,7 @@ function setupGpuCarrierWitness(section, wasm) {
         const observed = lookup.observed;
         const reactionInput = deriveGpuCarrierReactionInput(
           carrier,
-          compactProof,
+          compactProof.roots,
         );
         const reaction = await runGpuCarrierReaction(
           device,
