@@ -43,6 +43,88 @@ const levelLabel = (id) => LEVEL_LABELS[id] || id;
 const tabLabel = (id) => TAB_LABELS[id] || id;
 const errorText = (error) => error && error.message ? error.message : String(error);
 
+const VERIFICATION_LEVEL_IDS = Object.freeze([
+  "TRANSPORT_VALID",
+  "TRACE_CONSISTENT",
+  "SEMANTIC_REPLAY_VERIFIED",
+  "SCALAR_ORACLE_VERIFIED",
+]);
+
+function verificationState(value) {
+  if (value === true) return "verified";
+  if (value === false) return "failed";
+  return "not_checked";
+}
+
+export function workbenchVerificationLevels(
+  run,
+  compactVerification = null,
+) {
+  const compactEvidence =
+    compactVerification ?? run?.compactVerification ?? null;
+  const assertions = Array.isArray(run?.assertionResults)
+    ? run.assertionResults
+    : [];
+  const freshInstance =
+    run?.freshInstanceMatches ?? run?.oracleMatches ?? null;
+
+  const levels = [
+    {
+      id: VERIFICATION_LEVEL_IDS[0],
+      state: verificationState(compactEvidence?.transportValid),
+      independent: true,
+      explanation: compactEvidence
+        ? "Проверена схема/кодек compact proof."
+        : "В этом Scenario run compact proof не приложен; транспорт proof не проверялся.",
+    },
+    {
+      id: VERIFICATION_LEVEL_IDS[1],
+      state: verificationState(compactEvidence?.traceConsistent),
+      independent: true,
+      explanation: compactEvidence
+        ? "Проверена согласованность цепочки Scope/Result."
+        : "В этом Scenario run compact proof не приложен; trace consistency не проверялась.",
+    },
+    {
+      id: VERIFICATION_LEVEL_IDS[2],
+      state: verificationState(compactEvidence?.semanticReplayVerified),
+      independent: true,
+      explanation: compactEvidence
+        ? "Независимый structural replay подтвердил исполнение в заявленном профиле."
+        : "В этом Scenario run независимый compact semantic replay не запускался.",
+    },
+    {
+      id: VERIFICATION_LEVEL_IDS[3],
+      state: verificationState(run?.scalarOracleMatches),
+      independent: true,
+      explanation:
+        run?.scalarOracleMatches == null
+          ? "Независимый скалярный оракул для этого отчёта не указан."
+          : "Обычная скалярная семантика сравнивается с реальным результатом исполнения.",
+    },
+    {
+      id: "FRESH_INSTANCE_MATCH",
+      state: verificationState(freshInstance),
+      independent: false,
+      explanation:
+        freshInstance == null
+          ? "Сравнение со свежим экземпляром не выполнялось."
+          : "Это повтор тем же структурным движком на свежем экземпляре; это не независимый оракул.",
+    },
+    {
+      id: "EXPECTED_ASSERTIONS",
+      state: assertions.length === 0
+        ? "not_checked"
+        : verificationState(assertions.every((item) => item.passed === true)),
+      independent: false,
+      explanation: assertions.length === 0
+        ? "Для ручного набора входов эталонные assertions не заданы."
+        : "Проверены ожидания, записанные в готовом Scenario.",
+    },
+  ];
+  return levels;
+}
+
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const sameInputs = (a, b) => JSON.stringify(a || {}) === JSON.stringify(b || {});
 
@@ -128,23 +210,50 @@ export function workbenchResultStatus(run) {
       explanation: "Программа загружена один раз. Нажмите «Выполнить», чтобы запустить её в этой же сессии апамяти.",
     };
   }
-  const assertions = Array.isArray(run.assertionResults)
-    ? run.assertionResults
-    : [];
-  if (assertions.length === 0) {
+
+  const levels = workbenchVerificationLevels(run);
+  const scalar = levels.find(
+    (item) => item.id === "SCALAR_ORACLE_VERIFIED",
+  );
+  const fresh = levels.find(
+    (item) => item.id === "FRESH_INSTANCE_MATCH",
+  );
+  const expected = levels.find(
+    (item) => item.id === "EXPECTED_ASSERTIONS",
+  );
+
+  if (scalar?.state === "failed") {
+    return {
+      kind: "fail",
+      label: "СКАЛЯРНАЯ ПРОВЕРКА НЕ ПРОЙДЕНА",
+      explanation: "Независимая скалярная семантика не совпала с реальным результатом исполнения.",
+    };
+  }
+  if (fresh?.state === "failed") {
+    return {
+      kind: "fail",
+      label: "СВЕЖИЙ ЭКЗЕМПЛЯР НЕ СОВПАЛ",
+      explanation: "Повтор тем же структурным движком на свежем экземпляре дал другой результат.",
+    };
+  }
+  if (expected?.state === "failed") {
+    return {
+      kind: "fail",
+      label: "ПРОВЕРКИ СЦЕНАРИЯ НЕ ПРОЙДЕНЫ",
+      explanation: "Хотя бы одно ожидание готового сценария не совпало с реальным результатом исполнения.",
+    };
+  }
+  if (expected?.state === "not_checked") {
     return {
       kind: "neutral",
       label: "РЕЗУЛЬТАТ",
-      explanation: "Получен реальный результат исполнения. Для этого ручного набора входов нет эталонной проверки, поэтому интерфейс не придумывает статус «пройдено/не пройдено».",
+      explanation: "Получен реальный результат исполнения. Для этого ручного набора входов эталонные assertions не заданы; независимые уровни проверки показаны отдельно.",
     };
   }
-  const passed = assertions.every((item) => item.passed === true);
   return {
-    kind: passed ? "pass" : "fail",
-    label: passed ? "ПРОЙДЕНО" : "НЕ ПРОЙДЕНО",
-    explanation: passed
-      ? "Результат исполнения удовлетворяет всем проверкам, заданным этим готовым сценарием."
-      : "Хотя бы одна проверка готового сценария не совпала с реальным результатом исполнения.",
+    kind: "pass",
+    label: "ПРОВЕРКИ СЦЕНАРИЯ ПРОЙДЕНЫ",
+    explanation: "Assertions готового сценария совпали. Это не общий PASS: scalar oracle, fresh-instance и compact-proof уровни показаны отдельно.",
   };
 }
 
@@ -191,7 +300,10 @@ export function workbenchStageDetails(status, run, stageId) {
       sessionRunId: run.sessionRunId,
       result: run.result,
       assertionResults: run.assertionResults ?? [],
-      oracleMatches: run.oracleMatches ?? null,
+      freshInstanceMatches:
+        run.freshInstanceMatches ?? run.oracleMatches ?? null,
+      scalarOracleMatches: run.scalarOracleMatches ?? null,
+      verificationLevels: workbenchVerificationLevels(run),
     };
   }
   if (stageId === "EVIDENCE") {
@@ -200,6 +312,7 @@ export function workbenchStageDetails(status, run, stageId) {
       eventCount: run.observed?.events?.length ?? 0,
       observationLevel: run.observed?.observationLevel ?? null,
       pipelineProfile: run.pipelineProfile ?? null,
+      verificationLevels: workbenchVerificationLevels(run),
     };
   }
   return null;
@@ -218,6 +331,24 @@ const compact = (value) => {
 function timing(stages, key) {
   if (!stages || stages.timingAvailable === false) return "время недоступно";
   return Number.isFinite(stages[key]) ? stages[key] + " ns" : "нет данных";
+}
+
+function verificationStateText(state) {
+  if (state === "verified") return "ПРОВЕРЕНО";
+  if (state === "failed") return "ОШИБКА";
+  return "НЕ ПРОВЕРЕНО";
+}
+
+function verificationMatrixHtml(run) {
+  if (!run) return "";
+  return '<div class="wb-verification"><h4>Уровни проверки</h4>' +
+    workbenchVerificationLevels(run).map((item) =>
+      '<div class="wb-verification-row ' + esc(item.state) + '">' +
+      '<code>' + esc(item.id) + '</code><strong>' +
+      esc(verificationStateText(item.state)) + '</strong><small>' +
+      esc(item.explanation) + (item.independent ? "" : " · не независимое доказательство") +
+      '</small></div>'
+    ).join("") + '</div>';
 }
 
 function resultText(run) {
@@ -255,6 +386,7 @@ function styles() {
     ".wb-proof-structure{margin-top:10px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2)}.proof-recursive-structure{margin-top:8px;border:1px solid var(--line);border-radius:9px;background:var(--surface)}.proof-recursive-structure summary{cursor:pointer;padding:8px 10px}.proof-recursive-structure>code{display:block;padding:10px;max-height:280px;overflow:auto;overflow-wrap:anywhere}",
     ".wb-levels{display:flex;gap:5px;flex-wrap:wrap}.wb-levels button{border:1px solid var(--line);border-radius:999px;background:var(--surface-2);color:var(--muted);padding:5px 8px;cursor:pointer;font-size:.76rem}.wb-levels button[aria-pressed=true]{border-color:var(--accent);color:var(--text);font-weight:800}",
     ".wb-simple-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:12px}.wb-simple-item{padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);min-width:0}.wb-simple-item small{display:block;color:var(--muted)}.wb-simple-item strong,.wb-simple-item code{display:block;margin-top:5px;overflow-wrap:anywhere}.wb-result.pass{border-color:var(--good)}.wb-result.fail{border-color:var(--bad)}",
+    ".wb-verification{margin-top:12px;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--surface-2);display:grid;gap:7px}.wb-verification h4{margin:0 0 2px}.wb-verification-row{display:grid;grid-template-columns:minmax(180px,1fr) auto;gap:4px 12px;padding:8px;border:1px solid var(--line);border-radius:9px;background:var(--surface)}.wb-verification-row small{grid-column:1/-1;color:var(--muted)}.wb-verification-row.verified{border-color:var(--good)}.wb-verification-row.failed{border-color:var(--bad)}",
 
     "@media(max-width:1000px){.wb-grid{grid-template-columns:1fr}.wb-memory{grid-template-columns:1fr 1fr}.wb-pipe{grid-template-columns:repeat(3,1fr)}}@media(max-width:620px){.wb-memory,.wb-pipe{grid-template-columns:1fr}}",
   ].join("\n");
@@ -542,6 +674,7 @@ function render(state) {
         " · достигнут покой=" + String(run.observed && run.observed.finalQuiescent))) +
     '</div>' + (run && level !== "simple" ? '<details class="wb-raw"><summary>Нормализованный результат</summary><pre>' + json(run.result) +
     '</pre></details>' : '') + '</div>' +
+    verificationMatrixHtml(run) +
     (level === "simple" ? '<div class="wb-help">Откройте «Инженерный» режим для связей Links, области Scope, реакций и профиля; «Доказательство» — для сырых структурных данных.</div>' :
       stageDetail ? '<details class="wb-raw" open><summary>Стадия «' + esc(stageLabel(state.stage)) + '» · реальные данные</summary><pre>' +
         json(stageDetail) + '</pre></details>' : '<div class="wb-help">Выберите завершённую стадию конвейера, чтобы посмотреть её реальные данные.</div>') +
