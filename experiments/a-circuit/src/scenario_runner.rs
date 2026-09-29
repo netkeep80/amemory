@@ -11,6 +11,10 @@ use super::{
         configure_mux1_session, prepare_mux1_session_program,
         project_mux1_session_result, web_prove_mux1,
     },
+    mul32_n::{
+        configure_mul32_session, prepare_mul32_session_program,
+        project_mul32_session_result, web_prove_mul32,
+    },
     observability::{
         run_pipeline_profile_v1, session_open_profile_v1, time_stage,
         ObservedRunV1, RunPipelineProfileV1, SessionOpenProfileV1,
@@ -94,6 +98,13 @@ const CPU_SCENARIO_ADAPTERS: &[CpuScenarioAdapter] = &[
         configure: configure_shl32_from_inputs,
         project: project_shl32_result,
         oracle: oracle_shl32_result,
+    },
+    CpuScenarioAdapter {
+        profile_id: "a-circuit:mul32",
+        prepare: prepare_mul32_session_program,
+        configure: configure_mul32_from_inputs,
+        project: project_mul32_result,
+        oracle: oracle_mul32_result,
     },
 ];
 
@@ -577,6 +588,20 @@ fn effect32_normalized(
     }
 }
 
+fn wide64_normalized(
+    lo: u32,
+    hi: u32,
+    result_recursive_wire: String,
+) -> ScenarioNormalizedResultV1 {
+    let mut fields = BTreeMap::new();
+    fields.insert("lo".to_owned(), canonical_word32(lo));
+    fields.insert("hi".to_owned(), canonical_word32(hi));
+    ScenarioNormalizedResultV1 {
+        fields,
+        result_recursive_wire: Some(result_recursive_wire),
+    }
+}
+
 fn configure_xor32_from_inputs(
     session: &mut ProofRuntimeSession,
     load: &WebProofLoadStage,
@@ -745,6 +770,50 @@ fn oracle_shl32_result(
     ))
 }
 
+fn configure_mul32_from_inputs(
+    session: &mut ProofRuntimeSession,
+    load: &WebProofLoadStage,
+    inputs: &BTreeMap<String, Value>,
+) -> Result<ConfiguredRun, String> {
+    let a = word32_input(inputs, "A")?;
+    let b = word32_input(inputs, "B")?;
+    let (initial, before, after) =
+        configure_mul32_session(session, load, a, b)
+            .ok_or_else(|| "MUL32 configuration failed".to_owned())?;
+    Ok(ConfiguredRun {
+        initial,
+        links_before: before as u32,
+        links_after: after as u32,
+    })
+}
+
+fn project_mul32_result(
+    session: &ProofRuntimeSession,
+    load: &WebProofLoadStage,
+) -> Result<ScenarioNormalizedResultV1, String> {
+    let projected = project_mul32_session_result(session, load)
+        .ok_or_else(|| "MUL32 result projection failed".to_owned())?;
+    Ok(wide64_normalized(
+        projected.lo,
+        projected.hi,
+        projected.result_recursive_wire,
+    ))
+}
+
+fn oracle_mul32_result(
+    inputs: &BTreeMap<String, Value>,
+) -> Result<ScenarioNormalizedResultV1, String> {
+    let a = word32_input(inputs, "A")?;
+    let b = word32_input(inputs, "B")?;
+    let proof = web_prove_mul32(a, b)
+        .ok_or_else(|| "fresh MUL32 oracle failed".to_owned())?;
+    Ok(wide64_normalized(
+        proof.outcome.lo,
+        proof.outcome.hi,
+        proof.proof.result.result_anum,
+    ))
+}
+
 fn bit_input(
     inputs: &BTreeMap<String, Value>,
     key: &str,
@@ -772,6 +841,8 @@ mod tests {
         include_str!("../scenarios/add32-lifecycle-v1.json");
     const SHL32_LIFECYCLE: &str =
         include_str!("../scenarios/shl32-lifecycle-v1.json");
+    const MUL32_LIFECYCLE: &str =
+        include_str!("../scenarios/mul32-lifecycle-v1.json");
 
     #[test]
     fn canonical_mux1_manifest_runs_four_times_on_one_session() {
@@ -943,6 +1014,46 @@ mod tests {
         assert!(
             report.runs[4].configuration_reused,
             "returning to COUNT=0 must reuse canonical configuration Links",
+        );
+    }
+
+    #[test]
+    fn canonical_mul32_manifest_proves_wide64_in_one_session() {
+        let manifest =
+            parse_and_validate_manifest_v1(MUL32_LIFECYCLE).unwrap();
+        let report = run_scenario_manifest_v1(
+            &manifest,
+            ScenarioBackendV1::OptimizedCpu,
+        )
+        .unwrap();
+
+        assert!(report.overall_pass);
+        assert_eq!(report.runs.len(), 4);
+        assert!(report.runs.iter().all(|run| {
+            run.observed.session_id == report.session_id
+                && run.observed.final_quiescent
+                && run.oracle_matches == Some(true)
+        }));
+        assert_eq!(
+            report
+                .runs
+                .iter()
+                .map(|run| run.observed.active_reaction_count)
+                .collect::<Vec<_>>(),
+            vec![33, 1071, 1071, 33],
+        );
+        assert_eq!(
+            report.runs[2].result.fields.get("lo"),
+            Some(&Value::String("0x00000000".to_owned())),
+        );
+        assert_eq!(
+            report.runs[2].result.fields.get("hi"),
+            Some(&Value::String("0x00000001".to_owned())),
+        );
+        assert_eq!(report.runs[0].result, report.runs[3].result);
+        assert!(
+            report.runs[3].configuration_reused,
+            "returning to first MUL32 inputs must reuse canonical Links",
         );
     }
 
