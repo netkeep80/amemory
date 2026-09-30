@@ -1,7 +1,7 @@
 use super::runtime_session::{CpuMemoryInstance, CpuRuntimeSession, CpuSessionState};
 use super::observability::{
     ns_u64, ObservationTimer, ObservedRunV1, RunEventKind, RunEventV1,
-    RunObservationLevel, RunProfileV1, RunStage, RunStructuralFactV1,
+    RunObservationLevel, RunProfileV1, RunStage,
     StructuralProfileV1, OBSERVABILITY_TIMING_AVAILABLE,
     OPTIMIZED_CPU_BACKEND_ID, RUN_OBSERVABILITY_SCHEMA_VERSION,
 };
