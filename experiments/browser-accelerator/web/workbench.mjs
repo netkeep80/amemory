@@ -1,13 +1,4 @@
-import {
-  beginScenarioLiveStepRun,
-  closeScenarioLiveSession,
-  openScenarioLiveSession,
-  readScenarioTransportLimits,
-  refreshScenarioLiveHistoryStatus,
-  runScenarioLiveSession,
-  setScenarioLiveRetentionPolicy,
-  stepScenarioLiveSession,
-} from "./scenario-transport.mjs";
+import { ScenarioWorkerClient } from "./scenario-worker-client.mjs";
 import {
   loadScenarioPresetManifestByIndex,
   refreshScenarioPresetRegistry,
@@ -817,21 +808,28 @@ function styles() {
   document.head.append(style);
 }
 
-async function wasm() {
-  const response = await fetch("./amemory_a_circuit.wasm", { cache: "no-store" });
-  if (!response.ok) throw new Error("Не удалось загрузить A-Circuit WASM: HTTP " + response.status);
+async function catalogWasm() {
+  const response = await fetch("./amemory_a_circuit.wasm", {
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    throw new Error(
+      "Не удалось загрузить каталог A-Circuit WASM: HTTP " +
+      response.status,
+    );
+  }
   const bytes = await response.arrayBuffer();
   const loaded = await WebAssembly.instantiate(bytes, {});
   const w = loaded.instance.exports;
   for (const name of [
     "amemory_scenario_preset_registry_refresh",
-    "amemory_scenario_live_open_json",
-    "amemory_scenario_live_execute_json",
-    "amemory_scenario_live_step_begin_json",
-    "amemory_scenario_live_step_json",
-    "amemory_scenario_live_close",
+    "amemory_scenario_preset_manifest_load",
   ]) {
-    if (typeof w[name] !== "function") throw new Error("В WASM отсутствует функция ABI лаборатории: " + name);
+    if (typeof w[name] !== "function") {
+      throw new Error(
+        "В WASM отсутствует функция ABI каталога: " + name,
+      );
+    }
   }
   return w;
 }
@@ -851,75 +849,154 @@ function presetInputs(state) {
   state.inputs = clone((run && run.inputs) || state.manifest.initialInputs || {});
 }
 
-function loadManifest(state, index) {
+async function loadManifest(state, index) {
   stopWorkbenchPlayer(state);
-  if (state.session) closeScenarioLiveSession(state.wasm);
-  const source = loadScenarioPresetManifestByIndex(state.wasm, index);
-  if (source == null) throw new Error("Не найден манифест сценария с индексом " + index);
+  if (state.session) {
+    await state.worker.closeSession();
+  }
+  const source = loadScenarioPresetManifestByIndex(
+    state.catalogWasm,
+    index,
+  );
+  if (source == null) {
+    throw new Error(
+      "Не найден манифест сценария с индексом " + index,
+    );
+  }
   state.scenarioIndex = index;
   state.manifest = JSON.parse(source);
   state.presetIndex = 0;
   state.mode = "preset";
-  state.backend = (state.manifest.supportedИсполнительs || [])[0] || "optimized-cpu";
+  state.backend =
+    (state.manifest.supportedИсполнительs || [])[0] || "optimized-cpu";
   state.session = null;
   state.run = null;
   state.step = null;
   state.history = null;
+  state.workerProgress = null;
+  state.workerRunActive = false;
+  state.cancelling = false;
   state.error = null;
   presetInputs(state);
 }
 
 async function history(state) {
-  const refreshed = refreshScenarioLiveHistoryStatus(state.wasm);
-  state.history = refreshed.ok ? refreshed.status : null;
+  if (!state.session) {
+    state.history = null;
+    return;
+  }
+  try {
+    const refreshed = await state.worker.history();
+    state.history = refreshed.status || null;
+  } catch {
+    state.history = null;
+  }
 }
 
 async function open(state) {
   stopWorkbenchPlayer(state);
-  state.loading = true; state.error = null; render(state);
+  state.loading = true;
+  state.error = null;
+  render(state);
   try {
-    const opened = openScenarioLiveSession(state.wasm, state.manifest, state.backend);
-    if (!opened.ok) throw new Error(opened.error && opened.error.message || JSON.stringify(opened.error));
+    const opened = await state.worker.open(
+      state.manifest,
+      state.backend,
+    );
     state.session = opened.status;
     state.run = null;
     state.step = null;
-    const cap = readScenarioTransportLimits(state.wasm).liveObserver;
-    const policy = setScenarioLiveRetentionPolicy(state.wasm, {
-      retentionMode: "RING",
-      maxRetainedRuns: Math.min(8, cap.maxRetainedRuns),
-      maxRetainedEvents: Math.min(8192, cap.maxRetainedEvents),
-      maxRetainedBytes: Math.min(8 * 1024 * 1024, cap.maxRetainedBytes),
-    });
-    if (!policy.ok) throw new Error(policy.error && policy.error.message || JSON.stringify(policy.error));
-    await history(state);
+    state.workerProgress = null;
+    state.history = opened.history || null;
   } catch (error) {
-    state.session = null; state.run = null; state.history = null;
-    state.error = "Не удалось открыть апамять: " + errorText(error);
+    state.session = null;
+    state.run = null;
+    state.history = null;
+    state.error =
+      "Не удалось открыть апамять: " + errorText(error);
   }
-  state.loading = false; render(state);
+  state.loading = false;
+  render(state);
 }
 
 async function execute(state) {
   stopWorkbenchPlayer(state);
-  state.loading = true; state.error = null; render(state);
+  state.loading = true;
+  state.workerRunActive = true;
+  state.cancelling = false;
+  state.workerProgress = null;
+  state.error = null;
+  render(state);
+
   try {
     const request = createWorkbenchRun(
-      state.manifest, state.presetIndex, state.inputs,
-      (state.session.completedRuns || 0) + 1, state.mode,
+      state.manifest,
+      state.presetIndex,
+      state.inputs,
+      (state.session.completedRuns || 0) + 1,
+      state.mode,
     );
-    const result = runScenarioLiveSession(state.wasm, request);
-    if (!result.ok) throw new Error(result.error && result.error.message || JSON.stringify(result.error));
-    state.session = result.payload.status;
-    state.run = result.payload.run;
+    const result = await state.worker.run(request, {
+      onProgress(progress) {
+        state.workerProgress = progress;
+        if (progress?.status) state.session = progress.status;
+        // Keep the UI responsive without rendering every single reaction.
+        if ((progress?.completedSteps || 0) <= 2 ||
+            (progress?.completedSteps || 0) % 16 === 0 ||
+            progress?.completed === true) {
+          render(state);
+        }
+      },
+    });
+
+    state.session = result.status;
+    const completed = {
+      active: false,
+      begin: result.begin,
+      reports: result.reports,
+    };
+    state.run = completedStepRun(completed);
+    state.step = null;
+    state.stage = "RESULT";
     await history(state);
   } catch (error) {
+    if (error?.recovery === "REOPEN_REQUIRED" ||
+        error?.recovery === "OPEN_REQUIRED") {
+      state.session = null;
+      state.step = null;
+      state.history = null;
+    }
     state.error = "Ошибка исполнения: " + errorText(error);
   }
-  state.loading = false; render(state);
+
+  state.workerRunActive = false;
+  state.cancelling = false;
+  state.loading = false;
+  render(state);
+}
+
+async function cancelRun(state) {
+  if (!state.workerRunActive || state.cancelling) return;
+  state.cancelling = true;
+  render(state);
+  try {
+    const result = await state.worker.cancelActive();
+    if (!result.accepted) {
+      state.cancelling = false;
+      state.error = "Worker уже не имеет активного запуска для отмены.";
+      render(state);
+    }
+  } catch (error) {
+    state.cancelling = false;
+    state.error = "Не удалось запросить отмену: " + errorText(error);
+    render(state);
+  }
 }
 
 async function beginStep(state) {
-  state.loading = true; state.error = null; render(state);
+  state.loading = true;
+  state.error = null;
+  render(state);
   try {
     const request = createWorkbenchStepRun(
       state.manifest,
@@ -928,36 +1005,38 @@ async function beginStep(state) {
       (state.session.completedRuns || 0) + 1,
       state.mode,
     );
-    const result = beginScenarioLiveStepRun(state.wasm, request);
-    if (!result.ok) {
-      throw new Error(result.error?.message || JSON.stringify(result.error));
-    }
-    state.session = result.payload.status;
+    const result = await state.worker.beginStep(request);
+    state.session = result.status;
     state.run = null;
     state.step = {
       active: true,
-      begin: result.payload.begin,
+      begin: result.begin,
       reports: [],
       player: defaultWorkbenchPlayer(),
     };
     state.stage = "EXECUTE";
   } catch (error) {
-    state.error = "Не удалось начать пошаговое исполнение: " +
-      errorText(error);
+    if (error?.recovery === "REOPEN_REQUIRED" ||
+        error?.recovery === "OPEN_REQUIRED") {
+      state.session = null;
+      state.step = null;
+    }
+    state.error =
+      "Не удалось начать пошаговое исполнение: " + errorText(error);
   }
-  state.loading = false; render(state);
+  state.loading = false;
+  render(state);
 }
 
 async function stepOnce(state) {
-  state.loading = true; state.error = null; render(state);
+  state.loading = true;
+  state.error = null;
+  render(state);
   try {
-    const result = stepScenarioLiveSession(state.wasm);
-    if (!result.ok) {
-      throw new Error(result.error?.message || JSON.stringify(result.error));
-    }
-    state.session = result.payload.status;
-    state.step.reports.push(result.payload.step);
-    if (result.payload.step.completed) {
+    const result = await state.worker.step();
+    state.session = result.status;
+    state.step.reports.push(result.step);
+    if (result.step.completed) {
       state.step.active = false;
       state.run = completedStepRun(state.step);
       state.stage = "RESULT";
@@ -966,19 +1045,35 @@ async function stepOnce(state) {
       state.stage = "EXECUTE";
     }
   } catch (error) {
+    if (error?.recovery === "REOPEN_REQUIRED" ||
+        error?.recovery === "OPEN_REQUIRED") {
+      state.session = null;
+      state.step = null;
+      state.history = null;
+    }
     state.error = "Ошибка шага исполнения: " + errorText(error);
   }
-  state.loading = false; render(state);
+  state.loading = false;
+  render(state);
 }
 
-function close(state) {
+async function close(state) {
   stopWorkbenchPlayer(state);
-  if (state.session) closeScenarioLiveSession(state.wasm);
+  state.loading = true;
+  render(state);
+  try {
+    await state.worker.closeSession();
+  } catch (error) {
+    state.error = "Ошибка закрытия Worker Session: " + errorText(error);
+  }
   state.session = null;
   state.run = null;
   state.step = null;
   state.history = null;
-  state.error = null;
+  state.workerProgress = null;
+  state.workerRunActive = false;
+  state.cancelling = false;
+  state.loading = false;
   render(state);
 }
 
@@ -1266,7 +1361,10 @@ function render(state) {
       (!openSession || state.loading || state.step?.active ? " disabled" : "") +
     '>Выполнить полностью</button><button id="wb-step-start"' +
       (!openSession || state.loading || state.step?.active ? " disabled" : "") +
-    '>Начать по шагам</button><button id="wb-close"' +
+    '>Начать по шагам</button><button id="wb-cancel"' +
+      (!state.workerRunActive ? " disabled" : "") +
+    '>' + (state.cancelling ? "Отмена запрошена…" : "Отменить на границе реакции") +
+    '</button><button id="wb-close"' +
       (!openSession || state.loading ? " disabled" : "") +
     '>Закрыть</button></div>' +
     '<div class="wb-help">Готовый и ручной режим используют один и тот же манифест сценария. Изменение входов сохраняет эту же сессию и уже загруженную апамять.</div>' +
@@ -1281,11 +1379,14 @@ function render(state) {
     '<div class="wb-simple-item"><small>Текущее состояние</small><strong>' +
       esc(!status
         ? "апамять закрыта"
-        : state.step?.active
-          ? "пошаговое исполнение · реакция " + stepSnapshot.reactionCount
-          : run
-            ? "запуск №" + run.sessionRunId + " завершён"
-            : "загружено один раз · готово к выполнению") +
+        : state.workerRunActive
+          ? "Worker · завершено реакций " +
+            (state.workerProgress?.completedSteps || 0)
+          : state.step?.active
+            ? "пошаговое исполнение · реакция " + stepSnapshot.reactionCount
+            : run
+              ? "запуск №" + run.sessionRunId + " завершён"
+              : "загружено один раз · готово к выполнению") +
     '</strong></div></div>' +
     (level === "simple" ? "" :
       '<div class="wb-memory">' +
@@ -1342,10 +1443,15 @@ function render(state) {
     });
   }
   root.querySelector("#wb-scenario")?.addEventListener("change", (event) => {
-    try { loadManifest(state, Number(event.target.value)); } catch (error) {
-      state.error = "Не удалось загрузить сценарий: " + errorText(error);
-    }
-    render(state);
+    void (async () => {
+      try {
+        await loadManifest(state, Number(event.target.value));
+      } catch (error) {
+        state.error =
+          "Не удалось загрузить сценарий: " + errorText(error);
+      }
+      render(state);
+    })();
   });
   root.querySelector("#wb-preset-run")?.addEventListener("change", (event) => {
     state.presetIndex = Number(event.target.value); presetInputs(state); render(state);
@@ -1413,7 +1519,12 @@ function render(state) {
       toggleWorkbenchOverlay(state,input.dataset.overlay,input.checked);
     });
   }
-  root.querySelector("#wb-close")?.addEventListener("click", () => close(state));
+  root.querySelector("#wb-cancel")?.addEventListener("click", () => {
+    void cancelRun(state);
+  });
+  root.querySelector("#wb-close")?.addEventListener("click", () => {
+    void close(state);
+  });
   for (const button of root.querySelectorAll("[data-tab]")) {
     button.addEventListener("click", () => { state.tab = button.dataset.tab; render(state); });
   }
@@ -1422,22 +1533,37 @@ function render(state) {
 export async function mountWorkbench(root) {
   styles();
   const state = {
-    root, wasm: null, registry: { entries: [] }, manifest: { runSequence: [], inputSchema: [] },
-    scenarioIndex: 0, presetIndex: 0, inputs: {}, mode: "preset", backend: "optimized-cpu",
+    root,
+    catalogWasm: null,
+    worker: null,
+    registry: { entries: [] },
+    manifest: { runSequence: [], inputSchema: [] },
+    scenarioIndex: 0, presetIndex: 0, inputs: {}, mode: "preset",
+    backend: "optimized-cpu",
     session: null, run: null, step: null, history: null, tab: "timeline",
+    workerRunActive: false, workerProgress: null, cancelling: false,
     playerTimer: null,
     level: "simple", stage: "RESULT",
     build: { version: "загрузка", sha: "загрузка" }, loading: true, error: null,
   };
   root.innerHTML = '<div class="notice">Загрузка реальной рабочей лаборатории апамяти…</div>';
   try {
-    const loaded = await Promise.all([wasm(), buildInfo()]);
-    state.wasm = loaded[0]; state.build = loaded[1];
-    state.registry = refreshScenarioPresetRegistry(state.wasm);
-    let index = state.registry.entries.findIndex((entry) => entry.scenarioId === "mux1-lifecycle");
+    const loaded = await Promise.all([catalogWasm(), buildInfo()]);
+    state.catalogWasm = loaded[0];
+    state.build = loaded[1];
+    state.worker = new ScenarioWorkerClient();
+    await state.worker.init();
+    state.registry = refreshScenarioPresetRegistry(state.catalogWasm);
+    let index = state.registry.entries.findIndex(
+      (entry) => entry.scenarioId === "mux1-lifecycle"
+    );
     if (index < 0) index = 0;
-    loadManifest(state, index);
-    state.loading = false; render(state);
+    await loadManifest(state, index);
+    // Expose the mounted state on its own root for deterministic browser E2E
+    // and diagnostics without creating a second execution surface.
+    root.__amemoryWorkbenchState = state;
+    state.loading = false;
+    render(state);
     await open(state);
   } catch (error) {
     state.loading = false; state.error = "Не удалось запустить рабочую лабораторию: " + errorText(error); render(state);
