@@ -458,8 +458,10 @@ impl CpuRuntimeSession {
         initial: Handle,
         budget: CpuRunBudgetV1,
         observation_level: RunObservationLevel,
-    ) -> Result<CpuBoundedRunV1, CpuSessionStepError> {
-        let mut controller = self.begin_budgeted_run(initial, budget)?;
+    ) -> Result<CpuBoundedRunV1, CpuRunStopReasonV1> {
+        let mut controller = self
+            .begin_budgeted_run(initial, budget)
+            .map_err(CpuRunStopReasonV1::from_step_error)?;
         let run_id = controller.run_id();
         let links_before_run = controller.links_before_run();
         let mut steps = Vec::new();
@@ -512,6 +514,35 @@ mod tests {
             Some(CpuRunStopReasonV1::ScopeWidthBudgetExceeded),
         );
         assert_eq!(budget.resource_stop_reason(10, 15, 3), None);
+    }
+
+    #[test]
+    fn stop_reasons_are_stable_machine_values() {
+        assert_eq!(
+            serde_json::to_string(&CpuRunStopReasonV1::Quiescent).unwrap(),
+            "\"QUIESCENT\"",
+        );
+        assert_eq!(
+            serde_json::to_string(
+                &CpuRunStopReasonV1::ReactionBudgetExceeded,
+            )
+            .unwrap(),
+            "\"REACTION_BUDGET_EXCEEDED\"",
+        );
+        assert_eq!(
+            CpuRunStopReasonV1::from_step_error(
+                CpuSessionStepError::EngineFailure,
+            ),
+            CpuRunStopReasonV1::EngineFailure,
+        );
+        assert_eq!(
+            CpuRunStopReasonV1::from_step_error(
+                CpuSessionStepError::InvalidState(
+                    CpuSessionState::Quiescent,
+                ),
+            ),
+            CpuRunStopReasonV1::InvalidState,
+        );
     }
 
     #[test]
