@@ -44,6 +44,9 @@ jobs:
           node --check experiments/browser-accelerator/web/gpu-carrier.mjs
           node --check experiments/browser-accelerator/web/scenario-transport.mjs
           node --check experiments/browser-accelerator/web/scenario-presets.mjs
+          node --check experiments/browser-accelerator/web/scenario-worker.mjs
+          node --check experiments/browser-accelerator/web/scenario-worker-client.mjs
+          node --check experiments/a-circuit/tests/workbench-worker-browser-e2e.mjs
 
           node --input-type=module <<'NODE'
           import {
@@ -272,6 +275,11 @@ jobs:
             --release \
             --manifest-path experiments/a-circuit/Cargo.toml \
             --target wasm32-unknown-unknown
+
+      - name: Real browser retained Worker Session E2E
+        env:
+          AMEMORY_SOURCE_SHA: ${{ github.sha }}
+        run: node experiments/a-circuit/tests/workbench-worker-browser-e2e.mjs
 
       - name: Registry schema and uniqueness
         run: node experiments/a-circuit/tests/web-lab-registry.test.cjs
