@@ -1152,7 +1152,8 @@ Promise.all([
   const firstReactionVerification =
     verifyLiveReactionEvidence(stepReports[0].evidence);
   if (firstReactionVerification.traceConsistent !== true ||
-      firstReactionVerification.quiescent !== false) {
+      firstReactionVerification.quiescent !== false ||
+      firstReactionVerification.contexts <= 0) {
     throw new Error("#244 first reaction consistency mismatch");
   }
 
@@ -1203,6 +1204,18 @@ Promise.all([
     }
     instantiated.createdLinks[0].end =
       instantiated.createdLinks[0].handle + 1;
+  });
+  expectLiveTraceReject("Context lifecycle", (corrupted) => {
+    const activeReport = corrupted.find((report) =>
+      report.evidence.rawRuleMatches > 0
+    );
+    const index = activeReport?.evidence?.structuralFacts?.findIndex(
+      (fact) => fact.kind === "CONTEXT_COLLAPSED"
+    ) ?? -1;
+    if (index < 0) {
+      throw new Error("#245 falsifier could not find Context collapse");
+    }
+    activeReport.evidence.structuralFacts.splice(index, 1);
   });
 
   const finalStep = stepReports.at(-1);

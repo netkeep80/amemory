@@ -164,6 +164,171 @@ function verifyPublishedScope(published, scopeAfter) {
   }
 }
 
+
+function requireContextId(value, label) {
+  const id = requireUint(value, label);
+  if (id === 0) fail(label + " must be non-zero");
+  return id;
+}
+
+function verifyContextLifecycle(
+  facts,
+  matched,
+  instantiated,
+  activePublished,
+  rawRuleMatches,
+) {
+  const created = facts.filter((fact) => fact.kind === "CONTEXT_CREATED");
+  const updated = facts.filter((fact) => fact.kind === "CONTEXT_UPDATED");
+  const contextPublished = facts.filter((fact) =>
+    fact.kind === "CONTEXT_PUBLISHED");
+  const collapsed = facts.filter((fact) => fact.kind === "CONTEXT_COLLAPSED");
+
+  if (created.length !== rawRuleMatches ||
+      updated.length !== rawRuleMatches ||
+      contextPublished.length !== rawRuleMatches ||
+      collapsed.length !== rawRuleMatches) {
+    fail("Context lifecycle counts disagree with rawRuleMatches");
+  }
+  if (rawRuleMatches === 0) return 0;
+
+  const states = new Map();
+  const groupIds = new Set();
+  for (const fact of facts) {
+    if (fact.kind === "CONTEXT_CREATED") {
+      const id = requireContextId(fact.contextId, "CONTEXT_CREATED contextId");
+      const groupId = requireContextId(
+        fact.contextGroupId,
+        "CONTEXT_CREATED contextGroupId",
+      );
+      if (states.has(id)) fail("duplicate Context id " + id);
+      if (fact.parentContextId != null) {
+        fail("R1 Context must not fabricate parentContextId");
+      }
+      states.set(id, {
+        state: "CREATED",
+        groupId,
+        active: requireHandle(fact.active, "CONTEXT_CREATED active"),
+        rule: requireHandle(fact.rule, "CONTEXT_CREATED rule"),
+        outputBundleTemplate: requireHandle(
+          fact.outputBundleTemplate,
+          "CONTEXT_CREATED outputBundleTemplate",
+        ),
+        groundedBundle: null,
+        outputs: null,
+      });
+      groupIds.add(groupId);
+      continue;
+    }
+
+    if (fact.kind === "CONTEXT_UPDATED") {
+      const id = requireContextId(fact.contextId, "CONTEXT_UPDATED contextId");
+      const state = states.get(id);
+      if (!state || state.state !== "CREATED") {
+        fail("Context " + id + " updated outside CREATED state");
+      }
+      if (requireContextId(
+        fact.contextGroupId,
+        "CONTEXT_UPDATED contextGroupId",
+      ) !== state.groupId) {
+        fail("Context " + id + " changed atomic group");
+      }
+      state.groundedBundle = requireHandle(
+        fact.groundedBundle,
+        "CONTEXT_UPDATED groundedBundle",
+      );
+      state.state = "UPDATED";
+      continue;
+    }
+
+    if (fact.kind === "CONTEXT_PUBLISHED") {
+      const id = requireContextId(
+        fact.contextId,
+        "CONTEXT_PUBLISHED contextId",
+      );
+      const state = states.get(id);
+      if (!state || state.state !== "UPDATED") {
+        fail("Context " + id + " published outside UPDATED state");
+      }
+      if (requireContextId(
+        fact.contextGroupId,
+        "CONTEXT_PUBLISHED contextGroupId",
+      ) !== state.groupId) {
+        fail("Context " + id + " changed atomic group");
+      }
+      state.outputs = requireHandleArray(
+        fact.outputs,
+        "CONTEXT_PUBLISHED outputs",
+      );
+      state.state = "PUBLISHED";
+      continue;
+    }
+
+    if (fact.kind === "CONTEXT_COLLAPSED") {
+      const id = requireContextId(
+        fact.contextId,
+        "CONTEXT_COLLAPSED contextId",
+      );
+      const state = states.get(id);
+      if (!state || state.state !== "PUBLISHED") {
+        fail("Context " + id + " collapsed outside PUBLISHED state");
+      }
+      if (requireContextId(
+        fact.contextGroupId,
+        "CONTEXT_COLLAPSED contextGroupId",
+      ) !== state.groupId) {
+        fail("Context " + id + " changed atomic group");
+      }
+      state.state = "COLLAPSED";
+    }
+  }
+
+  if (states.size !== rawRuleMatches ||
+      [...states.values()].some((state) => state.state !== "COLLAPSED")) {
+    fail("not every Context completed create/update/publish/collapse");
+  }
+  if (groupIds.size !== 1) {
+    fail("sibling Contexts do not share one atomic reaction group");
+  }
+
+  const createdKeys = countByKey(created, (fact) =>
+    requireHandle(fact.active, "CONTEXT_CREATED active") + ":" +
+    requireHandle(fact.rule, "CONTEXT_CREATED rule"));
+  const matchedKeys = countByKey(matched, (fact) =>
+    requireHandle(fact.active, "RULE_MATCHED active") + ":" +
+    requireHandle(fact.rule, "RULE_MATCHED rule"));
+  if (!sameCounts(createdKeys, matchedKeys)) {
+    fail("Context creation does not match RuleMatched identities");
+  }
+
+  const contextGroundedKeys = countByKey(
+    [...states.values()],
+    (state) => state.active + ":" + state.rule + ":" + state.groundedBundle,
+  );
+  const instantiatedKeys = countByKey(instantiated, (fact) =>
+    requireHandle(fact.active, "INSTANTIATED active") + ":" +
+    requireHandle(fact.rule, "INSTANTIATED rule") + ":" +
+    requireHandle(fact.groundedBundle, "INSTANTIATED groundedBundle"));
+  if (!sameCounts(contextGroundedKeys, instantiatedKeys)) {
+    fail("Context grounding disagrees with persistent instantiation");
+  }
+
+  const contextPublishKeys = countByKey(
+    [...states.values()],
+    (state) => state.active + ":" + state.rule + ":" +
+      JSON.stringify(state.outputs),
+  );
+  const persistentPublishKeys = countByKey(activePublished, (fact) =>
+    requireHandle(fact.active, "PUBLISHED active") + ":" +
+    requireHandle(fact.rule, "PUBLISHED rule") + ":" +
+    JSON.stringify(requireHandleArray(fact.outputs, "PUBLISHED outputs")));
+  if (!sameCounts(contextPublishKeys, persistentPublishKeys)) {
+    fail("Context publication disagrees with persistent publication");
+  }
+
+  return states.size;
+}
+
 export function verifyLiveReactionEvidence(rawEvidence) {
   const evidence = requireObject(rawEvidence, "evidence");
   if (evidence.schemaVersion !== TRACE_VERIFIER_SCHEMA_VERSION) {
@@ -193,8 +358,12 @@ export function verifyLiveReactionEvidence(rawEvidence) {
   const allowedKinds = new Set([
     "DISCOVERY_COMPLETE",
     "RULE_MATCHED",
+    "CONTEXT_CREATED",
     "INSTANTIATED",
+    "CONTEXT_UPDATED",
     "PUBLISHED",
+    "CONTEXT_PUBLISHED",
+    "CONTEXT_COLLAPSED",
     "SCOPE_COMMITTED",
   ]);
   for (const fact of facts) {
@@ -248,6 +417,13 @@ export function verifyLiveReactionEvidence(rawEvidence) {
     requireHandle(fact.active, "INSTANTIATED active") + ":" +
     requireHandle(fact.rule, "INSTANTIATED rule"));
   const activePublished = published.filter((fact) => fact.preserved === false);
+  const contextCount = verifyContextLifecycle(
+    facts,
+    matched,
+    instantiated,
+    activePublished,
+    rawRuleMatches,
+  );
   const publishedKeys = countByKey(activePublished, (fact) =>
     requireHandle(fact.active, "PUBLISHED active") + ":" +
     requireHandle(fact.rule, "PUBLISHED rule"));
@@ -298,6 +474,7 @@ export function verifyLiveReactionEvidence(rawEvidence) {
   return {
     schemaVersion: TRACE_VERIFIER_SCHEMA_VERSION,
     traceConsistent: true,
+    contexts: contextCount,
     createdLinks,
     publishedFacts: published.length,
     scopeWidthBefore: scopeBefore.length,
