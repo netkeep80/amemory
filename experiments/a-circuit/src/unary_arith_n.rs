@@ -918,7 +918,9 @@ fn persistent_unary32_session_lifecycle_all_ops(){
             }
 
             let execute=execute_session_to_quiescence(
-                &mut session,initial,64,
+                &mut session,
+                initial,
+                oracle_program.active_steps as u32 + 2,
             ).expect("execute UNARY32");
             assert!(execute.final_quiescent);
             assert_eq!(session.memory.id,memory_id);
