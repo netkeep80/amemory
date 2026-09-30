@@ -1124,6 +1124,8 @@ pub struct OptimizedStructuralEngine {
     quiescent: bool,
     metadata_store_instance: Option<u32>,
     rule_metadata_cache: HashMap<Handle, CompiledRuleMetadata>,
+    next_context_id: u32,
+    next_context_group_id: u32,
 }
 
 impl OptimizedStructuralEngine {
@@ -1140,6 +1142,8 @@ impl OptimizedStructuralEngine {
             quiescent: false,
             metadata_store_instance: None,
             rule_metadata_cache: HashMap::new(),
+            next_context_id: 1,
+            next_context_group_id: 1,
         }
     }
 
@@ -1253,11 +1257,11 @@ impl OptimizedStructuralEngine {
         // Phase 1 is strictly read-only. Borrow only dense carrier/index
         // slices, not canonical HashMaps, and discover every old Scope member
         // before publication can append a Link.
-        // R1 Context identity is local to one atomic reaction. It is not a
-        // persistent Link identity. All sibling firings in this reaction share
-        // one group id; observer order among siblings carries no semantics.
-        let mut next_context_id = 1u32;
-        let context_group_id = 1u32;
+        // R1 Context identity is runtime/session-local and never a persistent
+        // A-memory Link identity. Sibling firings in one successful reaction
+        // share one group id; failed reactions do not consume committed ids.
+        let mut next_context_id = self.next_context_id;
+        let context_group_id = self.next_context_group_id;
         let discovered = {
             let execution_view = store.packed_execution_ref();
             let authority =
@@ -1492,6 +1496,17 @@ impl OptimizedStructuralEngine {
                     return Err(error);
                 }
             };
+
+        // Context identity is committed atomically with the successful
+        // reaction. A rejected reaction therefore consumes no runtime ids.
+        if raw_rule_matches > 0 {
+            self.next_context_id = next_context_id;
+            self.next_context_group_id = context_group_id
+                .checked_add(1)
+                .ok_or(StructuralError::Store(
+                    StoreError::CapacityExceeded,
+                ))?;
+        }
 
         // Engine-visible state commits only after the Store transaction has
         // completed. A rejected reaction therefore preserves both physical
@@ -2182,8 +2197,8 @@ mod tests {
         assert!(trace.events.iter().any(|event| matches!(
             event,
             StructuralTraceEvent::ContextCollapsed {
-                context_id: 1,
-                context_group_id: 1,
+                context_id: 2,
+                context_group_id: 2,
             }
         )));
         assert!(trace.events.iter().any(|event| matches!(
@@ -2300,8 +2315,8 @@ mod tests {
         assert!(reused_trace.events.iter().any(|event| matches!(
             event,
             StructuralTraceEvent::ContextCreated {
-                context_id: 1,
-                context_group_id: 1,
+                context_id: 2,
+                context_group_id: 2,
                 ..
             }
         )));
