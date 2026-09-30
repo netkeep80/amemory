@@ -3387,6 +3387,14 @@ Promise.all([
       );
     }
   }
+  if ((memoryProof.execute.linksBeforeExecute >>> 0) <=
+        (memoryProof.load.linksAfterLoad >>> 0) ||
+      (memoryProof.execute.reactions[0]?.scopeBefore?.[0] ?? 0) >
+        (memoryProof.execute.linksBeforeExecute >>> 0)) {
+    throw new Error(
+      "M6a CONFIGURE/EXECUTE persistent-Link boundary mismatch"
+    );
+  }
   const oldRootRef = memoryPayloadM6aFinal.oldRoot >>> 0;
   const newRootRef = memoryPayloadM6aFinal.newRoot >>> 0;
   if (oldRootRef !== memoryRoles.get("memory.zero_root").carrierRef ||
