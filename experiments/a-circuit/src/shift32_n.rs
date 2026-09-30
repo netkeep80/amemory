@@ -8,11 +8,23 @@ use super::{
     },
     logic_n::{GateSet, LogicProgram},
     proof_n::{
-        execute_session_to_quiescence, execute_to_quiescence,
-        identical_rerun, load_runtime, load_runtime_session, loaded_handle,
-        prepare_stage, semantic_source, theory_admissions, visual_snapshot,
-        ProofRuntimeMemory, ProofRuntimeSession, WebProofLoadStage,
-        WebProofPrepareStage, WebProofResultStage, WebStructuralProof,
+        execute_session_to_quiescence,
+        execute_to_quiescence,
+        identical_rerun,
+        load_runtime,
+        load_runtime_session,
+        loaded_handle,
+        prepare_stage,
+        semantic_source,
+        theory_admissions,
+        visual_snapshot,
+        WebProofLoadStage,
+        WebProofPrepareStage,
+        WebProofResultStage,
+        WebStructuralProof,
+    },
+    runtime_session::{
+        CpuMemoryInstance, CpuRuntimeSession
     },
 };
 use amemory_optimized_cpu_probe::{
@@ -1264,7 +1276,7 @@ fn web_flag_masks(states: [(u32, FlagState); 6]) -> (u32, u32, u32, u32) {
 }
 
 fn runtime_shift_bit(
-    memory: &ProofRuntimeMemory,
+    memory: &CpuMemoryInstance,
     value: Handle,
     zero: Handle,
     one: Handle,
@@ -1280,7 +1292,7 @@ fn runtime_shift_bit(
 }
 
 fn runtime_shift_word(
-    memory: &ProofRuntimeMemory,
+    memory: &CpuMemoryInstance,
     word: Handle,
     zero: Handle,
     one: Handle,
@@ -1297,7 +1309,7 @@ fn runtime_shift_word(
 }
 
 fn runtime_shift_action(
-    memory: &ProofRuntimeMemory,
+    memory: &CpuMemoryInstance,
     action: Handle,
     set_tag: Handle,
     undefined_tag: Handle,
@@ -1327,7 +1339,7 @@ fn runtime_shift_action(
 
 #[allow(clippy::too_many_arguments)]
 fn decode_runtime_shift_effect(
-    memory: &ProofRuntimeMemory,
+    memory: &CpuMemoryInstance,
     final_link: Handle,
     caller: Handle,
     result_tag: Handle,
@@ -1478,7 +1490,7 @@ fn shift32_function_role(op: u32) -> Option<&'static str> {
 }
 
 pub(crate) fn configure_shift32_session(
-    session: &mut ProofRuntimeSession,
+    session: &mut CpuRuntimeSession,
     load: &WebProofLoadStage,
     op: u32,
     value: u32,
@@ -1517,7 +1529,7 @@ pub(crate) fn configure_shift32_session(
 }
 
 pub(crate) fn project_shift32_session_result(
-    session: &ProofRuntimeSession,
+    session: &CpuRuntimeSession,
     load: &WebProofLoadStage,
 ) -> Option<Shift32SessionProjection> {
     if session.engine.current().len() != 1 {
@@ -1583,7 +1595,7 @@ pub(crate) fn prepare_shl32_session_program(
 }
 
 pub(crate) fn configure_shl32_session(
-    session: &mut ProofRuntimeSession,
+    session: &mut CpuRuntimeSession,
     load: &WebProofLoadStage,
     value: u32,
     count: u8,
@@ -1592,7 +1604,7 @@ pub(crate) fn configure_shl32_session(
 }
 
 pub(crate) fn project_shl32_session_result(
-    session: &ProofRuntimeSession,
+    session: &CpuRuntimeSession,
     load: &WebProofLoadStage,
 ) -> Option<Shl32SessionProjection> {
     project_shift32_session_result(session, load)
