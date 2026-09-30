@@ -1,0 +1,281 @@
+{
+  "schemaVersion": 1,
+  "scenarioId": "neg32-lifecycle",
+  "scenarioVersion": "1.0.0",
+  "title": "NEG32: граничные значения в одной апамяти",
+  "description": "Одна статическая асеть UNARY32 загружается один раз; NEG32 выбирается каноническим профилем, VALUE публикуется связями Links для последовательных запусков. NEG определяет полный арифметический набор флагов.",
+  "programProfile": {
+    "profileId": "a-circuit:unary-neg32",
+    "family": "unary-arithmetic-effect",
+    "programId": "neg32",
+    "asetSource": "builtin:a-circuit/unary32/neg"
+  },
+  "inputSchema": [
+    {
+      "key": "VALUE",
+      "type": "WORD32",
+      "description": "32-битный операнд NEG32",
+      "default": "0x00000000"
+    }
+  ],
+  "initialInputs": {
+    "VALUE": "0x00000000"
+  },
+  "runSequence": [
+    {
+      "runId": "run-1-zero",
+      "inputs": {
+        "VALUE": "0x00000000"
+      },
+      "executionMode": "TO_QUIESCENCE",
+      "maxReactions": 1024,
+      "assertions": [
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "value",
+          "expected": "0x00000000"
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "writeback",
+          "expected": 1
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "definedMask",
+          "expected": "0x000008d5"
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "valueMask",
+          "expected": "0x00000044"
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "undefinedMask",
+          "expected": "0x00000000"
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "preserveMask",
+          "expected": "0x00000000"
+        },
+        {
+          "kind": "QUIESCENT_EQUALS",
+          "expected": true
+        },
+        {
+          "kind": "REACTION_COUNT_EQUALS",
+          "expected": 609
+        }
+      ]
+    },
+    {
+      "runId": "run-2-one",
+      "inputs": {
+        "VALUE": "0x00000001"
+      },
+      "executionMode": "TO_QUIESCENCE",
+      "maxReactions": 1024,
+      "assertions": [
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "value",
+          "expected": "0xffffffff"
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "writeback",
+          "expected": 1
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "definedMask",
+          "expected": "0x000008d5"
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "valueMask",
+          "expected": "0x00000095"
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "undefinedMask",
+          "expected": "0x00000000"
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "preserveMask",
+          "expected": "0x00000000"
+        },
+        {
+          "kind": "QUIESCENT_EQUALS",
+          "expected": true
+        },
+        {
+          "kind": "REACTION_COUNT_EQUALS",
+          "expected": 609
+        }
+      ]
+    },
+    {
+      "runId": "run-3-signed-min",
+      "inputs": {
+        "VALUE": "0x80000000"
+      },
+      "executionMode": "TO_QUIESCENCE",
+      "maxReactions": 1024,
+      "assertions": [
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "value",
+          "expected": "0x80000000"
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "writeback",
+          "expected": 1
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "definedMask",
+          "expected": "0x000008d5"
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "valueMask",
+          "expected": "0x00000885"
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "undefinedMask",
+          "expected": "0x00000000"
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "preserveMask",
+          "expected": "0x00000000"
+        },
+        {
+          "kind": "QUIESCENT_EQUALS",
+          "expected": true
+        },
+        {
+          "kind": "REACTION_COUNT_EQUALS",
+          "expected": 609
+        }
+      ]
+    },
+    {
+      "runId": "run-4-minus-one",
+      "inputs": {
+        "VALUE": "0xffffffff"
+      },
+      "executionMode": "TO_QUIESCENCE",
+      "maxReactions": 1024,
+      "assertions": [
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "value",
+          "expected": "0x00000001"
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "writeback",
+          "expected": 1
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "definedMask",
+          "expected": "0x000008d5"
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "valueMask",
+          "expected": "0x00000011"
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "undefinedMask",
+          "expected": "0x00000000"
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "preserveMask",
+          "expected": "0x00000000"
+        },
+        {
+          "kind": "QUIESCENT_EQUALS",
+          "expected": true
+        },
+        {
+          "kind": "REACTION_COUNT_EQUALS",
+          "expected": 609
+        }
+      ]
+    },
+    {
+      "runId": "run-5-return-first",
+      "inputs": {
+        "VALUE": "0x00000000"
+      },
+      "executionMode": "TO_QUIESCENCE",
+      "maxReactions": 1024,
+      "assertions": [
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "value",
+          "expected": "0x00000000"
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "writeback",
+          "expected": 1
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "definedMask",
+          "expected": "0x000008d5"
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "valueMask",
+          "expected": "0x00000044"
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "undefinedMask",
+          "expected": "0x00000000"
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "preserveMask",
+          "expected": "0x00000000"
+        },
+        {
+          "kind": "QUIESCENT_EQUALS",
+          "expected": true
+        },
+        {
+          "kind": "REACTION_COUNT_EQUALS",
+          "expected": 609
+        }
+      ]
+    }
+  ],
+  "supportedBackends": [
+    "optimized-cpu"
+  ],
+  "oraclePolicy": "FRESH_INSTANCE",
+  "invariants": [
+    "prepare-once",
+    "load-once",
+    "same-session",
+    "link-only-reconfiguration",
+    "unary-flags",
+    "return-to-first-configuration"
+  ],
+  "observationLevel": "PROFILE",
+  "profilingPolicy": "FULL",
+  "visualizationProfile": "engineering"
+}

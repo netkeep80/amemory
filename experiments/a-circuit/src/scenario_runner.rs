@@ -988,6 +988,12 @@ mod tests {
         include_str!("../scenarios/rcl32-lifecycle-v1.json");
     const RCR32_LIFECYCLE: &str =
         include_str!("../scenarios/rcr32-lifecycle-v1.json");
+    const INC32_LIFECYCLE: &str =
+        include_str!("../scenarios/inc32-lifecycle-v1.json");
+    const DEC32_LIFECYCLE: &str =
+        include_str!("../scenarios/dec32-lifecycle-v1.json");
+    const NEG32_LIFECYCLE: &str =
+        include_str!("../scenarios/neg32-lifecycle-v1.json");
     const MUL32_LIFECYCLE: &str =
         include_str!("../scenarios/mul32-lifecycle-v1.json");
     const RADIX_MEMORY8_LIFECYCLE: &str =
@@ -1810,6 +1816,45 @@ mod tests {
             assert_eq!(report.runs[0].result, report.runs[6].result);
             assert!(
                 report.runs[6].configuration_reused,
+                "{} return-to-first must reuse canonical Links",
+                manifest.scenario_id,
+            );
+        }
+    }
+
+    #[test]
+    fn canonical_unary32_family_manifests_share_one_session_model() {
+        for source in [
+            INC32_LIFECYCLE,
+            DEC32_LIFECYCLE,
+            NEG32_LIFECYCLE,
+        ] {
+            let manifest = parse_and_validate_manifest_v1(source).unwrap();
+            let report = run_scenario_manifest_v1(
+                &manifest,
+                ScenarioBackendV1::OptimizedCpu,
+            )
+            .unwrap();
+
+            assert!(report.overall_pass, "{}", manifest.scenario_id);
+            assert_eq!(report.runs.len(), 5, "{}", manifest.scenario_id);
+            assert!(report.runs.iter().all(|run| {
+                run.observed.session_id == report.session_id
+                    && run.observed.active_reaction_count == 609
+                    && run.observed.final_quiescent
+                    && run.oracle_matches == Some(true)
+                    && run.fresh_instance_matches == Some(true)
+                    && run.scalar_oracle_matches
+            }), "{}", manifest.scenario_id);
+
+            assert_eq!(
+                report.runs[0].result,
+                report.runs[4].result,
+                "{} return-to-first result",
+                manifest.scenario_id,
+            );
+            assert!(
+                report.runs[4].configuration_reused,
                 "{} return-to-first must reuse canonical Links",
                 manifest.scenario_id,
             );
