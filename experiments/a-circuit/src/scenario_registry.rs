@@ -16,6 +16,10 @@ const PRESET_SOURCES: &[&str] = &[
     include_str!("../scenarios/shl32-lifecycle-v1.json"),
     include_str!("../scenarios/mul32-lifecycle-v1.json"),
     include_str!("../scenarios/radix-memory8-lifecycle-v1.json"),
+    include_str!("../scenarios/and32-lifecycle-v1.json"),
+    include_str!("../scenarios/or32-lifecycle-v1.json"),
+    include_str!("../scenarios/not32-lifecycle-v1.json"),
+    include_str!("../scenarios/test32-lifecycle-v1.json"),
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -175,7 +179,7 @@ mod tests {
     fn registry_summary_is_derived_from_canonical_mux1_manifest() {
         let registry = load_preset_registry_v1().unwrap();
         assert_eq!(registry.schema_version, 1);
-        assert_eq!(registry.entries.len(), 6);
+        assert_eq!(registry.entries.len(), 10);
 
         let source = preset_manifest_source_by_index_v1(0).unwrap();
         let manifest = parse_and_validate_manifest_v1(source).unwrap();
@@ -231,6 +235,37 @@ mod tests {
         assert_eq!(summary.family, "logic-effect");
         assert_eq!(summary.program_id, "xor32");
         assert_eq!(summary.run_count, 4);
+    }
+
+    #[test]
+    fn registry_resolves_complete_logic32_family() {
+        let registry = load_preset_registry_v1().unwrap();
+        for (scenario_id, profile_id, program_id, inputs) in [
+            ("and32-lifecycle", "a-circuit:logic-and32", "and32", 2usize),
+            ("or32-lifecycle", "a-circuit:logic-or32", "or32", 2usize),
+            ("xor32-lifecycle", "a-circuit:logic-xor32", "xor32", 2usize),
+            ("not32-lifecycle", "a-circuit:logic-not32", "not32", 1usize),
+            ("test32-lifecycle", "a-circuit:logic-test32", "test32", 2usize),
+        ] {
+            let source =
+                preset_manifest_source_v1(scenario_id, "1.0.0").unwrap();
+            let manifest = parse_and_validate_manifest_v1(source).unwrap();
+            assert_eq!(manifest.program_profile.profile_id, profile_id);
+            assert_eq!(manifest.program_profile.program_id, program_id);
+            assert_eq!(manifest.input_schema.len(), inputs);
+            assert_eq!(manifest.run_sequence.len(), 4);
+
+            let summary = registry
+                .entries
+                .iter()
+                .find(|entry| entry.scenario_id == scenario_id)
+                .unwrap();
+            assert_eq!(summary.program_profile_id, profile_id);
+            assert_eq!(summary.family, "logic-effect");
+            assert_eq!(summary.program_id, program_id);
+            assert_eq!(summary.run_count, 4);
+            assert_eq!(summary.input_schema.len(), inputs);
+        }
     }
 
     #[test]
