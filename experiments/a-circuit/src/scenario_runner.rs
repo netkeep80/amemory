@@ -4,8 +4,8 @@ use super::{
         project_add32_session_result, web_prove_arithmetic,
     },
     logic_effect_n::{
-        configure_xor32_session, prepare_xor32_session_program,
-        project_xor32_session_result, web_prove_logic,
+        configure_logic32_session, prepare_logic32_session_program,
+        project_logic32_session_result, web_prove_logic,
     },
     memory_n::{
         configure_radix_memory_session,
@@ -65,16 +65,25 @@ type FreshInstanceFn = fn(
 type ScalarOracleFn =
     fn(&BTreeMap<String, Value>) -> Result<BTreeMap<String, Value>, String>;
 
+enum CpuScenarioImplementation {
+    Direct {
+        prepare: PrepareFn,
+        configure: ConfigureFn,
+        project: ProjectFn,
+        fresh_instance: FreshInstanceFn,
+        scalar_oracle: ScalarOracleFn,
+    },
+    Logic32 {
+        op: u32,
+    },
+}
+
 struct CpuScenarioAdapter {
     profile_id: &'static str,
     family: &'static str,
     program_id: &'static str,
     aset_source: &'static str,
-    prepare: PrepareFn,
-    configure: ConfigureFn,
-    project: ProjectFn,
-    fresh_instance: FreshInstanceFn,
-    scalar_oracle: ScalarOracleFn,
+    implementation: CpuScenarioImplementation,
 }
 
 impl CpuScenarioAdapter {
@@ -84,6 +93,74 @@ impl CpuScenarioAdapter {
             family: self.family.to_owned(),
             program_id: self.program_id.to_owned(),
             aset_source: self.aset_source.to_owned(),
+        }
+    }
+
+    fn prepare(&self) -> Option<WebProofPrepareStage> {
+        match self.implementation {
+            CpuScenarioImplementation::Direct { prepare, .. } => prepare(),
+            CpuScenarioImplementation::Logic32 { op } => {
+                prepare_logic32_session_program(op)
+            }
+        }
+    }
+
+    fn configure(
+        &self,
+        session: &mut ProofRuntimeSession,
+        load: &WebProofLoadStage,
+        inputs: &BTreeMap<String, Value>,
+    ) -> Result<ConfiguredRun, String> {
+        match self.implementation {
+            CpuScenarioImplementation::Direct { configure, .. } => {
+                configure(session, load, inputs)
+            }
+            CpuScenarioImplementation::Logic32 { op } => {
+                configure_logic32_from_inputs(op, session, load, inputs)
+            }
+        }
+    }
+
+    fn project(
+        &self,
+        session: &ProofRuntimeSession,
+        load: &WebProofLoadStage,
+    ) -> Result<ScenarioNormalizedResultV1, String> {
+        match self.implementation {
+            CpuScenarioImplementation::Direct { project, .. } => {
+                project(session, load)
+            }
+            CpuScenarioImplementation::Logic32 { .. } => {
+                project_logic32_result(session, load)
+            }
+        }
+    }
+
+    fn fresh_instance(
+        &self,
+        inputs: &BTreeMap<String, Value>,
+    ) -> Result<ScenarioNormalizedResultV1, String> {
+        match self.implementation {
+            CpuScenarioImplementation::Direct {
+                fresh_instance, ..
+            } => fresh_instance(inputs),
+            CpuScenarioImplementation::Logic32 { op } => {
+                fresh_instance_logic32_result(op, inputs)
+            }
+        }
+    }
+
+    fn scalar_oracle(
+        &self,
+        inputs: &BTreeMap<String, Value>,
+    ) -> Result<BTreeMap<String, Value>, String> {
+        match self.implementation {
+            CpuScenarioImplementation::Direct {
+                scalar_oracle, ..
+            } => scalar_oracle(inputs),
+            CpuScenarioImplementation::Logic32 { op } => {
+                scalar_logic32_result(op, inputs)
+            }
         }
     }
 }
@@ -121,66 +198,100 @@ const CPU_SCENARIO_ADAPTERS: &[CpuScenarioAdapter] = &[
         family: "mux",
         program_id: "mux1",
         aset_source: "builtin:a-circuit/mux1",
-        prepare: prepare_mux1_session_program,
-        configure: configure_mux1_from_inputs,
-        project: project_mux1_result,
-        fresh_instance: fresh_instance_mux1_result,
-        scalar_oracle: scalar_mux1_result,
+        implementation: CpuScenarioImplementation::Direct {
+            prepare: prepare_mux1_session_program,
+            configure: configure_mux1_from_inputs,
+            project: project_mux1_result,
+            fresh_instance: fresh_instance_mux1_result,
+            scalar_oracle: scalar_mux1_result,
+        },
+    },
+    CpuScenarioAdapter {
+        profile_id: "a-circuit:logic-and32",
+        family: "logic-effect",
+        program_id: "and32",
+        aset_source: "builtin:a-circuit/logic-effect/and32",
+        implementation: CpuScenarioImplementation::Logic32 { op: 1 },
+    },
+    CpuScenarioAdapter {
+        profile_id: "a-circuit:logic-or32",
+        family: "logic-effect",
+        program_id: "or32",
+        aset_source: "builtin:a-circuit/logic-effect/or32",
+        implementation: CpuScenarioImplementation::Logic32 { op: 2 },
     },
     CpuScenarioAdapter {
         profile_id: "a-circuit:logic-xor32",
         family: "logic-effect",
         program_id: "xor32",
         aset_source: "builtin:a-circuit/logic-effect/xor32",
-        prepare: prepare_xor32_session_program,
-        configure: configure_xor32_from_inputs,
-        project: project_xor32_result,
-        fresh_instance: fresh_instance_xor32_result,
-        scalar_oracle: scalar_xor32_result,
+        implementation: CpuScenarioImplementation::Logic32 { op: 3 },
+    },
+    CpuScenarioAdapter {
+        profile_id: "a-circuit:logic-not32",
+        family: "logic-effect",
+        program_id: "not32",
+        aset_source: "builtin:a-circuit/logic-effect/not32",
+        implementation: CpuScenarioImplementation::Logic32 { op: 4 },
+    },
+    CpuScenarioAdapter {
+        profile_id: "a-circuit:logic-test32",
+        family: "logic-effect",
+        program_id: "test32",
+        aset_source: "builtin:a-circuit/logic-effect/test32",
+        implementation: CpuScenarioImplementation::Logic32 { op: 5 },
     },
     CpuScenarioAdapter {
         profile_id: "a-circuit:arithmetic-add32",
         family: "arithmetic-effect",
         program_id: "add32",
         aset_source: "builtin:a-circuit/arithmetic-effect/add32",
-        prepare: prepare_add32_session_program,
-        configure: configure_add32_from_inputs,
-        project: project_add32_result,
-        fresh_instance: fresh_instance_add32_result,
-        scalar_oracle: scalar_add32_result,
+        implementation: CpuScenarioImplementation::Direct {
+            prepare: prepare_add32_session_program,
+            configure: configure_add32_from_inputs,
+            project: project_add32_result,
+            fresh_instance: fresh_instance_add32_result,
+            scalar_oracle: scalar_add32_result,
+        },
     },
     CpuScenarioAdapter {
         profile_id: "a-circuit:shift-shl32",
         family: "shift-effect",
         program_id: "shl32",
         aset_source: "builtin:a-circuit/shift32/shl",
-        prepare: prepare_shl32_session_program,
-        configure: configure_shl32_from_inputs,
-        project: project_shl32_result,
-        fresh_instance: fresh_instance_shl32_result,
-        scalar_oracle: scalar_shl32_result,
+        implementation: CpuScenarioImplementation::Direct {
+            prepare: prepare_shl32_session_program,
+            configure: configure_shl32_from_inputs,
+            project: project_shl32_result,
+            fresh_instance: fresh_instance_shl32_result,
+            scalar_oracle: scalar_shl32_result,
+        },
     },
     CpuScenarioAdapter {
         profile_id: "a-circuit:mul32",
         family: "mul",
         program_id: "mul32",
         aset_source: "builtin:a-circuit/mul32",
-        prepare: prepare_mul32_session_program,
-        configure: configure_mul32_from_inputs,
-        project: project_mul32_result,
-        fresh_instance: fresh_instance_mul32_result,
-        scalar_oracle: scalar_mul32_result,
+        implementation: CpuScenarioImplementation::Direct {
+            prepare: prepare_mul32_session_program,
+            configure: configure_mul32_from_inputs,
+            project: project_mul32_result,
+            fresh_instance: fresh_instance_mul32_result,
+            scalar_oracle: scalar_mul32_result,
+        },
     },
     CpuScenarioAdapter {
         profile_id: "a-circuit:memory-radix8",
         family: "memory",
         program_id: "radix-page8",
         aset_source: "builtin:a-circuit/memory-radix8",
-        prepare: prepare_radix_memory_session_program,
-        configure: configure_radix_memory_from_inputs,
-        project: project_radix_memory_result,
-        fresh_instance: fresh_instance_radix_memory_result,
-        scalar_oracle: scalar_radix_memory_result,
+        implementation: CpuScenarioImplementation::Direct {
+            prepare: prepare_radix_memory_session_program,
+            configure: configure_radix_memory_from_inputs,
+            project: project_radix_memory_result,
+            fresh_instance: fresh_instance_radix_memory_result,
+            scalar_oracle: scalar_radix_memory_result,
+        },
     },
 ];
 
@@ -539,7 +650,7 @@ pub(crate) fn open_cpu_scenario_session_v1(
     let adapter = resolve_cpu_scenario_adapter(&manifest.program_profile)?;
     let program_profile = adapter.canonical_program_profile();
 
-    let (prepare, prepare_ns) = time_stage(|| (adapter.prepare)());
+    let (prepare, prepare_ns) = time_stage(|| adapter.prepare());
     let prepare = prepare.ok_or_else(|| {
         ScenarioRunnerErrorV1::PrepareFailed {
             profile_id: manifest.program_profile.profile_id.clone(),
@@ -638,7 +749,7 @@ pub(crate) fn run_cpu_scenario_session_once_v1(
 
     let adapter = live.adapter;
     let (configured, configure_ns) =
-        time_stage(|| (adapter.configure)(
+        time_stage(|| adapter.configure(
             &mut live.session,
             &live.load,
             &run.inputs,
@@ -663,7 +774,7 @@ pub(crate) fn run_cpu_scenario_session_once_v1(
 
     let links_before_result = live.session.memory.store.link_count();
     let (projected, result_ns) =
-        time_stage(|| (adapter.project)(&live.session, &live.load));
+        time_stage(|| adapter.project(&live.session, &live.load));
     let result = projected.map_err(|message| {
         ScenarioRunnerErrorV1::ProjectResultFailed {
             run_id: run.run_id.clone(),
@@ -685,7 +796,7 @@ pub(crate) fn run_cpu_scenario_session_once_v1(
     // ordinary host integers. They do not call the structural executor,
     // inspect the Link Store, consume trace data, or reproduce recursive wire.
     let scalar_oracle =
-        (adapter.scalar_oracle)(&run.inputs).map_err(|message| {
+        adapter.scalar_oracle(&run.inputs).map_err(|message| {
             ScenarioRunnerErrorV1::OracleFailed {
                 run_id: run.run_id.clone(),
                 message,
@@ -699,7 +810,7 @@ pub(crate) fn run_cpu_scenario_session_once_v1(
     let fresh_instance_matches = match live.manifest.oracle_policy {
         ScenarioOraclePolicyV1::FreshInstance => {
             let fresh =
-                (adapter.fresh_instance)(&run.inputs).map_err(|message| {
+                adapter.fresh_instance(&run.inputs).map_err(|message| {
                     ScenarioRunnerErrorV1::OracleFailed {
                         run_id: run.run_id.clone(),
                         message,
@@ -791,7 +902,7 @@ pub(crate) fn begin_cpu_scenario_step_run_v1(
     }
     ensure_cpu_session_configurable(live, &run.run_id)?;
 
-    let configured = (live.adapter.configure)(
+    let configured = live.adapter.configure(
         &mut live.session,
         &live.load,
         &run.inputs,
@@ -883,7 +994,7 @@ pub(crate) fn step_cpu_scenario_session_v1(
 
     let finalized = (|| {
         let links_before_result = live.session.memory.store.link_count();
-        let result = (live.adapter.project)(&live.session, &live.load)
+        let result = live.adapter.project(&live.session, &live.load)
             .map_err(|message| {
                 ScenarioRunnerErrorV1::ProjectResultFailed {
                     run_id: active.run.run_id.clone(),
@@ -906,7 +1017,7 @@ pub(crate) fn step_cpu_scenario_session_v1(
         );
 
         let scalar_oracle =
-            (live.adapter.scalar_oracle)(&active.run.inputs).map_err(
+            live.adapter.scalar_oracle(&active.run.inputs).map_err(
                 |message| ScenarioRunnerErrorV1::OracleFailed {
                     run_id: active.run.run_id.clone(),
                     message,
@@ -916,7 +1027,7 @@ pub(crate) fn step_cpu_scenario_session_v1(
 
         let fresh_instance_matches = match live.manifest.oracle_policy {
             ScenarioOraclePolicyV1::FreshInstance => {
-                let fresh = (live.adapter.fresh_instance)(
+                let fresh = live.adapter.fresh_instance(
                     &active.run.inputs,
                 )
                 .map_err(|message| ScenarioRunnerErrorV1::OracleFailed {
@@ -1222,16 +1333,29 @@ fn wide64_normalized(
     }
 }
 
-fn configure_xor32_from_inputs(
+fn logic32_inputs(
+    op: u32,
+    inputs: &BTreeMap<String, Value>,
+) -> Result<(u32, u32), String> {
+    let a = word32_input(inputs, "A")?;
+    let b = if op == 4 {
+        0
+    } else {
+        word32_input(inputs, "B")?
+    };
+    Ok((a, b))
+}
+
+fn configure_logic32_from_inputs(
+    op: u32,
     session: &mut ProofRuntimeSession,
     load: &WebProofLoadStage,
     inputs: &BTreeMap<String, Value>,
 ) -> Result<ConfiguredRun, String> {
-    let a = word32_input(inputs, "A")?;
-    let b = word32_input(inputs, "B")?;
+    let (a, b) = logic32_inputs(op, inputs)?;
     let (initial, before, after) =
-        configure_xor32_session(session, load, a, b)
-            .ok_or_else(|| "XOR32 configuration failed".to_owned())?;
+        configure_logic32_session(session, load, op, a, b)
+            .ok_or_else(|| format!("Logic32 op {op} configuration failed"))?;
     Ok(ConfiguredRun {
         initial,
         links_before: before as u32,
@@ -1239,12 +1363,12 @@ fn configure_xor32_from_inputs(
     })
 }
 
-fn project_xor32_result(
+fn project_logic32_result(
     session: &ProofRuntimeSession,
     load: &WebProofLoadStage,
 ) -> Result<ScenarioNormalizedResultV1, String> {
-    let projected = project_xor32_session_result(session, load)
-        .ok_or_else(|| "XOR32 result projection failed".to_owned())?;
+    let projected = project_logic32_session_result(session, load)
+        .ok_or_else(|| "Logic32 result projection failed".to_owned())?;
     Ok(effect32_normalized(
         projected.value,
         projected.writeback,
@@ -1256,13 +1380,13 @@ fn project_xor32_result(
     ))
 }
 
-fn fresh_instance_xor32_result(
+fn fresh_instance_logic32_result(
+    op: u32,
     inputs: &BTreeMap<String, Value>,
 ) -> Result<ScenarioNormalizedResultV1, String> {
-    let a = word32_input(inputs, "A")?;
-    let b = word32_input(inputs, "B")?;
-    let proof = web_prove_logic(3, a, b)
-        .ok_or_else(|| "fresh XOR32 oracle failed".to_owned())?;
+    let (a, b) = logic32_inputs(op, inputs)?;
+    let proof = web_prove_logic(op, a, b)
+        .ok_or_else(|| format!("fresh Logic32 op {op} oracle failed"))?;
     Ok(effect32_normalized(
         proof.outcome.value,
         proof.outcome.writeback,
@@ -1617,12 +1741,29 @@ fn scalar_mux1_result(
     Ok(fields)
 }
 
-fn scalar_xor32_result(
+fn scalar_logic32_result(
+    op: u32,
     inputs: &BTreeMap<String, Value>,
 ) -> Result<BTreeMap<String, Value>, String> {
-    let a = word32_input(inputs, "A")?;
-    let b = word32_input(inputs, "B")?;
-    let value = a ^ b;
+    let (a, b) = logic32_inputs(op, inputs)?;
+    if op == 4 {
+        return Ok(scalar_effect32_fields(
+            !a,
+            1,
+            0,
+            0,
+            0,
+            SCALAR_STATUS_FLAGS,
+        ));
+    }
+
+    let (value, writeback) = match op {
+        1 => (a & b, 1),
+        2 => (a | b, 1),
+        3 => (a ^ b, 1),
+        5 => (a & b, 0),
+        _ => return Err(format!("unsupported Logic32 op {op}")),
+    };
     let defined =
         SCALAR_CF | SCALAR_PF | SCALAR_ZF | SCALAR_SF | SCALAR_OF;
     let value_mask = scalar_status_value_mask(
@@ -1634,7 +1775,7 @@ fn scalar_xor32_result(
         false,
     ) & defined;
     Ok(scalar_effect32_fields(
-        value, 1, defined, value_mask, SCALAR_AF, 0,
+        value, writeback, defined, value_mask, SCALAR_AF, 0,
     ))
 }
 
@@ -1715,6 +1856,14 @@ mod tests {
         include_str!("../scenarios/mux1-lifecycle-v1.json");
     const XOR32_LIFECYCLE: &str =
         include_str!("../scenarios/xor32-lifecycle-v1.json");
+    const AND32_LIFECYCLE: &str =
+        include_str!("../scenarios/and32-lifecycle-v1.json");
+    const OR32_LIFECYCLE: &str =
+        include_str!("../scenarios/or32-lifecycle-v1.json");
+    const NOT32_LIFECYCLE: &str =
+        include_str!("../scenarios/not32-lifecycle-v1.json");
+    const TEST32_LIFECYCLE: &str =
+        include_str!("../scenarios/test32-lifecycle-v1.json");
     const ADD32_LIFECYCLE: &str =
         include_str!("../scenarios/add32-lifecycle-v1.json");
     const SHL32_LIFECYCLE: &str =
@@ -1728,7 +1877,7 @@ mod tests {
     fn prepared_aset_fingerprint_is_stable_and_program_specific() {
         let mux_a = prepare_mux1_session_program().unwrap();
         let mux_b = prepare_mux1_session_program().unwrap();
-        let xor = prepare_xor32_session_program().unwrap();
+        let xor = prepare_logic32_session_program(3).unwrap();
 
         let mux_fingerprint = prepared_aset_fingerprint_v1(&mux_a);
         assert_eq!(
@@ -1918,7 +2067,7 @@ mod tests {
             ProofRuntimeSessionState::Open,
         );
 
-        let configured = (live.adapter.configure)(
+        let configured = live.adapter.configure(
             &mut live.session,
             &live.load,
             &run.inputs,
@@ -1974,7 +2123,7 @@ mod tests {
             ))
         ));
 
-        let result = (live.adapter.project)(&live.session, &live.load).unwrap();
+        let result = live.adapter.project(&live.session, &live.load).unwrap();
         let carrier = live.session.memory.store.export_packed_duplets();
         let after = live.status_v1();
         (result, carrier, evidence, opened, after)
@@ -2182,6 +2331,45 @@ mod tests {
             report.manifest_field_semantics.invariants,
             ScenarioManifestFieldAuthorityV1::Advisory
         );
+    }
+
+    #[test]
+    fn canonical_logic32_family_manifests_run_four_times_on_one_session() {
+        for (source, expected_reactions) in [
+            (AND32_LIFECYCLE, 147u32),
+            (OR32_LIFECYCLE, 147u32),
+            (NOT32_LIFECYCLE, 67u32),
+            (TEST32_LIFECYCLE, 147u32),
+        ] {
+            let manifest = parse_and_validate_manifest_v1(source).unwrap();
+            let report = run_scenario_manifest_v1(
+                &manifest,
+                ScenarioBackendV1::OptimizedCpu,
+            )
+            .unwrap();
+
+            assert!(report.overall_pass, "{}", manifest.scenario_id);
+            assert_eq!(report.runs.len(), 4, "{}", manifest.scenario_id);
+            assert!(report.runs.iter().all(|run| {
+                run.observed.session_id == report.session_id
+                    && run.observed.active_reaction_count == expected_reactions
+                    && run.observed.final_quiescent
+                    && run.oracle_matches == Some(true)
+                    && run.fresh_instance_matches == Some(true)
+                    && run.scalar_oracle_matches
+            }), "{}", manifest.scenario_id);
+            assert_eq!(
+                report.runs[0].result,
+                report.runs[3].result,
+                "{} return-to-first result",
+                manifest.scenario_id,
+            );
+            assert!(
+                report.runs[3].configuration_reused,
+                "{} return-to-first must reuse canonical Links",
+                manifest.scenario_id,
+            );
+        }
     }
 
     #[test]

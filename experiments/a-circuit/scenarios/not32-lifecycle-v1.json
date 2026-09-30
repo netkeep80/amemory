@@ -1,0 +1,132 @@
+{
+  "schemaVersion": 1,
+  "scenarioId": "not32-lifecycle",
+  "scenarioVersion": "1.0.0",
+  "title": "NOT32: четыре запуска в одной апамяти",
+  "description": "Одна асеть NOT32 загружается один раз; четыре входа публикуются связями Links и исполняются в одной постоянной сессии.",
+  "programProfile": {
+    "profileId": "a-circuit:logic-not32",
+    "family": "logic-effect",
+    "programId": "not32",
+    "asetSource": "builtin:a-circuit/logic-effect/not32"
+  },
+  "inputSchema": [
+    {
+      "key": "A",
+      "type": "WORD32",
+      "description": "Первый 32-битный вход NOT",
+      "default": "0x00000000"
+    }
+  ],
+  "initialInputs": {
+    "A": "0x00000000"
+  },
+  "runSequence": [
+    {
+      "runId": "run-1-zero",
+      "inputs": {
+        "A": "0x00000000"
+      },
+      "executionMode": "TO_QUIESCENCE",
+      "maxReactions": 512,
+      "assertions": [
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "value",
+          "expected": "0xffffffff"
+        },
+        {
+          "kind": "QUIESCENT_EQUALS",
+          "expected": true
+        },
+        {
+          "kind": "REACTION_COUNT_EQUALS",
+          "expected": 67
+        }
+      ]
+    },
+    {
+      "runId": "run-2-ones",
+      "inputs": {
+        "A": "0xffffffff"
+      },
+      "executionMode": "TO_QUIESCENCE",
+      "maxReactions": 512,
+      "assertions": [
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "value",
+          "expected": "0x00000000"
+        },
+        {
+          "kind": "QUIESCENT_EQUALS",
+          "expected": true
+        },
+        {
+          "kind": "REACTION_COUNT_EQUALS",
+          "expected": 67
+        }
+      ]
+    },
+    {
+      "runId": "run-3-pattern",
+      "inputs": {
+        "A": "0x12345678"
+      },
+      "executionMode": "TO_QUIESCENCE",
+      "maxReactions": 512,
+      "assertions": [
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "value",
+          "expected": "0xedcba987"
+        },
+        {
+          "kind": "QUIESCENT_EQUALS",
+          "expected": true
+        },
+        {
+          "kind": "REACTION_COUNT_EQUALS",
+          "expected": 67
+        }
+      ]
+    },
+    {
+      "runId": "run-4-return-first",
+      "inputs": {
+        "A": "0x00000000"
+      },
+      "executionMode": "TO_QUIESCENCE",
+      "maxReactions": 512,
+      "assertions": [
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "value",
+          "expected": "0xffffffff"
+        },
+        {
+          "kind": "QUIESCENT_EQUALS",
+          "expected": true
+        },
+        {
+          "kind": "REACTION_COUNT_EQUALS",
+          "expected": 67
+        }
+      ]
+    }
+  ],
+  "supportedBackends": [
+    "optimized-cpu"
+  ],
+  "oraclePolicy": "FRESH_INSTANCE",
+  "invariants": [
+    "prepare-once",
+    "load-once",
+    "same-session",
+    "link-only-reconfiguration",
+    "return-to-first-configuration"
+  ],
+  "observationLevel": "PROFILE",
+  "profilingPolicy": "FULL",
+  "visualizationProfile": "engineering"
+}

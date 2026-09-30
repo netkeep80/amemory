@@ -301,8 +301,8 @@ Promise.all([
     "utf8"
   );
   const presetRegistry = refreshScenarioPresetRegistry(w);
-  if (presetRegistry.entries.length !== 6) {
-    throw new Error("R3d5 preset registry count mismatch");
+  if (presetRegistry.entries.length !== 10) {
+    throw new Error("R3d6 preset registry count mismatch");
   }
   const presetSummary = presetRegistry.entries.find(
     (entry) => entry.scenarioId === "mux1-lifecycle"
@@ -330,6 +330,29 @@ Promise.all([
       !Array.isArray(xorPresetSummary.inputSchema) ||
       xorPresetSummary.inputSchema.length !== 2) {
     throw new Error("R3d1 manifest-derived XOR32 preset summary mismatch");
+  }
+
+  for (const [scenarioId, profileId, programId, inputCount] of [
+    ["and32-lifecycle", "a-circuit:logic-and32", "and32", 2],
+    ["or32-lifecycle", "a-circuit:logic-or32", "or32", 2],
+    ["not32-lifecycle", "a-circuit:logic-not32", "not32", 1],
+    ["test32-lifecycle", "a-circuit:logic-test32", "test32", 2],
+  ]) {
+    const summary = presetRegistry.entries.find(
+      (entry) => entry.scenarioId === scenarioId
+    );
+    if (!summary ||
+        summary.scenarioVersion !== "1.0.0" ||
+        summary.programProfileId !== profileId ||
+        summary.family !== "logic-effect" ||
+        summary.programId !== programId ||
+        summary.runCount !== 4 ||
+        !Array.isArray(summary.inputSchema) ||
+        summary.inputSchema.length !== inputCount) {
+      throw new Error(
+        "R3d6 manifest-derived Logic32 preset summary mismatch: " + scenarioId
+      );
+    }
   }
 
   const addPresetSummary = presetRegistry.entries.find(
@@ -1479,6 +1502,68 @@ Promise.all([
     throw new Error(
       "R3d1 XOR32 generic Scenario path mutated legacy LabInstanceState"
     );
+  }
+
+  // R3d6: AND/OR/NOT/TEST use the same generic Scenario transport and
+  // the same family-level persistent Logic32 runtime as XOR32.
+  for (const [scenarioId, fileName, reactions] of [
+    ["and32-lifecycle", "and32-lifecycle-v1.json", 147],
+    ["or32-lifecycle", "or32-lifecycle-v1.json", 147],
+    ["not32-lifecycle", "not32-lifecycle-v1.json", 67],
+    ["test32-lifecycle", "test32-lifecycle-v1.json", 147],
+  ]) {
+    const canonicalLogicSource = fs.readFileSync(
+      "experiments/a-circuit/scenarios/" + fileName,
+      "utf8"
+    );
+    const logicPreset = loadScenarioPresetManifest(
+      w,
+      presetRegistry,
+      scenarioId,
+      "1.0.0"
+    );
+    if (logicPreset === null ||
+        logicPreset.source !== canonicalLogicSource) {
+      throw new Error(
+        "R3d6 Logic32 canonical preset round-trip mismatch: " + scenarioId
+      );
+    }
+    const logicCpu = executeScenarioManifest(
+      w,
+      JSON.parse(logicPreset.source),
+      "optimized-cpu"
+    );
+    if (!logicCpu.ok ||
+        logicCpu.error !== null ||
+        logicCpu.report?.scenarioId !== scenarioId ||
+        logicCpu.report?.overallPass !== true ||
+        logicCpu.report?.runs?.length !== 4) {
+      throw new Error(
+        "R3d6 generic Logic32 Scenario execution failed: " + scenarioId
+      );
+    }
+    for (let index = 0; index < logicCpu.report.runs.length; index += 1) {
+      const run = logicCpu.report.runs[index];
+      if ((run.sessionRunId >>> 0) !== index + 1 ||
+          run.observed?.sessionId !== logicCpu.report.sessionId ||
+          run.observed?.finalQuiescent !== true ||
+          run.observed?.activeReactionCount !== reactions ||
+          run.oracleMatches !== true ||
+          run.freshInstanceMatches !== true ||
+          run.scalarOracleMatches !== true) {
+        throw new Error(
+          "R3d6 Logic32 persistent-session evidence mismatch: " +
+          scenarioId + " run " + index
+        );
+      }
+    }
+    if (logicCpu.report.runs[3].configurationReused !== true ||
+        JSON.stringify(logicCpu.report.runs[3].result) !==
+          JSON.stringify(logicCpu.report.runs[0].result)) {
+      throw new Error(
+        "R3d6 Logic32 return-to-first mismatch: " + scenarioId
+      );
+    }
   }
 
   // R3d2: arithmetic uses the same generic preset registry and Scenario
