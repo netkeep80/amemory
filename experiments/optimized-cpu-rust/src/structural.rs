@@ -136,6 +136,13 @@ impl StructuralRunProfile {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StructuralCreatedLink {
+    pub handle: Handle,
+    pub start: Handle,
+    pub end: Handle,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StructuralTraceEvent {
     DiscoveryComplete {
         active: Handle,
@@ -154,7 +161,7 @@ pub enum StructuralTraceEvent {
         grounded_bundle: Handle,
         /// Exact append-only Store records physically created while grounding
         /// this output bundle. Persistent carrier Links; not Context.
-        created_links: Vec<Handle>,
+        created_links: Vec<StructuralCreatedLink>,
     },
     Published {
         active: Handle,
@@ -1326,13 +1333,21 @@ impl OptimizedStructuralEngine {
                                 ..=links_after_instantiation
                         )
                             .map(|raw| {
-                                Handle::try_from(raw).map_err(|_| {
-                                    StructuralError::Store(
-                                        StoreError::CapacityExceeded,
-                                    )
+                                let handle = Handle::try_from(raw).map_err(
+                                    |_| {
+                                        StructuralError::Store(
+                                            StoreError::CapacityExceeded,
+                                        )
+                                    },
+                                )?;
+                                let (start, end) = store.poles(handle)?;
+                                Ok(StructuralCreatedLink {
+                                    handle,
+                                    start,
+                                    end,
                                 })
                             })
-                            .collect::<Result<Vec<_>, _>>()?;
+                            .collect::<Result<Vec<_>, StructuralError>>()?;
                         trace.events.push(StructuralTraceEvent::Instantiated {
                             active,
                             rule: image.rule,
@@ -2002,12 +2017,21 @@ mod tests {
                         traced_links_before + 1
                             ..=traced_links_after
                     )
-                        .map(|raw| raw as Handle)
+                        .map(|raw| {
+                            let handle = raw as Handle;
+                            let (start, end) =
+                                traced_store.poles(handle).unwrap();
+                            StructuralCreatedLink {
+                                handle,
+                                start,
+                                end,
+                            }
+                        })
                         .collect::<Vec<_>>();
                     assert_eq!(
                         created_links,
                         &expected_created,
-                        "trace must name exactly the persistent Store records appended by this instantiation",
+                        "trace must carry exact handle/start/end records appended by this instantiation",
                     );
                     Some(*grounded_bundle)
                 }
