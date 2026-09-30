@@ -5,10 +5,13 @@ use super::{
         SessionOpenProfileV1,
     },
     proof_n::{
-        execute_session_observed_to_quiescence, load_runtime_session,
-        ProofRuntimeSession, ProofRuntimeSessionState,
-        ProofRuntimeStepError, SessionReactionEvidenceV1,
-        WebProofLoadStage, WebProofPrepareStage,
+        execute_session_observed_to_quiescence,
+        load_runtime_session,
+        WebProofLoadStage,
+        WebProofPrepareStage,
+    },
+    runtime_session::{
+        CpuRuntimeSession, CpuSessionState, CpuSessionStepError, CpuSessionReactionEvidenceV1
     },
     scenario::{
         validate_manifest_v1, ScenarioAssertionV1, ScenarioBackendV1,
@@ -96,7 +99,7 @@ pub(crate) struct ScenarioStepReportV1 {
     pub(crate) schema_version: u32,
     pub(crate) manifest_run_id: String,
     pub(crate) session_run_id: u64,
-    pub(crate) evidence: SessionReactionEvidenceV1,
+    pub(crate) evidence: CpuSessionReactionEvidenceV1,
     pub(crate) completed: bool,
     pub(crate) active_reaction_count: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -302,7 +305,7 @@ pub(crate) struct ScenarioCpuSessionV1 {
     manifest: ScenarioManifestV1,
     program_profile: ScenarioProgramProfileV1,
     adapter: &'static CpuScenarioAdapter,
-    session: ProofRuntimeSession,
+    session: CpuRuntimeSession,
     load: WebProofLoadStage,
     loaded_link_count: usize,
     loaded_prefix: Vec<(Handle, Handle)>,
@@ -449,8 +452,8 @@ fn ensure_cpu_session_configurable(
 ) -> Result<(), ScenarioRunnerErrorV1> {
     if matches!(
         live.session.execution_state(),
-        ProofRuntimeSessionState::Open
-            | ProofRuntimeSessionState::Quiescent
+        CpuSessionState::Open
+            | CpuSessionState::Quiescent
     ) {
         return Ok(());
     }
@@ -1183,7 +1186,7 @@ mod tests {
     ) -> (
         ScenarioNormalizedResultV1,
         Vec<(Handle, Handle)>,
-        Vec<SessionReactionEvidenceV1>,
+        Vec<CpuSessionReactionEvidenceV1>,
         ScenarioLiveSessionStatusV1,
         ScenarioLiveSessionStatusV1,
     ) {
@@ -1194,7 +1197,7 @@ mod tests {
 
         assert_eq!(
             live.session.execution_state(),
-            ProofRuntimeSessionState::Open,
+            CpuSessionState::Open,
         );
 
         let configured = live.adapter.configure(
@@ -1207,10 +1210,10 @@ mod tests {
         assert_eq!(run_id, 1);
         assert_eq!(
             live.session.execution_state(),
-            ProofRuntimeSessionState::Configured,
+            CpuSessionState::Configured,
         );
 
-        let mut evidence: Vec<SessionReactionEvidenceV1> = Vec::new();
+        let mut evidence: Vec<CpuSessionReactionEvidenceV1> = Vec::new();
         loop {
             let step = live.session.step(observation_level).unwrap();
             assert_eq!(step.evidence.session_id, opened.session_id);
@@ -1238,18 +1241,18 @@ mod tests {
             }
             assert_eq!(
                 live.session.execution_state(),
-                ProofRuntimeSessionState::Running,
+                CpuSessionState::Running,
             );
         }
 
         assert_eq!(
             live.session.execution_state(),
-            ProofRuntimeSessionState::Quiescent,
+            CpuSessionState::Quiescent,
         );
         assert!(matches!(
             live.session.step(observation_level),
-            Err(ProofRuntimeStepError::InvalidState(
-                ProofRuntimeSessionState::Quiescent
+            Err(CpuSessionStepError::InvalidState(
+                CpuSessionState::Quiescent
             ))
         ));
 
