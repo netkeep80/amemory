@@ -1299,28 +1299,17 @@ impl OptimizedStructuralEngine {
                 for image in images {
                     raw_rule_matches = raw_rule_matches.saturating_add(1);
 
+                    let links_before_instantiation = trace
+                        .as_ref()
+                        .map(|_| store.link_count());
                     let instantiation_started =
                         profile.as_ref().map(|_| ProfileTimer::start());
-                    let links_before_instantiation = store.link_count();
                     let grounded_bundle = instantiate_structural_template_internal(
                         store,
                         image.output_bundle_template,
                         &image.bindings,
                         profile,
                     )?;
-                    let links_after_instantiation = store.link_count();
-                    let created_links = (
-                        links_before_instantiation + 1
-                            ..=links_after_instantiation
-                    )
-                        .map(|raw| {
-                            Handle::try_from(raw).map_err(|_| {
-                                StructuralError::Store(
-                                    StoreError::CapacityExceeded,
-                                )
-                            })
-                        })
-                        .collect::<Result<Vec<_>, _>>()?;
                     if let Some(profile) = profile.as_deref_mut() {
                         if let Some(started) = instantiation_started {
                             profile.instantiation_ns += started.elapsed_ns();
@@ -1328,6 +1317,22 @@ impl OptimizedStructuralEngine {
                     }
                     if let Some(trace) = trace.as_deref_mut() {
                         let trace_started = ProfileTimer::start();
+                        let links_before_instantiation =
+                            links_before_instantiation
+                                .expect("trace link checkpoint");
+                        let links_after_instantiation = store.link_count();
+                        let created_links = (
+                            links_before_instantiation + 1
+                                ..=links_after_instantiation
+                        )
+                            .map(|raw| {
+                                Handle::try_from(raw).map_err(|_| {
+                                    StructuralError::Store(
+                                        StoreError::CapacityExceeded,
+                                    )
+                                })
+                            })
+                            .collect::<Result<Vec<_>, _>>()?;
                         trace.events.push(StructuralTraceEvent::Instantiated {
                             active,
                             rule: image.rule,
