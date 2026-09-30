@@ -13,7 +13,6 @@ use super::{
     runtime_session::{
         CpuRunBudgetV1, CpuRunControllerV1, CpuRunStopReasonV1,
         CpuRuntimeSession, CpuSessionReactionEvidenceV1, CpuSessionState,
-        CpuSessionStepError,
     },
     scenario::{
         validate_manifest_v1, ScenarioAssertionV1, ScenarioBackendV1,
