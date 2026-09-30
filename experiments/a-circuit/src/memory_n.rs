@@ -1350,6 +1350,13 @@ pub(crate) fn web_prove_radix_memory(
             "memory.result_tag",
             program.result_tag,
         ),
+        // Standard verifier aliases point at the same structural handles.
+        // Domain-specific roles stay present for M6 diagnostics.
+        semantic_source(
+            &compiler.store,
+            "result.tag",
+            program.result_tag,
+        ),
         semantic_source(
             &compiler.store,
             "data.offset8",
@@ -1393,6 +1400,11 @@ pub(crate) fn web_prove_radix_memory(
         semantic_source(
             &compiler.store,
             "context.result",
+            compiler.k,
+        ),
+        semantic_source(
+            &compiler.store,
+            "context.caller",
             compiler.k,
         ),
     ];

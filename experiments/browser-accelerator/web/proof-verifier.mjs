@@ -343,14 +343,24 @@ function decodeBit(store, handle, roots) {
   fail("result contains non-bit L" + handle);
 }
 
-function decodeWord32(store, handle, roots) {
+function decodeWord(store, handle, roots, width) {
   const bits = store.sequence(handle);
-  if (bits.length !== 32) fail("result word width is " + bits.length);
+  if (bits.length !== width) {
+    fail("result word width is " + bits.length + ", expected " + width);
+  }
   let value = 0;
   for (let index = 0; index < bits.length; index += 1) {
     value += decodeBit(store, bits[index], roots) * (2 ** index);
   }
   return value;
+}
+
+function decodeWord32(store, handle, roots) {
+  return decodeWord(store, handle, roots, 32);
+}
+
+function decodeWord8(store, handle, roots) {
+  return decodeWord(store, handle, roots, 8);
 }
 
 function verifyResultStructure(compact, actualStore, roots, finalScope) {
@@ -387,7 +397,13 @@ function verifyResultStructure(compact, actualStore, roots, finalScope) {
   let decodedValue;
   let decodedValueHi = null;
 
-  if (roots.has("function.mul32")) {
+  if (roots.has("function.memory.witness")) {
+    if (fields.length !== 5) {
+      fail("M6 radix Result payload does not have five fields");
+    }
+    decodedValue = decodeWord8(actualStore, fields[3], roots);
+    decodedValueHi = decodeWord8(actualStore, fields[4], roots);
+  } else if (roots.has("function.mul32")) {
     if (fields.length < 1) fail("MUL32 Result payload is empty");
     const wide = actualStore.sequence(fields[0]);
     if (wide.length !== 2) fail("MUL32 Wide64 payload is not lo/hi");
