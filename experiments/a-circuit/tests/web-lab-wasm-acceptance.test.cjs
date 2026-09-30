@@ -120,6 +120,8 @@ for (const required of [
   "beginScenarioLiveStepRun",
   "stepScenarioLiveSession",
   "workbenchStepSnapshot",
+  "workbenchTraceFrames",
+  "workbenchPlayerSnapshot",
   "refreshScenarioLiveHistoryStatus",
   "setScenarioLiveRetentionPolicy",
   "closeScenarioLiveSession",
@@ -148,6 +150,16 @@ for (const required of [
   "Открыть апамять",
   "Выполнить полностью",
   "Начать по шагам",
+  "Назад",
+  "Вперёд",
+  "Воспроизвести",
+  "Пауза",
+  "До конца",
+  "Реакции",
+  "Контексты",
+  "Постоянная асеть",
+  "ВРЕМЕННЫЙ CONTEXT",
+  "Источник evidence",
   "UI не передаёт Scope обратно",
   "Простой",
   "Инженерный",
@@ -270,6 +282,8 @@ Promise.all([
     workbenchVerificationLevels,
     workbenchRecursiveStructure,
     workbenchStepSnapshot,
+    workbenchTraceFrames,
+    workbenchPlayerSnapshot,
   },
   {
     verifyLiveReactionEvidence,
@@ -517,6 +531,21 @@ Promise.all([
       workbenchStepPipeline[4].state !== "waiting" ||
       workbenchStepPipeline[5].state !== "done") {
     throw new Error("#333 Workbench live step projection mismatch");
+  }
+  const fakeReactionFrames =
+    workbenchTraceFrames(workbenchLiveStep, "reaction");
+  const fakeContextFrames =
+    workbenchTraceFrames(workbenchLiveStep, "context");
+  const fakePlayer = workbenchPlayerSnapshot(workbenchLiveStep);
+  if (fakeReactionFrames.length !== 1 ||
+      fakePlayer.frameCount !== 1 ||
+      fakePlayer.frame?.kind !== "REACTION_COMMIT" ||
+      !fakeContextFrames.some(
+        (frame) => frame.kind === "CONTEXT_UNAVAILABLE"
+      )) {
+    throw new Error(
+      "#246 Workbench inferred Context when evidence was unavailable"
+    );
   }
   const stepOnceStart = workbenchSource.indexOf(
     "async function stepOnce(state)"
@@ -1169,6 +1198,61 @@ Promise.all([
     );
   if (!nestedContextFact) {
     throw new Error("#245 real-WASM trace has no nested Context lineage");
+  }
+
+  const workbenchRealStepState = {
+    active: false,
+    begin: stepBegin.payload.begin,
+    reports: stepReports,
+    player: {
+      mode: "context",
+      cursor: 0,
+      playing: false,
+      speedMs: 800,
+      overlays: {
+        persistent: true,
+        context: true,
+        result: true,
+      },
+    },
+  };
+  const reactionFrames =
+    workbenchTraceFrames(workbenchRealStepState, "reaction");
+  const contextFrames =
+    workbenchTraceFrames(workbenchRealStepState, "context");
+  if (reactionFrames.length !== stepReports.length ||
+      contextFrames.length <= reactionFrames.length ||
+      !contextFrames.some((frame) =>
+        frame.kind === "CONTEXT_CREATED" &&
+        (frame.selectedContext?.parentContextIds?.length ?? 0) > 0
+      )) {
+    throw new Error("#246 real evidence player frame projection mismatch");
+  }
+  const collapseIndex = contextFrames.findIndex((frame) =>
+    frame.kind === "CONTEXT_COLLAPSED" &&
+    (frame.publishedOutputs?.length ?? 0) > 0
+  );
+  if (collapseIndex < 0) {
+    throw new Error("#246 player has no real Context collapse frame");
+  }
+  const collapsedFrame = contextFrames[collapseIndex];
+  const collapsedId = collapsedFrame.selectedContext?.id;
+  if (collapsedId == null ||
+      collapsedFrame.activeContexts.some(
+        (context) => context.id === collapsedId
+      ) ||
+      collapsedFrame.publishedOutputs.length === 0) {
+    throw new Error(
+      "#246 Context collapse erased persistent publication or stayed active"
+    );
+  }
+  workbenchRealStepState.player.cursor = collapseIndex;
+  const collapseSnapshot =
+    workbenchPlayerSnapshot(workbenchRealStepState);
+  if (collapseSnapshot.frame?.locator == null ||
+      collapseSnapshot.frame.kind !== "CONTEXT_COLLAPSED" ||
+      collapseSnapshot.hasPrevious !== (collapseIndex > 0)) {
+    throw new Error("#246 player evidence cursor/locator mismatch");
   }
 
   function expectLiveTraceReject(label, mutate) {
