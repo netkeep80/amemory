@@ -301,7 +301,7 @@ Promise.all([
     "utf8"
   );
   const presetRegistry = refreshScenarioPresetRegistry(w);
-  if (presetRegistry.entries.length !== 23) {
+  if (presetRegistry.entries.length !== 24) {
     throw new Error("R3d7 preset registry count mismatch");
   }
   const presetSummary = presetRegistry.entries.find(
@@ -517,6 +517,23 @@ Promise.all([
       presetRegistry.entries[21]?.scenarioId !== "dec32-lifecycle" ||
       presetRegistry.entries[22]?.scenarioId !== "neg32-lifecycle") {
     throw new Error("R8 UNARY32 preset append changed historical indexes");
+  }
+
+  const mulEffectSummary = presetRegistry.entries.find(
+    (entry) => entry.scenarioId === "mul-effect32-lifecycle"
+  );
+  if (!mulEffectSummary ||
+      mulEffectSummary.scenarioVersion !== "1.0.0" ||
+      mulEffectSummary.programProfileId !== "a-circuit:mul-effect32" ||
+      mulEffectSummary.family !== "mul-effect" ||
+      mulEffectSummary.programId !== "mul-effect32" ||
+      mulEffectSummary.runCount !== 5 ||
+      !Array.isArray(mulEffectSummary.inputSchema) ||
+      mulEffectSummary.inputSchema.length !== 2 ||
+      presetRegistry.entries[22]?.scenarioId !== "neg32-lifecycle" ||
+      presetRegistry.entries[23]?.scenarioId !==
+        "mul-effect32-lifecycle") {
+    throw new Error("R9 manifest-derived MUL-effect preset mismatch");
   }
 
   const mulPresetSummary = presetRegistry.entries.find(
@@ -2177,6 +2194,66 @@ Promise.all([
         )) {
       throw new Error("R8 NEG32 must define CF on every run");
     }
+  }
+
+  // R9: x86 MUL32 effect uses the generic persistent Scenario path.
+  const canonicalMulEffectSource = fs.readFileSync(
+    "experiments/a-circuit/scenarios/mul-effect32-lifecycle-v1.json",
+    "utf8"
+  );
+  const mulEffectPreset = loadScenarioPresetManifest(
+    w,
+    presetRegistry,
+    "mul-effect32-lifecycle",
+    "1.0.0"
+  );
+  if (mulEffectPreset === null ||
+      mulEffectPreset.source !== canonicalMulEffectSource) {
+    throw new Error("R9 MUL-effect canonical preset round-trip mismatch");
+  }
+  const mulEffectCpu = executeScenarioManifest(
+    w,
+    JSON.parse(mulEffectPreset.source),
+    "optimized-cpu"
+  );
+  if (!mulEffectCpu.ok ||
+      mulEffectCpu.error !== null ||
+      mulEffectCpu.report?.scenarioId !== "mul-effect32-lifecycle" ||
+      mulEffectCpu.report?.overallPass !== true ||
+      mulEffectCpu.report?.runs?.length !== 5) {
+    throw new Error("R9 generic MUL-effect Scenario execution failed");
+  }
+  const expectedMulEffectReactions = [97, 1135, 1135, 1135, 97];
+  for (let index = 0; index < mulEffectCpu.report.runs.length; index += 1) {
+    const item = mulEffectCpu.report.runs[index];
+    if ((item.sessionRunId >>> 0) !== index + 1 ||
+        item.observed?.sessionId !== mulEffectCpu.report.sessionId ||
+        item.observed?.finalQuiescent !== true ||
+        item.observed?.activeReactionCount !==
+          expectedMulEffectReactions[index] ||
+        item.oracleMatches !== true ||
+        item.freshInstanceMatches !== true ||
+        item.scalarOracleMatches !== true ||
+        !item.pipelineProfile ||
+        item.observed?.profile?.structural?.unificationAttempts <= 0) {
+      throw new Error(
+        "R9 MUL-effect evidence mismatch at run " + index
+      );
+    }
+  }
+  if (mulEffectCpu.report.runs[2].result?.fields?.hi !== "0x00000001" ||
+      mulEffectCpu.report.runs[2].result?.fields?.definedMask !==
+        "0x00000801" ||
+      mulEffectCpu.report.runs[2].result?.fields?.valueMask !==
+        "0x00000801" ||
+      mulEffectCpu.report.runs[2].result?.fields?.undefinedMask !==
+        "0x000000d4" ||
+      mulEffectCpu.report.runs[2].result?.fields?.preserveMask !==
+        "0x00000000" ||
+      mulEffectCpu.report.runs[4].configurationReused !== true ||
+      JSON.stringify(mulEffectCpu.report.runs[4].result) !==
+        JSON.stringify(mulEffectCpu.report.runs[0].result)) {
+    throw new Error("R9 MUL-effect flags/canonical reuse mismatch");
   }
 
   // R3d4: raw MUL32 Wide64 uses the same generic preset/Scenario path.
