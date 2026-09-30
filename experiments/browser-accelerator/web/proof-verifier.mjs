@@ -450,9 +450,13 @@ export function verifyCompactTraceConsistency(compact) {
   const reactions = compact.execute.reactions;
   if (reactions.length === 0) fail("execution trace is empty");
 
-  const initial = requireRoot(roots, "scope.initial");
-  if (!sameArray(reactions[0].scopeBefore, [initial])) {
-    fail("first scopeBefore does not equal scope.initial");
+  const preparedInitial = roots.get("scope.initial");
+  if (Number.isInteger(preparedInitial)) {
+    if (!sameArray(reactions[0].scopeBefore, [preparedInitial])) {
+      fail("first scopeBefore does not equal prepared scope.initial");
+    }
+  } else if (reactions[0].scopeBefore.length === 0) {
+    fail("configured first scopeBefore is empty");
   }
 
   for (let index = 0; index < reactions.length; index += 1) {
@@ -508,14 +512,22 @@ export function verifyCompactSemanticReplay(compact) {
   const consistency = verifyCompactTraceConsistency(compact);
   const roots = rootDirectory(compact);
 
+  const allStarts = compact.topology.base.starts.concat(
+    compact.topology.append.starts,
+  );
+  const allEnds = compact.topology.base.ends.concat(
+    compact.topology.append.ends,
+  );
+  const linksBeforeExecute =
+    compact.execute.linksBeforeExecute ?? compact.load.linksAfterLoad;
   const replayStore = new StructuralStore(
-    compact.topology.base.starts,
-    compact.topology.base.ends,
-    "replay base Store",
+    allStarts.slice(0, linksBeforeExecute),
+    allEnds.slice(0, linksBeforeExecute),
+    "replay configured Store",
   );
   const actualStore = new StructuralStore(
-    compact.topology.base.starts.concat(compact.topology.append.starts),
-    compact.topology.base.ends.concat(compact.topology.append.ends),
+    allStarts,
+    allEnds,
     "evidence Store",
   );
 
@@ -530,7 +542,10 @@ export function verifyCompactSemanticReplay(compact) {
     fail("theoryAdmissions does not equal admissions derived from topology");
   }
 
-  let current = [requireRoot(roots, "scope.initial")];
+  const preparedInitial = roots.get("scope.initial");
+  let current = Number.isInteger(preparedInitial)
+    ? [preparedInitial]
+    : [...compact.execute.reactions[0].scopeBefore];
   let totalMatches = 0;
 
   for (let index = 0; index < compact.execute.reactions.length; index += 1) {
