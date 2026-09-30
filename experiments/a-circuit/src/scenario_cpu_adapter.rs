@@ -24,6 +24,10 @@ use super::{
     proof_n::{
         ProofRuntimeSession, WebProofLoadStage, WebProofPrepareStage,
     },
+    rotate32_n::{
+        configure_rotate32_session, prepare_rotate32_session_program,
+        project_rotate32_session_result, web_prove_rotate32,
+    },
     scenario::ScenarioProgramProfileV1,
     shift32_n::{
         configure_shift32_session, prepare_shift32_session_program,
@@ -68,6 +72,9 @@ enum CpuScenarioImplementation {
     Shift32 {
         op: u32,
     },
+    Rotate32 {
+        op: u32,
+    },
 }
 
 pub(crate) struct CpuScenarioAdapter {
@@ -100,6 +107,9 @@ impl CpuScenarioAdapter {
             CpuScenarioImplementation::Shift32 { .. } => {
                 prepare_shift32_session_program()
             }
+            CpuScenarioImplementation::Rotate32 { .. } => {
+                prepare_rotate32_session_program()
+            }
         }
     }
 
@@ -124,6 +134,9 @@ impl CpuScenarioAdapter {
             CpuScenarioImplementation::Shift32 { op } => {
                 configure_shift32_from_inputs(op, session, load, inputs)
             }
+            CpuScenarioImplementation::Rotate32 { op } => {
+                configure_rotate32_from_inputs(op, session, load, inputs)
+            }
         }
     }
 
@@ -145,6 +158,9 @@ impl CpuScenarioAdapter {
             CpuScenarioImplementation::Shift32 { .. } => {
                 project_shift32_result(session, load)
             }
+            CpuScenarioImplementation::Rotate32 { .. } => {
+                project_rotate32_result(session, load)
+            }
         }
     }
 
@@ -165,6 +181,9 @@ impl CpuScenarioAdapter {
             CpuScenarioImplementation::Shift32 { op } => {
                 fresh_instance_shift32_result(op, inputs)
             }
+            CpuScenarioImplementation::Rotate32 { op } => {
+                fresh_instance_rotate32_result(op, inputs)
+            }
         }
     }
 
@@ -184,6 +203,9 @@ impl CpuScenarioAdapter {
             }
             CpuScenarioImplementation::Shift32 { op } => {
                 scalar_shift32_result(op, inputs)
+            }
+            CpuScenarioImplementation::Rotate32 { op } => {
+                scalar_rotate32_result(op, inputs)
             }
         }
     }
@@ -335,6 +357,20 @@ const CPU_SCENARIO_ADAPTERS: &[CpuScenarioAdapter] = &[
         program_id: "sar32",
         aset_source: "builtin:a-circuit/shift32/sar",
         implementation: CpuScenarioImplementation::Shift32 { op: 15 },
+    },
+    CpuScenarioAdapter {
+        profile_id: "a-circuit:rotate-rol32",
+        family: "rotate-effect",
+        program_id: "rol32",
+        aset_source: "builtin:a-circuit/rotate32/rol",
+        implementation: CpuScenarioImplementation::Rotate32 { op: 16 },
+    },
+    CpuScenarioAdapter {
+        profile_id: "a-circuit:rotate-ror32",
+        family: "rotate-effect",
+        program_id: "ror32",
+        aset_source: "builtin:a-circuit/rotate32/ror",
+        implementation: CpuScenarioImplementation::Rotate32 { op: 17 },
     },
     CpuScenarioAdapter {
         profile_id: "a-circuit:mul32",
@@ -725,6 +761,67 @@ fn fresh_instance_shift32_result(
     ))
 }
 
+fn rotate32_inputs(
+    inputs: &BTreeMap<String, Value>,
+) -> Result<(u32, u8), String> {
+    Ok((
+        word32_input(inputs, "VALUE")?,
+        count8_input(inputs, "COUNT")?,
+    ))
+}
+
+fn configure_rotate32_from_inputs(
+    op: u32,
+    session: &mut ProofRuntimeSession,
+    load: &WebProofLoadStage,
+    inputs: &BTreeMap<String, Value>,
+) -> Result<ConfiguredRun, String> {
+    let (value, count) = rotate32_inputs(inputs)?;
+    let (initial, before, after) =
+        configure_rotate32_session(session, load, op, value, count)
+            .ok_or_else(|| format!("Rotate32 op {op} configuration failed"))?;
+    Ok(ConfiguredRun {
+        initial,
+        links_before: before as u32,
+        links_after: after as u32,
+    })
+}
+
+fn project_rotate32_result(
+    session: &ProofRuntimeSession,
+    load: &WebProofLoadStage,
+) -> Result<ScenarioNormalizedResultV1, String> {
+    let projected = project_rotate32_session_result(session, load)
+        .ok_or_else(|| "Rotate32 result projection failed".to_owned())?;
+    Ok(effect32_normalized(
+        projected.value,
+        projected.writeback,
+        projected.defined_mask,
+        projected.value_mask,
+        projected.undefined_mask,
+        projected.preserve_mask,
+        projected.result_recursive_wire,
+    ))
+}
+
+fn fresh_instance_rotate32_result(
+    op: u32,
+    inputs: &BTreeMap<String, Value>,
+) -> Result<ScenarioNormalizedResultV1, String> {
+    let (value, count) = rotate32_inputs(inputs)?;
+    let proof = web_prove_rotate32(op, value, u32::from(count))
+        .ok_or_else(|| format!("fresh Rotate32 op {op} oracle failed"))?;
+    Ok(effect32_normalized(
+        proof.outcome.value,
+        proof.outcome.writeback,
+        proof.outcome.defined_mask,
+        proof.outcome.value_mask,
+        proof.outcome.undefined_mask,
+        proof.outcome.preserve_mask,
+        proof.proof.result.result_anum,
+    ))
+}
+
 fn configure_mul32_from_inputs(
     session: &mut ProofRuntimeSession,
     load: &WebProofLoadStage,
@@ -1082,6 +1179,55 @@ fn scalar_shift32_result(
         scalar_status_value_mask(cf, pf, false, zf, sf, of) & defined;
     Ok(scalar_effect32_fields(
         result, 1, defined, value_mask, undefined, 0,
+    ))
+}
+
+fn scalar_rotate32_result(
+    op: u32,
+    inputs: &BTreeMap<String, Value>,
+) -> Result<BTreeMap<String, Value>, String> {
+    let (value, count) = rotate32_inputs(inputs)?;
+    let masked = u32::from(count & 31);
+    if masked == 0 {
+        return Ok(scalar_effect32_fields(
+            value, 1, 0, 0, 0, SCALAR_STATUS_FLAGS,
+        ));
+    }
+
+    let result = match op {
+        16 => value.rotate_left(masked),
+        17 => value.rotate_right(masked),
+        _ => return Err(format!("unsupported Rotate32 op {op}")),
+    };
+    let cf = match op {
+        16 => result & 1 != 0,
+        17 => result >> 31 != 0,
+        _ => unreachable!(),
+    };
+    let of = if masked == 1 {
+        match op {
+            16 => (result >> 31 != 0) ^ cf,
+            17 => ((result >> 31) & 1) != ((result >> 30) & 1),
+            _ => unreachable!(),
+        }
+    } else {
+        false
+    };
+
+    let mut defined = SCALAR_CF;
+    let mut undefined = 0u32;
+    if masked == 1 {
+        defined |= SCALAR_OF;
+    } else {
+        undefined |= SCALAR_OF;
+    }
+    let preserve =
+        SCALAR_PF | SCALAR_AF | SCALAR_ZF | SCALAR_SF;
+    let value_mask =
+        scalar_status_value_mask(cf, false, false, false, false, of)
+            & defined;
+    Ok(scalar_effect32_fields(
+        result, 1, defined, value_mask, undefined, preserve,
     ))
 }
 

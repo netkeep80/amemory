@@ -1824,7 +1824,7 @@ mod tests {
         );
         let registry: ScenarioPresetRegistryV1 =
             serde_json::from_str(&registry_json).unwrap();
-        assert_eq!(registry.entries.len(), 16);
+        assert_eq!(registry.entries.len(), 18);
         assert_eq!(registry.entries[0].scenario_id, "mux1-lifecycle");
         assert_eq!(registry.entries[1].scenario_id, "xor32-lifecycle");
         assert_eq!(
@@ -1865,6 +1865,8 @@ mod tests {
             (13usize, "cmp32-lifecycle", "a-circuit:arithmetic-cmp32"),
             (14usize, "shr32-lifecycle", "a-circuit:shift-shr32"),
             (15usize, "sar32-lifecycle", "a-circuit:shift-sar32"),
+            (16usize, "rol32-lifecycle", "a-circuit:rotate-rol32"),
+            (17usize, "ror32-lifecycle", "a-circuit:rotate-ror32"),
         ] {
             assert_eq!(registry.entries[index].scenario_id, scenario_id);
             assert_eq!(
