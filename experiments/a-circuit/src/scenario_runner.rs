@@ -996,6 +996,8 @@ mod tests {
         include_str!("../scenarios/neg32-lifecycle-v1.json");
     const MUL_EFFECT32_LIFECYCLE: &str =
         include_str!("../scenarios/mul-effect32-lifecycle-v1.json");
+    const MUX32_LIFECYCLE: &str =
+        include_str!("../scenarios/mux32-lifecycle-v1.json");
     const MUL32_LIFECYCLE: &str =
         include_str!("../scenarios/mul32-lifecycle-v1.json");
     const RADIX_MEMORY8_LIFECYCLE: &str =
@@ -1906,6 +1908,49 @@ mod tests {
         assert!(
             report.runs[4].configuration_reused,
             "returning to first MUL-effect inputs must reuse canonical Links",
+        );
+    }
+
+    #[test]
+    fn canonical_mux32_manifest_completes_maintained_corpus() {
+        let manifest =
+            parse_and_validate_manifest_v1(MUX32_LIFECYCLE).unwrap();
+        let report = run_scenario_manifest_v1(
+            &manifest,
+            ScenarioBackendV1::OptimizedCpu,
+        )
+        .unwrap();
+
+        assert!(report.overall_pass);
+        assert_eq!(report.runs.len(), 5);
+        assert!(report.runs.iter().all(|run| {
+            run.observed.session_id == report.session_id
+                && run.observed.active_reaction_count == 257
+                && run.observed.final_quiescent
+                && run.oracle_matches == Some(true)
+                && run.fresh_instance_matches == Some(true)
+                && run.scalar_oracle_matches
+        }));
+        assert_eq!(
+            report.runs[0].result.fields.get("value"),
+            Some(&Value::String("0x00000000".to_owned())),
+        );
+        assert_eq!(
+            report.runs[1].result.fields.get("value"),
+            Some(&Value::String("0xffffffff".to_owned())),
+        );
+        assert_eq!(
+            report.runs[2].result.fields.get("value"),
+            Some(&Value::String("0x12345678".to_owned())),
+        );
+        assert_eq!(
+            report.runs[3].result.fields.get("value"),
+            Some(&Value::String("0x9abcdef0".to_owned())),
+        );
+        assert_eq!(report.runs[0].result, report.runs[4].result);
+        assert!(
+            report.runs[4].configuration_reused,
+            "returning to first MUX32 inputs must reuse canonical Links",
         );
     }
 

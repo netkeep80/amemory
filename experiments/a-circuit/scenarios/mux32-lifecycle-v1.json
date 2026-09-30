@@ -1,0 +1,180 @@
+{
+  "schemaVersion": 1,
+  "scenarioId": "mux32-lifecycle",
+  "scenarioVersion": "1.0.0",
+  "title": "MUX32: выбор 32-битного слова в одной апамяти",
+  "description": "Одна статическая асеть MUX32 загружается один раз; S, A и B публикуются связями Links. MUX32 структурно исполняется через общий MUX1/XOR2/AND2 путь и возвращает выбранное WORD32.",
+  "programProfile": {
+    "profileId": "a-circuit:mux32",
+    "family": "mux",
+    "programId": "mux32",
+    "asetSource": "builtin:a-circuit/mux32"
+  },
+  "inputSchema": [
+    {
+      "key": "S",
+      "type": "BIT",
+      "description": "Выбор: 0 => A, 1 => B",
+      "default": 0
+    },
+    {
+      "key": "A",
+      "type": "WORD32",
+      "description": "32-битный вход A",
+      "default": "0x00000000"
+    },
+    {
+      "key": "B",
+      "type": "WORD32",
+      "description": "32-битный вход B",
+      "default": "0xffffffff"
+    }
+  ],
+  "initialInputs": {
+    "S": 0,
+    "A": "0x00000000",
+    "B": "0xffffffff"
+  },
+  "runSequence": [
+    {
+      "runId": "run-1-select-a-zero",
+      "inputs": {
+        "S": 0,
+        "A": "0x00000000",
+        "B": "0xffffffff"
+      },
+      "executionMode": "TO_QUIESCENCE",
+      "maxReactions": 300,
+      "assertions": [
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "value",
+          "expected": "0x00000000"
+        },
+        {
+          "kind": "QUIESCENT_EQUALS",
+          "expected": true
+        },
+        {
+          "kind": "REACTION_COUNT_EQUALS",
+          "expected": 257
+        }
+      ]
+    },
+    {
+      "runId": "run-2-select-b-ones",
+      "inputs": {
+        "S": 1,
+        "A": "0x00000000",
+        "B": "0xffffffff"
+      },
+      "executionMode": "TO_QUIESCENCE",
+      "maxReactions": 300,
+      "assertions": [
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "value",
+          "expected": "0xffffffff"
+        },
+        {
+          "kind": "QUIESCENT_EQUALS",
+          "expected": true
+        },
+        {
+          "kind": "REACTION_COUNT_EQUALS",
+          "expected": 257
+        }
+      ]
+    },
+    {
+      "runId": "run-3-select-a-pattern",
+      "inputs": {
+        "S": 0,
+        "A": "0x12345678",
+        "B": "0x9abcdef0"
+      },
+      "executionMode": "TO_QUIESCENCE",
+      "maxReactions": 300,
+      "assertions": [
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "value",
+          "expected": "0x12345678"
+        },
+        {
+          "kind": "QUIESCENT_EQUALS",
+          "expected": true
+        },
+        {
+          "kind": "REACTION_COUNT_EQUALS",
+          "expected": 257
+        }
+      ]
+    },
+    {
+      "runId": "run-4-select-b-pattern",
+      "inputs": {
+        "S": 1,
+        "A": "0x12345678",
+        "B": "0x9abcdef0"
+      },
+      "executionMode": "TO_QUIESCENCE",
+      "maxReactions": 300,
+      "assertions": [
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "value",
+          "expected": "0x9abcdef0"
+        },
+        {
+          "kind": "QUIESCENT_EQUALS",
+          "expected": true
+        },
+        {
+          "kind": "REACTION_COUNT_EQUALS",
+          "expected": 257
+        }
+      ]
+    },
+    {
+      "runId": "run-5-return-first",
+      "inputs": {
+        "S": 0,
+        "A": "0x00000000",
+        "B": "0xffffffff"
+      },
+      "executionMode": "TO_QUIESCENCE",
+      "maxReactions": 300,
+      "assertions": [
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "value",
+          "expected": "0x00000000"
+        },
+        {
+          "kind": "QUIESCENT_EQUALS",
+          "expected": true
+        },
+        {
+          "kind": "REACTION_COUNT_EQUALS",
+          "expected": 257
+        }
+      ]
+    }
+  ],
+  "supportedBackends": [
+    "optimized-cpu"
+  ],
+  "oraclePolicy": "FRESH_INSTANCE",
+  "invariants": [
+    "prepare-once",
+    "load-once",
+    "same-session",
+    "link-only-reconfiguration",
+    "mux32-composed-through-mux1",
+    "return-to-first-configuration"
+  ],
+  "observationLevel": "PROFILE",
+  "profilingPolicy": "FULL",
+  "visualizationProfile": "engineering"
+}
