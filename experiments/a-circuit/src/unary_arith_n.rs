@@ -7,9 +7,11 @@ use super::{
         call, define_bundle_rule, index_rule_for, Fixture as FullFixture,
     },
     proof_n::{
-        execute_to_quiescence, identical_rerun, load_runtime, loaded_handle,
+        execute_session_to_quiescence, execute_to_quiescence,
+        identical_rerun, load_runtime, load_runtime_session, loaded_handle,
         prepare_stage, semantic_source, theory_admissions, visual_snapshot,
-        ProofRuntimeMemory, WebProofResultStage, WebStructuralProof,
+        ProofRuntimeMemory, ProofRuntimeSession, WebProofLoadStage,
+        WebProofPrepareStage, WebProofResultStage, WebStructuralProof,
     },
 };
 use amemory_optimized_cpu_probe::{
@@ -485,6 +487,152 @@ fn decode_runtime_unary_effect(
     Some((outcome,payload))
 }
 
+
+#[derive(Clone,Debug,PartialEq,Eq)]
+pub(crate) struct Unary32SessionProjection{
+    pub(crate) value:u32,
+    pub(crate) writeback:u8,
+    pub(crate) defined_mask:u32,
+    pub(crate) value_mask:u32,
+    pub(crate) undefined_mask:u32,
+    pub(crate) preserve_mask:u32,
+    pub(crate) result_recursive_wire:String,
+}
+
+pub(crate) fn prepare_unary32_session_program(
+)->Option<WebProofPrepareStage>{
+    let mut compiler=FullFixture::new();
+    let program=Program::install(&mut compiler,32);
+
+    let prepared_roots=vec![
+        semantic_source(&compiler.store,"function.unary.inc",program.inc),
+        semantic_source(&compiler.store,"function.unary.dec",program.dec),
+        semantic_source(&compiler.store,"function.unary.neg",program.neg),
+        semantic_source(
+            &compiler.store,"function.flagged_arithmetic",program.flagged.flagged,
+        ),
+        semantic_source(
+            &compiler.store,"result.flagged_tag",program.flagged.result_tag,
+        ),
+        semantic_source(&compiler.store,"data.bit.zero",compiler.zero),
+        semantic_source(&compiler.store,"data.bit.one",compiler.one),
+        semantic_source(&compiler.store,"execution.interpreter",compiler.interpreter),
+        semantic_source(&compiler.store,"execution.theory",compiler.theory),
+        semantic_source(&compiler.store,"execution.apply",compiler.apply),
+        semantic_source(&compiler.store,"context.caller",compiler.k),
+        semantic_source(&compiler.store,"result.tag",program.result_tag),
+        semantic_source(&compiler.store,"result.flag.set_tag",program.schema.set_tag),
+        semantic_source(&compiler.store,"result.flag.cf",program.schema.cf),
+        semantic_source(&compiler.store,"result.flag.pf",program.schema.pf),
+        semantic_source(&compiler.store,"result.flag.af",program.schema.af),
+        semantic_source(&compiler.store,"result.flag.zf",program.schema.zf),
+        semantic_source(&compiler.store,"result.flag.sf",program.schema.sf),
+        semantic_source(&compiler.store,"result.flag.of",program.schema.of),
+    ];
+    let admissions=theory_admissions(&compiler.store,compiler.theory)?;
+    Some(prepare_stage(&compiler.store,prepared_roots,admissions))
+}
+
+fn unary32_function_role(op:u32)->Option<&'static str>{
+    match op{
+        20=>Some("function.unary.inc"),
+        21=>Some("function.unary.dec"),
+        22=>Some("function.unary.neg"),
+        _=>None,
+    }
+}
+
+pub(crate) fn configure_unary32_session(
+    session:&mut ProofRuntimeSession,
+    load:&WebProofLoadStage,
+    op:u32,
+    value:u32,
+)->Option<(Handle,usize,usize)>{
+    let function=loaded_handle(load,unary32_function_role(op)?)?;
+    let apply=loaded_handle(load,"execution.apply")?;
+    let caller=loaded_handle(load,"context.caller")?;
+    let zero=loaded_handle(load,"data.bit.zero")?;
+    let one=loaded_handle(load,"data.bit.one")?;
+
+    let bits=(0..32)
+        .map(|bit|if (value>>bit)&1==1{one}else{zero})
+        .collect::<Vec<_>>();
+
+    let before=session.memory.store.link_count();
+    let word=materialize_exact_sequence(&mut session.memory.store,&bits).ok()?;
+    let args=materialize_exact_sequence(&mut session.memory.store,&[word]).ok()?;
+    let invocation=call(&mut session.memory.store,apply,function,args);
+    let initial=session.memory.store.ensure_pair(caller,invocation).ok()?;
+    let after=session.memory.store.link_count();
+
+    Some((initial,before,after))
+}
+
+pub(crate) fn project_unary32_session_result(
+    session:&ProofRuntimeSession,
+    load:&WebProofLoadStage,
+)->Option<Unary32SessionProjection>{
+    if session.engine.current().len()!=1{return None;}
+
+    let caller=loaded_handle(load,"context.caller")?;
+    let result_tag=loaded_handle(load,"result.tag")?;
+    let zero=loaded_handle(load,"data.bit.zero")?;
+    let one=loaded_handle(load,"data.bit.one")?;
+    let set_tag=loaded_handle(load,"result.flag.set_tag")?;
+    let cf_flag=loaded_handle(load,"result.flag.cf")?;
+    let pf_flag=loaded_handle(load,"result.flag.pf")?;
+    let af_flag=loaded_handle(load,"result.flag.af")?;
+    let zf_flag=loaded_handle(load,"result.flag.zf")?;
+    let sf_flag=loaded_handle(load,"result.flag.sf")?;
+    let of_flag=loaded_handle(load,"result.flag.of")?;
+    let final_link=session.engine.current()[0];
+
+    let (actual,_)=decode_runtime_unary_effect(
+        &session.memory,
+        final_link,
+        caller,
+        result_tag,
+        zero,
+        one,
+        set_tag,
+        cf_flag,
+        pf_flag,
+        af_flag,
+        zf_flag,
+        sf_flag,
+        of_flag,
+    )?;
+
+    let mut defined_mask=WEB_PF|WEB_AF|WEB_ZF|WEB_SF|WEB_OF;
+    let mut value_mask=0u32;
+    for (flag_mask,bit) in [
+        (WEB_PF,actual.pf),
+        (WEB_AF,actual.af),
+        (WEB_ZF,actual.zf),
+        (WEB_SF,actual.sf),
+        (WEB_OF,actual.of),
+    ]{
+        if bit!=0{value_mask|=flag_mask;}
+    }
+    let preserve_mask=if let Some(cf)=actual.cf{
+        defined_mask|=WEB_CF;
+        if cf!=0{value_mask|=WEB_CF;}
+        0
+    }else{
+        WEB_CF
+    };
+
+    Some(Unary32SessionProjection{
+        value:actual.value,
+        writeback:1,
+        defined_mask,
+        value_mask,
+        undefined_mask:0,
+        preserve_mask,
+        result_recursive_wire:session.memory.store.export_anum(final_link).ok()?,
+    })
+}
+
 pub(crate) fn web_prove_unary32(
     op:u32,
     value:u32,
@@ -689,6 +837,156 @@ pub(crate) fn web_run_unary32(op:u32,value:u32)->Option<WebUnaryOutcome>{
     })
 }
 
+
+#[test]
+fn persistent_unary32_session_lifecycle_all_ops(){
+    for (op,kind,run_values) in [
+        (
+            20u32,
+            UnaryKind::Inc,
+            [0x7fff_ffffu32,0xffff_ffff,0,0x8000_0000,0x7fff_ffff],
+        ),
+        (
+            21u32,
+            UnaryKind::Dec,
+            [0x8000_0000u32,0,1,0xffff_ffff,0x8000_0000],
+        ),
+        (
+            22u32,
+            UnaryKind::Neg,
+            [0u32,1,0x8000_0000,0xffff_ffff,0],
+        ),
+    ]{
+        let prepare=prepare_unary32_session_program()
+            .expect("prepare UNARY32");
+        let prepared_roles=prepare.semantic_roots.iter()
+            .map(|root|root.role.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+
+        for runtime_role in [
+            "function.unary.selected",
+            "data.value.word",
+            "invocation.args",
+            "invocation.call",
+            "scope.initial",
+        ]{
+            assert!(
+                !prepared_roles.contains(runtime_role),
+                "op {op}: PREPARE leaked runtime role {runtime_role}",
+            );
+        }
+        for static_role in [
+            "function.unary.inc",
+            "function.unary.dec",
+            "function.unary.neg",
+            "function.flagged_arithmetic",
+        ]{
+            assert!(
+                prepared_roles.contains(static_role),
+                "op {op}: static UNARY32 Aset missing {static_role}",
+            );
+        }
+
+        let (mut session,load)=load_runtime_session(&prepare,64)
+            .expect("load UNARY32");
+        let memory_id=session.memory.id.clone();
+        let base_link_count=session.base_link_count;
+        let base_carrier=session.memory.store.export_packed_duplets();
+
+        let mut oracle_fixture=FullFixture::new();
+        let oracle_program=Program::install(&mut oracle_fixture,32);
+        let oracle_function=match kind{
+            UnaryKind::Inc=>oracle_program.inc,
+            UnaryKind::Dec=>oracle_program.dec,
+            UnaryKind::Neg=>oracle_program.neg,
+        };
+
+        let mut first_projection=None;
+        for (index,value) in run_values.into_iter().enumerate(){
+            let (initial,before,after)=configure_unary32_session(
+                &mut session,&load,op,value,
+            ).expect("configure UNARY32");
+            assert_eq!(session.memory.id,memory_id);
+            assert!(before>=base_link_count);
+            assert!(after>=before);
+
+            if index==4{
+                assert_eq!(
+                    after,before,
+                    "op {op}: return-to-first must reuse canonical configuration Links",
+                );
+            }
+
+            let execute=execute_session_to_quiescence(
+                &mut session,
+                initial,
+                oracle_program.active_steps as u32 + 2,
+            ).expect("execute UNARY32");
+            assert!(execute.final_quiescent);
+            assert_eq!(session.memory.id,memory_id);
+            assert_eq!(session.engine.current().len(),1);
+            assert_eq!(
+                execute.active_reaction_count,
+                oracle_program.active_steps as u32,
+                "op {op} run {index}: reaction count",
+            );
+
+            let projected=project_unary32_session_result(
+                &session,&load,
+            ).expect("project UNARY32");
+            let expected=expected(32,kind,value);
+
+            let mut expected_defined=
+                WEB_PF|WEB_AF|WEB_ZF|WEB_SF|WEB_OF;
+            let mut expected_values=0u32;
+            for (flag_mask,bit) in [
+                (WEB_PF,expected.pf),
+                (WEB_AF,expected.af),
+                (WEB_ZF,expected.zf),
+                (WEB_SF,expected.sf),
+                (WEB_OF,expected.of),
+            ]{
+                if bit!=0{expected_values|=flag_mask;}
+            }
+            let expected_preserve=if let Some(cf)=expected.cf{
+                expected_defined|=WEB_CF;
+                if cf!=0{expected_values|=WEB_CF;}
+                0
+            }else{
+                WEB_CF
+            };
+
+            assert_eq!(projected.value,expected.value);
+            assert_eq!(projected.writeback,1);
+            assert_eq!(projected.defined_mask,expected_defined);
+            assert_eq!(projected.value_mask,expected_values);
+            assert_eq!(projected.undefined_mask,0);
+            assert_eq!(projected.preserve_mask,expected_preserve);
+
+            let carrier=session.memory.store.export_packed_duplets();
+            assert_eq!(
+                &carrier[..base_link_count],base_carrier.as_slice(),
+                "op {op}: loaded base prefix changed",
+            );
+
+            // The runtime result must be the same semantic endpoint as the
+            // existing fresh structural execution for the same unary function.
+            let fresh=run(
+                &mut oracle_fixture,&oracle_program,oracle_function,value,
+            );
+            assert_eq!(fresh,expected);
+
+            if index==0{
+                first_projection=Some(projected.clone());
+            }else if index==4{
+                assert_eq!(
+                    Some(projected),first_projection,
+                    "op {op}: return-to-first changed semantic Result",
+                );
+            }
+        }
+    }
+}
 
 #[test]
 #[ignore="heavy M4 unary arithmetic suite; mandatory release workflow"]
