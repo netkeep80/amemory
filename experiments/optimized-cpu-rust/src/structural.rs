@@ -152,6 +152,9 @@ pub enum StructuralTraceEvent {
         rule: Handle,
         output_bundle_template: Handle,
         grounded_bundle: Handle,
+        /// Exact append-only Store records physically created while grounding
+        /// this output bundle. Persistent carrier Links; not Context.
+        created_links: Vec<Handle>,
     },
     Published {
         active: Handle,
@@ -1298,12 +1301,26 @@ impl OptimizedStructuralEngine {
 
                     let instantiation_started =
                         profile.as_ref().map(|_| ProfileTimer::start());
+                    let links_before_instantiation = store.link_count();
                     let grounded_bundle = instantiate_structural_template_internal(
                         store,
                         image.output_bundle_template,
                         &image.bindings,
                         profile,
                     )?;
+                    let links_after_instantiation = store.link_count();
+                    let created_links = (
+                        links_before_instantiation + 1
+                            ..=links_after_instantiation
+                    )
+                        .map(|raw| {
+                            Handle::try_from(raw).map_err(|_| {
+                                StructuralError::Store(
+                                    StoreError::CapacityExceeded,
+                                )
+                            })
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
                     if let Some(profile) = profile.as_deref_mut() {
                         if let Some(started) = instantiation_started {
                             profile.instantiation_ns += started.elapsed_ns();
@@ -1317,6 +1334,7 @@ impl OptimizedStructuralEngine {
                             output_bundle_template:
                                 image.output_bundle_template,
                             grounded_bundle,
+                            created_links,
                         });
                         trace.collection_ns += trace_started.elapsed_ns();
                     }
@@ -1910,8 +1928,10 @@ mod tests {
         let profiled_expected =
             profiled_store.ensure_pair(caller, output).unwrap();
 
+        let traced_links_before = traced_store.link_count();
         let (traced_reaction, traced_profile, trace) =
             traced_engine.run_traced(&mut traced_store).unwrap();
+        let traced_links_after = traced_store.link_count();
         let traced_expected =
             traced_store.ensure_pair(caller, output).unwrap();
 
@@ -1968,10 +1988,22 @@ mod tests {
                     rule: traced_rule,
                     output_bundle_template,
                     grounded_bundle,
+                    created_links,
                 } if *traced_active == active
                     && *traced_rule == rule
                     && *output_bundle_template == bundle =>
                 {
+                    let expected_created = (
+                        traced_links_before + 1
+                            ..=traced_links_after
+                    )
+                        .map(|raw| raw as Handle)
+                        .collect::<Vec<_>>();
+                    assert_eq!(
+                        created_links,
+                        &expected_created,
+                        "trace must name exactly the persistent Store records appended by this instantiation",
+                    );
                     Some(*grounded_bundle)
                 }
                 _ => None,
@@ -2044,6 +2076,13 @@ mod tests {
             } if *traced_active == traced_expected
                 && outputs == &vec![traced_expected]
         )));
+        assert!(
+            !quiescent_trace.events.iter().any(|event| matches!(
+                event,
+                StructuralTraceEvent::Instantiated { .. }
+            )),
+            "quiescent preserved members must not fabricate persistent Link deltas",
+        );
         assert!(quiescent_trace.events.iter().any(|event| matches!(
             event,
             StructuralTraceEvent::ScopeCommitted {
