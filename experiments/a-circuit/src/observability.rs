@@ -108,6 +108,10 @@ pub(crate) struct RunStructuralFactV1 {
     pub(crate) output_bundle_template: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) grounded_bundle: Option<u32>,
+    /// Persistent carrier Links physically appended by this instantiation.
+    /// This field does not classify them as Context scaffolding.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) created_links: Option<Vec<u32>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) bindings: Option<Vec<RunBindingV1>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -137,6 +141,7 @@ impl From<StructuralTraceEvent> for RunStructuralFactV1 {
                 matched_rules: Some(matched_rules),
                 output_bundle_template: None,
                 grounded_bundle: None,
+                created_links: None,
                 bindings: None,
                 outputs: None,
                 preserved: None,
@@ -157,6 +162,7 @@ impl From<StructuralTraceEvent> for RunStructuralFactV1 {
                 matched_rules: None,
                 output_bundle_template: Some(output_bundle_template),
                 grounded_bundle: None,
+                created_links: None,
                 bindings: Some(
                     bindings
                         .into_iter()
@@ -178,6 +184,7 @@ impl From<StructuralTraceEvent> for RunStructuralFactV1 {
                 rule,
                 output_bundle_template,
                 grounded_bundle,
+                created_links,
             } => Self {
                 kind: RunStructuralFactKind::Instantiated,
                 active: Some(active),
@@ -185,6 +192,7 @@ impl From<StructuralTraceEvent> for RunStructuralFactV1 {
                 matched_rules: None,
                 output_bundle_template: Some(output_bundle_template),
                 grounded_bundle: Some(grounded_bundle),
+                created_links: Some(created_links),
                 bindings: None,
                 outputs: None,
                 preserved: None,
@@ -205,6 +213,7 @@ impl From<StructuralTraceEvent> for RunStructuralFactV1 {
                 matched_rules: None,
                 output_bundle_template: None,
                 grounded_bundle: None,
+                created_links: None,
                 bindings: None,
                 outputs: Some(outputs),
                 preserved: Some(preserved),
@@ -225,6 +234,7 @@ impl From<StructuralTraceEvent> for RunStructuralFactV1 {
                 matched_rules: None,
                 output_bundle_template: None,
                 grounded_bundle: None,
+                created_links: None,
                 bindings: None,
                 outputs: None,
                 preserved: None,
@@ -620,6 +630,27 @@ mod tests {
         let json = serde_json::to_string(&fact).unwrap();
         assert!(json.contains("\"kind\":\"RULE_MATCHED\""));
         assert!(json.contains("\"rule\":12"));
+    }
+
+    #[test]
+    fn persistent_link_delta_survives_portable_projection() {
+        let fact = RunStructuralFactV1::from(
+            StructuralTraceEvent::Instantiated {
+                active: 11,
+                rule: 12,
+                output_bundle_template: 13,
+                grounded_bundle: 17,
+                created_links: vec![14, 15, 16, 17],
+            },
+        );
+
+        assert_eq!(fact.kind, RunStructuralFactKind::Instantiated);
+        assert_eq!(fact.created_links, Some(vec![14, 15, 16, 17]));
+        assert_eq!(fact.grounded_bundle, Some(17));
+
+        let json = serde_json::to_string(&fact).unwrap();
+        assert!(json.contains("\"createdLinks\":[14,15,16,17]"));
+        assert!(!json.contains("context"));
     }
 
     #[test]
