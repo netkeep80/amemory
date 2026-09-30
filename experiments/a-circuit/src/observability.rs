@@ -89,6 +89,14 @@ pub(crate) enum RunStructuralFactKind {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct RunCreatedLinkV1 {
+    pub(crate) handle: u32,
+    pub(crate) start: u32,
+    pub(crate) end: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct RunBindingV1 {
     pub(crate) role: u32,
     pub(crate) value: u32,
@@ -111,7 +119,7 @@ pub(crate) struct RunStructuralFactV1 {
     /// Persistent carrier Links physically appended by this instantiation.
     /// This field does not classify them as Context scaffolding.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) created_links: Option<Vec<u32>>,
+    pub(crate) created_links: Option<Vec<RunCreatedLinkV1>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) bindings: Option<Vec<RunBindingV1>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -192,7 +200,16 @@ impl From<StructuralTraceEvent> for RunStructuralFactV1 {
                 matched_rules: None,
                 output_bundle_template: Some(output_bundle_template),
                 grounded_bundle: Some(grounded_bundle),
-                created_links: Some(created_links),
+                created_links: Some(
+                    created_links
+                        .into_iter()
+                        .map(|link| RunCreatedLinkV1 {
+                            handle: link.handle,
+                            start: link.start,
+                            end: link.end,
+                        })
+                        .collect(),
+                ),
                 bindings: None,
                 outputs: None,
                 preserved: None,
@@ -640,16 +657,43 @@ mod tests {
                 rule: 12,
                 output_bundle_template: 13,
                 grounded_bundle: 17,
-                created_links: vec![14, 15, 16, 17],
+                created_links: vec![
+                    amemory_optimized_cpu_probe::structural::StructuralCreatedLink {
+                        handle: 14,
+                        start: 11,
+                        end: 12,
+                    },
+                    amemory_optimized_cpu_probe::structural::StructuralCreatedLink {
+                        handle: 15,
+                        start: 14,
+                        end: 13,
+                    },
+                ],
             },
         );
 
         assert_eq!(fact.kind, RunStructuralFactKind::Instantiated);
-        assert_eq!(fact.created_links, Some(vec![14, 15, 16, 17]));
+        assert_eq!(
+            fact.created_links,
+            Some(vec![
+                RunCreatedLinkV1 {
+                    handle: 14,
+                    start: 11,
+                    end: 12,
+                },
+                RunCreatedLinkV1 {
+                    handle: 15,
+                    start: 14,
+                    end: 13,
+                },
+            ]),
+        );
         assert_eq!(fact.grounded_bundle, Some(17));
 
         let json = serde_json::to_string(&fact).unwrap();
-        assert!(json.contains("\"createdLinks\":[14,15,16,17]"));
+        assert!(json.contains(
+            "\"createdLinks\":[{\"handle\":14,\"start\":11,\"end\":12}"
+        ));
         assert!(!json.contains("context"));
     }
 
