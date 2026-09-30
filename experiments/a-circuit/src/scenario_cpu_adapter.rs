@@ -28,6 +28,12 @@ use super::{
         configure_rotate32_session, prepare_rotate32_session_program,
         project_rotate32_session_result, web_prove_rotate32,
     },
+    rotate_carry32_n::{
+        configure_rotate_carry32_session,
+        prepare_rotate_carry32_session_program,
+        project_rotate_carry32_session_result,
+        web_prove_rotate_carry32,
+    },
     scenario::ScenarioProgramProfileV1,
     shift32_n::{
         configure_shift32_session, prepare_shift32_session_program,
@@ -75,6 +81,9 @@ enum CpuScenarioImplementation {
     Rotate32 {
         op: u32,
     },
+    RotateCarry32 {
+        op: u32,
+    },
 }
 
 pub(crate) struct CpuScenarioAdapter {
@@ -110,6 +119,9 @@ impl CpuScenarioAdapter {
             CpuScenarioImplementation::Rotate32 { .. } => {
                 prepare_rotate32_session_program()
             }
+            CpuScenarioImplementation::RotateCarry32 { .. } => {
+                prepare_rotate_carry32_session_program()
+            }
         }
     }
 
@@ -137,6 +149,11 @@ impl CpuScenarioAdapter {
             CpuScenarioImplementation::Rotate32 { op } => {
                 configure_rotate32_from_inputs(op, session, load, inputs)
             }
+            CpuScenarioImplementation::RotateCarry32 { op } => {
+                configure_rotate_carry32_from_inputs(
+                    op, session, load, inputs,
+                )
+            }
         }
     }
 
@@ -161,6 +178,9 @@ impl CpuScenarioAdapter {
             CpuScenarioImplementation::Rotate32 { .. } => {
                 project_rotate32_result(session, load)
             }
+            CpuScenarioImplementation::RotateCarry32 { .. } => {
+                project_rotate_carry32_result(session, load)
+            }
         }
     }
 
@@ -184,6 +204,9 @@ impl CpuScenarioAdapter {
             CpuScenarioImplementation::Rotate32 { op } => {
                 fresh_instance_rotate32_result(op, inputs)
             }
+            CpuScenarioImplementation::RotateCarry32 { op } => {
+                fresh_instance_rotate_carry32_result(op, inputs)
+            }
         }
     }
 
@@ -206,6 +229,9 @@ impl CpuScenarioAdapter {
             }
             CpuScenarioImplementation::Rotate32 { op } => {
                 scalar_rotate32_result(op, inputs)
+            }
+            CpuScenarioImplementation::RotateCarry32 { op } => {
+                scalar_rotate_carry32_result(op, inputs)
             }
         }
     }
@@ -371,6 +397,20 @@ const CPU_SCENARIO_ADAPTERS: &[CpuScenarioAdapter] = &[
         program_id: "ror32",
         aset_source: "builtin:a-circuit/rotate32/ror",
         implementation: CpuScenarioImplementation::Rotate32 { op: 17 },
+    },
+    CpuScenarioAdapter {
+        profile_id: "a-circuit:rotate-carry-rcl32",
+        family: "rotate-carry-effect",
+        program_id: "rcl32",
+        aset_source: "builtin:a-circuit/rotate-carry32/rcl",
+        implementation: CpuScenarioImplementation::RotateCarry32 { op: 18 },
+    },
+    CpuScenarioAdapter {
+        profile_id: "a-circuit:rotate-carry-rcr32",
+        family: "rotate-carry-effect",
+        program_id: "rcr32",
+        aset_source: "builtin:a-circuit/rotate-carry32/rcr",
+        implementation: CpuScenarioImplementation::RotateCarry32 { op: 19 },
     },
     CpuScenarioAdapter {
         profile_id: "a-circuit:mul32",
@@ -822,6 +862,76 @@ fn fresh_instance_rotate32_result(
     ))
 }
 
+fn rotate_carry32_inputs(
+    inputs: &BTreeMap<String, Value>,
+) -> Result<(u32, u8, u8), String> {
+    Ok((
+        word32_input(inputs, "VALUE")?,
+        count8_input(inputs, "COUNT")?,
+        bit_input(inputs, "CF")? as u8,
+    ))
+}
+
+fn configure_rotate_carry32_from_inputs(
+    op: u32,
+    session: &mut ProofRuntimeSession,
+    load: &WebProofLoadStage,
+    inputs: &BTreeMap<String, Value>,
+) -> Result<ConfiguredRun, String> {
+    let (value, count, cf_in) = rotate_carry32_inputs(inputs)?;
+    let (initial, before, after) =
+        configure_rotate_carry32_session(
+            session, load, op, value, count, cf_in,
+        )
+        .ok_or_else(|| {
+            format!("RotateCarry32 op {op} configuration failed")
+        })?;
+    Ok(ConfiguredRun {
+        initial,
+        links_before: before as u32,
+        links_after: after as u32,
+    })
+}
+
+fn project_rotate_carry32_result(
+    session: &ProofRuntimeSession,
+    load: &WebProofLoadStage,
+) -> Result<ScenarioNormalizedResultV1, String> {
+    let projected = project_rotate_carry32_session_result(session, load)
+        .ok_or_else(|| "RotateCarry32 result projection failed".to_owned())?;
+    Ok(effect32_normalized(
+        projected.value,
+        projected.writeback,
+        projected.defined_mask,
+        projected.value_mask,
+        projected.undefined_mask,
+        projected.preserve_mask,
+        projected.result_recursive_wire,
+    ))
+}
+
+fn fresh_instance_rotate_carry32_result(
+    op: u32,
+    inputs: &BTreeMap<String, Value>,
+) -> Result<ScenarioNormalizedResultV1, String> {
+    let (value, count, cf_in) = rotate_carry32_inputs(inputs)?;
+    let proof = web_prove_rotate_carry32(
+        op, value, u32::from(count), u32::from(cf_in),
+    )
+    .ok_or_else(|| {
+        format!("fresh RotateCarry32 op {op} oracle failed")
+    })?;
+    Ok(effect32_normalized(
+        proof.outcome.value,
+        proof.outcome.writeback,
+        proof.outcome.defined_mask,
+        proof.outcome.value_mask,
+        proof.outcome.undefined_mask,
+        proof.outcome.preserve_mask,
+        proof.proof.result.result_anum,
+    ))
+}
+
 fn configure_mul32_from_inputs(
     session: &mut ProofRuntimeSession,
     load: &WebProofLoadStage,
@@ -1208,6 +1318,54 @@ fn scalar_rotate32_result(
         match op {
             16 => (result >> 31 != 0) ^ cf,
             17 => ((result >> 31) & 1) != ((result >> 30) & 1),
+            _ => unreachable!(),
+        }
+    } else {
+        false
+    };
+
+    let mut defined = SCALAR_CF;
+    let mut undefined = 0u32;
+    if masked == 1 {
+        defined |= SCALAR_OF;
+    } else {
+        undefined |= SCALAR_OF;
+    }
+    let preserve =
+        SCALAR_PF | SCALAR_AF | SCALAR_ZF | SCALAR_SF;
+    let value_mask =
+        scalar_status_value_mask(cf, false, false, false, false, of)
+            & defined;
+    Ok(scalar_effect32_fields(
+        result, 1, defined, value_mask, undefined, preserve,
+    ))
+}
+
+fn scalar_rotate_carry32_result(
+    op: u32,
+    inputs: &BTreeMap<String, Value>,
+) -> Result<BTreeMap<String, Value>, String> {
+    let (value, count, cf_in) = rotate_carry32_inputs(inputs)?;
+    let masked = u32::from(count & 31);
+    if masked == 0 {
+        return Ok(scalar_effect32_fields(
+            value, 1, 0, 0, 0, SCALAR_STATUS_FLAGS,
+        ));
+    }
+
+    let mask = (1u64 << 33) - 1;
+    let ext = (u64::from(cf_in) << 32) | u64::from(value);
+    let rotated = match op {
+        18 => ((ext << masked) | (ext >> (33 - masked))) & mask,
+        19 => ((ext >> masked) | (ext << (33 - masked))) & mask,
+        _ => return Err(format!("unsupported RotateCarry32 op {op}")),
+    };
+    let result = rotated as u32;
+    let cf = ((rotated >> 32) & 1) != 0;
+    let of = if masked == 1 {
+        match op {
+            18 => (result >> 31 != 0) ^ cf,
+            19 => ((result >> 31) & 1) != ((result >> 30) & 1),
             _ => unreachable!(),
         }
     } else {
