@@ -7,7 +7,8 @@ use super::{
         call, define_bundle_rule, index_rule_for, Fixture as FullFixture,
     },
     proof_n::{
-        execute_to_quiescence, identical_rerun, load_runtime, loaded_handle,
+        execute_session_to_quiescence, execute_to_quiescence,
+        identical_rerun, load_runtime, load_runtime_session, loaded_handle,
         prepare_stage, semantic_source, theory_admissions, visual_snapshot,
         ProofRuntimeMemory, ProofRuntimeSession, WebProofLoadStage,
         WebProofPrepareStage, WebProofResultStage, WebStructuralProof,
@@ -717,7 +718,7 @@ fn decode_runtime_arithmetic_effect(
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct Add32SessionProjection {
+pub(crate) struct Arithmetic32SessionProjection {
     pub(crate) value: u32,
     pub(crate) writeback: u8,
     pub(crate) defined_mask: u32,
@@ -727,13 +728,16 @@ pub(crate) struct Add32SessionProjection {
     pub(crate) result_recursive_wire: String,
 }
 
-pub(crate) fn prepare_add32_session_program(
+pub(crate) type Add32SessionProjection = Arithmetic32SessionProjection;
+
+pub(crate) fn prepare_arithmetic32_session_program(
 ) -> Option<WebProofPrepareStage> {
     let mut compiler = FullFixture::new();
     let program = ArithmeticEffectProgram::install(&mut compiler, 32);
 
-    // Static arithmetic program only. Concrete A/B values and invocation
-    // control/payload are published after LOAD by CONFIGURE.
+    // One static arithmetic Aset supports ADD/ADC/SUB/SBB/CMP.
+    // Concrete A/B, carry/borrow input, mode, writeback, invocation and
+    // initial Scope are runtime CONFIGURE data after LOAD.
     let prepared_roots = vec![
         semantic_source(
             &compiler.store,
@@ -830,12 +834,33 @@ pub(crate) fn prepare_add32_session_program(
     ))
 }
 
-pub(crate) fn configure_add32_session(
+fn arithmetic32_control(
+    op: u32,
+    input_flag: u32,
+) -> Option<(u8, u8, u8)> {
+    if input_flag > 1 {
+        return None;
+    }
+    match op {
+        6 => Some((0, 0, 1)),
+        7 => Some((input_flag as u8, 0, 1)),
+        8 => Some((0, 1, 1)),
+        9 => Some((input_flag as u8, 1, 1)),
+        10 => Some((0, 1, 0)),
+        _ => None,
+    }
+}
+
+pub(crate) fn configure_arithmetic32_session(
     session: &mut ProofRuntimeSession,
     load: &WebProofLoadStage,
+    op: u32,
     a: u32,
     b: u32,
+    input_flag: u32,
 ) -> Option<(Handle, usize, usize)> {
+    let (x, mode, writeback) =
+        arithmetic32_control(op, input_flag)?;
     let effect =
         loaded_handle(load, "function.effect.arithmetic")?;
     let apply = loaded_handle(load, "execution.apply")?;
@@ -851,14 +876,14 @@ pub(crate) fn configure_add32_session(
             .collect::<Vec<_>>();
         materialize_exact_sequence(store, &bits).ok()
     };
+    let bit = |value: u8| if value == 0 { zero } else { one };
 
     let before = session.memory.store.link_count();
     let aword = word(&mut session.memory.store, a)?;
     let bword = word(&mut session.memory.store, b)?;
     let args = materialize_exact_sequence(
         &mut session.memory.store,
-        // ADD32: X=0, Mode=0, WriteBack=1.
-        &[aword, bword, zero, zero, one],
+        &[aword, bword, bit(x), bit(mode), bit(writeback)],
     )
     .ok()?;
     let invocation =
@@ -873,10 +898,10 @@ pub(crate) fn configure_add32_session(
     Some((initial, before, after))
 }
 
-pub(crate) fn project_add32_session_result(
+pub(crate) fn project_arithmetic32_session_result(
     session: &ProofRuntimeSession,
     load: &WebProofLoadStage,
-) -> Option<Add32SessionProjection> {
+) -> Option<Arithmetic32SessionProjection> {
     if session.engine.current().len() != 1 {
         return None;
     }
@@ -913,7 +938,7 @@ pub(crate) fn project_add32_session_result(
     let (defined_mask, value_mask) =
         web_arithmetic_masks(outcome);
 
-    Some(Add32SessionProjection {
+    Some(Arithmetic32SessionProjection {
         value: outcome.value,
         writeback: outcome.writeback,
         defined_mask,
@@ -926,6 +951,28 @@ pub(crate) fn project_add32_session_result(
             .export_anum(final_link)
             .ok()?,
     })
+}
+
+// Compatibility facade: ADD32 owns no separate persistent executor.
+pub(crate) fn prepare_add32_session_program(
+) -> Option<WebProofPrepareStage> {
+    prepare_arithmetic32_session_program()
+}
+
+pub(crate) fn configure_add32_session(
+    session: &mut ProofRuntimeSession,
+    load: &WebProofLoadStage,
+    a: u32,
+    b: u32,
+) -> Option<(Handle, usize, usize)> {
+    configure_arithmetic32_session(session, load, 6, a, b, 0)
+}
+
+pub(crate) fn project_add32_session_result(
+    session: &ProofRuntimeSession,
+    load: &WebProofLoadStage,
+) -> Option<Add32SessionProjection> {
+    project_arithmetic32_session_result(session, load)
 }
 
 pub(crate) fn web_prove_arithmetic(
@@ -1180,6 +1227,123 @@ pub(crate) fn web_run_arithmetic(
     })
 }
 
+
+#[test]
+fn persistent_arithmetic32_session_four_run_lifecycle_all_ops() {
+    let run_vectors = [
+        (0xffff_ffffu32, 0x0000_0000u32, 1u32),
+        (0x7fff_ffffu32, 0x0000_0001u32, 0u32),
+        (0x8000_0000u32, 0x0000_0001u32, 1u32),
+        (0xffff_ffffu32, 0x0000_0000u32, 1u32),
+    ];
+
+    for op in 6u32..=10 {
+        let prepare = prepare_arithmetic32_session_program()
+            .expect("prepare Arithmetic32");
+        let prepared_roles = prepare
+            .semantic_roots
+            .iter()
+            .map(|root| root.role.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        for runtime_role in [
+            "data.a.word",
+            "data.b.word",
+            "data.x",
+            "data.mode",
+            "data.writeback",
+            "invocation.args",
+            "invocation.call",
+            "scope.initial",
+        ] {
+            assert!(
+                !prepared_roles.contains(runtime_role),
+                "op {op}: PREPARE leaked runtime role {runtime_role}",
+            );
+        }
+
+        let (mut session, load) =
+            load_runtime_session(&prepare, 128).expect("load Arithmetic32");
+        let memory_id = session.memory.id.clone();
+        let base_link_count = session.base_link_count;
+        let base_carrier =
+            session.memory.store.export_packed_duplets();
+
+        let mut first_projection = None;
+        for (index, (a, b, input_flag)) in
+            run_vectors.into_iter().enumerate()
+        {
+            let (initial, before, after) =
+                configure_arithmetic32_session(
+                    &mut session,
+                    &load,
+                    op,
+                    a,
+                    b,
+                    input_flag,
+                )
+                .expect("configure Arithmetic32");
+            assert_eq!(session.memory.id, memory_id);
+            assert!(before >= base_link_count);
+            assert!(after >= before);
+
+            if index == 3 {
+                assert_eq!(
+                    after, before,
+                    "op {op}: return-to-first input must reuse canonical configuration Links",
+                );
+            }
+
+            let execute = execute_session_to_quiescence(
+                &mut session,
+                initial,
+                1024,
+            )
+            .expect("execute Arithmetic32");
+            assert!(execute.final_quiescent);
+            assert_eq!(execute.active_reaction_count, 609);
+            assert_eq!(session.memory.id, memory_id);
+            assert_eq!(session.engine.current().len(), 1);
+
+            let projected =
+                project_arithmetic32_session_result(&session, &load)
+                    .expect("project Arithmetic32");
+            let (x, mode, writeback) =
+                arithmetic32_control(op, input_flag).unwrap();
+            let expected =
+                expected(32, a, b, x, mode, writeback);
+            let (expected_defined, expected_values) =
+                web_arithmetic_masks(expected);
+
+            assert_eq!(projected.value, expected.value, "op {op} run {index}");
+            assert_eq!(
+                projected.writeback,
+                expected.writeback,
+                "op {op} run {index}",
+            );
+            assert_eq!(projected.defined_mask, expected_defined);
+            assert_eq!(projected.value_mask, expected_values);
+            assert_eq!(projected.undefined_mask, 0);
+            assert_eq!(projected.preserve_mask, 0);
+
+            let carrier = session.memory.store.export_packed_duplets();
+            assert_eq!(
+                &carrier[..base_link_count],
+                base_carrier.as_slice(),
+                "op {op}: loaded base prefix changed",
+            );
+
+            if index == 0 {
+                first_projection = Some(projected.clone());
+            } else if index == 3 {
+                assert_eq!(
+                    Some(projected),
+                    first_projection,
+                    "op {op}: return-to-first input changed semantic Result",
+                );
+            }
+        }
+    }
+}
 
 #[test]
 #[ignore = "heavy M4 arithmetic-effect suite; mandatory release workflow"]
