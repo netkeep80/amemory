@@ -1448,7 +1448,7 @@ fn arithmetic32_inputs(
     let a = word32_input(inputs, "A")?;
     let b = word32_input(inputs, "B")?;
     let input_flag = if matches!(op, 7 | 9) {
-        u32::from(bit_input(inputs, "CF")?)
+        bit_input(inputs, "CF")? as u32
     } else {
         0
     };
