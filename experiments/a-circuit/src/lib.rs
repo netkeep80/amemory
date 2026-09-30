@@ -24,6 +24,7 @@ mod observability;
 mod proof_n;
 mod scenario;
 mod scenario_registry;
+mod scenario_cpu_adapter;
 mod scenario_runner;
 mod scenario_web;
 mod unary_arith_n;
