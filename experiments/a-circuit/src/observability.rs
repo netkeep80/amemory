@@ -115,7 +115,7 @@ pub(crate) struct RunStructuralFactV1 {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) context_group_id: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) parent_context_id: Option<u32>,
+    pub(crate) parent_context_ids: Option<Vec<u32>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) active: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -156,7 +156,7 @@ impl From<StructuralTraceEvent> for RunStructuralFactV1 {
                 kind: RunStructuralFactKind::DiscoveryComplete,
                 context_id: None,
                 context_group_id: None,
-                parent_context_id: None,
+                parent_context_ids: None,
                 active: Some(active),
                 rule: None,
                 matched_rules: Some(matched_rules),
@@ -180,7 +180,7 @@ impl From<StructuralTraceEvent> for RunStructuralFactV1 {
                 kind: RunStructuralFactKind::RuleMatched,
                 context_id: None,
                 context_group_id: None,
-                parent_context_id: None,
+                parent_context_ids: None,
                 active: Some(active),
                 rule: Some(rule),
                 matched_rules: None,
@@ -206,7 +206,7 @@ impl From<StructuralTraceEvent> for RunStructuralFactV1 {
             StructuralTraceEvent::ContextCreated {
                 context_id,
                 context_group_id,
-                parent_context_id,
+                parent_context_ids,
                 active,
                 rule,
                 output_bundle_template,
@@ -215,7 +215,11 @@ impl From<StructuralTraceEvent> for RunStructuralFactV1 {
                 kind: RunStructuralFactKind::ContextCreated,
                 context_id: Some(context_id),
                 context_group_id: Some(context_group_id),
-                parent_context_id,
+                parent_context_ids: if parent_context_ids.is_empty() {
+                    None
+                } else {
+                    Some(parent_context_ids)
+                },
                 active: Some(active),
                 rule: Some(rule),
                 matched_rules: None,
@@ -248,7 +252,7 @@ impl From<StructuralTraceEvent> for RunStructuralFactV1 {
                 kind: RunStructuralFactKind::Instantiated,
                 context_id: None,
                 context_group_id: None,
-                parent_context_id: None,
+                parent_context_ids: None,
                 active: Some(active),
                 rule: Some(rule),
                 matched_rules: None,
@@ -280,7 +284,7 @@ impl From<StructuralTraceEvent> for RunStructuralFactV1 {
                 kind: RunStructuralFactKind::ContextUpdated,
                 context_id: Some(context_id),
                 context_group_id: Some(context_group_id),
-                parent_context_id: None,
+                parent_context_ids: None,
                 active: None,
                 rule: None,
                 matched_rules: None,
@@ -304,7 +308,7 @@ impl From<StructuralTraceEvent> for RunStructuralFactV1 {
                 kind: RunStructuralFactKind::Published,
                 context_id: None,
                 context_group_id: None,
-                parent_context_id: None,
+                parent_context_ids: None,
                 active: Some(active),
                 rule,
                 matched_rules: None,
@@ -327,7 +331,7 @@ impl From<StructuralTraceEvent> for RunStructuralFactV1 {
                 kind: RunStructuralFactKind::ContextPublished,
                 context_id: Some(context_id),
                 context_group_id: Some(context_group_id),
-                parent_context_id: None,
+                parent_context_ids: None,
                 active: None,
                 rule: None,
                 matched_rules: None,
@@ -349,7 +353,7 @@ impl From<StructuralTraceEvent> for RunStructuralFactV1 {
                 kind: RunStructuralFactKind::ContextCollapsed,
                 context_id: Some(context_id),
                 context_group_id: Some(context_group_id),
-                parent_context_id: None,
+                parent_context_ids: None,
                 active: None,
                 rule: None,
                 matched_rules: None,
@@ -373,7 +377,7 @@ impl From<StructuralTraceEvent> for RunStructuralFactV1 {
                 kind: RunStructuralFactKind::ScopeCommitted,
                 context_id: None,
                 context_group_id: None,
-                parent_context_id: None,
+                parent_context_ids: None,
                 active: None,
                 rule: None,
                 matched_rules: None,

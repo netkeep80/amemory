@@ -1153,8 +1153,22 @@ Promise.all([
     verifyLiveReactionEvidence(stepReports[0].evidence);
   if (firstReactionVerification.traceConsistent !== true ||
       firstReactionVerification.quiescent !== false ||
-      firstReactionVerification.contexts <= 0) {
+      firstReactionVerification.contexts <= 0 ||
+      firstReactionVerification.contextLineage.some(
+        (context) => context.parentContextIds.length !== 0
+      )) {
     throw new Error("#244 first reaction consistency mismatch");
+  }
+  const nestedContextFact = stepReports
+    .slice(1)
+    .flatMap((report) => report.evidence.structuralFacts)
+    .find((fact) =>
+      fact.kind === "CONTEXT_CREATED" &&
+      Array.isArray(fact.parentContextIds) &&
+      fact.parentContextIds.length > 0
+    );
+  if (!nestedContextFact) {
+    throw new Error("#245 real-WASM trace has no nested Context lineage");
   }
 
   function expectLiveTraceReject(label, mutate) {
@@ -1216,6 +1230,20 @@ Promise.all([
       throw new Error("#245 falsifier could not find Context collapse");
     }
     activeReport.evidence.structuralFacts.splice(index, 1);
+  });
+  expectLiveTraceReject("Context parent provenance", (corrupted) => {
+    const nested = corrupted
+      .slice(1)
+      .flatMap((report) => report.evidence.structuralFacts)
+      .find((fact) =>
+        fact.kind === "CONTEXT_CREATED" &&
+        Array.isArray(fact.parentContextIds) &&
+        fact.parentContextIds.length > 0
+      );
+    if (!nested) {
+      throw new Error("#245 falsifier could not find nested Context");
+    }
+    nested.parentContextIds = [0xffff_fffe];
   });
 
   const finalStep = stepReports.at(-1);
