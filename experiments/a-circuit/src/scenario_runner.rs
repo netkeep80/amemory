@@ -11,6 +11,7 @@ use super::{
         WebProofPrepareStage,
     },
     runtime_session::{
+        CpuRunBudgetV1, CpuRunControllerV1, CpuRunStopReasonV1,
         CpuRuntimeSession, CpuSessionReactionEvidenceV1, CpuSessionState,
         CpuSessionStepError,
     },
@@ -27,7 +28,7 @@ use super::{
 #[cfg(test)]
 use super::{
     logic_effect_n::prepare_logic32_session_program,
-    mux_n::prepare_mux1_session_program,
+    mux_n::{configure_mux1_session, prepare_mux1_session_program},
 };
 use amemory_optimized_cpu_probe::Handle;
 use serde::{Deserialize, Serialize};
@@ -78,7 +79,7 @@ pub(crate) struct ScenarioRunReportV1 {
 struct ScenarioActiveStepRunV1 {
     run: ScenarioRunV1,
     session_run_id: u64,
-    steps_taken: u32,
+    controller: CpuRunControllerV1,
     active_reaction_count: u32,
 }
 
@@ -212,6 +213,7 @@ pub(crate) enum ScenarioRunnerErrorV1 {
     ExecuteFailed {
         run_id: String,
         max_reactions: u32,
+        stop_reason: CpuRunStopReasonV1,
     },
     ProjectResultFailed {
         run_id: String,
@@ -515,9 +517,10 @@ pub(crate) fn run_cpu_scenario_session_once_v1(
         run.max_reactions,
         live.manifest.observation_level,
     )
-    .ok_or_else(|| ScenarioRunnerErrorV1::ExecuteFailed {
+    .map_err(|stop_reason| ScenarioRunnerErrorV1::ExecuteFailed {
         run_id: run.run_id.clone(),
         max_reactions: run.max_reactions,
+        stop_reason,
     })?;
 
     let links_before_result = live.session.memory.store.link_count();
@@ -660,13 +663,17 @@ pub(crate) fn begin_cpu_scenario_step_run_v1(
         message,
     })?;
 
-    let session_run_id =
-        live.session.begin_run(configured.initial).map_err(|error| {
-            ScenarioRunnerErrorV1::StepControlFailed {
-                run_id: run.run_id.clone(),
-                message: format!("{error:?}"),
-            }
+    let controller = live
+        .session
+        .begin_budgeted_run(
+            configured.initial,
+            CpuRunBudgetV1::scenario_default(run.max_reactions),
+        )
+        .map_err(|error| ScenarioRunnerErrorV1::StepControlFailed {
+            run_id: run.run_id.clone(),
+            message: format!("{error:?}"),
         })?;
+    let session_run_id = controller.run_id();
 
     let begin = ScenarioStepBeginV1 {
         schema_version: SCENARIO_REPORT_SCHEMA_VERSION,
@@ -681,7 +688,7 @@ pub(crate) fn begin_cpu_scenario_step_run_v1(
     live.active_step_run = Some(ScenarioActiveStepRunV1 {
         run: run.clone(),
         session_run_id,
-        steps_taken: 0,
+        controller,
         active_reaction_count: 0,
     });
     Ok(begin)
@@ -695,35 +702,36 @@ pub(crate) fn step_cpu_scenario_session_v1(
         .take()
         .ok_or(ScenarioRunnerErrorV1::StepRunNotActive)?;
 
-    if active.steps_taken >= active.run.max_reactions {
-        live.session.fail_active_run();
-        return Err(ScenarioRunnerErrorV1::ExecuteFailed {
-            run_id: active.run.run_id,
-            max_reactions: active.run.max_reactions,
-        });
-    }
+    let controlled = active
+        .controller
+        .next(&mut live.session, live.manifest.observation_level);
 
-    let step = match live
-        .session
-        .step(live.manifest.observation_level)
-    {
-        Ok(step) => step,
-        Err(error) => {
-            live.session.fail_active_run();
-            return Err(ScenarioRunnerErrorV1::StepControlFailed {
+    if let Some(stop_reason) = controlled.stop_reason {
+        if stop_reason != CpuRunStopReasonV1::Quiescent {
+            return Err(ScenarioRunnerErrorV1::ExecuteFailed {
                 run_id: active.run.run_id,
-                message: format!("{error:?}"),
+                max_reactions: active.run.max_reactions,
+                stop_reason,
             });
         }
-    };
-    active.steps_taken = active.steps_taken.saturating_add(1);
+    }
+
+    let step = controlled.step.ok_or_else(|| {
+        ScenarioRunnerErrorV1::StepControlFailed {
+            run_id: active.run.run_id.clone(),
+            message: "runtime budget controller stopped without step evidence"
+                .to_owned(),
+        }
+    })?;
     if !step.evidence.quiescent {
         active.active_reaction_count =
             active.active_reaction_count.saturating_add(1);
     }
 
+    let completed =
+        controlled.stop_reason == Some(CpuRunStopReasonV1::Quiescent);
     let evidence = step.evidence;
-    if !evidence.quiescent {
+    if !completed {
         let report = ScenarioStepReportV1 {
             schema_version: SCENARIO_REPORT_SCHEMA_VERSION,
             manifest_run_id: active.run.run_id.clone(),
@@ -2035,6 +2043,96 @@ mod tests {
         );
     }
 
+    fn configured_mux1_for_budget_test(
+    ) -> (CpuRuntimeSession, WebProofLoadStage, Handle) {
+        let prepare = prepare_mux1_session_program().unwrap();
+        let (mut session, load) =
+            load_runtime_session(&prepare, 32).unwrap();
+        let (initial, _, _) =
+            configure_mux1_session(&mut session, &load, 1, 0, 1)
+                .unwrap();
+        (session, load, initial)
+    }
+
+    #[test]
+    fn total_links_budget_stops_before_semantic_step() {
+        let (mut session, _load, initial) =
+            configured_mux1_for_budget_test();
+        let current_links = session.memory.store.link_count() as u32;
+        let budget = CpuRunBudgetV1 {
+            schema_version: 1,
+            max_reactions: 64,
+            max_appended_links: u32::MAX,
+            max_total_links: current_links.saturating_sub(1),
+            max_scope_width: u32::MAX,
+        };
+        let mut controller =
+            session.begin_budgeted_run(initial, budget).unwrap();
+        let stopped =
+            controller.next(&mut session, RunObservationLevel::Off);
+        assert!(stopped.step.is_none());
+        assert_eq!(
+            stopped.stop_reason,
+            Some(CpuRunStopReasonV1::TotalLinksBudgetExceeded),
+        );
+        assert_eq!(session.execution_state(), CpuSessionState::Failed);
+    }
+
+    #[test]
+    fn scope_width_budget_stops_before_semantic_step() {
+        let (mut session, _load, initial) =
+            configured_mux1_for_budget_test();
+        let budget = CpuRunBudgetV1 {
+            schema_version: 1,
+            max_reactions: 64,
+            max_appended_links: u32::MAX,
+            max_total_links: u32::MAX,
+            max_scope_width: 0,
+        };
+        let mut controller =
+            session.begin_budgeted_run(initial, budget).unwrap();
+        let stopped =
+            controller.next(&mut session, RunObservationLevel::Off);
+        assert!(stopped.step.is_none());
+        assert_eq!(
+            stopped.stop_reason,
+            Some(CpuRunStopReasonV1::ScopeWidthBudgetExceeded),
+        );
+        assert_eq!(session.execution_state(), CpuSessionState::Failed);
+    }
+
+    #[test]
+    fn appended_links_budget_stops_after_bounded_semantic_step() {
+        let (mut session, _load, initial) =
+            configured_mux1_for_budget_test();
+        let budget = CpuRunBudgetV1 {
+            schema_version: 1,
+            max_reactions: 64,
+            max_appended_links: 0,
+            max_total_links: u32::MAX,
+            max_scope_width: u32::MAX,
+        };
+        let mut controller =
+            session.begin_budgeted_run(initial, budget).unwrap();
+
+        let mut stopped = None;
+        for _ in 0..8 {
+            let outcome =
+                controller.next(&mut session, RunObservationLevel::Off);
+            if outcome.stop_reason.is_some() {
+                stopped = Some(outcome);
+                break;
+            }
+        }
+        let stopped = stopped.expect("MUX1 must hit a stop boundary");
+        assert!(stopped.step.is_some());
+        assert_eq!(
+            stopped.stop_reason,
+            Some(CpuRunStopReasonV1::AppendedLinksBudgetExceeded),
+        );
+        assert_eq!(session.execution_state(), CpuSessionState::Failed);
+    }
+
     #[test]
     fn reaction_budget_is_safety_only_and_never_partial_success() {
         let mut manifest =
@@ -2053,6 +2151,8 @@ mod tests {
             ScenarioRunnerErrorV1::ExecuteFailed {
                 run_id: "run-1-zero-ones".to_owned(),
                 max_reactions: 1,
+                stop_reason:
+                    CpuRunStopReasonV1::ReactionBudgetExceeded,
             },
         );
     }
