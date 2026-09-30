@@ -301,7 +301,7 @@ Promise.all([
     "utf8"
   );
   const presetRegistry = refreshScenarioPresetRegistry(w);
-  if (presetRegistry.entries.length !== 20) {
+  if (presetRegistry.entries.length !== 23) {
     throw new Error("R3d7 preset registry count mismatch");
   }
   const presetSummary = presetRegistry.entries.find(
@@ -488,6 +488,35 @@ Promise.all([
     throw new Error(
       "R7 ROTATE-CARRY32 preset append changed historical indexes"
     );
+  }
+
+  for (const [scenarioId, profileId, programId] of [
+    ["inc32-lifecycle", "a-circuit:unary-inc32", "inc32"],
+    ["dec32-lifecycle", "a-circuit:unary-dec32", "dec32"],
+    ["neg32-lifecycle", "a-circuit:unary-neg32", "neg32"],
+  ]) {
+    const entry = presetRegistry.entries.find(
+      (candidate) => candidate.scenarioId === scenarioId
+    );
+    if (!entry ||
+        entry.scenarioVersion !== "1.0.0" ||
+        entry.programProfileId !== profileId ||
+        entry.family !== "unary-arithmetic-effect" ||
+        entry.programId !== programId ||
+        entry.runCount !== 5 ||
+        !Array.isArray(entry.inputSchema) ||
+        entry.inputSchema.length !== 1) {
+      throw new Error(
+        "R8 manifest-derived UNARY32 preset summary mismatch: " +
+        scenarioId
+      );
+    }
+  }
+  if (presetRegistry.entries[19]?.scenarioId !== "rcr32-lifecycle" ||
+      presetRegistry.entries[20]?.scenarioId !== "inc32-lifecycle" ||
+      presetRegistry.entries[21]?.scenarioId !== "dec32-lifecycle" ||
+      presetRegistry.entries[22]?.scenarioId !== "neg32-lifecycle") {
+    throw new Error("R8 UNARY32 preset append changed historical indexes");
   }
 
   const mulPresetSummary = presetRegistry.entries.find(
@@ -2070,6 +2099,83 @@ Promise.all([
         "R7 ROTATE-CARRY32 masking/CF/canonical reuse mismatch: " +
         scenarioId
       );
+    }
+  }
+
+  // R8: INC32/DEC32/NEG32 use one persistent UNARY32 Aset through
+  // generic Scenario transport. INC/DEC preserve CF structurally.
+  for (const [scenarioId, fileName] of [
+    ["inc32-lifecycle", "inc32-lifecycle-v1.json"],
+    ["dec32-lifecycle", "dec32-lifecycle-v1.json"],
+    ["neg32-lifecycle", "neg32-lifecycle-v1.json"],
+  ]) {
+    const canonicalSource = fs.readFileSync(
+      "experiments/a-circuit/scenarios/" + fileName,
+      "utf8"
+    );
+    const preset = loadScenarioPresetManifest(
+      w,
+      presetRegistry,
+      scenarioId,
+      "1.0.0"
+    );
+    if (preset === null || preset.source !== canonicalSource) {
+      throw new Error(
+        "R8 UNARY32 canonical preset round-trip mismatch: " + scenarioId
+      );
+    }
+    const cpu = executeScenarioManifest(
+      w,
+      JSON.parse(preset.source),
+      "optimized-cpu"
+    );
+    if (!cpu.ok ||
+        cpu.error !== null ||
+        cpu.report?.scenarioId !== scenarioId ||
+        cpu.report?.overallPass !== true ||
+        cpu.report?.runs?.length !== 5) {
+      throw new Error(
+        "R8 generic UNARY32 Scenario execution failed: " + scenarioId
+      );
+    }
+    for (let index = 0; index < cpu.report.runs.length; index += 1) {
+      const item = cpu.report.runs[index];
+      if ((item.sessionRunId >>> 0) !== index + 1 ||
+          item.observed?.sessionId !== cpu.report.sessionId ||
+          item.observed?.finalQuiescent !== true ||
+          item.observed?.activeReactionCount !== 609 ||
+          item.oracleMatches !== true ||
+          item.freshInstanceMatches !== true ||
+          item.scalarOracleMatches !== true ||
+          !item.pipelineProfile ||
+          item.observed?.profile?.structural?.unificationAttempts <= 0) {
+        throw new Error(
+          "R8 UNARY32 evidence mismatch: " +
+          scenarioId + " run " + index
+        );
+      }
+    }
+    if (cpu.report.runs[4].configurationReused !== true ||
+        JSON.stringify(cpu.report.runs[4].result) !==
+          JSON.stringify(cpu.report.runs[0].result)) {
+      throw new Error(
+        "R8 UNARY32 return-to-first mismatch: " + scenarioId
+      );
+    }
+    if ((scenarioId === "inc32-lifecycle" ||
+         scenarioId === "dec32-lifecycle") &&
+        cpu.report.runs.some(
+          (item) => item.result?.fields?.preserveMask !== "0x00000001"
+        )) {
+      throw new Error(
+        "R8 INC/DEC must preserve CF structurally: " + scenarioId
+      );
+    }
+    if (scenarioId === "neg32-lifecycle" &&
+        cpu.report.runs.some(
+          (item) => item.result?.fields?.preserveMask !== "0x00000000"
+        )) {
+      throw new Error("R8 NEG32 must define CF on every run");
     }
   }
 
