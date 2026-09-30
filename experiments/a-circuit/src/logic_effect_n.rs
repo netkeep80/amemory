@@ -8,7 +8,8 @@ use super::{
     },
     logic_n::LogicProgram,
     proof_n::{
-        execute_to_quiescence, identical_rerun, load_runtime, loaded_handle,
+        execute_session_to_quiescence, execute_to_quiescence,
+        identical_rerun, load_runtime, load_runtime_session, loaded_handle,
         prepare_stage, semantic_source, theory_admissions, visual_snapshot,
         ProofRuntimeMemory, ProofRuntimeSession, WebProofLoadStage,
         WebProofPrepareStage, WebProofResultStage, WebStructuralProof,
@@ -1162,7 +1163,7 @@ fn decode_runtime_effect(
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct Xor32SessionProjection {
+pub(crate) struct Logic32SessionProjection {
     pub(crate) value: u32,
     pub(crate) writeback: u8,
     pub(crate) defined_mask: u32,
@@ -1172,29 +1173,76 @@ pub(crate) struct Xor32SessionProjection {
     pub(crate) result_recursive_wire: String,
 }
 
-pub(crate) fn prepare_xor32_session_program(
+pub(crate) type Xor32SessionProjection = Logic32SessionProjection;
+
+fn logic32_selected_roots(
+    program: &LogicEffectProgram,
+    op: u32,
+) -> Option<(
+    &'static str,
+    Handle,
+    &'static str,
+    Handle,
+    &'static str,
+    Handle,
+)> {
+    match op {
+        1 | 5 => Some((
+            "function.effect.binary",
+            program.binary_effect,
+            "function.word_binary",
+            program.logic.word_binary,
+            "function.gate.and2",
+            program.logic.gates.and2,
+        )),
+        2 => Some((
+            "function.effect.binary",
+            program.binary_effect,
+            "function.word_binary",
+            program.logic.word_binary,
+            "function.gate.or2",
+            program.logic.gates.or2,
+        )),
+        3 => Some((
+            "function.effect.binary",
+            program.binary_effect,
+            "function.word_binary",
+            program.logic.word_binary,
+            "function.gate.xor2",
+            program.logic.gates.xor2,
+        )),
+        4 => Some((
+            "function.effect.not",
+            program.not_effect,
+            "function.word_not",
+            program.logic.word_not,
+            "function.gate.not1",
+            program.logic.gates.not1,
+        )),
+        _ => None,
+    }
+}
+
+pub(crate) fn prepare_logic32_session_program(
+    op: u32,
 ) -> Option<WebProofPrepareStage> {
     let mut compiler = FullFixture::new();
     let program = LogicEffectProgram::install(&mut compiler, 32);
+    let (
+        effect_role,
+        effect,
+        word_role,
+        word,
+        gate_role,
+        gate,
+    ) = logic32_selected_roots(&program, op)?;
 
-    // Static program only. Concrete A/B words, invocation and initial Scope
-    // are deliberately absent and are published after LOAD by CONFIGURE.
+    // Static program only. Concrete A/B words, writeback selector,
+    // invocation and initial Scope are published after LOAD by CONFIGURE.
     let prepared_roots = vec![
-        semantic_source(
-            &compiler.store,
-            "function.effect.binary",
-            program.binary_effect,
-        ),
-        semantic_source(
-            &compiler.store,
-            "function.word_binary",
-            program.logic.word_binary,
-        ),
-        semantic_source(
-            &compiler.store,
-            "function.gate.xor2",
-            program.logic.gates.xor2,
-        ),
+        semantic_source(&compiler.store, effect_role, effect),
+        semantic_source(&compiler.store, word_role, word),
+        semantic_source(&compiler.store, gate_role, gate),
         semantic_source(
             &compiler.store,
             "data.bit.zero",
@@ -1280,15 +1328,17 @@ pub(crate) fn prepare_xor32_session_program(
     ))
 }
 
-pub(crate) fn configure_xor32_session(
+pub(crate) fn configure_logic32_session(
     session: &mut ProofRuntimeSession,
     load: &WebProofLoadStage,
+    op: u32,
     a: u32,
     b: u32,
 ) -> Option<(Handle, usize, usize)> {
-    let effect =
-        loaded_handle(load, "function.effect.binary")?;
-    let gate = loaded_handle(load, "function.gate.xor2")?;
+    if !(1..=5).contains(&op) {
+        return None;
+    }
+
     let apply = loaded_handle(load, "execution.apply")?;
     let caller = loaded_handle(load, "context.caller")?;
     let zero = loaded_handle(load, "data.bit.zero")?;
@@ -1305,12 +1355,33 @@ pub(crate) fn configure_xor32_session(
 
     let before = session.memory.store.link_count();
     let aword = word(&mut session.memory.store, a)?;
-    let bword = word(&mut session.memory.store, b)?;
-    let args = materialize_exact_sequence(
-        &mut session.memory.store,
-        &[gate, aword, bword, one],
-    )
-    .ok()?;
+
+    let (effect, args) = if op == 4 {
+        let effect = loaded_handle(load, "function.effect.not")?;
+        let args =
+            materialize_exact_sequence(&mut session.memory.store, &[aword])
+                .ok()?;
+        (effect, args)
+    } else {
+        let effect =
+            loaded_handle(load, "function.effect.binary")?;
+        let gate_role = match op {
+            1 | 5 => "function.gate.and2",
+            2 => "function.gate.or2",
+            3 => "function.gate.xor2",
+            _ => return None,
+        };
+        let gate = loaded_handle(load, gate_role)?;
+        let bword = word(&mut session.memory.store, b)?;
+        let writeback = if op == 5 { zero } else { one };
+        let args = materialize_exact_sequence(
+            &mut session.memory.store,
+            &[gate, aword, bword, writeback],
+        )
+        .ok()?;
+        (effect, args)
+    };
+
     let invocation =
         call(&mut session.memory.store, apply, effect, args);
     let initial = session
@@ -1323,10 +1394,10 @@ pub(crate) fn configure_xor32_session(
     Some((initial, before, after))
 }
 
-pub(crate) fn project_xor32_session_result(
+pub(crate) fn project_logic32_session_result(
     session: &ProofRuntimeSession,
     load: &WebProofLoadStage,
-) -> Option<Xor32SessionProjection> {
+) -> Option<Logic32SessionProjection> {
     if session.engine.current().len() != 1 {
         return None;
     }
@@ -1370,7 +1441,7 @@ pub(crate) fn project_xor32_session_result(
         preserve_mask,
     ) = web_logic_masks(outcome);
 
-    Some(Xor32SessionProjection {
+    Some(Logic32SessionProjection {
         value: outcome.value,
         writeback: outcome.writeback,
         defined_mask,
@@ -1383,6 +1454,29 @@ pub(crate) fn project_xor32_session_result(
             .export_anum(final_link)
             .ok()?,
     })
+}
+
+// Compatibility facade for the first Scenario adapter. XOR owns no separate
+// execution path: it delegates to the family-level persistent Logic32 API.
+pub(crate) fn prepare_xor32_session_program(
+) -> Option<WebProofPrepareStage> {
+    prepare_logic32_session_program(3)
+}
+
+pub(crate) fn configure_xor32_session(
+    session: &mut ProofRuntimeSession,
+    load: &WebProofLoadStage,
+    a: u32,
+    b: u32,
+) -> Option<(Handle, usize, usize)> {
+    configure_logic32_session(session, load, 3, a, b)
+}
+
+pub(crate) fn project_xor32_session_result(
+    session: &ProofRuntimeSession,
+    load: &WebProofLoadStage,
+) -> Option<Xor32SessionProjection> {
+    project_logic32_session_result(session, load)
 }
 
 pub(crate) fn web_prove_logic(
@@ -1775,6 +1869,125 @@ pub(crate) fn web_run_logic(op: u32, a: u32, b: u32) -> Option<WebLogicOutcome> 
     })
 }
 
+
+#[test]
+fn persistent_logic32_session_four_run_lifecycle_all_ops() {
+    let run_vectors = [
+        (0x1234_5678u32, 0x0f0f_00ffu32),
+        (0x8000_0001u32, 0xffff_ffffu32),
+        (0xdead_beefu32, 0x1357_9bdfu32),
+        (0x1234_5678u32, 0x0f0f_00ffu32),
+    ];
+
+    for op in 1u32..=5 {
+        let prepare =
+            prepare_logic32_session_program(op).expect("prepare Logic32");
+        let prepared_roles = prepare
+            .semantic_roots
+            .iter()
+            .map(|root| root.role.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        for runtime_role in [
+            "data.a.word",
+            "data.b.word",
+            "data.writeback",
+            "invocation.args",
+            "invocation.call",
+            "scope.initial",
+        ] {
+            assert!(
+                !prepared_roles.contains(runtime_role),
+                "op {op}: PREPARE leaked runtime role {runtime_role}",
+            );
+        }
+
+        let (mut session, load) =
+            load_runtime_session(&prepare, 128).expect("load Logic32");
+        let memory_id = session.memory.id.clone();
+        let base_link_count = session.base_link_count;
+        let base_carrier =
+            session.memory.store.export_packed_duplets();
+
+        let mut first_projection = None;
+        for (index, (a, b)) in run_vectors.into_iter().enumerate() {
+            let (initial, before, after) =
+                configure_logic32_session(
+                    &mut session,
+                    &load,
+                    op,
+                    a,
+                    b,
+                )
+                .expect("configure Logic32");
+            assert_eq!(session.memory.id, memory_id);
+            assert!(before >= base_link_count);
+            assert!(after >= before);
+
+            if index == 3 {
+                assert_eq!(
+                    after, before,
+                    "op {op}: return-to-first input must reuse canonical configuration Links",
+                );
+            }
+
+            let execute = execute_session_to_quiescence(
+                &mut session,
+                initial,
+                256,
+            )
+            .expect("execute Logic32");
+            assert!(execute.final_quiescent);
+            assert_eq!(session.memory.id, memory_id);
+            assert_eq!(session.engine.current().len(), 1);
+
+            let projected =
+                project_logic32_session_result(&session, &load)
+                    .expect("project Logic32");
+            let expected = match op {
+                1 => expected_logic(a & b, 32, 1),
+                2 => expected_logic(a | b, 32, 1),
+                3 => expected_logic(a ^ b, 32, 1),
+                4 => expected_not(a, 32),
+                5 => expected_logic(a & b, 32, 0),
+                _ => unreachable!(),
+            };
+            let (
+                expected_defined,
+                expected_values,
+                expected_undefined,
+                expected_preserve,
+            ) = web_logic_masks(expected);
+
+            assert_eq!(projected.value, expected.value, "op {op} run {index}");
+            assert_eq!(
+                projected.writeback,
+                expected.writeback,
+                "op {op} run {index}",
+            );
+            assert_eq!(projected.defined_mask, expected_defined);
+            assert_eq!(projected.value_mask, expected_values);
+            assert_eq!(projected.undefined_mask, expected_undefined);
+            assert_eq!(projected.preserve_mask, expected_preserve);
+
+            let carrier = session.memory.store.export_packed_duplets();
+            assert_eq!(
+                &carrier[..base_link_count],
+                base_carrier.as_slice(),
+                "op {op}: loaded base prefix changed",
+            );
+
+            if index == 0 {
+                first_projection = Some(projected.clone());
+            } else if index == 3 {
+                assert_eq!(
+                    Some(projected),
+                    first_projection,
+                    "op {op}: return-to-first input changed semantic Result",
+                );
+            }
+        }
+    }
+}
 
 #[test]
 #[ignore = "heavy M4 logical-effect suite; mandatory release workflow"]
