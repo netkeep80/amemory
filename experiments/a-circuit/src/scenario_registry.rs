@@ -28,6 +28,8 @@ const PRESET_SOURCES: &[&str] = &[
     include_str!("../scenarios/sar32-lifecycle-v1.json"),
     include_str!("../scenarios/rol32-lifecycle-v1.json"),
     include_str!("../scenarios/ror32-lifecycle-v1.json"),
+    include_str!("../scenarios/rcl32-lifecycle-v1.json"),
+    include_str!("../scenarios/rcr32-lifecycle-v1.json"),
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -187,7 +189,7 @@ mod tests {
     fn registry_summary_is_derived_from_canonical_mux1_manifest() {
         let registry = load_preset_registry_v1().unwrap();
         assert_eq!(registry.schema_version, 1);
-        assert_eq!(registry.entries.len(), 18);
+        assert_eq!(registry.entries.len(), 20);
 
         let source = preset_manifest_source_by_index_v1(0).unwrap();
         let manifest = parse_and_validate_manifest_v1(source).unwrap();
@@ -424,6 +426,49 @@ mod tests {
         assert_eq!(registry.entries[15].scenario_id, "sar32-lifecycle");
         assert_eq!(registry.entries[16].scenario_id, "rol32-lifecycle");
         assert_eq!(registry.entries[17].scenario_id, "ror32-lifecycle");
+    }
+
+    #[test]
+    fn registry_resolves_complete_rotate_carry32_family() {
+        let registry = load_preset_registry_v1().unwrap();
+        for (scenario_id, profile_id, program_id, source) in [
+            (
+                "rcl32-lifecycle",
+                "a-circuit:rotate-carry-rcl32",
+                "rcl32",
+                include_str!("../scenarios/rcl32-lifecycle-v1.json"),
+            ),
+            (
+                "rcr32-lifecycle",
+                "a-circuit:rotate-carry-rcr32",
+                "rcr32",
+                include_str!("../scenarios/rcr32-lifecycle-v1.json"),
+            ),
+        ] {
+            let resolved =
+                preset_manifest_source_v1(scenario_id, "1.0.0").unwrap();
+            assert_eq!(resolved, source);
+            let manifest =
+                parse_and_validate_manifest_v1(resolved).unwrap();
+            assert_eq!(manifest.program_profile.profile_id, profile_id);
+            assert_eq!(manifest.program_profile.program_id, program_id);
+            assert_eq!(manifest.run_sequence.len(), 7);
+
+            let summary = registry
+                .entries
+                .iter()
+                .find(|entry| entry.scenario_id == scenario_id)
+                .unwrap();
+            assert_eq!(summary.program_profile_id, profile_id);
+            assert_eq!(summary.family, "rotate-carry-effect");
+            assert_eq!(summary.program_id, program_id);
+            assert_eq!(summary.run_count, 7);
+            assert_eq!(summary.input_schema.len(), 3);
+        }
+
+        assert_eq!(registry.entries[17].scenario_id, "ror32-lifecycle");
+        assert_eq!(registry.entries[18].scenario_id, "rcl32-lifecycle");
+        assert_eq!(registry.entries[19].scenario_id, "rcr32-lifecycle");
     }
 
     #[test]
