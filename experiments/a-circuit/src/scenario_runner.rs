@@ -11,7 +11,8 @@ use super::{
         WebProofPrepareStage,
     },
     runtime_session::{
-        CpuRuntimeSession, CpuSessionState, CpuSessionStepError, CpuSessionReactionEvidenceV1
+        CpuRuntimeSession, CpuSessionReactionEvidenceV1, CpuSessionState,
+        CpuSessionStepError,
     },
     scenario::{
         validate_manifest_v1, ScenarioAssertionV1, ScenarioBackendV1,
