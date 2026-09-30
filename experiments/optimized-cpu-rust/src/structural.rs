@@ -1500,12 +1500,17 @@ impl OptimizedStructuralEngine {
         // Context identity is committed atomically with the successful
         // reaction. A rejected reaction therefore consumes no runtime ids.
         if raw_rule_matches > 0 {
+            let next_context_group_id = match context_group_id.checked_add(1) {
+                Some(next) => next,
+                None => {
+                    store.rollback_append(checkpoint);
+                    return Err(StructuralError::Store(
+                        StoreError::CapacityExceeded,
+                    ));
+                }
+            };
             self.next_context_id = next_context_id;
-            self.next_context_group_id = context_group_id
-                .checked_add(1)
-                .ok_or(StructuralError::Store(
-                    StoreError::CapacityExceeded,
-                ))?;
+            self.next_context_group_id = next_context_group_id;
         }
 
         // Engine-visible state commits only after the Store transaction has
@@ -2197,8 +2202,8 @@ mod tests {
         assert!(trace.events.iter().any(|event| matches!(
             event,
             StructuralTraceEvent::ContextCollapsed {
-                context_id: 2,
-                context_group_id: 2,
+                context_id: 1,
+                context_group_id: 1,
             }
         )));
         assert!(trace.events.iter().any(|event| matches!(
@@ -2323,8 +2328,8 @@ mod tests {
         assert!(reused_trace.events.iter().any(|event| matches!(
             event,
             StructuralTraceEvent::ContextCollapsed {
-                context_id: 1,
-                context_group_id: 1,
+                context_id: 2,
+                context_group_id: 2,
             }
         )));
     }
