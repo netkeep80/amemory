@@ -2486,6 +2486,7 @@ Promise.all([
         carrierRoundTrip: proof.load.carrierRoundTrip,
       },
       execute: {
+        linksBeforeExecute: proof.execute.linksBeforeExecute,
         activeReactionCount: proof.execute.activeReactionCount,
         finalQuiescent: proof.execute.finalQuiescent,
         reactions: compactReactions,
