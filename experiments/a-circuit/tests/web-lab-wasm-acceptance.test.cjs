@@ -301,7 +301,7 @@ Promise.all([
     "utf8"
   );
   const presetRegistry = refreshScenarioPresetRegistry(w);
-  if (presetRegistry.entries.length !== 18) {
+  if (presetRegistry.entries.length !== 20) {
     throw new Error("R3d7 preset registry count mismatch");
   }
   const presetSummary = presetRegistry.entries.find(
@@ -459,6 +459,35 @@ Promise.all([
       presetRegistry.entries[16]?.scenarioId !== "rol32-lifecycle" ||
       presetRegistry.entries[17]?.scenarioId !== "ror32-lifecycle") {
     throw new Error("R6 ROTATE32 preset append changed historical indexes");
+  }
+
+  for (const [scenarioId, profileId, programId] of [
+    ["rcl32-lifecycle", "a-circuit:rotate-carry-rcl32", "rcl32"],
+    ["rcr32-lifecycle", "a-circuit:rotate-carry-rcr32", "rcr32"],
+  ]) {
+    const entry = presetRegistry.entries.find(
+      (candidate) => candidate.scenarioId === scenarioId
+    );
+    if (!entry ||
+        entry.scenarioVersion !== "1.0.0" ||
+        entry.programProfileId !== profileId ||
+        entry.family !== "rotate-carry-effect" ||
+        entry.programId !== programId ||
+        entry.runCount !== 7 ||
+        !Array.isArray(entry.inputSchema) ||
+        entry.inputSchema.length !== 3) {
+      throw new Error(
+        "R7 manifest-derived ROTATE-CARRY32 preset summary mismatch: " +
+        scenarioId
+      );
+    }
+  }
+  if (presetRegistry.entries[17]?.scenarioId !== "ror32-lifecycle" ||
+      presetRegistry.entries[18]?.scenarioId !== "rcl32-lifecycle" ||
+      presetRegistry.entries[19]?.scenarioId !== "rcr32-lifecycle") {
+    throw new Error(
+      "R7 ROTATE-CARRY32 preset append changed historical indexes"
+    );
   }
 
   const mulPresetSummary = presetRegistry.entries.find(
@@ -1970,6 +1999,76 @@ Promise.all([
           JSON.stringify(rotateCpu.report.runs[0].result)) {
       throw new Error(
         "R6 ROTATE32 masking/canonical reuse mismatch: " + scenarioId
+      );
+    }
+  }
+
+  // R7: RCL32/RCR32 use one persistent ROTATE-CARRY32 Aset through
+  // generic Scenario transport. CF is runtime configuration, not executor state.
+  for (const [scenarioId, fileName] of [
+    ["rcl32-lifecycle", "rcl32-lifecycle-v1.json"],
+    ["rcr32-lifecycle", "rcr32-lifecycle-v1.json"],
+  ]) {
+    const canonicalSource = fs.readFileSync(
+      "experiments/a-circuit/scenarios/" + fileName,
+      "utf8"
+    );
+    const preset = loadScenarioPresetManifest(
+      w,
+      presetRegistry,
+      scenarioId,
+      "1.0.0"
+    );
+    if (preset === null || preset.source !== canonicalSource) {
+      throw new Error(
+        "R7 ROTATE-CARRY32 canonical preset round-trip mismatch: " +
+        scenarioId
+      );
+    }
+    const cpu = executeScenarioManifest(
+      w,
+      JSON.parse(preset.source),
+      "optimized-cpu"
+    );
+    if (!cpu.ok ||
+        cpu.error !== null ||
+        cpu.report?.scenarioId !== scenarioId ||
+        cpu.report?.overallPass !== true ||
+        cpu.report?.runs?.length !== 7) {
+      throw new Error(
+        "R7 generic ROTATE-CARRY32 Scenario execution failed: " + scenarioId
+      );
+    }
+    const expectedReactions = [1, 3, 3, 1, 1, 3, 1];
+    for (let index = 0; index < cpu.report.runs.length; index += 1) {
+      const item = cpu.report.runs[index];
+      if ((item.sessionRunId >>> 0) !== index + 1 ||
+          item.observed?.sessionId !== cpu.report.sessionId ||
+          item.observed?.finalQuiescent !== true ||
+          item.observed?.activeReactionCount !== expectedReactions[index] ||
+          item.oracleMatches !== true ||
+          item.freshInstanceMatches !== true ||
+          item.scalarOracleMatches !== true ||
+          !item.pipelineProfile ||
+          item.observed?.profile?.structural?.unificationAttempts <= 0) {
+        throw new Error(
+          "R7 ROTATE-CARRY32 evidence mismatch: " +
+          scenarioId + " run " + index
+        );
+      }
+    }
+    if (JSON.stringify(cpu.report.runs[0].result) !==
+          JSON.stringify(cpu.report.runs[4].result) ||
+        cpu.report.runs[4].configurationReused !== false ||
+        JSON.stringify(cpu.report.runs[2].result) !==
+          JSON.stringify(cpu.report.runs[5].result) ||
+        cpu.report.runs[5].configurationReused !== false ||
+        cpu.report.runs[6].configurationReused !== true ||
+        JSON.stringify(cpu.report.runs[6].result) !==
+          JSON.stringify(cpu.report.runs[0].result)) {
+      throw new Error(
+        "R7 ROTATE-CARRY32 masking/CF/canonical reuse mismatch: " +
+        scenarioId
       );
     }
   }
