@@ -21,6 +21,10 @@ use super::{
         configure_mul32_session, prepare_mul32_session_program,
         project_mul32_session_result, web_prove_mul32,
     },
+    mul_effect_n::{
+        configure_mul_effect_session, prepare_mul_effect_session_program,
+        project_mul_effect_session_result, web_prove_mul_effect,
+    },
     proof_n::{
         ProofRuntimeSession, WebProofLoadStage, WebProofPrepareStage,
     },
@@ -454,6 +458,19 @@ const CPU_SCENARIO_ADAPTERS: &[CpuScenarioAdapter] = &[
         program_id: "neg32",
         aset_source: "builtin:a-circuit/unary32/neg",
         implementation: CpuScenarioImplementation::Unary32 { op: 22 },
+    },
+    CpuScenarioAdapter {
+        profile_id: "a-circuit:mul-effect32",
+        family: "mul-effect",
+        program_id: "mul-effect32",
+        aset_source: "builtin:a-circuit/mul-effect32",
+        implementation: CpuScenarioImplementation::Direct {
+            prepare: prepare_mul_effect_session_program,
+            configure: configure_mul_effect_from_inputs,
+            project: project_mul_effect_result,
+            fresh_instance: fresh_instance_mul_effect_result,
+            scalar_oracle: scalar_mul_effect_result,
+        },
     },
     CpuScenarioAdapter {
         profile_id: "a-circuit:mul32",
@@ -1033,6 +1050,99 @@ fn fresh_instance_unary32_result(
     ))
 }
 
+fn mul_effect_inputs(
+    inputs: &BTreeMap<String, Value>,
+) -> Result<(u32, u32), String> {
+    Ok((
+        word32_input(inputs, "A")?,
+        word32_input(inputs, "B")?,
+    ))
+}
+
+fn configure_mul_effect_from_inputs(
+    session: &mut ProofRuntimeSession,
+    load: &WebProofLoadStage,
+    inputs: &BTreeMap<String, Value>,
+) -> Result<ConfiguredRun, String> {
+    let (a, b) = mul_effect_inputs(inputs)?;
+    let (initial, before, after) =
+        configure_mul_effect_session(session, load, a, b)
+            .ok_or_else(|| "MUL-effect configuration failed".to_owned())?;
+    Ok(ConfiguredRun {
+        initial,
+        links_before: before as u32,
+        links_after: after as u32,
+    })
+}
+
+fn mul_effect_normalized(
+    lo: u32,
+    hi: u32,
+    defined_mask: u32,
+    value_mask: u32,
+    undefined_mask: u32,
+    preserve_mask: u32,
+    result_recursive_wire: String,
+) -> ScenarioNormalizedResultV1 {
+    let mut fields = BTreeMap::new();
+    fields.insert("lo".to_owned(), canonical_word32(lo));
+    fields.insert("hi".to_owned(), canonical_word32(hi));
+    fields.insert(
+        "definedMask".to_owned(),
+        canonical_word32(defined_mask),
+    );
+    fields.insert(
+        "valueMask".to_owned(),
+        canonical_word32(value_mask),
+    );
+    fields.insert(
+        "undefinedMask".to_owned(),
+        canonical_word32(undefined_mask),
+    );
+    fields.insert(
+        "preserveMask".to_owned(),
+        canonical_word32(preserve_mask),
+    );
+    ScenarioNormalizedResultV1 {
+        fields,
+        result_recursive_wire: Some(result_recursive_wire),
+    }
+}
+
+fn project_mul_effect_result(
+    session: &ProofRuntimeSession,
+    load: &WebProofLoadStage,
+) -> Result<ScenarioNormalizedResultV1, String> {
+    let projected = project_mul_effect_session_result(session, load)
+        .ok_or_else(|| "MUL-effect result projection failed".to_owned())?;
+    Ok(mul_effect_normalized(
+        projected.lo,
+        projected.hi,
+        projected.defined_mask,
+        projected.value_mask,
+        projected.undefined_mask,
+        projected.preserve_mask,
+        projected.result_recursive_wire,
+    ))
+}
+
+fn fresh_instance_mul_effect_result(
+    inputs: &BTreeMap<String, Value>,
+) -> Result<ScenarioNormalizedResultV1, String> {
+    let (a, b) = mul_effect_inputs(inputs)?;
+    let proof = web_prove_mul_effect(a, b)
+        .ok_or_else(|| "fresh MUL-effect oracle failed".to_owned())?;
+    Ok(mul_effect_normalized(
+        proof.outcome.lo,
+        proof.outcome.hi,
+        proof.outcome.defined_mask,
+        proof.outcome.value_mask,
+        proof.outcome.undefined_mask,
+        proof.outcome.preserve_mask,
+        proof.proof.result.result_anum,
+    ))
+}
+
 fn configure_mul32_from_inputs(
     session: &mut ProofRuntimeSession,
     load: &WebProofLoadStage,
@@ -1538,6 +1648,37 @@ fn scalar_unary32_result(
     Ok(scalar_effect32_fields(
         value, 1, defined, value_mask, 0, preserve,
     ))
+}
+
+fn scalar_mul_effect_result(
+    inputs: &BTreeMap<String, Value>,
+) -> Result<BTreeMap<String, Value>, String> {
+    let (a, b) = mul_effect_inputs(inputs)?;
+    let product = u64::from(a) * u64::from(b);
+    let lo = product as u32;
+    let hi = (product >> 32) as u32;
+    let overflow = hi != 0;
+    let defined = SCALAR_CF | SCALAR_OF;
+    let value_mask = if overflow { defined } else { 0 };
+    let undefined =
+        SCALAR_PF | SCALAR_AF | SCALAR_ZF | SCALAR_SF;
+
+    let mut fields = BTreeMap::new();
+    fields.insert("lo".to_owned(), canonical_word32(lo));
+    fields.insert("hi".to_owned(), canonical_word32(hi));
+    fields.insert(
+        "definedMask".to_owned(), canonical_word32(defined),
+    );
+    fields.insert(
+        "valueMask".to_owned(), canonical_word32(value_mask),
+    );
+    fields.insert(
+        "undefinedMask".to_owned(), canonical_word32(undefined),
+    );
+    fields.insert(
+        "preserveMask".to_owned(), canonical_word32(0),
+    );
+    Ok(fields)
 }
 
 fn scalar_mul32_result(
