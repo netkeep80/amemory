@@ -4,9 +4,19 @@ use super::{
     },
     memory32_n::Memory32Program,
     proof_n::{
-        execute_to_quiescence, identical_rerun, load_runtime, loaded_handle,
-        prepare_stage, semantic_source, theory_admissions, visual_snapshot,
-        ProofRuntimeMemory, WebProofResultStage, WebStructuralProof,
+        execute_to_quiescence,
+        identical_rerun,
+        load_runtime,
+        loaded_handle,
+        prepare_stage,
+        semantic_source,
+        theory_admissions,
+        visual_snapshot,
+        WebProofResultStage,
+        WebStructuralProof,
+    },
+    runtime_session::{
+        CpuMemoryInstance
     },
 };
 use amemory_optimized_cpu_probe::{
@@ -826,7 +836,7 @@ fn decode_exact_store(
 }
 
 fn runtime_read_word(
-    memory: &mut ProofRuntimeMemory,
+    memory: &mut CpuMemoryInstance,
     interpreter: Handle,
     apply: Handle,
     function: Handle,
@@ -1092,7 +1102,7 @@ fn web_prove_word_memory(
 
     // Verification uses a clone of the exact runtime carrier so read-back
     // cannot pollute authoritative compact-proof link accounting.
-    let mut verification_memory = ProofRuntimeMemory {
+    let mut verification_memory = CpuMemoryInstance {
         id: memory.id.clone(),
         store: memory.store.clone(),
     };
