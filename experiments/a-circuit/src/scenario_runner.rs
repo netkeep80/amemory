@@ -1189,7 +1189,7 @@ mod tests {
         );
     }
 
-    fn manual_step_first_run(
+    fn bounded_runtime_first_run(
         source: &str,
         observation_level: RunObservationLevel,
     ) -> (
@@ -1204,66 +1204,54 @@ mod tests {
         let mut live = open_cpu_scenario_session_v1(&manifest).unwrap();
         let opened = live.status_v1();
 
-        assert_eq!(
-            live.session.execution_state(),
-            CpuSessionState::Open,
-        );
-
         let configured = live.adapter.configure(
             &mut live.session,
             &live.load,
             &run.inputs,
         )
         .unwrap();
-        let run_id = live.session.begin_run(configured.initial).unwrap();
-        assert_eq!(run_id, 1);
+        let bounded = live
+            .session
+            .run_to_quiescence(
+                configured.initial,
+                CpuRunBudgetV1::scenario_default(run.max_reactions),
+                observation_level,
+            )
+            .unwrap();
+        assert_eq!(bounded.run_id, 1);
         assert_eq!(
-            live.session.execution_state(),
-            CpuSessionState::Configured,
+            bounded.stop_reason,
+            CpuRunStopReasonV1::Quiescent,
         );
-
-        let mut evidence: Vec<CpuSessionReactionEvidenceV1> = Vec::new();
-        loop {
-            let step = live.session.step(observation_level).unwrap();
-            assert_eq!(step.evidence.session_id, opened.session_id);
-            assert_eq!(step.evidence.run_id, run_id);
-            assert_eq!(
-                step.evidence.reaction_index,
-                evidence.len() as u32,
-            );
-            assert!(
-                step.evidence.links_after >= step.evidence.links_before,
-                "a successful reaction must not shrink the canonical Store",
-            );
-            if let Some(previous) = evidence.last() {
-                assert_eq!(
-                    previous.scope_after,
-                    step.evidence.scope_before,
-                    "real Session.step Scope chain must be contiguous",
-                );
-            }
-
-            let quiescent = step.evidence.quiescent;
-            evidence.push(step.evidence);
-            if quiescent {
-                break;
-            }
-            assert_eq!(
-                live.session.execution_state(),
-                CpuSessionState::Running,
-            );
-        }
-
         assert_eq!(
             live.session.execution_state(),
             CpuSessionState::Quiescent,
         );
-        assert!(matches!(
-            live.session.step(observation_level),
-            Err(CpuSessionStepError::InvalidState(
-                CpuSessionState::Quiescent
-            ))
-        ));
+
+        let evidence = bounded
+            .steps
+            .into_iter()
+            .map(|step| step.evidence)
+            .collect::<Vec<_>>();
+        for (index, step) in evidence.iter().enumerate() {
+            assert_eq!(step.session_id, opened.session_id);
+            assert_eq!(step.run_id, bounded.run_id);
+            assert_eq!(step.reaction_index, index as u32);
+            assert!(
+                step.links_after >= step.links_before,
+                "a successful reaction must not shrink the canonical Store",
+            );
+            if let Some(previous) = index
+                .checked_sub(1)
+                .and_then(|previous| evidence.get(previous))
+            {
+                assert_eq!(
+                    previous.scope_after,
+                    step.scope_before,
+                    "runtime Scope chain must be contiguous",
+                );
+            }
+        }
 
         let result = live.adapter.project(&live.session, &live.load).unwrap();
         let carrier = live.session.memory.store.export_packed_duplets();
@@ -1294,13 +1282,13 @@ mod tests {
     }
 
     #[test]
-    fn first_class_session_step_matches_run_to_quiescence() {
+    fn runtime_bounded_steps_match_observed_to_quiescence() {
         for (source, active_reactions) in [
             (MUX1_LIFECYCLE, 7u32),
             (XOR32_LIFECYCLE, 147u32),
         ] {
             let (step_result, step_carrier, steps, step_opened, step_after) =
-                manual_step_first_run(source, RunObservationLevel::Trace);
+                bounded_runtime_first_run(source, RunObservationLevel::Trace);
             let (
                 wrapped_result,
                 wrapped_carrier,
@@ -2112,23 +2100,17 @@ mod tests {
             max_total_links: u32::MAX,
             max_scope_width: u32::MAX,
         };
-        let mut controller =
-            session.begin_budgeted_run(initial, budget).unwrap();
-
-        let mut stopped = None;
-        for _ in 0..8 {
-            let outcome =
-                controller.next(&mut session, RunObservationLevel::Off);
-            if outcome.stop_reason.is_some() {
-                stopped = Some(outcome);
-                break;
-            }
-        }
-        let stopped = stopped.expect("MUX1 must hit a stop boundary");
-        assert!(stopped.step.is_some());
+        let stopped = session
+            .run_to_quiescence(
+                initial,
+                budget,
+                RunObservationLevel::Off,
+            )
+            .unwrap();
+        assert!(!stopped.steps.is_empty());
         assert_eq!(
             stopped.stop_reason,
-            Some(CpuRunStopReasonV1::AppendedLinksBudgetExceeded),
+            CpuRunStopReasonV1::AppendedLinksBudgetExceeded,
         );
         assert_eq!(session.execution_state(), CpuSessionState::Failed);
     }
