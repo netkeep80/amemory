@@ -1353,6 +1353,165 @@ pub(crate) fn web_prove_mux1(
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Mux32SessionProjection {
+    pub(crate) value: u32,
+    pub(crate) result_recursive_wire: String,
+}
+
+pub(crate) fn prepare_mux32_session_program() -> Option<WebProofPrepareStage> {
+    let mut compiler = FullFixture::new();
+    let program = MuxProgram::install(&mut compiler);
+    let prepared_roots = vec![
+        semantic_source(&compiler.store, "function.mux32", program.mux32),
+        semantic_source(&compiler.store, "function.mux1", program.mux1),
+        semantic_source(
+            &compiler.store,
+            "function.gate.xor2",
+            program.gates.xor2,
+        ),
+        semantic_source(
+            &compiler.store,
+            "function.gate.and2",
+            program.gates.and2,
+        ),
+        semantic_source(&compiler.store, "data.bit.zero", compiler.zero),
+        semantic_source(&compiler.store, "data.bit.one", compiler.one),
+        semantic_source(
+            &compiler.store,
+            "execution.interpreter",
+            compiler.interpreter,
+        ),
+        semantic_source(
+            &compiler.store,
+            "execution.theory",
+            compiler.theory,
+        ),
+        semantic_source(
+            &compiler.store,
+            "execution.apply",
+            compiler.apply,
+        ),
+        semantic_source(&compiler.store, "context.caller", compiler.k),
+        semantic_source(
+            &compiler.store,
+            "result.word_tag",
+            program.word_result_tag,
+        ),
+        semantic_source(
+            &compiler.store,
+            "result.bit_tag",
+            program.bit_result_tag,
+        ),
+    ];
+    let admissions = theory_admissions(&compiler.store, compiler.theory)?;
+    Some(prepare_stage(
+        &compiler.store,
+        prepared_roots,
+        admissions,
+    ))
+}
+
+pub(crate) fn configure_mux32_session(
+    session: &mut ProofRuntimeSession,
+    load: &WebProofLoadStage,
+    select: usize,
+    a: u32,
+    b: u32,
+) -> Option<(Handle, usize, usize)> {
+    if select > 1 {
+        return None;
+    }
+
+    let mux32 = loaded_handle(load, "function.mux32")?;
+    let apply = loaded_handle(load, "execution.apply")?;
+    let caller = loaded_handle(load, "context.caller")?;
+    let zero = loaded_handle(load, "data.bit.zero")?;
+    let one = loaded_handle(load, "data.bit.one")?;
+    let bits = [zero, one];
+
+    let make_word = |store: &mut OptimizedLinkStore, value: u32| {
+        let word_bits = (0..WIDTH)
+            .map(|bit| {
+                if (value >> bit) & 1 == 1 { one } else { zero }
+            })
+            .collect::<Vec<_>>();
+        materialize_exact_sequence(store, &word_bits).ok()
+    };
+
+    let before = session.memory.store.link_count();
+    let aword = make_word(&mut session.memory.store, a)?;
+    let bword = make_word(&mut session.memory.store, b)?;
+    let args = materialize_exact_sequence(
+        &mut session.memory.store,
+        &[bits[select], aword, bword],
+    )
+    .ok()?;
+    let invocation =
+        call(&mut session.memory.store, apply, mux32, args);
+    let initial = session
+        .memory
+        .store
+        .ensure_pair(caller, invocation)
+        .ok()?;
+    let after = session.memory.store.link_count();
+
+    Some((initial, before, after))
+}
+
+pub(crate) fn project_mux32_session_result(
+    session: &ProofRuntimeSession,
+    load: &WebProofLoadStage,
+) -> Option<Mux32SessionProjection> {
+    if session.engine.current().len() != 1 {
+        return None;
+    }
+
+    let caller = loaded_handle(load, "context.caller")?;
+    let result_tag = loaded_handle(load, "result.word_tag")?;
+    let zero = loaded_handle(load, "data.bit.zero")?;
+    let one = loaded_handle(load, "data.bit.one")?;
+    let final_link = session.engine.current()[0];
+
+    let (final_caller, endpoint) =
+        session.memory.store.poles(final_link).ok()?;
+    if final_caller != caller {
+        return None;
+    }
+    let (tag, payload) = session.memory.store.poles(endpoint).ok()?;
+    if tag != result_tag {
+        return None;
+    }
+    let values =
+        read_exact_sequence(&session.memory.store, payload).ok()?;
+    if values.len() != 1 {
+        return None;
+    }
+    let word_bits =
+        read_exact_sequence(&session.memory.store, values[0]).ok()?;
+    if word_bits.len() != WIDTH {
+        return None;
+    }
+
+    let mut value = 0u32;
+    for (index, bit) in word_bits.into_iter().enumerate() {
+        let decoded = if bit == one {
+            1u32
+        } else if bit == zero {
+            0u32
+        } else {
+            return None;
+        };
+        value |= decoded << index;
+    }
+
+    Some(Mux32SessionProjection {
+        value,
+        result_recursive_wire:
+            session.memory.store.export_anum(final_link).ok()?,
+    })
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Mux1SessionProjection {
     pub(crate) value: u32,
     pub(crate) result_recursive_wire: String,
@@ -2002,6 +2161,104 @@ fn m1_mux1_direct_and_composed_all_rows() {
                 assert_eq!(composed, expected);
                 assert_eq!(direct, composed);
             }
+        }
+    }
+}
+
+#[test]
+fn persistent_mux32_session_lifecycle() {
+    let runs = [
+        (0usize, 0u32, u32::MAX, 0u32),
+        (1usize, 0u32, u32::MAX, u32::MAX),
+        (0usize, 0x1234_5678u32, 0x9abc_def0u32, 0x1234_5678u32),
+        (1usize, 0x1234_5678u32, 0x9abc_def0u32, 0x9abc_def0u32),
+        (0usize, 0u32, u32::MAX, 0u32),
+    ];
+
+    let prepare = prepare_mux32_session_program()
+        .expect("prepare MUX32");
+    let roles = prepare.semantic_roots.iter()
+        .map(|root| root.role.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+
+    for runtime_role in [
+        "data.select",
+        "data.a.word",
+        "data.b.word",
+        "invocation.args",
+        "invocation.call",
+        "scope.initial",
+    ] {
+        assert!(
+            !roles.contains(runtime_role),
+            "PREPARE leaked runtime role {runtime_role}",
+        );
+    }
+    for static_role in [
+        "function.mux32",
+        "function.mux1",
+        "function.gate.xor2",
+        "function.gate.and2",
+    ] {
+        assert!(
+            roles.contains(static_role),
+            "static MUX32 Aset missing {static_role}",
+        );
+    }
+
+    let (mut session, load) =
+        load_runtime_session(&prepare, 64).expect("load MUX32");
+    let memory_id = session.memory.id.clone();
+    let base_link_count = session.base_link_count;
+    let base_carrier = session.memory.store.export_packed_duplets();
+    let mut first_projection = None;
+
+    for (index, (select, a, b, expected)) in runs.into_iter().enumerate() {
+        let (initial, before, after) =
+            configure_mux32_session(&mut session, &load, select, a, b)
+                .expect("configure MUX32");
+        assert_eq!(session.memory.id, memory_id);
+        assert!(before >= base_link_count);
+        assert!(after >= before);
+
+        if index == 4 {
+            assert_eq!(
+                after, before,
+                "return-to-first must reuse canonical configuration Links",
+            );
+        }
+
+        let execute = execute_session_to_quiescence(
+            &mut session,
+            initial,
+            259,
+        )
+        .expect("execute MUX32");
+        assert!(execute.final_quiescent);
+        assert_eq!(execute.active_reaction_count, 257);
+        assert_eq!(session.engine.current().len(), 1);
+        assert_eq!(session.memory.id, memory_id);
+
+        let projected =
+            project_mux32_session_result(&session, &load)
+                .expect("project MUX32");
+        assert_eq!(projected.value, expected);
+
+        let carrier = session.memory.store.export_packed_duplets();
+        assert_eq!(
+            &carrier[..base_link_count],
+            base_carrier.as_slice(),
+            "loaded MUX32 base prefix changed",
+        );
+
+        if index == 0 {
+            first_projection = Some(projected.clone());
+        } else if index == 4 {
+            assert_eq!(
+                Some(projected),
+                first_projection,
+                "return-to-first changed semantic Result",
+            );
         }
     }
 }
