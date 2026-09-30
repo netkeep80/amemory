@@ -182,6 +182,296 @@ export function workbenchStepSnapshot(stepState) {
   };
 }
 
+const CONTEXT_FACT_KINDS = new Set([
+  "CONTEXT_CREATED",
+  "CONTEXT_UPDATED",
+  "CONTEXT_PUBLISHED",
+  "CONTEXT_COLLAPSED",
+]);
+
+function contextFactLabel(kind) {
+  return ({
+    CONTEXT_CREATED: "Context создан",
+    CONTEXT_UPDATED: "Context дополнен",
+    CONTEXT_PUBLISHED: "Context опубликовал результат",
+    CONTEXT_COLLAPSED: "Context схлопнут",
+    CONTEXT_UNAVAILABLE: "Данные Context недоступны",
+    REACTION_COMMIT: "Реакция завершена",
+  })[kind] || kind;
+}
+
+function cloneContext(value) {
+  return value == null ? null : clone(value);
+}
+
+function reactionPersistentFacts(evidence) {
+  const facts = Array.isArray(evidence?.structuralFacts)
+    ? evidence.structuralFacts
+    : [];
+  return {
+    createdLinks: facts
+      .filter((fact) => fact.kind === "INSTANTIATED")
+      .flatMap((fact) => Array.isArray(fact.createdLinks)
+        ? fact.createdLinks
+        : []),
+    publishedOutputs: facts
+      .filter((fact) =>
+        fact.kind === "PUBLISHED" && fact.preserved === false)
+      .flatMap((fact) => Array.isArray(fact.outputs) ? fact.outputs : []),
+  };
+}
+
+export function workbenchTraceFrames(stepState, mode = "reaction") {
+  const reports = Array.isArray(stepState?.reports)
+    ? stepState.reports
+    : [];
+  if (mode !== "reaction" && mode !== "context") {
+    throw new Error("Неизвестный режим проигрывателя: " + mode);
+  }
+
+  if (mode === "reaction") {
+    return reports.map((report, reportIndex) => {
+      const evidence = report?.evidence || {};
+      const persistent = reactionPersistentFacts(evidence);
+      const facts = Array.isArray(evidence.structuralFacts)
+        ? evidence.structuralFacts
+        : [];
+      const contexts = facts
+        .filter((fact) => fact.kind === "CONTEXT_CREATED")
+        .map((fact) => ({
+          id: fact.contextId,
+          groupId: fact.contextGroupId,
+          parentContextIds: fact.parentContextIds || [],
+          active: fact.active,
+          rule: fact.rule,
+          outputBundleTemplate: fact.outputBundleTemplate,
+        }));
+      return {
+        mode: "reaction",
+        kind: "REACTION_COMMIT",
+        label: "Реакция " + (reportIndex + 1),
+        reportIndex,
+        reactionIndex: evidence.reactionIndex ?? reportIndex,
+        structuralFactIndex: null,
+        locator:
+          "run " + (report?.sessionRunId ?? evidence.runId ?? "?") +
+          " / reaction " + (evidence.reactionIndex ?? reportIndex),
+        currentScope: clone(evidence.scopeAfter || []),
+        scopeBefore: clone(evidence.scopeBefore || []),
+        scopeAfter: clone(evidence.scopeAfter || []),
+        linksBefore: evidence.linksBefore ?? null,
+        linksAfter: evidence.linksAfter ?? null,
+        rawRuleMatches: evidence.rawRuleMatches ?? null,
+        quiescent: evidence.quiescent === true,
+        persistentCreatedLinks: clone(persistent.createdLinks),
+        publishedOutputs: clone(persistent.publishedOutputs),
+        activeContexts: [],
+        contexts,
+        selectedContext: null,
+        result: report?.completed ? clone(report.result) : null,
+        completed: report?.completed === true,
+        contextAvailable:
+          evidence.rawRuleMatches === 0 ||
+          contexts.length === (evidence.rawRuleMatches ?? 0),
+      };
+    });
+  }
+
+  const frames = [];
+  const activeContexts = new Map();
+  for (let reportIndex=0; reportIndex<reports.length; reportIndex+=1) {
+    const report=reports[reportIndex];
+    const evidence=report?.evidence || {};
+    const facts=Array.isArray(evidence.structuralFacts)
+      ? evidence.structuralFacts
+      : [];
+    const persistentCreatedLinks=[];
+    const publishedOutputs=[];
+    let contextFactCount=0;
+
+    for (let factIndex=0; factIndex<facts.length; factIndex+=1) {
+      const fact=facts[factIndex];
+      if (fact.kind === "INSTANTIATED") {
+        persistentCreatedLinks.push(
+          ...(Array.isArray(fact.createdLinks) ? clone(fact.createdLinks) : [])
+        );
+      }
+      if (fact.kind === "PUBLISHED" && fact.preserved === false) {
+        publishedOutputs.push(
+          ...(Array.isArray(fact.outputs) ? clone(fact.outputs) : [])
+        );
+      }
+      if (!CONTEXT_FACT_KINDS.has(fact.kind)) continue;
+      contextFactCount+=1;
+
+      let selectedContext=null;
+      if (fact.kind === "CONTEXT_CREATED") {
+        selectedContext={
+          id:fact.contextId,
+          groupId:fact.contextGroupId,
+          parentContextIds:clone(fact.parentContextIds || []),
+          active:fact.active,
+          rule:fact.rule,
+          outputBundleTemplate:fact.outputBundleTemplate,
+          groundedBundle:null,
+          outputs:[],
+        };
+        activeContexts.set(fact.contextId,selectedContext);
+      } else {
+        const current=activeContexts.get(fact.contextId);
+        selectedContext=current ? cloneContext(current) : {
+          id:fact.contextId,
+          groupId:fact.contextGroupId,
+          parentContextIds:[],
+          active:null,
+          rule:null,
+          outputBundleTemplate:null,
+          groundedBundle:null,
+          outputs:[],
+        };
+        if (fact.kind === "CONTEXT_UPDATED") {
+          selectedContext.groundedBundle=fact.groundedBundle;
+          activeContexts.set(fact.contextId,selectedContext);
+        } else if (fact.kind === "CONTEXT_PUBLISHED") {
+          selectedContext.outputs=clone(fact.outputs || []);
+          activeContexts.set(fact.contextId,selectedContext);
+        } else if (fact.kind === "CONTEXT_COLLAPSED") {
+          activeContexts.delete(fact.contextId);
+        }
+      }
+
+      frames.push({
+        mode:"context",
+        kind:fact.kind,
+        label:contextFactLabel(fact.kind),
+        reportIndex,
+        reactionIndex:evidence.reactionIndex ?? reportIndex,
+        structuralFactIndex:factIndex,
+        locator:
+          "run " + (report?.sessionRunId ?? evidence.runId ?? "?") +
+          " / reaction " + (evidence.reactionIndex ?? reportIndex) +
+          " / structuralFacts[" + factIndex + "]",
+        currentScope:clone(evidence.scopeBefore || []),
+        scopeBefore:clone(evidence.scopeBefore || []),
+        scopeAfter:clone(evidence.scopeAfter || []),
+        linksBefore:evidence.linksBefore ?? null,
+        linksAfter:evidence.linksAfter ?? null,
+        rawRuleMatches:evidence.rawRuleMatches ?? null,
+        quiescent:false,
+        persistentCreatedLinks:clone(persistentCreatedLinks),
+        publishedOutputs:clone(publishedOutputs),
+        activeContexts:[...activeContexts.values()].map(cloneContext),
+        selectedContext:cloneContext(selectedContext),
+        result:null,
+        completed:false,
+        contextAvailable:true,
+      });
+    }
+
+    if ((evidence.rawRuleMatches ?? 0)>0 && contextFactCount===0) {
+      frames.push({
+        mode:"context",
+        kind:"CONTEXT_UNAVAILABLE",
+        label:contextFactLabel("CONTEXT_UNAVAILABLE"),
+        reportIndex,
+        reactionIndex:evidence.reactionIndex ?? reportIndex,
+        structuralFactIndex:null,
+        locator:
+          "run " + (report?.sessionRunId ?? evidence.runId ?? "?") +
+          " / reaction " + (evidence.reactionIndex ?? reportIndex),
+        currentScope:clone(evidence.scopeBefore || []),
+        scopeBefore:clone(evidence.scopeBefore || []),
+        scopeAfter:clone(evidence.scopeAfter || []),
+        linksBefore:evidence.linksBefore ?? null,
+        linksAfter:evidence.linksAfter ?? null,
+        rawRuleMatches:evidence.rawRuleMatches ?? null,
+        quiescent:false,
+        persistentCreatedLinks:clone(persistentCreatedLinks),
+        publishedOutputs:clone(publishedOutputs),
+        activeContexts:[],
+        selectedContext:null,
+        result:null,
+        completed:false,
+        contextAvailable:false,
+      });
+    }
+
+    frames.push({
+      mode:"context",
+      kind:"REACTION_COMMIT",
+      label:contextFactLabel("REACTION_COMMIT"),
+      reportIndex,
+      reactionIndex:evidence.reactionIndex ?? reportIndex,
+      structuralFactIndex:null,
+      locator:
+        "run " + (report?.sessionRunId ?? evidence.runId ?? "?") +
+        " / reaction " + (evidence.reactionIndex ?? reportIndex) +
+        " / commit",
+      currentScope:clone(evidence.scopeAfter || []),
+      scopeBefore:clone(evidence.scopeBefore || []),
+      scopeAfter:clone(evidence.scopeAfter || []),
+      linksBefore:evidence.linksBefore ?? null,
+      linksAfter:evidence.linksAfter ?? null,
+      rawRuleMatches:evidence.rawRuleMatches ?? null,
+      quiescent:evidence.quiescent === true,
+      persistentCreatedLinks:clone(persistentCreatedLinks),
+      publishedOutputs:clone(publishedOutputs),
+      activeContexts:[...activeContexts.values()].map(cloneContext),
+      selectedContext:null,
+      result:report?.completed ? clone(report.result) : null,
+      completed:report?.completed === true,
+      contextAvailable:
+        (evidence.rawRuleMatches ?? 0)===0 || contextFactCount>0,
+    });
+  }
+  return frames;
+}
+
+function defaultWorkbenchPlayer() {
+  return {
+    mode:"reaction",
+    cursor:-1,
+    playing:false,
+    speedMs:800,
+    overlays:{
+      persistent:true,
+      context:true,
+      result:true,
+    },
+  };
+}
+
+export function workbenchPlayerSnapshot(stepState) {
+  const player=stepState?.player || defaultWorkbenchPlayer();
+  const frames=workbenchTraceFrames(stepState,player.mode);
+  const cursor=frames.length===0
+    ? -1
+    : Math.max(0,Math.min(
+      Number.isInteger(player.cursor) ? player.cursor : frames.length-1,
+      frames.length-1,
+    ));
+  const frame=cursor>=0 ? frames[cursor] : null;
+  return {
+    mode:player.mode,
+    cursor,
+    frameCount:frames.length,
+    frame,
+    hasPrevious:cursor>0,
+    hasCachedNext:cursor>=0 && cursor<frames.length-1,
+    canAdvance:
+      (cursor>=0 && cursor<frames.length-1) ||
+      Boolean(stepState?.active),
+    playing:Boolean(player.playing),
+    speedMs:player.speedMs || 800,
+    overlays:{
+      persistent:player.overlays?.persistent !== false,
+      context:player.overlays?.context !== false,
+      result:player.overlays?.result !== false,
+    },
+  };
+}
+
+
 function completedStepRun(stepState) {
   const latest = stepState?.reports?.at(-1);
   if (!latest?.completed) return null;
@@ -396,6 +686,108 @@ function freshInstanceEvidenceHtml(run) {
     "а не независимый семантический оракул.</div>";
 }
 
+function contextCardHtml(context) {
+  if (!context) return "";
+  return '<div class="wb-context-card"><strong>Context #' +
+    esc(context.id ?? "?") + '</strong><small>группа ' +
+    esc(context.groupId ?? "?") + ' · родители ' +
+    esc(JSON.stringify(context.parentContextIds || [])) +
+    '</small><code>active=' + esc(context.active ?? "—") +
+    ' · rule=' + esc(context.rule ?? "—") +
+    '</code><small>grounded=' +
+    esc(context.groundedBundle ?? "—") + ' · outputs=' +
+    esc(JSON.stringify(context.outputs || [])) + '</small></div>';
+}
+
+function workbenchPlayerHtml(stepState) {
+  const snapshot=workbenchPlayerSnapshot(stepState);
+  const frame=snapshot.frame;
+  const player=stepState?.player || defaultWorkbenchPlayer();
+  if (!frame) {
+    return '<div class="wb-step-live"><h4>Проигрыватель исполнения</h4>' +
+      '<div class="wb-help">Нажмите «Вперёд»: следующий кадр будет получен настоящим Session.step(), а не сгенерирован интерфейсом.</div>' +
+      '<div class="wb-player-controls"><button id="wb-step-next" class="primary"' +
+      (!stepState?.active ? ' disabled' : '') + '>Вперёд</button></div></div>';
+  }
+
+  const activeContexts=frame.activeContexts || [];
+  const contextLayer=frame.contextAvailable
+    ? (activeContexts.length
+      ? activeContexts.map(contextCardHtml).join("")
+      : '<div class="wb-help">Активных временных Context после этого события нет: строительные леса схлопнуты.</div>')
+    : '<div class="wb-help"><strong>Данные Context недоступны.</strong> Интерфейс не восстанавливает их из Scope или Links.</div>';
+
+  return '<div class="wb-step-live"><h4>Проигрыватель реального исполнения</h4>' +
+    '<div class="wb-player-toolbar">' +
+    '<div class="wb-mode"><button data-player-mode="reaction" aria-pressed="' +
+      (snapshot.mode==="reaction") + '">Реакции</button>' +
+    '<button data-player-mode="context" aria-pressed="' +
+      (snapshot.mode==="context") + '">Контексты</button></div>' +
+    '<div class="wb-player-controls">' +
+      '<button id="wb-player-prev"' + (!snapshot.hasPrevious ? ' disabled' : '') + '>Назад</button>' +
+      '<button id="wb-step-next" class="primary"' + (!snapshot.canAdvance ? ' disabled' : '') + '>Вперёд</button>' +
+      '<button id="wb-player-play"' + (!snapshot.canAdvance || snapshot.playing ? ' disabled' : '') + '>Воспроизвести</button>' +
+      '<button id="wb-player-pause"' + (!snapshot.playing ? ' disabled' : '') + '>Пауза</button>' +
+      '<button id="wb-player-end"' + (!stepState?.active ? ' disabled' : '') + '>До конца</button>' +
+    '</div><label class="wb-player-speed">Скорость <select id="wb-player-speed">' +
+      [250,500,800,1500].map((value) =>
+        '<option value="' + value + '"' +
+        (snapshot.speedMs===value ? ' selected' : '') + '>' +
+        value + ' мс</option>').join("") +
+      '</select></label></div>' +
+    '<div class="wb-player-toolbar"><div class="wb-player-controls">' +
+      '<button id="wb-jump-create">К созданию Context</button>' +
+      '<button id="wb-jump-collapse">К схлопыванию Context</button>' +
+    '</div><div class="wb-overlays">' +
+      '<label><input type="checkbox" data-overlay="persistent"' +
+        (snapshot.overlays.persistent ? ' checked' : '') + '> Постоянная асеть</label>' +
+      '<label><input type="checkbox" data-overlay="context"' +
+        (snapshot.overlays.context ? ' checked' : '') + '> Временный Context</label>' +
+      '<label><input type="checkbox" data-overlay="result"' +
+        (snapshot.overlays.result ? ' checked' : '') + '> Result</label>' +
+    '</div></div>' +
+    '<div class="wb-player-head"><strong>' + esc(frame.label) +
+      '</strong><span>кадр ' + esc(snapshot.cursor+1) + '/' +
+      esc(snapshot.frameCount) + '</span><code>Источник evidence: ' +
+      esc(frame.locator) + '</code></div>' +
+    '<div class="wb-simple-grid">' +
+      '<div class="wb-simple-item"><small>Текущий Scope</small><code>' +
+        esc(JSON.stringify(frame.currentScope || [])) + '</code></div>' +
+      '<div class="wb-simple-item"><small>Границы Links реакции</small><strong>' +
+        esc(frame.linksBefore ?? "—") + ' → ' +
+        esc(frame.linksAfter ?? "—") + '</strong></div>' +
+      '<div class="wb-simple-item"><small>Группа / событие</small><strong>' +
+        esc(frame.selectedContext?.groupId ?? "—") + ' / ' +
+        esc(frame.kind) + '</strong></div></div>' +
+    (snapshot.overlays.persistent
+      ? '<section class="wb-layer wb-layer-persistent"><h5>ПОСТОЯННАЯ АСЕТЬ / STORE</h5>' +
+        '<div class="wb-help">Физически созданные Links в этой реакции до выбранного события: ' +
+        esc(frame.persistentCreatedLinks?.length || 0) +
+        '. Они не являются Context и не исчезают при его схлопывании.</div>' +
+        '<code>' + esc(JSON.stringify(frame.persistentCreatedLinks || [])) +
+        '</code><div class="wb-help">Опубликованные выходы: ' +
+        esc(JSON.stringify(frame.publishedOutputs || [])) + '</div></section>'
+      : '') +
+    (snapshot.overlays.context
+      ? '<section class="wb-layer wb-layer-context"><h5>ВРЕМЕННЫЙ CONTEXT — строительные леса</h5>' +
+        (frame.selectedContext
+          ? '<div class="wb-help">Context события:</div>' +
+            contextCardHtml(frame.selectedContext)
+          : '') +
+        contextLayer + '</section>'
+      : '') +
+    (snapshot.overlays.result
+      ? '<section class="wb-layer wb-layer-result"><h5>RESULT / опубликованный результат</h5>' +
+        (frame.result
+          ? '<pre>' + json(frame.result) + '</pre>'
+          : '<div class="wb-help">Финальный Result появляется только после реального достижения покоя. Уже опубликованные persistent outputs при этом не стираются: ' +
+            esc(JSON.stringify(frame.publishedOutputs || [])) + '</div>') +
+        '</section>'
+      : '') +
+    '<div class="wb-help">«Назад» меняет только курсор просмотра evidence и никогда не откатывает апамять. «Вперёд» у конца уже полученной трассы вызывает настоящий Session.step(). Sibling Context одной группы атомарны: порядок строк observer не считается семантическим порядком.</div>' +
+  '</div>';
+}
+
 function styles() {
   if (document.querySelector("#amemory-workbench-style")) return;
   const style = document.createElement("style");
@@ -411,7 +803,7 @@ function styles() {
     ".wb-mode,.wb-actions{display:flex;gap:7px;flex-wrap:wrap}.wb-mode button,.wb-actions button{cursor:pointer}.wb-mode button[aria-pressed=true]{outline:2px solid var(--accent);font-weight:800}.wb-actions .primary{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:800}.wb-actions button:disabled{opacity:.45}",
     ".wb-help{color:var(--muted);font-size:.78rem;margin-top:6px}.wb-memory{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.wb-metric{padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);min-width:0}.wb-metric small{display:block;color:var(--muted)}.wb-metric strong,.wb-metric code{display:block;margin-top:4px;overflow-wrap:anywhere}",
     ".wb-result{margin-top:12px;padding:14px;border:2px solid var(--line);border-radius:12px}.wb-result.ready{border-color:var(--good)}.wb-result h4{margin:0 0 7px}.wb-result-value{font-size:1.35rem;font-weight:900;overflow-wrap:anywhere}",
-    ".wb-step-live{margin-top:12px;padding:14px;border:2px solid var(--accent);border-radius:12px;background:var(--surface-2)}.wb-step-live h4{margin:0 0 10px}",
+    ".wb-step-live{margin-top:12px;padding:14px;border:2px solid var(--accent);border-radius:12px;background:var(--surface-2)}.wb-step-live h4{margin:0 0 10px}.wb-step-live h5{margin:0 0 7px}.wb-player-toolbar{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin:8px 0}.wb-player-controls,.wb-overlays{display:flex;gap:7px;flex-wrap:wrap;align-items:center}.wb-player-controls button,.wb-player-speed select{min-height:34px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--text);padding:6px 8px}.wb-player-controls .primary{background:var(--accent);color:#fff;border-color:var(--accent)}.wb-player-controls button:disabled{opacity:.45}.wb-player-speed,.wb-overlays label{font-size:.78rem;color:var(--muted)}.wb-player-head{display:grid;grid-template-columns:auto auto minmax(0,1fr);gap:10px;align-items:center;margin:10px 0}.wb-player-head span{color:var(--muted);font-size:.78rem}.wb-player-head code{text-align:right;overflow-wrap:anywhere}.wb-layer{margin-top:9px;padding:11px;border-radius:10px;background:var(--surface)}.wb-layer-persistent{border:2px solid var(--line)}.wb-layer-context{border:2px dashed var(--accent)}.wb-layer-result{border:3px double var(--good)}.wb-layer>code{display:block;max-height:120px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}.wb-context-card{display:grid;gap:3px;padding:8px;margin:6px 0;border:1px dashed var(--accent);border-radius:9px;background:var(--surface-2)}.wb-context-card small{color:var(--muted)}",
     ".wb-verification{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:10px 0}.wb-verification-item{display:grid;gap:5px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2)}.wb-verification-item code{overflow-wrap:anywhere}.wb-verification-item strong{font-size:.76rem}.wb-verification-item small{color:var(--muted)}.wb-verification-item.verified{border-color:var(--good)}.wb-verification-item.failed{border-color:var(--bad)}",
     ".wb-tabs{padding:0 16px 16px}.wb-tabbar{display:flex;gap:6px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:9px}.wb-tabbar button{border:0;background:transparent;color:var(--muted);padding:7px 9px;cursor:pointer}.wb-tabbar button[aria-selected=true]{color:var(--text);font-weight:800;border-bottom:2px solid var(--accent)}.wb-tab{padding-top:12px}",
     ".wb-log{display:grid;gap:6px;max-height:360px;overflow:auto}.wb-log-row{padding:8px 10px;border:1px solid var(--line);border-radius:9px;background:var(--surface-2);font-size:.78rem}.wb-table{width:100%;border-collapse:collapse;font-size:.8rem}.wb-table th,.wb-table td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line)}.wb-table th{color:var(--muted)}",
@@ -460,6 +852,7 @@ function presetInputs(state) {
 }
 
 function loadManifest(state, index) {
+  stopWorkbenchPlayer(state);
   if (state.session) closeScenarioLiveSession(state.wasm);
   const source = loadScenarioPresetManifestByIndex(state.wasm, index);
   if (source == null) throw new Error("Не найден манифест сценария с индексом " + index);
@@ -482,6 +875,7 @@ async function history(state) {
 }
 
 async function open(state) {
+  stopWorkbenchPlayer(state);
   state.loading = true; state.error = null; render(state);
   try {
     const opened = openScenarioLiveSession(state.wasm, state.manifest, state.backend);
@@ -506,6 +900,7 @@ async function open(state) {
 }
 
 async function execute(state) {
+  stopWorkbenchPlayer(state);
   state.loading = true; state.error = null; render(state);
   try {
     const request = createWorkbenchRun(
@@ -543,6 +938,7 @@ async function beginStep(state) {
       active: true,
       begin: result.payload.begin,
       reports: [],
+      player: defaultWorkbenchPlayer(),
     };
     state.stage = "EXECUTE";
   } catch (error) {
@@ -576,12 +972,128 @@ async function stepOnce(state) {
 }
 
 function close(state) {
+  stopWorkbenchPlayer(state);
   if (state.session) closeScenarioLiveSession(state.wasm);
   state.session = null;
   state.run = null;
   state.step = null;
   state.history = null;
   state.error = null;
+  render(state);
+}
+
+function stopWorkbenchPlayer(state) {
+  if (state.playerTimer != null) {
+    clearTimeout(state.playerTimer);
+    state.playerTimer=null;
+  }
+  if (state.step?.player) state.step.player.playing=false;
+}
+
+function setWorkbenchPlayerMode(state, mode) {
+  if (!state.step) return;
+  stopWorkbenchPlayer(state);
+  state.step.player=state.step.player || defaultWorkbenchPlayer();
+  state.step.player.mode=mode;
+  const frames=workbenchTraceFrames(state.step,mode);
+  state.step.player.cursor=frames.length ? frames.length-1 : -1;
+  render(state);
+}
+
+function moveWorkbenchPlayer(state, delta) {
+  if (!state.step) return false;
+  stopWorkbenchPlayer(state);
+  const snapshot=workbenchPlayerSnapshot(state.step);
+  if (!snapshot.frameCount) return false;
+  const next=Math.max(0,Math.min(
+    snapshot.frameCount-1,
+    snapshot.cursor+delta,
+  ));
+  if (next===snapshot.cursor) return false;
+  state.step.player.cursor=next;
+  render(state);
+  return true;
+}
+
+async function advanceWorkbenchPlayer(state) {
+  if (!state.step || state.loading) return false;
+  const before=workbenchPlayerSnapshot(state.step);
+  if (before.hasCachedNext) {
+    state.step.player.cursor=before.cursor+1;
+    render(state);
+    return true;
+  }
+  if (!state.step.active) return false;
+
+  const mode=state.step.player.mode;
+  const oldCount=workbenchTraceFrames(state.step,mode).length;
+  await stepOnce(state);
+  if (!state.step) return false;
+  const frames=workbenchTraceFrames(state.step,mode);
+  if (frames.length<=oldCount) return false;
+  state.step.player.cursor=oldCount;
+  render(state);
+  return true;
+}
+
+async function finishWorkbenchPlayer(state) {
+  if (!state.step) return;
+  stopWorkbenchPlayer(state);
+  const max=Number(state.step.begin?.maxReactions || 4096);
+  let guard=0;
+  while (state.step.active && guard<max) {
+    await stepOnce(state);
+    guard+=1;
+    if (state.error) break;
+  }
+  if (state.step) {
+    const frames=workbenchTraceFrames(state.step,state.step.player.mode);
+    state.step.player.cursor=frames.length ? frames.length-1 : -1;
+  }
+  render(state);
+}
+
+function scheduleWorkbenchPlayer(state) {
+  if (!state.step?.player?.playing) return;
+  state.playerTimer=setTimeout(async () => {
+    state.playerTimer=null;
+    if (!state.step?.player?.playing) return;
+    const moved=await advanceWorkbenchPlayer(state);
+    if (!moved || !state.step) {
+      stopWorkbenchPlayer(state);
+      render(state);
+      return;
+    }
+    if (state.step.player.playing) scheduleWorkbenchPlayer(state);
+  },state.step.player.speedMs || 800);
+}
+
+function playWorkbenchPlayer(state) {
+  if (!state.step) return;
+  stopWorkbenchPlayer(state);
+  state.step.player.playing=true;
+  render(state);
+  scheduleWorkbenchPlayer(state);
+}
+
+function jumpWorkbenchPlayer(state, kind) {
+  if (!state.step) return;
+  stopWorkbenchPlayer(state);
+  if (state.step.player.mode!=="context") {
+    state.step.player.mode="context";
+  }
+  const frames=workbenchTraceFrames(state.step,"context");
+  const current=Math.max(-1,state.step.player.cursor);
+  let target=frames.findIndex((frame,index) =>
+    index>current && frame.kind===kind);
+  if (target<0) target=frames.findIndex((frame) => frame.kind===kind);
+  if (target>=0) state.step.player.cursor=target;
+  render(state);
+}
+
+function toggleWorkbenchOverlay(state, name, checked) {
+  if (!state.step) return;
+  state.step.player.overlays[name]=Boolean(checked);
   render(state);
 }
 
@@ -754,9 +1266,7 @@ function render(state) {
       (!openSession || state.loading || state.step?.active ? " disabled" : "") +
     '>Выполнить полностью</button><button id="wb-step-start"' +
       (!openSession || state.loading || state.step?.active ? " disabled" : "") +
-    '>Начать по шагам</button><button id="wb-step-next" class="primary"' +
-      (!state.step?.active || state.loading ? " disabled" : "") +
-    '>Шаг</button><button id="wb-close"' +
+    '>Начать по шагам</button><button id="wb-close"' +
       (!openSession || state.loading ? " disabled" : "") +
     '>Закрыть</button></div>' +
     '<div class="wb-help">Готовый и ручной режим используют один и тот же манифест сценария. Изменение входов сохраняет эту же сессию и уже загруженную апамять.</div>' +
@@ -787,25 +1297,9 @@ function render(state) {
       '<div class="wb-metric"><small>Подготовка / загрузка / запуски</small><strong>' + esc(status && status.prepareCount || 0) +
       " / " + esc(status && status.loadCount || 0) + " / " + esc(status && status.completedRuns || 0) + '</strong></div>' +
       '</div>') +
+    (state.step ? workbenchPlayerHtml(state.step) : '') +
     (state.step
-      ? '<div class="wb-step-live"><h4>Реальный шаг исполнения</h4>' +
-        '<div class="wb-simple-grid">' +
-        '<div class="wb-simple-item"><small>Реакция</small><strong>' +
-          esc(stepSnapshot.reactionCount) + '</strong></div>' +
-        '<div class="wb-simple-item"><small>Scope до</small><code>' +
-          esc(JSON.stringify(stepSnapshot.scopeBefore)) + '</code></div>' +
-        '<div class="wb-simple-item"><small>Scope после</small><code>' +
-          esc(JSON.stringify(stepSnapshot.scopeAfter)) + '</code></div>' +
-        '</div><div class="wb-memory">' +
-        '<div class="wb-metric"><small>Совпадений правил</small><strong>' +
-          esc(stepSnapshot.rawRuleMatches ?? "—") + '</strong></div>' +
-        '<div class="wb-metric"><small>Переходов</small><strong>' +
-          esc(stepSnapshot.transitionedMembers ?? "—") + '</strong></div>' +
-        '<div class="wb-metric"><small>Публикаций / handoff</small><strong>' +
-          esc(stepSnapshot.handoffCount ?? "—") + '</strong></div>' +
-        '<div class="wb-metric"><small>Покой</small><strong>' +
-          esc(String(stepSnapshot.quiescent)) + '</strong></div>' +
-        '</div><div class="wb-help">Scope показан только из runtime ReactionEvidence. UI не передаёт Scope обратно в исполнитель.</div></div>'
+      ? '<div class="wb-help">Scope показан только из runtime ReactionEvidence. UI не передаёт Scope обратно в исполнитель.</div>'
       : '') +
     '<div class="wb-result ' + (run ? resultStatus.kind : "") + '"><h4>' + esc(resultStatus.label) + '</h4><div class="wb-result-value">' +
     esc(resultText(run)) + '</div><div class="wb-help">' +
@@ -880,8 +1374,45 @@ function render(state) {
     void beginStep(state);
   });
   root.querySelector("#wb-step-next")?.addEventListener("click", () => {
-    void stepOnce(state);
+    void advanceWorkbenchPlayer(state);
   });
+  root.querySelector("#wb-player-prev")?.addEventListener("click", () => {
+    moveWorkbenchPlayer(state,-1);
+  });
+  root.querySelector("#wb-player-play")?.addEventListener("click", () => {
+    playWorkbenchPlayer(state);
+  });
+  root.querySelector("#wb-player-pause")?.addEventListener("click", () => {
+    stopWorkbenchPlayer(state); render(state);
+  });
+  root.querySelector("#wb-player-end")?.addEventListener("click", () => {
+    void finishWorkbenchPlayer(state);
+  });
+  root.querySelector("#wb-jump-create")?.addEventListener("click", () => {
+    jumpWorkbenchPlayer(state,"CONTEXT_CREATED");
+  });
+  root.querySelector("#wb-jump-collapse")?.addEventListener("click", () => {
+    jumpWorkbenchPlayer(state,"CONTEXT_COLLAPSED");
+  });
+  root.querySelector("#wb-player-speed")?.addEventListener("change", (event) => {
+    if (state.step?.player) {
+      state.step.player.speedMs=Number(event.target.value);
+      if (state.step.player.playing) {
+        stopWorkbenchPlayer(state);
+        playWorkbenchPlayer(state);
+      } else render(state);
+    }
+  });
+  for (const button of root.querySelectorAll("[data-player-mode]")) {
+    button.addEventListener("click", () => {
+      setWorkbenchPlayerMode(state,button.dataset.playerMode);
+    });
+  }
+  for (const input of root.querySelectorAll("[data-overlay]")) {
+    input.addEventListener("change", () => {
+      toggleWorkbenchOverlay(state,input.dataset.overlay,input.checked);
+    });
+  }
   root.querySelector("#wb-close")?.addEventListener("click", () => close(state));
   for (const button of root.querySelectorAll("[data-tab]")) {
     button.addEventListener("click", () => { state.tab = button.dataset.tab; render(state); });
@@ -894,6 +1425,7 @@ export async function mountWorkbench(root) {
     root, wasm: null, registry: { entries: [] }, manifest: { runSequence: [], inputSchema: [] },
     scenarioIndex: 0, presetIndex: 0, inputs: {}, mode: "preset", backend: "optimized-cpu",
     session: null, run: null, step: null, history: null, tab: "timeline",
+    playerTimer: null,
     level: "simple", stage: "RESULT",
     build: { version: "загрузка", sha: "загрузка" }, loading: true, error: null,
   };
