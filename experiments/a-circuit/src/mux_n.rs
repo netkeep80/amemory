@@ -4,11 +4,24 @@ use super::{
     },
     logic_n::{install_gate_basis, GateSet},
     proof_n::{
-        execute_session_to_quiescence, execute_to_quiescence,
-        identical_rerun, load_runtime, load_runtime_session, loaded_handle,
-        prepare_stage, semantic_source, theory_admissions, visual_snapshot,
-        ProofRuntimeSession, WebMux1Proof, WebProofLoadStage,
-        WebProofPrepareStage, WebProofResultStage, WebStructuralProof,
+        execute_session_to_quiescence,
+        execute_to_quiescence,
+        identical_rerun,
+        load_runtime,
+        load_runtime_session,
+        loaded_handle,
+        prepare_stage,
+        semantic_source,
+        theory_admissions,
+        visual_snapshot,
+        WebMux1Proof,
+        WebProofLoadStage,
+        WebProofPrepareStage,
+        WebProofResultStage,
+        WebStructuralProof,
+    },
+    runtime_session::{
+        CpuRuntimeSession
     },
 };
 use amemory_optimized_cpu_probe::{
@@ -1412,7 +1425,7 @@ pub(crate) fn prepare_mux32_session_program() -> Option<WebProofPrepareStage> {
 }
 
 pub(crate) fn configure_mux32_session(
-    session: &mut ProofRuntimeSession,
+    session: &mut CpuRuntimeSession,
     load: &WebProofLoadStage,
     select: usize,
     a: u32,
@@ -1459,7 +1472,7 @@ pub(crate) fn configure_mux32_session(
 }
 
 pub(crate) fn project_mux32_session_result(
-    session: &ProofRuntimeSession,
+    session: &CpuRuntimeSession,
     load: &WebProofLoadStage,
 ) -> Option<Mux32SessionProjection> {
     if session.engine.current().len() != 1 {
@@ -1554,7 +1567,7 @@ pub(crate) fn prepare_mux1_session_program() -> Option<WebProofPrepareStage> {
 }
 
 pub(crate) fn configure_mux1_session(
-    session: &mut ProofRuntimeSession,
+    session: &mut CpuRuntimeSession,
     load: &WebProofLoadStage,
     select: usize,
     a: usize,
@@ -1590,7 +1603,7 @@ pub(crate) fn configure_mux1_session(
 }
 
 pub(crate) fn project_mux1_session_result(
-    session: &ProofRuntimeSession,
+    session: &CpuRuntimeSession,
     load: &WebProofLoadStage,
 ) -> Option<Mux1SessionProjection> {
     if session.engine.current().len() != 1 {
