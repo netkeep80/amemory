@@ -301,8 +301,8 @@ Promise.all([
     "utf8"
   );
   const presetRegistry = refreshScenarioPresetRegistry(w);
-  if (presetRegistry.entries.length !== 10) {
-    throw new Error("R3d6 preset registry count mismatch");
+  if (presetRegistry.entries.length !== 14) {
+    throw new Error("R3d7 preset registry count mismatch");
   }
   const presetSummary = presetRegistry.entries.find(
     (entry) => entry.scenarioId === "mux1-lifecycle"
@@ -367,6 +367,30 @@ Promise.all([
       !Array.isArray(addPresetSummary.inputSchema) ||
       addPresetSummary.inputSchema.length !== 2) {
     throw new Error("R3d2 manifest-derived ADD32 preset summary mismatch");
+  }
+
+  for (const [scenarioId, profileId, programId, inputCount] of [
+    ["adc32-lifecycle", "a-circuit:arithmetic-adc32", "adc32", 3],
+    ["sub32-lifecycle", "a-circuit:arithmetic-sub32", "sub32", 2],
+    ["sbb32-lifecycle", "a-circuit:arithmetic-sbb32", "sbb32", 3],
+    ["cmp32-lifecycle", "a-circuit:arithmetic-cmp32", "cmp32", 2],
+  ]) {
+    const summary = presetRegistry.entries.find(
+      (entry) => entry.scenarioId === scenarioId
+    );
+    if (!summary ||
+        summary.scenarioVersion !== "1.0.0" ||
+        summary.programProfileId !== profileId ||
+        summary.family !== "arithmetic-effect" ||
+        summary.programId !== programId ||
+        summary.runCount !== 4 ||
+        !Array.isArray(summary.inputSchema) ||
+        summary.inputSchema.length !== inputCount) {
+      throw new Error(
+        "R3d7 manifest-derived Arithmetic32 preset summary mismatch: " +
+        scenarioId
+      );
+    }
   }
 
   const shlPresetSummary = presetRegistry.entries.find(
@@ -1624,6 +1648,74 @@ Promise.all([
     throw new Error(
       "R3d2 ADD32 generic Scenario path mutated legacy LabInstanceState"
     );
+  }
+
+  // R3d7: ADC/SUB/SBB/CMP use the same generic Scenario transport
+  // and the same shared persistent Arithmetic32 Aset as ADD32.
+  for (const [scenarioId, fileName] of [
+    ["adc32-lifecycle", "adc32-lifecycle-v1.json"],
+    ["sub32-lifecycle", "sub32-lifecycle-v1.json"],
+    ["sbb32-lifecycle", "sbb32-lifecycle-v1.json"],
+    ["cmp32-lifecycle", "cmp32-lifecycle-v1.json"],
+  ]) {
+    const canonicalArithmeticSource = fs.readFileSync(
+      "experiments/a-circuit/scenarios/" + fileName,
+      "utf8"
+    );
+    const arithmeticPreset = loadScenarioPresetManifest(
+      w,
+      presetRegistry,
+      scenarioId,
+      "1.0.0"
+    );
+    if (arithmeticPreset === null ||
+        arithmeticPreset.source !== canonicalArithmeticSource) {
+      throw new Error(
+        "R3d7 Arithmetic32 canonical preset round-trip mismatch: " +
+        scenarioId
+      );
+    }
+    const arithmeticCpu = executeScenarioManifest(
+      w,
+      JSON.parse(arithmeticPreset.source),
+      "optimized-cpu"
+    );
+    if (!arithmeticCpu.ok ||
+        arithmeticCpu.error !== null ||
+        arithmeticCpu.report?.scenarioId !== scenarioId ||
+        arithmeticCpu.report?.overallPass !== true ||
+        arithmeticCpu.report?.runs?.length !== 4) {
+      throw new Error(
+        "R3d7 generic Arithmetic32 Scenario execution failed: " +
+        scenarioId
+      );
+    }
+    for (
+      let index = 0;
+      index < arithmeticCpu.report.runs.length;
+      index += 1
+    ) {
+      const run = arithmeticCpu.report.runs[index];
+      if ((run.sessionRunId >>> 0) !== index + 1 ||
+          run.observed?.sessionId !== arithmeticCpu.report.sessionId ||
+          run.observed?.finalQuiescent !== true ||
+          run.observed?.activeReactionCount !== 609 ||
+          run.oracleMatches !== true ||
+          run.freshInstanceMatches !== true ||
+          run.scalarOracleMatches !== true) {
+        throw new Error(
+          "R3d7 Arithmetic32 persistent-session evidence mismatch: " +
+          scenarioId + " run " + index
+        );
+      }
+    }
+    if (arithmeticCpu.report.runs[3].configurationReused !== true ||
+        JSON.stringify(arithmeticCpu.report.runs[3].result) !==
+          JSON.stringify(arithmeticCpu.report.runs[0].result)) {
+      throw new Error(
+        "R3d7 Arithmetic32 return-to-first mismatch: " + scenarioId
+      );
+    }
   }
 
   // R3d3: SHIFT also uses the exact same generic preset/Scenario path.

@@ -1,0 +1,163 @@
+{
+  "schemaVersion": 1,
+  "scenarioId": "sub32-lifecycle",
+  "scenarioVersion": "1.0.0",
+  "title": "SUB32: четыре запуска в одной апамяти",
+  "description": "Одна общая арифметическая асеть загружается один раз; SUB32 задаётся CONFIGURE-связями и исполняется без перезагрузки.",
+  "programProfile": {
+    "profileId": "a-circuit:arithmetic-sub32",
+    "family": "arithmetic-effect",
+    "programId": "sub32",
+    "asetSource": "builtin:a-circuit/arithmetic-effect/sub32"
+  },
+  "inputSchema": [
+    {
+      "key": "A",
+      "type": "WORD32",
+      "description": "Первый 32-битный операнд",
+      "default": "0x00000000"
+    },
+    {
+      "key": "B",
+      "type": "WORD32",
+      "description": "Второй 32-битный операнд",
+      "default": "0x00000001"
+    }
+  ],
+  "initialInputs": {
+    "A": "0x00000000",
+    "B": "0x00000001"
+  },
+  "runSequence": [
+    {
+      "runId": "run-1-borrow",
+      "inputs": {
+        "A": "0x00000000",
+        "B": "0x00000001"
+      },
+      "executionMode": "TO_QUIESCENCE",
+      "maxReactions": 1024,
+      "assertions": [
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "value",
+          "expected": "0xffffffff"
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "writeback",
+          "expected": 1
+        },
+        {
+          "kind": "QUIESCENT_EQUALS",
+          "expected": true
+        },
+        {
+          "kind": "REACTION_COUNT_EQUALS",
+          "expected": 609
+        }
+      ]
+    },
+    {
+      "runId": "run-2-identity",
+      "inputs": {
+        "A": "0x12345678",
+        "B": "0x00000000"
+      },
+      "executionMode": "TO_QUIESCENCE",
+      "maxReactions": 1024,
+      "assertions": [
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "value",
+          "expected": "0x12345678"
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "writeback",
+          "expected": 1
+        },
+        {
+          "kind": "QUIESCENT_EQUALS",
+          "expected": true
+        },
+        {
+          "kind": "REACTION_COUNT_EQUALS",
+          "expected": 609
+        }
+      ]
+    },
+    {
+      "runId": "run-3-signed-boundary",
+      "inputs": {
+        "A": "0x80000000",
+        "B": "0x00000001"
+      },
+      "executionMode": "TO_QUIESCENCE",
+      "maxReactions": 1024,
+      "assertions": [
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "value",
+          "expected": "0x7fffffff"
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "writeback",
+          "expected": 1
+        },
+        {
+          "kind": "QUIESCENT_EQUALS",
+          "expected": true
+        },
+        {
+          "kind": "REACTION_COUNT_EQUALS",
+          "expected": 609
+        }
+      ]
+    },
+    {
+      "runId": "run-4-return-first",
+      "inputs": {
+        "A": "0x00000000",
+        "B": "0x00000001"
+      },
+      "executionMode": "TO_QUIESCENCE",
+      "maxReactions": 1024,
+      "assertions": [
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "value",
+          "expected": "0xffffffff"
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "writeback",
+          "expected": 1
+        },
+        {
+          "kind": "QUIESCENT_EQUALS",
+          "expected": true
+        },
+        {
+          "kind": "REACTION_COUNT_EQUALS",
+          "expected": 609
+        }
+      ]
+    }
+  ],
+  "supportedBackends": [
+    "optimized-cpu"
+  ],
+  "oraclePolicy": "FRESH_INSTANCE",
+  "invariants": [
+    "prepare-once",
+    "load-once",
+    "same-session",
+    "link-only-reconfiguration",
+    "return-to-first-configuration"
+  ],
+  "observationLevel": "PROFILE",
+  "profilingPolicy": "FULL",
+  "visualizationProfile": "engineering"
+}

@@ -1,7 +1,8 @@
 use super::{
     arithmetic_effect_n::{
-        configure_add32_session, prepare_add32_session_program,
-        project_add32_session_result, web_prove_arithmetic,
+        configure_arithmetic32_session,
+        prepare_arithmetic32_session_program,
+        project_arithmetic32_session_result, web_prove_arithmetic,
     },
     logic_effect_n::{
         configure_logic32_session, prepare_logic32_session_program,
@@ -76,6 +77,9 @@ enum CpuScenarioImplementation {
     Logic32 {
         op: u32,
     },
+    Arithmetic32 {
+        op: u32,
+    },
 }
 
 struct CpuScenarioAdapter {
@@ -102,6 +106,9 @@ impl CpuScenarioAdapter {
             CpuScenarioImplementation::Logic32 { op } => {
                 prepare_logic32_session_program(op)
             }
+            CpuScenarioImplementation::Arithmetic32 { .. } => {
+                prepare_arithmetic32_session_program()
+            }
         }
     }
 
@@ -118,6 +125,11 @@ impl CpuScenarioAdapter {
             CpuScenarioImplementation::Logic32 { op } => {
                 configure_logic32_from_inputs(op, session, load, inputs)
             }
+            CpuScenarioImplementation::Arithmetic32 { op } => {
+                configure_arithmetic32_from_inputs(
+                    op, session, load, inputs,
+                )
+            }
         }
     }
 
@@ -133,6 +145,9 @@ impl CpuScenarioAdapter {
             CpuScenarioImplementation::Logic32 { .. } => {
                 project_logic32_result(session, load)
             }
+            CpuScenarioImplementation::Arithmetic32 { .. } => {
+                project_arithmetic32_result(session, load)
+            }
         }
     }
 
@@ -147,6 +162,9 @@ impl CpuScenarioAdapter {
             CpuScenarioImplementation::Logic32 { op } => {
                 fresh_instance_logic32_result(op, inputs)
             }
+            CpuScenarioImplementation::Arithmetic32 { op } => {
+                fresh_instance_arithmetic32_result(op, inputs)
+            }
         }
     }
 
@@ -160,6 +178,9 @@ impl CpuScenarioAdapter {
             } => scalar_oracle(inputs),
             CpuScenarioImplementation::Logic32 { op } => {
                 scalar_logic32_result(op, inputs)
+            }
+            CpuScenarioImplementation::Arithmetic32 { op } => {
+                scalar_arithmetic32_result(op, inputs)
             }
         }
     }
@@ -246,13 +267,35 @@ const CPU_SCENARIO_ADAPTERS: &[CpuScenarioAdapter] = &[
         family: "arithmetic-effect",
         program_id: "add32",
         aset_source: "builtin:a-circuit/arithmetic-effect/add32",
-        implementation: CpuScenarioImplementation::Direct {
-            prepare: prepare_add32_session_program,
-            configure: configure_add32_from_inputs,
-            project: project_add32_result,
-            fresh_instance: fresh_instance_add32_result,
-            scalar_oracle: scalar_add32_result,
-        },
+        implementation: CpuScenarioImplementation::Arithmetic32 { op: 6 },
+    },
+    CpuScenarioAdapter {
+        profile_id: "a-circuit:arithmetic-adc32",
+        family: "arithmetic-effect",
+        program_id: "adc32",
+        aset_source: "builtin:a-circuit/arithmetic-effect/adc32",
+        implementation: CpuScenarioImplementation::Arithmetic32 { op: 7 },
+    },
+    CpuScenarioAdapter {
+        profile_id: "a-circuit:arithmetic-sub32",
+        family: "arithmetic-effect",
+        program_id: "sub32",
+        aset_source: "builtin:a-circuit/arithmetic-effect/sub32",
+        implementation: CpuScenarioImplementation::Arithmetic32 { op: 8 },
+    },
+    CpuScenarioAdapter {
+        profile_id: "a-circuit:arithmetic-sbb32",
+        family: "arithmetic-effect",
+        program_id: "sbb32",
+        aset_source: "builtin:a-circuit/arithmetic-effect/sbb32",
+        implementation: CpuScenarioImplementation::Arithmetic32 { op: 9 },
+    },
+    CpuScenarioAdapter {
+        profile_id: "a-circuit:arithmetic-cmp32",
+        family: "arithmetic-effect",
+        program_id: "cmp32",
+        aset_source: "builtin:a-circuit/arithmetic-effect/cmp32",
+        implementation: CpuScenarioImplementation::Arithmetic32 { op: 10 },
     },
     CpuScenarioAdapter {
         profile_id: "a-circuit:shift-shl32",
@@ -1398,16 +1441,34 @@ fn fresh_instance_logic32_result(
     ))
 }
 
-fn configure_add32_from_inputs(
+fn arithmetic32_inputs(
+    op: u32,
+    inputs: &BTreeMap<String, Value>,
+) -> Result<(u32, u32, u32), String> {
+    let a = word32_input(inputs, "A")?;
+    let b = word32_input(inputs, "B")?;
+    let input_flag = if matches!(op, 7 | 9) {
+        bit_input(inputs, "CF")? as u32
+    } else {
+        0
+    };
+    Ok((a, b, input_flag))
+}
+
+fn configure_arithmetic32_from_inputs(
+    op: u32,
     session: &mut ProofRuntimeSession,
     load: &WebProofLoadStage,
     inputs: &BTreeMap<String, Value>,
 ) -> Result<ConfiguredRun, String> {
-    let a = word32_input(inputs, "A")?;
-    let b = word32_input(inputs, "B")?;
+    let (a, b, input_flag) = arithmetic32_inputs(op, inputs)?;
     let (initial, before, after) =
-        configure_add32_session(session, load, a, b)
-            .ok_or_else(|| "ADD32 configuration failed".to_owned())?;
+        configure_arithmetic32_session(
+            session, load, op, a, b, input_flag,
+        )
+        .ok_or_else(|| {
+            format!("Arithmetic32 op {op} configuration failed")
+        })?;
     Ok(ConfiguredRun {
         initial,
         links_before: before as u32,
@@ -1415,12 +1476,12 @@ fn configure_add32_from_inputs(
     })
 }
 
-fn project_add32_result(
+fn project_arithmetic32_result(
     session: &ProofRuntimeSession,
     load: &WebProofLoadStage,
 ) -> Result<ScenarioNormalizedResultV1, String> {
-    let projected = project_add32_session_result(session, load)
-        .ok_or_else(|| "ADD32 result projection failed".to_owned())?;
+    let projected = project_arithmetic32_session_result(session, load)
+        .ok_or_else(|| "Arithmetic32 result projection failed".to_owned())?;
     Ok(effect32_normalized(
         projected.value,
         projected.writeback,
@@ -1432,13 +1493,15 @@ fn project_add32_result(
     ))
 }
 
-fn fresh_instance_add32_result(
+fn fresh_instance_arithmetic32_result(
+    op: u32,
     inputs: &BTreeMap<String, Value>,
 ) -> Result<ScenarioNormalizedResultV1, String> {
-    let a = word32_input(inputs, "A")?;
-    let b = word32_input(inputs, "B")?;
-    let proof = web_prove_arithmetic(6, a, b, 0)
-        .ok_or_else(|| "fresh ADD32 oracle failed".to_owned())?;
+    let (a, b, input_flag) = arithmetic32_inputs(op, inputs)?;
+    let proof = web_prove_arithmetic(op, a, b, input_flag)
+        .ok_or_else(|| {
+            format!("fresh Arithmetic32 op {op} oracle failed")
+        })?;
     Ok(effect32_normalized(
         proof.outcome.value,
         proof.outcome.writeback,
@@ -1779,16 +1842,43 @@ fn scalar_logic32_result(
     ))
 }
 
-fn scalar_add32_result(
+fn scalar_arithmetic32_result(
+    op: u32,
     inputs: &BTreeMap<String, Value>,
 ) -> Result<BTreeMap<String, Value>, String> {
-    let a = word32_input(inputs, "A")?;
-    let b = word32_input(inputs, "B")?;
-    let total = u64::from(a) + u64::from(b);
-    let value = total as u32;
-    let cf = total > u64::from(u32::MAX);
-    let af = (a & 0x0f) + (b & 0x0f) > 0x0f;
-    let of = (!(a ^ b) & (a ^ value) & 0x8000_0000) != 0;
+    let (a, b, input_flag) = arithmetic32_inputs(op, inputs)?;
+    let x = input_flag;
+    let (mode, writeback) = match op {
+        6 | 7 => (0u8, 1u8),
+        8 | 9 => (1u8, 1u8),
+        10 => (1u8, 0u8),
+        _ => return Err(format!("unsupported Arithmetic32 op {op}")),
+    };
+
+    let (value, cf, af, of) = if mode == 0 {
+        let total = u64::from(a) + u64::from(b) + u64::from(x);
+        let signed =
+            i64::from(a as i32) + i64::from(b as i32) + i64::from(x);
+        (
+            total as u32,
+            total > u64::from(u32::MAX),
+            (a & 0x0f) + (b & 0x0f) + x > 0x0f,
+            signed > i64::from(i32::MAX)
+                || signed < i64::from(i32::MIN),
+        )
+    } else {
+        let subtrahend = u64::from(b) + u64::from(x);
+        let signed =
+            i64::from(a as i32) - i64::from(b as i32) - i64::from(x);
+        (
+            a.wrapping_sub(b).wrapping_sub(x),
+            u64::from(a) < subtrahend,
+            (a & 0x0f) < (b & 0x0f) + x,
+            signed > i64::from(i32::MAX)
+                || signed < i64::from(i32::MIN),
+        )
+    };
+
     let value_mask = scalar_status_value_mask(
         cf,
         scalar_even_parity_low_byte(value),
@@ -1798,7 +1888,12 @@ fn scalar_add32_result(
         of,
     );
     Ok(scalar_effect32_fields(
-        value, 1, SCALAR_STATUS_FLAGS, value_mask, 0, 0,
+        value,
+        writeback,
+        SCALAR_STATUS_FLAGS,
+        value_mask,
+        0,
+        0,
     ))
 }
 
@@ -1866,6 +1961,14 @@ mod tests {
         include_str!("../scenarios/test32-lifecycle-v1.json");
     const ADD32_LIFECYCLE: &str =
         include_str!("../scenarios/add32-lifecycle-v1.json");
+    const ADC32_LIFECYCLE: &str =
+        include_str!("../scenarios/adc32-lifecycle-v1.json");
+    const SUB32_LIFECYCLE: &str =
+        include_str!("../scenarios/sub32-lifecycle-v1.json");
+    const SBB32_LIFECYCLE: &str =
+        include_str!("../scenarios/sbb32-lifecycle-v1.json");
+    const CMP32_LIFECYCLE: &str =
+        include_str!("../scenarios/cmp32-lifecycle-v1.json");
     const SHL32_LIFECYCLE: &str =
         include_str!("../scenarios/shl32-lifecycle-v1.json");
     const MUL32_LIFECYCLE: &str =
@@ -2407,6 +2510,45 @@ mod tests {
             report.runs[3].configuration_reused,
             "returning to first XOR32 inputs must reuse canonical Links",
         );
+    }
+
+    #[test]
+    fn canonical_arithmetic32_family_manifests_run_four_times_on_one_session() {
+        for source in [
+            ADC32_LIFECYCLE,
+            SUB32_LIFECYCLE,
+            SBB32_LIFECYCLE,
+            CMP32_LIFECYCLE,
+        ] {
+            let manifest = parse_and_validate_manifest_v1(source).unwrap();
+            let report = run_scenario_manifest_v1(
+                &manifest,
+                ScenarioBackendV1::OptimizedCpu,
+            )
+            .unwrap();
+
+            assert!(report.overall_pass, "{}", manifest.scenario_id);
+            assert_eq!(report.runs.len(), 4, "{}", manifest.scenario_id);
+            assert!(report.runs.iter().all(|run| {
+                run.observed.session_id == report.session_id
+                    && run.observed.active_reaction_count == 609
+                    && run.observed.final_quiescent
+                    && run.oracle_matches == Some(true)
+                    && run.fresh_instance_matches == Some(true)
+                    && run.scalar_oracle_matches
+            }), "{}", manifest.scenario_id);
+            assert_eq!(
+                report.runs[0].result,
+                report.runs[3].result,
+                "{} return-to-first result",
+                manifest.scenario_id,
+            );
+            assert!(
+                report.runs[3].configuration_reused,
+                "{} return-to-first must reuse canonical Links",
+                manifest.scenario_id,
+            );
+        }
     }
 
     #[test]

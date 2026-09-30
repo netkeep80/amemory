@@ -1,0 +1,174 @@
+{
+  "schemaVersion": 1,
+  "scenarioId": "sbb32-lifecycle",
+  "scenarioVersion": "1.0.0",
+  "title": "SBB32: четыре запуска в одной апамяти",
+  "description": "Одна общая арифметическая асеть загружается один раз; SBB32 конфигурируется связями A/B/CF и исполняется повторно в той же сессии.",
+  "programProfile": {
+    "profileId": "a-circuit:arithmetic-sbb32",
+    "family": "arithmetic-effect",
+    "programId": "sbb32",
+    "asetSource": "builtin:a-circuit/arithmetic-effect/sbb32"
+  },
+  "inputSchema": [
+    {
+      "key": "A",
+      "type": "WORD32",
+      "description": "Первый 32-битный операнд",
+      "default": "0x00000000"
+    },
+    {
+      "key": "B",
+      "type": "WORD32",
+      "description": "Второй 32-битный операнд",
+      "default": "0x00000000"
+    },
+    {
+      "key": "CF",
+      "type": "BIT",
+      "description": "Входной флаг переноса/заёма",
+      "default": 1
+    }
+  ],
+  "initialInputs": {
+    "A": "0x00000000",
+    "B": "0x00000000",
+    "CF": 1
+  },
+  "runSequence": [
+    {
+      "runId": "run-1-borrow-in",
+      "inputs": {
+        "A": "0x00000000",
+        "B": "0x00000000",
+        "CF": 1
+      },
+      "executionMode": "TO_QUIESCENCE",
+      "maxReactions": 1024,
+      "assertions": [
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "value",
+          "expected": "0xffffffff"
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "writeback",
+          "expected": 1
+        },
+        {
+          "kind": "QUIESCENT_EQUALS",
+          "expected": true
+        },
+        {
+          "kind": "REACTION_COUNT_EQUALS",
+          "expected": 609
+        }
+      ]
+    },
+    {
+      "runId": "run-2-exact",
+      "inputs": {
+        "A": "0x00000005",
+        "B": "0x00000003",
+        "CF": 1
+      },
+      "executionMode": "TO_QUIESCENCE",
+      "maxReactions": 1024,
+      "assertions": [
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "value",
+          "expected": "0x00000001"
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "writeback",
+          "expected": 1
+        },
+        {
+          "kind": "QUIESCENT_EQUALS",
+          "expected": true
+        },
+        {
+          "kind": "REACTION_COUNT_EQUALS",
+          "expected": 609
+        }
+      ]
+    },
+    {
+      "runId": "run-3-signed-boundary",
+      "inputs": {
+        "A": "0x80000000",
+        "B": "0x00000000",
+        "CF": 1
+      },
+      "executionMode": "TO_QUIESCENCE",
+      "maxReactions": 1024,
+      "assertions": [
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "value",
+          "expected": "0x7fffffff"
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "writeback",
+          "expected": 1
+        },
+        {
+          "kind": "QUIESCENT_EQUALS",
+          "expected": true
+        },
+        {
+          "kind": "REACTION_COUNT_EQUALS",
+          "expected": 609
+        }
+      ]
+    },
+    {
+      "runId": "run-4-return-first",
+      "inputs": {
+        "A": "0x00000000",
+        "B": "0x00000000",
+        "CF": 1
+      },
+      "executionMode": "TO_QUIESCENCE",
+      "maxReactions": 1024,
+      "assertions": [
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "value",
+          "expected": "0xffffffff"
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "writeback",
+          "expected": 1
+        },
+        {
+          "kind": "QUIESCENT_EQUALS",
+          "expected": true
+        },
+        {
+          "kind": "REACTION_COUNT_EQUALS",
+          "expected": 609
+        }
+      ]
+    }
+  ],
+  "supportedBackends": [
+    "optimized-cpu"
+  ],
+  "oraclePolicy": "FRESH_INSTANCE",
+  "invariants": [
+    "prepare-once",
+    "load-once",
+    "same-session",
+    "link-only-reconfiguration",
+    "return-to-first-configuration"
+  ],
+  "observationLevel": "PROFILE",
+  "profilingPolicy": "FULL",
+  "visualizationProfile": "engineering"
+}
