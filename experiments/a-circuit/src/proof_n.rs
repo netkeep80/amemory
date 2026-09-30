@@ -1,4 +1,7 @@
-use super::runtime_session::{CpuMemoryInstance, CpuRuntimeSession, CpuSessionState};
+use super::runtime_session::{
+    CpuMemoryInstance, CpuRunBudgetV1, CpuRunStopReasonV1,
+    CpuRuntimeSession,
+};
 use super::observability::{
     ns_u64, ObservationTimer, ObservedRunV1, RunEventKind, RunEventV1,
     RunObservationLevel, RunProfileV1, RunStage,
@@ -682,57 +685,6 @@ pub(crate) fn loaded_handle(
         .map(|root| root.local_handle)
 }
 
-fn run_engine_to_quiescence(
-    memory: &mut CpuMemoryInstance,
-    engine: &mut OptimizedStructuralEngine,
-    initial: Handle,
-    max_steps: u32,
-) -> Option<WebProofExecuteStage> {
-    engine.set_current(&memory.store, &[initial]).ok()?;
-    let links_before_execute = memory.store.link_count() as u32;
-
-    let mut reactions = Vec::new();
-    for step in 0..max_steps {
-        let scope_before = export_scope(&memory.store, engine.current());
-        let reaction = engine.run(&mut memory.store).ok()?;
-        let scope_after = export_scope(&memory.store, engine.current());
-        let quiescent = reaction.quiescent;
-        reactions.push(WebProofReactionStep {
-            memory_instance_id: memory.id.clone(),
-            step,
-            scope_before,
-            raw_rule_matches: reaction.raw_rule_matches,
-            transitioned_members: reaction.transitioned_members,
-            handoff_count: reaction.handoff_count,
-            scope_after,
-            links_after: memory.store.link_count() as u32,
-            quiescent,
-        });
-        if quiescent {
-            break;
-        }
-    }
-
-    if !reactions
-        .last()
-        .map(|step| step.quiescent)
-        .unwrap_or(false)
-    {
-        return None;
-    }
-
-    let active_reaction_count =
-        reactions.iter().filter(|step| !step.quiescent).count() as u32;
-
-    Some(WebProofExecuteStage {
-        memory_instance_id: memory.id.clone(),
-        links_before_execute,
-        reactions,
-        active_reaction_count,
-        final_quiescent: true,
-    })
-}
-
 pub(crate) fn load_runtime_session(
     prepare: &WebProofPrepareStage,
     cap: usize,
@@ -754,47 +706,48 @@ pub(crate) fn execute_session_to_quiescence(
     initial: Handle,
     max_steps: u32,
 ) -> Option<WebProofExecuteStage> {
-    let memory_instance_id = session.memory.id.clone();
-    session.begin_run(initial).ok()?;
-    let links_before_execute = session.memory.store.link_count() as u32;
-
-    let mut reactions = Vec::new();
-    for _ in 0..max_steps {
-        let step = session.step(RunObservationLevel::Off).ok()?;
-        let evidence = step.evidence;
-        let quiescent = evidence.quiescent;
-        reactions.push(WebProofReactionStep {
-            memory_instance_id: memory_instance_id.clone(),
-            step: evidence.reaction_index,
-            scope_before: export_scope(
-                &session.memory.store,
-                &evidence.scope_before,
-            ),
-            raw_rule_matches: evidence.raw_rule_matches,
-            transitioned_members: evidence.transitioned_members,
-            handoff_count: evidence.handoff_count,
-            scope_after: export_scope(
-                &session.memory.store,
-                &evidence.scope_after,
-            ),
-            links_after: evidence.links_after,
-            quiescent,
-        });
-        if quiescent {
-            break;
-        }
-    }
-
-    if session.execution_state() != CpuSessionState::Quiescent {
-        session.fail_active_run();
+    let run = session
+        .run_to_quiescence(
+            initial,
+            CpuRunBudgetV1::scenario_default(max_steps),
+            RunObservationLevel::Off,
+        )
+        .ok()?;
+    if run.stop_reason != CpuRunStopReasonV1::Quiescent {
         return None;
     }
+
+    let memory_instance_id = session.memory.id.clone();
+    let reactions = run
+        .steps
+        .into_iter()
+        .map(|step| {
+            let evidence = step.evidence;
+            WebProofReactionStep {
+                memory_instance_id: memory_instance_id.clone(),
+                step: evidence.reaction_index,
+                scope_before: export_scope(
+                    &session.memory.store,
+                    &evidence.scope_before,
+                ),
+                raw_rule_matches: evidence.raw_rule_matches,
+                transitioned_members: evidence.transitioned_members,
+                handoff_count: evidence.handoff_count,
+                scope_after: export_scope(
+                    &session.memory.store,
+                    &evidence.scope_after,
+                ),
+                links_after: evidence.links_after,
+                quiescent: evidence.quiescent,
+            }
+        })
+        .collect::<Vec<_>>();
 
     let active_reaction_count =
         reactions.iter().filter(|step| !step.quiescent).count() as u32;
     Some(WebProofExecuteStage {
         memory_instance_id,
-        links_before_execute,
+        links_before_execute: run.links_before_run,
         reactions,
         active_reaction_count,
         final_quiescent: true,
@@ -804,15 +757,30 @@ pub(crate) fn execute_session_to_quiescence(
 pub(crate) fn execute_session_observed_to_quiescence(
     session: &mut CpuRuntimeSession,
     initial: Handle,
-    max_steps: u32,
+    max_reactions: u32,
     observation_level: RunObservationLevel,
-) -> Option<ObservedRunV1> {
+) -> Result<ObservedRunV1, CpuRunStopReasonV1> {
     let session_id = session.memory.id.clone();
-    let links_before_run = session.memory.store.link_count() as u32;
-    let run_id = session.begin_run(initial).ok()?;
-    let scope_before_width = session.engine.current().len() as u32;
-
     let run_started = ObservationTimer::start();
+    let run = session
+        .run_to_quiescence(
+            initial,
+            CpuRunBudgetV1::scenario_default(max_reactions),
+            observation_level,
+        )?;
+    if run.stop_reason != CpuRunStopReasonV1::Quiescent {
+        return Err(run.stop_reason);
+    }
+
+    let run_id = run.run_id;
+    let links_before_run = run.links_before_run;
+    let scope_before = run
+        .steps
+        .first()
+        .map(|step| step.evidence.scope_before.clone())
+        .unwrap_or_default();
+    let scope_before_width = scope_before.len() as u32;
+
     let mut sequence = 0u32;
     let mut events = Vec::new();
     let mut trace_projection_ns = 0u128;
@@ -831,7 +799,7 @@ pub(crate) fn execute_session_observed_to_quiescence(
             stage: RunStage::Execute,
             kind: RunEventKind::ExecuteBegin,
             reaction_index: None,
-            scope_before: Some(session.engine.current().to_vec()),
+            scope_before: Some(scope_before),
             scope_after: None,
             links_after: links_before_run,
             raw_rule_matches: None,
@@ -845,8 +813,7 @@ pub(crate) fn execute_session_observed_to_quiescence(
             .saturating_add(projection_started.elapsed_ns());
     }
 
-    for _ in 0..max_steps {
-        let step = session.step(observation_level).ok()?;
+    for step in run.steps {
         structural_profile.accumulate(&step.structural_profile);
         trace_projection_ns = trace_projection_ns
             .saturating_add(step.trace_projection_ns);
@@ -912,15 +879,6 @@ pub(crate) fn execute_session_observed_to_quiescence(
             trace_projection_ns = trace_projection_ns
                 .saturating_add(projection_started.elapsed_ns());
         }
-
-        if quiescent {
-            break;
-        }
-    }
-
-    if session.execution_state() != CpuSessionState::Quiescent {
-        session.fail_active_run();
-        return None;
     }
 
     let final_scope = session.engine.current().to_vec();
@@ -969,7 +927,7 @@ pub(crate) fn execute_session_observed_to_quiescence(
         structural: StructuralProfileV1::from(&structural_profile),
     });
 
-    Some(ObservedRunV1 {
+    Ok(ObservedRunV1 {
         schema_version: RUN_OBSERVABILITY_SCHEMA_VERSION,
         timing_available: OBSERVABILITY_TIMING_AVAILABLE,
         session_id,
@@ -989,13 +947,31 @@ pub(crate) fn execute_to_quiescence(
     interpreter: Handle,
     initial: Handle,
     cap: usize,
-    max_steps: u32,
+    max_reactions: u32,
 ) -> Option<(OptimizedStructuralEngine, WebProofExecuteStage)> {
+    let placeholder = CpuMemoryInstance {
+        id: String::new(),
+        store: OptimizedLinkStore::new(),
+    };
+    let owned_memory = std::mem::replace(memory, placeholder);
     let mut engine = OptimizedStructuralEngine::new(cap);
-    engine.set_interpreter(&memory.store, interpreter).ok()?;
+    if engine
+        .set_interpreter(&owned_memory.store, interpreter)
+        .is_err()
+    {
+        *memory = owned_memory;
+        return None;
+    }
+
+    let base_link_count = owned_memory.store.link_count();
+    let mut session =
+        CpuRuntimeSession::new(owned_memory, engine, base_link_count);
     let execute =
-        run_engine_to_quiescence(memory, &mut engine, initial, max_steps)?;
-    Some((engine, execute))
+        execute_session_to_quiescence(&mut session, initial, max_reactions);
+
+    let returned_engine = session.engine;
+    *memory = session.memory;
+    execute.map(|execute| (returned_engine, execute))
 }
 
 pub(crate) fn identical_rerun(
@@ -1003,29 +979,54 @@ pub(crate) fn identical_rerun(
     engine: &mut OptimizedStructuralEngine,
     initial: Handle,
     expected_result_anum: &str,
-    max_steps: u32,
+    max_reactions: u32,
 ) -> Option<u32> {
-    let links_before_rerun = memory.store.link_count();
-    engine.set_current(&memory.store, &[initial]).ok()?;
+    let placeholder_memory = CpuMemoryInstance {
+        id: String::new(),
+        store: OptimizedLinkStore::new(),
+    };
+    let owned_memory = std::mem::replace(memory, placeholder_memory);
+    let placeholder_engine = OptimizedStructuralEngine::new(1);
+    let owned_engine = std::mem::replace(engine, placeholder_engine);
+    let links_before_rerun = owned_memory.store.link_count();
+    let base_link_count = links_before_rerun;
 
-    for _ in 0..max_steps {
-        let repeat = engine.run(&mut memory.store).ok()?;
-        if repeat.quiescent {
-            break;
+    let mut session = CpuRuntimeSession::new(
+        owned_memory,
+        owned_engine,
+        base_link_count,
+    );
+    let bounded = session.run_to_quiescence(
+        initial,
+        CpuRunBudgetV1::scenario_default(max_reactions),
+        RunObservationLevel::Off,
+    );
+
+    let result = match bounded {
+        Ok(run)
+            if run.stop_reason == CpuRunStopReasonV1::Quiescent
+                && session.engine.current().len() == 1 =>
+        {
+            let repeat_result = session
+                .memory
+                .store
+                .export_anum(session.engine.current()[0])
+                .ok();
+            match repeat_result {
+                Some(value) if value == expected_result_anum => Some(
+                    (session.memory.store.link_count()
+                        - links_before_rerun) as u32,
+                ),
+                _ => None,
+            }
         }
-    }
+        _ => None,
+    };
 
-    if !engine.quiescent() || engine.current().len() != 1 {
-        return None;
-    }
-
-    let repeat_result =
-        memory.store.export_anum(engine.current()[0]).ok()?;
-    if repeat_result != expected_result_anum {
-        return None;
-    }
-
-    Some((memory.store.link_count() - links_before_rerun) as u32)
+    let returned_engine = session.engine;
+    *memory = session.memory;
+    *engine = returned_engine;
+    result
 }
 
 pub(crate) fn visual_snapshot(
