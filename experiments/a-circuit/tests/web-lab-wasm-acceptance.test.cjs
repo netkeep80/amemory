@@ -301,8 +301,8 @@ Promise.all([
     "utf8"
   );
   const presetRegistry = refreshScenarioPresetRegistry(w);
-  if (presetRegistry.entries.length !== 5) {
-    throw new Error("R3d4 preset registry count mismatch");
+  if (presetRegistry.entries.length !== 6) {
+    throw new Error("R3d5 preset registry count mismatch");
   }
   const presetSummary = presetRegistry.entries.find(
     (entry) => entry.scenarioId === "mux1-lifecycle"
@@ -373,6 +373,21 @@ Promise.all([
       !Array.isArray(mulPresetSummary.inputSchema) ||
       mulPresetSummary.inputSchema.length !== 2) {
     throw new Error("R3d4 manifest-derived MUL32 preset summary mismatch");
+  }
+
+  const m6PresetSummary = presetRegistry.entries.find(
+    (entry) => entry.scenarioId === "radix-memory8-lifecycle"
+  );
+  if (!m6PresetSummary ||
+      m6PresetSummary.scenarioVersion !== "1.0.0" ||
+      m6PresetSummary.programProfileId !== "a-circuit:memory-radix8" ||
+      m6PresetSummary.family !== "memory" ||
+      m6PresetSummary.programId !== "radix-page8" ||
+      m6PresetSummary.runCount !== 4 ||
+      m6PresetSummary.observationLevel !== "TRACE" ||
+      !Array.isArray(m6PresetSummary.inputSchema) ||
+      m6PresetSummary.inputSchema.length !== 2) {
+    throw new Error("R3d5 manifest-derived M6A preset summary mismatch");
   }
 
 
@@ -2471,6 +2486,7 @@ Promise.all([
         carrierRoundTrip: proof.load.carrierRoundTrip,
       },
       execute: {
+        linksBeforeExecute: proof.execute.linksBeforeExecute,
         activeReactionCount: proof.execute.activeReactionCount,
         finalQuiescent: proof.execute.finalQuiescent,
         reactions: compactReactions,
@@ -3306,8 +3322,10 @@ Promise.all([
   }
   const memoryPayloadM6aFinal =
     readCurrentWitnessPayload("M6a rerun", "memory-radix");
+  const memoryCompactProof =
+    readCurrentCompactProof("M6A_RADIX_PAGE");
   const memoryProof =
-    inflateCompactProof(readCurrentCompactProof("M6A_RADIX_PAGE"));
+    inflateCompactProof(memoryCompactProof);
   if (memoryProof.block !== "M6A_RADIX_PAGE" ||
       memoryProof.schemaVersion !== 4 ||
       !memoryProof.result.oracleMatches ||
@@ -3345,19 +3363,38 @@ Promise.all([
     "function.memory.write",
     "memory.zero_root",
     "memory.result_tag",
-    "data.offset8",
-    "data.byte8",
+    "result.tag",
     "data.bit.zero",
     "data.bit.one",
     "execution.interpreter",
     "execution.theory",
     "execution.apply",
-    "scope.initial",
     "context.result",
+    "context.caller",
   ]) {
     if (!memoryRoles.has(role)) {
       throw new Error("M6a prepared Aset missing semantic root " + role);
     }
+  }
+  for (const forbiddenRuntimeRole of [
+    "data.offset8",
+    "data.byte8",
+    "scope.initial",
+  ]) {
+    if (memoryRoles.has(forbiddenRuntimeRole)) {
+      throw new Error(
+        "M6a PREPARE leaked runtime CONFIGURE root " +
+        forbiddenRuntimeRole
+      );
+    }
+  }
+  if ((memoryProof.execute.linksBeforeExecute >>> 0) <=
+        (memoryProof.load.linksAfterLoad >>> 0) ||
+      (memoryProof.execute.reactions[0]?.scopeBefore?.[0] ?? 0) >
+        (memoryProof.execute.linksBeforeExecute >>> 0)) {
+    throw new Error(
+      "M6a CONFIGURE/EXECUTE persistent-Link boundary mismatch"
+    );
   }
   const oldRootRef = memoryPayloadM6aFinal.oldRoot >>> 0;
   const newRootRef = memoryPayloadM6aFinal.newRoot >>> 0;
@@ -3381,6 +3418,146 @@ Promise.all([
       (memoryPayloadM6aFinal.linksFinal >>> 0) !==
         memoryProof.result.linksFinal) {
     throw new Error("M6a WASM/proof Link-count mismatch");
+  }
+
+  // #246 R2: M6A is a normal Scenario Runner preset. Workbench therefore
+  // receives its long trace from the exact same Session.step(TRACE) transport
+  // used by every other scenario; there is no M6-specific UI executor.
+  const canonicalM6Source = fs.readFileSync(
+    "experiments/a-circuit/scenarios/radix-memory8-lifecycle-v1.json",
+    "utf8"
+  );
+  const m6Preset = loadScenarioPresetManifest(
+    w,
+    presetRegistry,
+    "radix-memory8-lifecycle",
+    "1.0.0"
+  );
+  if (m6Preset === null || m6Preset.source !== canonicalM6Source) {
+    throw new Error("#246 M6A canonical preset round-trip mismatch");
+  }
+  const m6Scenario = JSON.parse(m6Preset.source);
+  const m6StepOpen = openScenarioLiveSession(w, m6Scenario);
+  if (!m6StepOpen.ok || m6StepOpen.status?.completedRuns !== 0) {
+    throw new Error("#246 M6A live Scenario Session failed to open");
+  }
+  const m6StepIdentity = {
+    sessionId: m6StepOpen.status.sessionId,
+    storeInstanceId: m6StepOpen.status.storeInstanceId,
+    engineInstanceId: m6StepOpen.status.engineInstanceId,
+    baseLinkCount: m6StepOpen.status.baseLinkCount,
+  };
+  const m6StepRun = {
+    ...m6Scenario.runSequence[0],
+    runId: "live-step-m6a",
+    executionMode: "STEP",
+    maxReactions: 128,
+  };
+  const m6StepBegin = beginScenarioLiveStepRun(w, m6StepRun);
+  if (!m6StepBegin.ok ||
+      m6StepBegin.payload?.begin?.sessionRunId !== 1 ||
+      m6StepBegin.payload?.status?.sessionId !== m6StepIdentity.sessionId ||
+      m6StepBegin.payload?.status?.storeInstanceId !==
+        m6StepIdentity.storeInstanceId ||
+      m6StepBegin.payload?.status?.engineInstanceId !==
+        m6StepIdentity.engineInstanceId) {
+    throw new Error("#246 M6A live step begin changed Session identity");
+  }
+
+  const m6StepReports = [];
+  for (let guard = 0; guard < 128; guard += 1) {
+    const stepped = stepScenarioLiveSession(w);
+    if (!stepped.ok) {
+      throw new Error(
+        "#246 M6A Session.step failed at " + guard + ": " +
+        JSON.stringify(stepped.error)
+      );
+    }
+    const report = stepped.payload?.step;
+    const status = stepped.payload?.status;
+    if (status?.sessionId !== m6StepIdentity.sessionId ||
+        status?.storeInstanceId !== m6StepIdentity.storeInstanceId ||
+        status?.engineInstanceId !== m6StepIdentity.engineInstanceId ||
+        status?.baseLinkCount !== m6StepIdentity.baseLinkCount ||
+        report?.sessionRunId !== 1 ||
+        report?.manifestRunId !== "live-step-m6a" ||
+        report?.evidence?.sessionId !== m6StepIdentity.sessionId ||
+        report?.evidence?.runId !== 1 ||
+        report?.evidence?.reactionIndex !== guard) {
+      throw new Error(
+        "#246 M6A live step identity/correlation mismatch at " + guard
+      );
+    }
+    m6StepReports.push(report);
+    if (report.completed) break;
+  }
+
+  const m6LiveVerification = verifyLiveStepTrace(m6StepReports);
+  const m6CrossVerification = verifyLiveTraceAgainstCompactProof(
+    m6StepReports,
+    memoryCompactProof
+  );
+  const m6SemanticVerification =
+    verifyCompactExecutionProof(memoryCompactProof);
+  const m6FinalStep = m6StepReports.at(-1);
+  const m6FinalValue =
+    Number(m6FinalStep?.result?.fields?.after) >>> 0;
+  if (m6LiveVerification.traceConsistent !== true ||
+      m6LiveVerification.completed !== true ||
+      m6LiveVerification.activeReactionCount <= 40 ||
+      m6CrossVerification.compactCrossConsistent !== true ||
+      m6SemanticVerification.semanticReplayVerified !== true ||
+      m6FinalStep?.completed !== true ||
+      m6FinalStep?.evidence?.quiescent !== true ||
+      m6FinalStep?.freshInstanceMatches !== true ||
+      m6FinalStep?.scalarOracleMatches !== true ||
+      m6FinalValue !==
+        (memoryCompactProof.result.decodedValue >>> 0) ||
+      m6FinalValue !== 0xab) {
+    throw new Error(
+      "#246 M6A live trace / compact proof result mismatch"
+    );
+  }
+
+  const m6PlayerState = {
+    active: false,
+    begin: m6StepBegin.payload.begin,
+    reports: m6StepReports,
+    player: {
+      mode: "reaction",
+      cursor: m6StepReports.length - 1,
+      playing: false,
+      speedMs: 800,
+      overlays: {
+        persistent: true,
+        context: true,
+        result: true,
+      },
+    },
+  };
+  const m6ReactionFrames =
+    workbenchTraceFrames(m6PlayerState, "reaction");
+  const m6ContextFrames =
+    workbenchTraceFrames(m6PlayerState, "context");
+  const m6PlayerFinal =
+    workbenchPlayerSnapshot(m6PlayerState).frame;
+  if (m6ReactionFrames.length !== m6StepReports.length ||
+      m6ContextFrames.length <= m6ReactionFrames.length ||
+      !m6ContextFrames.some(
+        (frame) => frame.kind === "CONTEXT_CREATED"
+      ) ||
+      !m6ContextFrames.some(
+        (frame) => frame.kind === "CONTEXT_COLLAPSED"
+      ) ||
+      m6PlayerFinal?.completed !== true ||
+      (Number(m6PlayerFinal?.result?.fields?.after) >>> 0) !==
+        (memoryCompactProof.result.decodedValue >>> 0)) {
+    throw new Error(
+      "#246 M6A Workbench player projection/final result mismatch"
+    );
+  }
+  if (!closeScenarioLiveSession(w)) {
+    throw new Error("#246 M6A stepped Session close failed");
   }
 
   // M6b: full Address32 is structurally split into Page24 + Offset8.

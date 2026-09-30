@@ -343,14 +343,24 @@ function decodeBit(store, handle, roots) {
   fail("result contains non-bit L" + handle);
 }
 
-function decodeWord32(store, handle, roots) {
+function decodeWord(store, handle, roots, width) {
   const bits = store.sequence(handle);
-  if (bits.length !== 32) fail("result word width is " + bits.length);
+  if (bits.length !== width) {
+    fail("result word width is " + bits.length + ", expected " + width);
+  }
   let value = 0;
   for (let index = 0; index < bits.length; index += 1) {
     value += decodeBit(store, bits[index], roots) * (2 ** index);
   }
   return value;
+}
+
+function decodeWord32(store, handle, roots) {
+  return decodeWord(store, handle, roots, 32);
+}
+
+function decodeWord8(store, handle, roots) {
+  return decodeWord(store, handle, roots, 8);
 }
 
 function verifyResultStructure(compact, actualStore, roots, finalScope) {
@@ -387,7 +397,13 @@ function verifyResultStructure(compact, actualStore, roots, finalScope) {
   let decodedValue;
   let decodedValueHi = null;
 
-  if (roots.has("function.mul32")) {
+  if (roots.has("function.memory.witness")) {
+    if (fields.length !== 5) {
+      fail("M6 radix Result payload does not have five fields");
+    }
+    decodedValue = decodeWord8(actualStore, fields[3], roots);
+    decodedValueHi = decodeWord8(actualStore, fields[4], roots);
+  } else if (roots.has("function.mul32")) {
     if (fields.length < 1) fail("MUL32 Result payload is empty");
     const wide = actualStore.sequence(fields[0]);
     if (wide.length !== 2) fail("MUL32 Wide64 payload is not lo/hi");
@@ -434,9 +450,13 @@ export function verifyCompactTraceConsistency(compact) {
   const reactions = compact.execute.reactions;
   if (reactions.length === 0) fail("execution trace is empty");
 
-  const initial = requireRoot(roots, "scope.initial");
-  if (!sameArray(reactions[0].scopeBefore, [initial])) {
-    fail("first scopeBefore does not equal scope.initial");
+  const preparedInitial = roots.get("scope.initial");
+  if (Number.isInteger(preparedInitial)) {
+    if (!sameArray(reactions[0].scopeBefore, [preparedInitial])) {
+      fail("first scopeBefore does not equal prepared scope.initial");
+    }
+  } else if (reactions[0].scopeBefore.length === 0) {
+    fail("configured first scopeBefore is empty");
   }
 
   for (let index = 0; index < reactions.length; index += 1) {
@@ -492,14 +512,22 @@ export function verifyCompactSemanticReplay(compact) {
   const consistency = verifyCompactTraceConsistency(compact);
   const roots = rootDirectory(compact);
 
+  const allStarts = compact.topology.base.starts.concat(
+    compact.topology.append.starts,
+  );
+  const allEnds = compact.topology.base.ends.concat(
+    compact.topology.append.ends,
+  );
+  const linksBeforeExecute =
+    compact.execute.linksBeforeExecute ?? compact.load.linksAfterLoad;
   const replayStore = new StructuralStore(
-    compact.topology.base.starts,
-    compact.topology.base.ends,
-    "replay base Store",
+    allStarts.slice(0, linksBeforeExecute),
+    allEnds.slice(0, linksBeforeExecute),
+    "replay configured Store",
   );
   const actualStore = new StructuralStore(
-    compact.topology.base.starts.concat(compact.topology.append.starts),
-    compact.topology.base.ends.concat(compact.topology.append.ends),
+    allStarts,
+    allEnds,
     "evidence Store",
   );
 
@@ -514,7 +542,10 @@ export function verifyCompactSemanticReplay(compact) {
     fail("theoryAdmissions does not equal admissions derived from topology");
   }
 
-  let current = [requireRoot(roots, "scope.initial")];
+  const preparedInitial = roots.get("scope.initial");
+  let current = Number.isInteger(preparedInitial)
+    ? [preparedInitial]
+    : [...compact.execute.reactions[0].scopeBefore];
   let totalMatches = 0;
 
   for (let index = 0; index < compact.execute.reactions.length; index += 1) {

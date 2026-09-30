@@ -97,6 +97,10 @@ pub(crate) struct WebProofVisualLink {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct WebProofExecuteStage {
     pub(crate) memory_instance_id: String,
+    /// Persistent Link count after CONFIGURE and immediately before reaction 0.
+    /// This can exceed LOAD for scenarios whose concrete inputs/initial Scope
+    /// are materialized into the already loaded A-memory at runtime.
+    pub(crate) links_before_execute: u32,
     pub(crate) reactions: Vec<WebProofReactionStep>,
     pub(crate) active_reaction_count: u32,
     pub(crate) final_quiescent: bool,
@@ -197,6 +201,7 @@ pub(crate) struct WebCompactReactionStep {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct WebCompactExecute {
+    pub(crate) links_before_execute: u32,
     pub(crate) active_reaction_count: u32,
     pub(crate) final_quiescent: bool,
     pub(crate) reactions: Vec<WebCompactReactionStep>,
@@ -382,6 +387,12 @@ impl WebStructuralProof {
             .map(|value| parse_local_ref(value, base_len))
             .collect::<Option<Vec<_>>>()?;
 
+        if self.execute.links_before_execute < self.load.links_after_load
+            || self.execute.links_before_execute > self.result.links_final
+        {
+            return None;
+        }
+
         let expected_active_reactions = self
             .execute
             .reactions
@@ -400,7 +411,7 @@ impl WebStructuralProof {
             return None;
         }
 
-        let mut previous_links_after = self.load.links_after_load;
+        let mut previous_links_after = self.execute.links_before_execute;
         let reactions = self
             .execute
             .reactions
@@ -473,6 +484,7 @@ impl WebStructuralProof {
                 carrier_round_trip: self.load.carrier_round_trip,
             },
             execute: WebCompactExecute {
+                links_before_execute: self.execute.links_before_execute,
                 active_reaction_count: self.execute.active_reaction_count,
                 final_quiescent: self.execute.final_quiescent,
                 reactions,
@@ -918,6 +930,7 @@ fn run_engine_to_quiescence(
     max_steps: u32,
 ) -> Option<WebProofExecuteStage> {
     engine.set_current(&memory.store, &[initial]).ok()?;
+    let links_before_execute = memory.store.link_count() as u32;
 
     let mut reactions = Vec::new();
     for step in 0..max_steps {
@@ -954,6 +967,7 @@ fn run_engine_to_quiescence(
 
     Some(WebProofExecuteStage {
         memory_instance_id: memory.id.clone(),
+        links_before_execute,
         reactions,
         active_reaction_count,
         final_quiescent: true,
@@ -991,6 +1005,7 @@ pub(crate) fn execute_session_to_quiescence(
 ) -> Option<WebProofExecuteStage> {
     let memory_instance_id = session.memory.id.clone();
     session.begin_run(initial).ok()?;
+    let links_before_execute = session.memory.store.link_count() as u32;
 
     let mut reactions = Vec::new();
     for _ in 0..max_steps {
@@ -1028,6 +1043,7 @@ pub(crate) fn execute_session_to_quiescence(
         reactions.iter().filter(|step| !step.quiescent).count() as u32;
     Some(WebProofExecuteStage {
         memory_instance_id,
+        links_before_execute,
         reactions,
         active_reaction_count,
         final_quiescent: true,
@@ -1332,6 +1348,7 @@ mod tests {
             },
             execute: WebProofExecuteStage {
                 memory_instance_id: memory_id.clone(),
+                links_before_execute: 1,
                 reactions: vec![WebProofReactionStep {
                     memory_instance_id: memory_id.clone(),
                     step: 0,

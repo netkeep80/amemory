@@ -1824,7 +1824,7 @@ mod tests {
         );
         let registry: ScenarioPresetRegistryV1 =
             serde_json::from_str(&registry_json).unwrap();
-        assert_eq!(registry.entries.len(), 5);
+        assert_eq!(registry.entries.len(), 6);
         assert_eq!(registry.entries[0].scenario_id, "mux1-lifecycle");
         assert_eq!(registry.entries[1].scenario_id, "xor32-lifecycle");
         assert_eq!(
@@ -1845,6 +1845,14 @@ mod tests {
         assert_eq!(
             registry.entries[4].program_profile_id,
             "a-circuit:mul32"
+        );
+        assert_eq!(
+            registry.entries[5].scenario_id,
+            "radix-memory8-lifecycle"
+        );
+        assert_eq!(
+            registry.entries[5].program_profile_id,
+            "a-circuit:memory-radix8"
         );
 
         assert_eq!(amemory_scenario_preset_manifest_load(0), 1);

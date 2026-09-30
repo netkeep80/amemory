@@ -3,9 +3,10 @@ use super::{
         call, define_bundle_rule, index_rule_for, Fixture as FullFixture,
     },
     proof_n::{
-        execute_to_quiescence, identical_rerun, load_runtime, loaded_handle,
-        prepare_stage, semantic_source, theory_admissions, visual_snapshot,
-        WebProofResultStage, WebStructuralProof,
+        execute_session_to_quiescence, identical_rerun, load_runtime_session,
+        loaded_handle, prepare_stage, semantic_source, theory_admissions,
+        visual_snapshot, ProofRuntimeSession, WebProofLoadStage,
+        WebProofPrepareStage, WebProofResultStage, WebStructuralProof,
     },
 };
 use amemory_optimized_cpu_probe::{
@@ -1297,31 +1298,31 @@ pub(crate) struct WebRadixMemoryOutcome {
     pub(crate) quiescent: u8,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RadixMemorySessionProjection {
+    pub(crate) before_value: u32,
+    pub(crate) after_value: u32,
+    pub(crate) old_after_value: u32,
+    pub(crate) old_root_ref: u32,
+    pub(crate) new_root_ref: u32,
+    pub(crate) result_recursive_wire: String,
+    pub(crate) result_sequence_anum: String,
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct WebRadixMemoryExecution {
     pub(crate) outcome: WebRadixMemoryOutcome,
     pub(crate) proof: WebStructuralProof,
 }
 
-pub(crate) fn web_prove_radix_memory(
-    offset_value: u8,
-    byte_value: u8,
-) -> Option<WebRadixMemoryExecution> {
+pub(crate) fn prepare_radix_memory_session_program(
+) -> Option<WebProofPrepareStage> {
     let mut compiler = FullFixture::new();
     let program = RadixMemoryProgram::install(&mut compiler);
-    let offset = word8(&mut compiler, offset_value);
-    let byte = word8(&mut compiler, byte_value);
 
-    let args = materialize_exact_sequence(
-        &mut compiler.store,
-        &[program.zero_root, offset, byte],
-    )
-    .ok()?;
-    let invocation =
-        call(&mut compiler.store, compiler.apply, program.witness, args);
-    let initial =
-        compiler.store.ensure_pair(compiler.k, invocation).ok()?;
-
+    // PREPARE contains only the static program/Theory. Concrete OFFSET/VALUE
+    // and the initial invocation are published later by CONFIGURE into the
+    // already loaded persistent A-memory.
     let prepared_roots = vec![
         semantic_source(
             &compiler.store,
@@ -1348,15 +1349,11 @@ pub(crate) fn web_prove_radix_memory(
             "memory.result_tag",
             program.result_tag,
         ),
+        // Standard verifier aliases point at the same persistent handles.
         semantic_source(
             &compiler.store,
-            "data.offset8",
-            offset,
-        ),
-        semantic_source(
-            &compiler.store,
-            "data.byte8",
-            byte,
+            "result.tag",
+            program.result_tag,
         ),
         semantic_source(
             &compiler.store,
@@ -1385,94 +1382,181 @@ pub(crate) fn web_prove_radix_memory(
         ),
         semantic_source(
             &compiler.store,
-            "scope.initial",
-            initial,
+            "context.result",
+            compiler.k,
         ),
         semantic_source(
             &compiler.store,
-            "context.result",
+            "context.caller",
             compiler.k,
         ),
     ];
     let admissions =
         theory_admissions(&compiler.store, compiler.theory)?;
-    let prepare =
-        prepare_stage(&compiler.store, prepared_roots, admissions);
-    let (mut memory, load) = load_runtime(&prepare)?;
+    Some(prepare_stage(
+        &compiler.store,
+        prepared_roots,
+        admissions,
+    ))
+}
 
-    let interpreter =
-        loaded_handle(&load, "execution.interpreter")?;
-    let initial = loaded_handle(&load, "scope.initial")?;
-    let expected_old_root =
-        loaded_handle(&load, "memory.zero_root")?;
-    let result_tag =
-        loaded_handle(&load, "memory.result_tag")?;
-    let zero = loaded_handle(&load, "data.bit.zero")?;
-    let one = loaded_handle(&load, "data.bit.one")?;
-    let result_context =
-        loaded_handle(&load, "context.result")?;
+fn materialize_runtime_word8(
+    store: &mut OptimizedLinkStore,
+    zero: Handle,
+    one: Handle,
+    value: u8,
+) -> Option<Handle> {
+    let bits = (0..WIDTH)
+        .map(|bit| {
+            if (value >> bit) & 1 == 1 { one } else { zero }
+        })
+        .collect::<Vec<_>>();
+    materialize_exact_sequence(store, &bits).ok()
+}
 
-    let (mut engine, execute) = execute_to_quiescence(
-        &mut memory,
-        interpreter,
-        initial,
-        128,
-        96,
+pub(crate) fn configure_radix_memory_session(
+    session: &mut ProofRuntimeSession,
+    load: &WebProofLoadStage,
+    offset_value: u8,
+    byte_value: u8,
+) -> Option<(Handle, usize, usize)> {
+    let witness = loaded_handle(load, "function.memory.witness")?;
+    let zero_root = loaded_handle(load, "memory.zero_root")?;
+    let zero = loaded_handle(load, "data.bit.zero")?;
+    let one = loaded_handle(load, "data.bit.one")?;
+    let apply = loaded_handle(load, "execution.apply")?;
+    let caller = loaded_handle(load, "context.caller")?;
+
+    let before = session.memory.store.link_count();
+    let offset = materialize_runtime_word8(
+        &mut session.memory.store,
+        zero,
+        one,
+        offset_value,
     )?;
-    if engine.current().len() != 1 {
+    let byte = materialize_runtime_word8(
+        &mut session.memory.store,
+        zero,
+        one,
+        byte_value,
+    )?;
+    let args = materialize_exact_sequence(
+        &mut session.memory.store,
+        &[zero_root, offset, byte],
+    )
+    .ok()?;
+    let invocation =
+        call(&mut session.memory.store, apply, witness, args);
+    let initial = session
+        .memory
+        .store
+        .ensure_pair(caller, invocation)
+        .ok()?;
+    let after = session.memory.store.link_count();
+
+    Some((initial, before, after))
+}
+
+pub(crate) fn project_radix_memory_session_result(
+    session: &ProofRuntimeSession,
+    load: &WebProofLoadStage,
+) -> Option<RadixMemorySessionProjection> {
+    if session.engine.current().len() != 1 {
         return None;
     }
 
-    let final_link = engine.current()[0];
-    let (caller, envelope) = memory.store.poles(final_link).ok()?;
-    if caller != result_context {
+    let expected_old_root =
+        loaded_handle(load, "memory.zero_root")?;
+    let result_tag = loaded_handle(load, "result.tag")?;
+    let zero = loaded_handle(load, "data.bit.zero")?;
+    let one = loaded_handle(load, "data.bit.one")?;
+    let caller = loaded_handle(load, "context.caller")?;
+
+    let final_link = session.engine.current()[0];
+    let (actual_caller, envelope) =
+        session.memory.store.poles(final_link).ok()?;
+    if actual_caller != caller {
         return None;
     }
     let (tag, result_sequence) =
-        memory.store.poles(envelope).ok()?;
+        session.memory.store.poles(envelope).ok()?;
     if tag != result_tag {
         return None;
     }
     let values =
-        read_exact_sequence(&memory.store, result_sequence).ok()?;
+        read_exact_sequence(&session.memory.store, result_sequence).ok()?;
     if values.len() != 5 {
         return None;
     }
 
     let old_root = values[0];
     let new_root = values[1];
-    let before_byte = values[2];
-    let after_byte = values[3];
-    let old_after_byte = values[4];
     if old_root != expected_old_root
-        || !memory.store.is_valid(old_root)
-        || !memory.store.is_valid(new_root)
+        || !session.memory.store.is_valid(old_root)
+        || !session.memory.store.is_valid(new_root)
     {
         return None;
     }
 
-    let before_value =
-        decode_word8_store(&memory.store, zero, one, before_byte)?;
-    let after_value =
-        decode_word8_store(&memory.store, zero, one, after_byte)?;
-    let old_after_value =
-        decode_word8_store(&memory.store, zero, one, old_after_byte)?;
-    let oracle_matches = before_value == 0
-        && after_value == byte_value
-        && old_after_value == 0;
+    Some(RadixMemorySessionProjection {
+        before_value: u32::from(decode_word8_store(
+            &session.memory.store,
+            zero,
+            one,
+            values[2],
+        )?),
+        after_value: u32::from(decode_word8_store(
+            &session.memory.store,
+            zero,
+            one,
+            values[3],
+        )?),
+        old_after_value: u32::from(decode_word8_store(
+            &session.memory.store,
+            zero,
+            one,
+            values[4],
+        )?),
+        old_root_ref: old_root,
+        new_root_ref: new_root,
+        result_recursive_wire:
+            session.memory.store.export_anum(final_link).ok()?,
+        result_sequence_anum:
+            session.memory.store.export_anum(result_sequence).ok()?,
+    })
+}
 
-    let result_recursive_wire =
-        memory.store.export_anum(final_link).ok()?;
-    let result_sequence_anum =
-        memory.store.export_anum(result_sequence).ok()?;
+pub(crate) fn web_prove_radix_memory(
+    offset_value: u8,
+    byte_value: u8,
+) -> Option<WebRadixMemoryExecution> {
+    let prepare = prepare_radix_memory_session_program()?;
+    let (mut session, load) =
+        load_runtime_session(&prepare, 128)?;
+    let (initial, _, _) = configure_radix_memory_session(
+        &mut session,
+        &load,
+        offset_value,
+        byte_value,
+    )?;
+    let execute =
+        execute_session_to_quiescence(&mut session, initial, 96)?;
+    let projected =
+        project_radix_memory_session_result(&session, &load)?;
+
+    let oracle_matches = projected.before_value == 0
+        && projected.after_value == u32::from(byte_value)
+        && projected.old_after_value == 0;
+
     let identical_rerun_link_delta = identical_rerun(
-        &mut memory,
-        &mut engine,
+        &mut session.memory,
+        &mut session.engine,
         initial,
-        &result_recursive_wire,
+        &projected.result_recursive_wire,
         96,
     )?;
-    let visual_links = visual_snapshot(&memory, &load.semantic_roots);
+    let visual_links =
+        visual_snapshot(&session.memory, &load.semantic_roots);
 
     let proof = WebStructuralProof {
         schema_version: 4,
@@ -1481,15 +1565,16 @@ pub(crate) fn web_prove_radix_memory(
         load,
         execute,
         result: WebProofResultStage {
-            memory_instance_id: memory.id.clone(),
-            result_anum: result_recursive_wire,
-            result_sequence_anum,
-            decoded_value: u32::from(after_value),
-            decoded_value_hi: Some(u32::from(old_after_value)),
+            memory_instance_id: session.memory.id.clone(),
+            result_anum: projected.result_recursive_wire.clone(),
+            result_sequence_anum:
+                projected.result_sequence_anum.clone(),
+            decoded_value: projected.after_value,
+            decoded_value_hi: Some(projected.old_after_value),
             oracle_value: u32::from(byte_value),
             oracle_value_hi: Some(0),
             oracle_matches,
-            links_final: memory.store.link_count() as u32,
+            links_final: session.memory.store.link_count() as u32,
             identical_rerun_link_delta,
             visual_links,
         },
@@ -1499,15 +1584,16 @@ pub(crate) fn web_prove_radix_memory(
         outcome: WebRadixMemoryOutcome {
             offset: u32::from(offset_value),
             write_value: u32::from(byte_value),
-            before_value: u32::from(before_value),
-            after_value: u32::from(after_value),
-            old_after_value: u32::from(old_after_value),
-            old_root_ref: old_root,
-            new_root_ref: new_root,
+            before_value: projected.before_value,
+            after_value: projected.after_value,
+            old_after_value: projected.old_after_value,
+            old_root_ref: projected.old_root_ref,
+            new_root_ref: projected.new_root_ref,
             reactions: proof.execute.active_reaction_count,
             links_after_load: proof.load.links_after_load,
             links_final: proof.result.links_final,
-            steady_link_delta: proof.result.identical_rerun_link_delta,
+            steady_link_delta:
+                proof.result.identical_rerun_link_delta,
             quiescent: u8::from(proof.execute.final_quiescent),
         },
         proof,
