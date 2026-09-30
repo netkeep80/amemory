@@ -301,7 +301,7 @@ Promise.all([
     "utf8"
   );
   const presetRegistry = refreshScenarioPresetRegistry(w);
-  if (presetRegistry.entries.length !== 14) {
+  if (presetRegistry.entries.length !== 16) {
     throw new Error("R3d7 preset registry count mismatch");
   }
   const presetSummary = presetRegistry.entries.find(
@@ -405,6 +405,33 @@ Promise.all([
       !Array.isArray(shlPresetSummary.inputSchema) ||
       shlPresetSummary.inputSchema.length !== 2) {
     throw new Error("R3d3 manifest-derived SHL32 preset summary mismatch");
+  }
+
+  for (const [scenarioId, profileId, programId] of [
+    ["shr32-lifecycle", "a-circuit:shift-shr32", "shr32"],
+    ["sar32-lifecycle", "a-circuit:shift-sar32", "sar32"],
+  ]) {
+    const summary = presetRegistry.entries.find(
+      (entry) => entry.scenarioId === scenarioId
+    );
+    if (!summary ||
+        summary.scenarioVersion !== "1.0.0" ||
+        summary.programProfileId !== profileId ||
+        summary.family !== "shift-effect" ||
+        summary.programId !== programId ||
+        summary.runCount !== 5 ||
+        !Array.isArray(summary.inputSchema) ||
+        summary.inputSchema.length !== 2) {
+      throw new Error(
+        "R5 manifest-derived SHIFT32 preset summary mismatch: " + scenarioId
+      );
+    }
+  }
+  if (presetRegistry.entries[3]?.scenarioId !== "shl32-lifecycle" ||
+      presetRegistry.entries[13]?.scenarioId !== "cmp32-lifecycle" ||
+      presetRegistry.entries[14]?.scenarioId !== "shr32-lifecycle" ||
+      presetRegistry.entries[15]?.scenarioId !== "sar32-lifecycle") {
+    throw new Error("R5 SHIFT32 preset append changed historical indexes");
   }
 
 
@@ -1778,6 +1805,78 @@ Promise.all([
     throw new Error(
       "R3d3 SHL32 generic Scenario path mutated legacy LabInstanceState"
     );
+  }
+
+  // R5: SHR32/SAR32 use the same generic Scenario transport and the
+  // same static persistent SHIFT32 Aset. There is no browser shift executor.
+  for (const [scenarioId, fileName] of [
+    ["shr32-lifecycle", "shr32-lifecycle-v1.json"],
+    ["sar32-lifecycle", "sar32-lifecycle-v1.json"],
+  ]) {
+    const canonicalShiftSource = fs.readFileSync(
+      "experiments/a-circuit/scenarios/" + fileName,
+      "utf8"
+    );
+    const shiftPreset = loadScenarioPresetManifest(
+      w,
+      presetRegistry,
+      scenarioId,
+      "1.0.0"
+    );
+    if (shiftPreset === null ||
+        shiftPreset.source !== canonicalShiftSource) {
+      throw new Error(
+        "R5 SHIFT32 canonical preset round-trip mismatch: " + scenarioId
+      );
+    }
+
+    const shiftCpu = executeScenarioManifest(
+      w,
+      JSON.parse(shiftPreset.source),
+      "optimized-cpu"
+    );
+    if (!shiftCpu.ok ||
+        shiftCpu.error !== null ||
+        shiftCpu.report?.scenarioId !== scenarioId ||
+        shiftCpu.report?.overallPass !== true ||
+        shiftCpu.report?.runs?.length !== 5) {
+      throw new Error(
+        "R5 generic SHIFT32 Scenario execution failed: " + scenarioId
+      );
+    }
+
+    const expectedReactions = [1, 82, 1, 82, 1];
+    for (let index = 0; index < shiftCpu.report.runs.length; index += 1) {
+      const run = shiftCpu.report.runs[index];
+      if ((run.sessionRunId >>> 0) !== index + 1 ||
+          run.observed?.sessionId !== shiftCpu.report.sessionId ||
+          run.observed?.finalQuiescent !== true ||
+          run.observed?.activeReactionCount !== expectedReactions[index] ||
+          run.oracleMatches !== true ||
+          run.freshInstanceMatches !== true ||
+          run.scalarOracleMatches !== true ||
+          !run.pipelineProfile ||
+          run.observed?.profile?.structural?.unificationAttempts <= 0) {
+        throw new Error(
+          "R5 SHIFT32 persistent-session evidence mismatch: " +
+          scenarioId + " run " + index
+        );
+      }
+    }
+
+    if (JSON.stringify(shiftCpu.report.runs[0].result) !==
+          JSON.stringify(shiftCpu.report.runs[2].result) ||
+        shiftCpu.report.runs[2].configurationReused !== false ||
+        JSON.stringify(shiftCpu.report.runs[1].result) !==
+          JSON.stringify(shiftCpu.report.runs[3].result) ||
+        shiftCpu.report.runs[3].configurationReused !== false ||
+        shiftCpu.report.runs[4].configurationReused !== true ||
+        JSON.stringify(shiftCpu.report.runs[4].result) !==
+          JSON.stringify(shiftCpu.report.runs[0].result)) {
+      throw new Error(
+        "R5 SHIFT32 masking/canonical reuse mismatch: " + scenarioId
+      );
+    }
   }
 
   // R3d4: raw MUL32 Wide64 uses the same generic preset/Scenario path.

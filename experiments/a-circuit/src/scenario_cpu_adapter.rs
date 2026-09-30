@@ -26,8 +26,8 @@ use super::{
     },
     scenario::ScenarioProgramProfileV1,
     shift32_n::{
-        configure_shl32_session, prepare_shl32_session_program,
-        project_shl32_session_result, web_prove_shift32,
+        configure_shift32_session, prepare_shift32_session_program,
+        project_shift32_session_result, web_prove_shift32,
     },
 };
 use amemory_optimized_cpu_probe::Handle;
@@ -65,6 +65,9 @@ enum CpuScenarioImplementation {
     Arithmetic32 {
         op: u32,
     },
+    Shift32 {
+        op: u32,
+    },
 }
 
 pub(crate) struct CpuScenarioAdapter {
@@ -94,6 +97,9 @@ impl CpuScenarioAdapter {
             CpuScenarioImplementation::Arithmetic32 { .. } => {
                 prepare_arithmetic32_session_program()
             }
+            CpuScenarioImplementation::Shift32 { .. } => {
+                prepare_shift32_session_program()
+            }
         }
     }
 
@@ -115,6 +121,9 @@ impl CpuScenarioAdapter {
                     op, session, load, inputs,
                 )
             }
+            CpuScenarioImplementation::Shift32 { op } => {
+                configure_shift32_from_inputs(op, session, load, inputs)
+            }
         }
     }
 
@@ -133,6 +142,9 @@ impl CpuScenarioAdapter {
             CpuScenarioImplementation::Arithmetic32 { .. } => {
                 project_arithmetic32_result(session, load)
             }
+            CpuScenarioImplementation::Shift32 { .. } => {
+                project_shift32_result(session, load)
+            }
         }
     }
 
@@ -150,6 +162,9 @@ impl CpuScenarioAdapter {
             CpuScenarioImplementation::Arithmetic32 { op } => {
                 fresh_instance_arithmetic32_result(op, inputs)
             }
+            CpuScenarioImplementation::Shift32 { op } => {
+                fresh_instance_shift32_result(op, inputs)
+            }
         }
     }
 
@@ -166,6 +181,9 @@ impl CpuScenarioAdapter {
             }
             CpuScenarioImplementation::Arithmetic32 { op } => {
                 scalar_arithmetic32_result(op, inputs)
+            }
+            CpuScenarioImplementation::Shift32 { op } => {
+                scalar_shift32_result(op, inputs)
             }
         }
     }
@@ -302,13 +320,21 @@ const CPU_SCENARIO_ADAPTERS: &[CpuScenarioAdapter] = &[
         family: "shift-effect",
         program_id: "shl32",
         aset_source: "builtin:a-circuit/shift32/shl",
-        implementation: CpuScenarioImplementation::Direct {
-            prepare: prepare_shl32_session_program,
-            configure: configure_shl32_from_inputs,
-            project: project_shl32_result,
-            fresh_instance: fresh_instance_shl32_result,
-            scalar_oracle: scalar_shl32_result,
-        },
+        implementation: CpuScenarioImplementation::Shift32 { op: 13 },
+    },
+    CpuScenarioAdapter {
+        profile_id: "a-circuit:shift-shr32",
+        family: "shift-effect",
+        program_id: "shr32",
+        aset_source: "builtin:a-circuit/shift32/shr",
+        implementation: CpuScenarioImplementation::Shift32 { op: 14 },
+    },
+    CpuScenarioAdapter {
+        profile_id: "a-circuit:shift-sar32",
+        family: "shift-effect",
+        program_id: "sar32",
+        aset_source: "builtin:a-circuit/shift32/sar",
+        implementation: CpuScenarioImplementation::Shift32 { op: 15 },
     },
     CpuScenarioAdapter {
         profile_id: "a-circuit:mul32",
@@ -638,16 +664,25 @@ fn u8_input(
         .map_err(|_| format!("U8 input {key} outside 0..255"))
 }
 
-fn configure_shl32_from_inputs(
+fn shift32_inputs(
+    inputs: &BTreeMap<String, Value>,
+) -> Result<(u32, u8), String> {
+    Ok((
+        word32_input(inputs, "VALUE")?,
+        count8_input(inputs, "COUNT")?,
+    ))
+}
+
+fn configure_shift32_from_inputs(
+    op: u32,
     session: &mut ProofRuntimeSession,
     load: &WebProofLoadStage,
     inputs: &BTreeMap<String, Value>,
 ) -> Result<ConfiguredRun, String> {
-    let value = word32_input(inputs, "VALUE")?;
-    let count = count8_input(inputs, "COUNT")?;
+    let (value, count) = shift32_inputs(inputs)?;
     let (initial, before, after) =
-        configure_shl32_session(session, load, value, count)
-            .ok_or_else(|| "SHL32 configuration failed".to_owned())?;
+        configure_shift32_session(session, load, op, value, count)
+            .ok_or_else(|| format!("Shift32 op {op} configuration failed"))?;
     Ok(ConfiguredRun {
         initial,
         links_before: before as u32,
@@ -655,12 +690,12 @@ fn configure_shl32_from_inputs(
     })
 }
 
-fn project_shl32_result(
+fn project_shift32_result(
     session: &ProofRuntimeSession,
     load: &WebProofLoadStage,
 ) -> Result<ScenarioNormalizedResultV1, String> {
-    let projected = project_shl32_session_result(session, load)
-        .ok_or_else(|| "SHL32 result projection failed".to_owned())?;
+    let projected = project_shift32_session_result(session, load)
+        .ok_or_else(|| "Shift32 result projection failed".to_owned())?;
     Ok(effect32_normalized(
         projected.value,
         projected.writeback,
@@ -672,13 +707,13 @@ fn project_shl32_result(
     ))
 }
 
-fn fresh_instance_shl32_result(
+fn fresh_instance_shift32_result(
+    op: u32,
     inputs: &BTreeMap<String, Value>,
 ) -> Result<ScenarioNormalizedResultV1, String> {
-    let value = word32_input(inputs, "VALUE")?;
-    let count = count8_input(inputs, "COUNT")?;
-    let proof = web_prove_shift32(13, value, u32::from(count))
-        .ok_or_else(|| "fresh SHL32 oracle failed".to_owned())?;
+    let (value, count) = shift32_inputs(inputs)?;
+    let proof = web_prove_shift32(op, value, u32::from(count))
+        .ok_or_else(|| format!("fresh Shift32 op {op} oracle failed"))?;
     Ok(effect32_normalized(
         proof.outcome.value,
         proof.outcome.writeback,
@@ -998,11 +1033,11 @@ fn scalar_arithmetic32_result(
     ))
 }
 
-fn scalar_shl32_result(
+fn scalar_shift32_result(
+    op: u32,
     inputs: &BTreeMap<String, Value>,
 ) -> Result<BTreeMap<String, Value>, String> {
-    let value = word32_input(inputs, "VALUE")?;
-    let count = count8_input(inputs, "COUNT")?;
+    let (value, count) = shift32_inputs(inputs)?;
     let masked = u32::from(count & 31);
     if masked == 0 {
         return Ok(scalar_effect32_fields(
@@ -1010,12 +1045,31 @@ fn scalar_shl32_result(
         ));
     }
 
-    let result = value.wrapping_shl(masked);
-    let cf = ((value >> (32 - masked)) & 1) != 0;
+    let (result, cf, of) = match op {
+        13 => {
+            let result = value.wrapping_shl(masked);
+            let cf = ((value >> (32 - masked)) & 1) != 0;
+            let of = masked == 1
+                && ((result >> 31 != 0) ^ cf);
+            (result, cf, of)
+        }
+        14 => {
+            let result = value >> masked;
+            let cf = ((value >> (masked - 1)) & 1) != 0;
+            let of = masked == 1 && (value >> 31 != 0);
+            (result, cf, of)
+        }
+        15 => {
+            let result = ((value as i32) >> masked) as u32;
+            let cf = ((value >> (masked - 1)) & 1) != 0;
+            (result, cf, false)
+        }
+        _ => return Err(format!("unsupported Shift32 op {op}")),
+    };
+
     let pf = scalar_even_parity_low_byte(result);
     let zf = result == 0;
     let sf = result >> 31 != 0;
-    let of = masked == 1 && (sf ^ cf);
 
     let mut defined = SCALAR_CF | SCALAR_PF | SCALAR_ZF | SCALAR_SF;
     let mut undefined = SCALAR_AF;

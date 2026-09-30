@@ -24,6 +24,8 @@ const PRESET_SOURCES: &[&str] = &[
     include_str!("../scenarios/sub32-lifecycle-v1.json"),
     include_str!("../scenarios/sbb32-lifecycle-v1.json"),
     include_str!("../scenarios/cmp32-lifecycle-v1.json"),
+    include_str!("../scenarios/shr32-lifecycle-v1.json"),
+    include_str!("../scenarios/sar32-lifecycle-v1.json"),
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -183,7 +185,7 @@ mod tests {
     fn registry_summary_is_derived_from_canonical_mux1_manifest() {
         let registry = load_preset_registry_v1().unwrap();
         assert_eq!(registry.schema_version, 1);
-        assert_eq!(registry.entries.len(), 14);
+        assert_eq!(registry.entries.len(), 16);
 
         let source = preset_manifest_source_by_index_v1(0).unwrap();
         let manifest = parse_and_validate_manifest_v1(source).unwrap();
@@ -328,24 +330,55 @@ mod tests {
     }
 
     #[test]
-    fn registry_resolves_shl32_canonical_manifest() {
-        let source =
-            preset_manifest_source_v1("shl32-lifecycle", "1.0.0").unwrap();
-        assert_eq!(
-            source,
-            include_str!("../scenarios/shl32-lifecycle-v1.json")
-        );
-
+    fn registry_resolves_complete_shift32_family() {
         let registry = load_preset_registry_v1().unwrap();
-        let summary = registry
-            .entries
-            .iter()
-            .find(|entry| entry.scenario_id == "shl32-lifecycle")
-            .unwrap();
-        assert_eq!(summary.program_profile_id, "a-circuit:shift-shl32");
-        assert_eq!(summary.family, "shift-effect");
-        assert_eq!(summary.program_id, "shl32");
-        assert_eq!(summary.run_count, 5);
+        for (scenario_id, profile_id, program_id, source) in [
+            (
+                "shl32-lifecycle",
+                "a-circuit:shift-shl32",
+                "shl32",
+                include_str!("../scenarios/shl32-lifecycle-v1.json"),
+            ),
+            (
+                "shr32-lifecycle",
+                "a-circuit:shift-shr32",
+                "shr32",
+                include_str!("../scenarios/shr32-lifecycle-v1.json"),
+            ),
+            (
+                "sar32-lifecycle",
+                "a-circuit:shift-sar32",
+                "sar32",
+                include_str!("../scenarios/sar32-lifecycle-v1.json"),
+            ),
+        ] {
+            let resolved =
+                preset_manifest_source_v1(scenario_id, "1.0.0").unwrap();
+            assert_eq!(resolved, source);
+
+            let manifest =
+                parse_and_validate_manifest_v1(resolved).unwrap();
+            assert_eq!(manifest.program_profile.profile_id, profile_id);
+            assert_eq!(manifest.program_profile.program_id, program_id);
+            assert_eq!(manifest.run_sequence.len(), 5);
+
+            let summary = registry
+                .entries
+                .iter()
+                .find(|entry| entry.scenario_id == scenario_id)
+                .unwrap();
+            assert_eq!(summary.program_profile_id, profile_id);
+            assert_eq!(summary.family, "shift-effect");
+            assert_eq!(summary.program_id, program_id);
+            assert_eq!(summary.run_count, 5);
+            assert_eq!(summary.input_schema.len(), 2);
+        }
+
+        // Compatibility: the historical 14 entries do not move.
+        assert_eq!(registry.entries[3].scenario_id, "shl32-lifecycle");
+        assert_eq!(registry.entries[13].scenario_id, "cmp32-lifecycle");
+        assert_eq!(registry.entries[14].scenario_id, "shr32-lifecycle");
+        assert_eq!(registry.entries[15].scenario_id, "sar32-lifecycle");
     }
 
     #[test]

@@ -976,6 +976,10 @@ mod tests {
         include_str!("../scenarios/cmp32-lifecycle-v1.json");
     const SHL32_LIFECYCLE: &str =
         include_str!("../scenarios/shl32-lifecycle-v1.json");
+    const SHR32_LIFECYCLE: &str =
+        include_str!("../scenarios/shr32-lifecycle-v1.json");
+    const SAR32_LIFECYCLE: &str =
+        include_str!("../scenarios/sar32-lifecycle-v1.json");
     const MUL32_LIFECYCLE: &str =
         include_str!("../scenarios/mul32-lifecycle-v1.json");
     const RADIX_MEMORY8_LIFECYCLE: &str =
@@ -1640,6 +1644,72 @@ mod tests {
             report.runs[4].configuration_reused,
             "returning to COUNT=0 must reuse canonical configuration Links",
         );
+    }
+
+    #[test]
+    fn canonical_shift32_family_manifests_share_one_session_model() {
+        for source in [SHR32_LIFECYCLE, SAR32_LIFECYCLE] {
+            let manifest = parse_and_validate_manifest_v1(source).unwrap();
+            let report = run_scenario_manifest_v1(
+                &manifest,
+                ScenarioBackendV1::OptimizedCpu,
+            )
+            .unwrap();
+
+            assert!(report.overall_pass, "{}", manifest.scenario_id);
+            assert_eq!(report.runs.len(), 5, "{}", manifest.scenario_id);
+            assert_eq!(
+                report
+                    .runs
+                    .iter()
+                    .map(|run| run.observed.active_reaction_count)
+                    .collect::<Vec<_>>(),
+                vec![1, 82, 1, 82, 1],
+                "{} reaction profile",
+                manifest.scenario_id,
+            );
+            assert!(report.runs.iter().all(|run| {
+                run.observed.session_id == report.session_id
+                    && run.observed.final_quiescent
+                    && run.oracle_matches == Some(true)
+                    && run.fresh_instance_matches == Some(true)
+                    && run.scalar_oracle_matches
+            }), "{}", manifest.scenario_id);
+
+            assert_eq!(
+                report.runs[0].result,
+                report.runs[2].result,
+                "{} COUNT=32 must mask to zero",
+                manifest.scenario_id,
+            );
+            assert!(
+                !report.runs[2].configuration_reused,
+                "{} COUNT=32 is a distinct structural input",
+                manifest.scenario_id,
+            );
+            assert_eq!(
+                report.runs[1].result,
+                report.runs[3].result,
+                "{} COUNT=33 must mask to one",
+                manifest.scenario_id,
+            );
+            assert!(
+                !report.runs[3].configuration_reused,
+                "{} COUNT=33 is a distinct structural input",
+                manifest.scenario_id,
+            );
+            assert_eq!(
+                report.runs[0].result,
+                report.runs[4].result,
+                "{} return-to-first result",
+                manifest.scenario_id,
+            );
+            assert!(
+                report.runs[4].configuration_reused,
+                "{} return-to-first must reuse canonical Links",
+                manifest.scenario_id,
+            );
+        }
     }
 
     #[test]
