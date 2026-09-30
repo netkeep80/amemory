@@ -82,8 +82,12 @@ pub(crate) enum RunEventKind {
 pub(crate) enum RunStructuralFactKind {
     DiscoveryComplete,
     RuleMatched,
+    ContextCreated,
     Instantiated,
+    ContextUpdated,
     Published,
+    ContextPublished,
+    ContextCollapsed,
     ScopeCommitted,
 }
 
@@ -106,6 +110,12 @@ pub(crate) struct RunBindingV1 {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RunStructuralFactV1 {
     pub(crate) kind: RunStructuralFactKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) context_id: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) context_group_id: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) parent_context_id: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) active: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -144,6 +154,9 @@ impl From<StructuralTraceEvent> for RunStructuralFactV1 {
                 matched_rules,
             } => Self {
                 kind: RunStructuralFactKind::DiscoveryComplete,
+                context_id: None,
+                context_group_id: None,
+                parent_context_id: None,
                 active: Some(active),
                 rule: None,
                 matched_rules: Some(matched_rules),
@@ -165,6 +178,44 @@ impl From<StructuralTraceEvent> for RunStructuralFactV1 {
                 bindings,
             } => Self {
                 kind: RunStructuralFactKind::RuleMatched,
+                context_id: None,
+                context_group_id: None,
+                parent_context_id: None,
+                active: Some(active),
+                rule: Some(rule),
+                matched_rules: None,
+                output_bundle_template: Some(output_bundle_template),
+                grounded_bundle: None,
+                created_links: None,
+                bindings: Some(
+                    bindings
+                        .into_iter()
+                        .map(|binding| RunBindingV1 {
+                            role: binding.role,
+                            value: binding.value,
+                        })
+                        .collect(),
+                ),
+                outputs: None,
+                preserved: None,
+                old_scope: None,
+                next_scope: None,
+                quiescent: None,
+                handoff_count: None,
+            },
+            StructuralTraceEvent::ContextCreated {
+                context_id,
+                context_group_id,
+                parent_context_id,
+                active,
+                rule,
+                output_bundle_template,
+                bindings,
+            } => Self {
+                kind: RunStructuralFactKind::ContextCreated,
+                context_id: Some(context_id),
+                context_group_id: Some(context_group_id),
+                parent_context_id,
                 active: Some(active),
                 rule: Some(rule),
                 matched_rules: None,
@@ -195,6 +246,9 @@ impl From<StructuralTraceEvent> for RunStructuralFactV1 {
                 created_links,
             } => Self {
                 kind: RunStructuralFactKind::Instantiated,
+                context_id: None,
+                context_group_id: None,
+                parent_context_id: None,
                 active: Some(active),
                 rule: Some(rule),
                 matched_rules: None,
@@ -218,6 +272,29 @@ impl From<StructuralTraceEvent> for RunStructuralFactV1 {
                 quiescent: None,
                 handoff_count: None,
             },
+            StructuralTraceEvent::ContextUpdated {
+                context_id,
+                context_group_id,
+                grounded_bundle,
+            } => Self {
+                kind: RunStructuralFactKind::ContextUpdated,
+                context_id: Some(context_id),
+                context_group_id: Some(context_group_id),
+                parent_context_id: None,
+                active: None,
+                rule: None,
+                matched_rules: None,
+                output_bundle_template: None,
+                grounded_bundle: Some(grounded_bundle),
+                created_links: None,
+                bindings: None,
+                outputs: None,
+                preserved: None,
+                old_scope: None,
+                next_scope: None,
+                quiescent: None,
+                handoff_count: None,
+            },
             StructuralTraceEvent::Published {
                 active,
                 rule,
@@ -225,6 +302,9 @@ impl From<StructuralTraceEvent> for RunStructuralFactV1 {
                 preserved,
             } => Self {
                 kind: RunStructuralFactKind::Published,
+                context_id: None,
+                context_group_id: None,
+                parent_context_id: None,
                 active: Some(active),
                 rule,
                 matched_rules: None,
@@ -239,6 +319,51 @@ impl From<StructuralTraceEvent> for RunStructuralFactV1 {
                 quiescent: None,
                 handoff_count: None,
             },
+            StructuralTraceEvent::ContextPublished {
+                context_id,
+                context_group_id,
+                outputs,
+            } => Self {
+                kind: RunStructuralFactKind::ContextPublished,
+                context_id: Some(context_id),
+                context_group_id: Some(context_group_id),
+                parent_context_id: None,
+                active: None,
+                rule: None,
+                matched_rules: None,
+                output_bundle_template: None,
+                grounded_bundle: None,
+                created_links: None,
+                bindings: None,
+                outputs: Some(outputs),
+                preserved: None,
+                old_scope: None,
+                next_scope: None,
+                quiescent: None,
+                handoff_count: None,
+            },
+            StructuralTraceEvent::ContextCollapsed {
+                context_id,
+                context_group_id,
+            } => Self {
+                kind: RunStructuralFactKind::ContextCollapsed,
+                context_id: Some(context_id),
+                context_group_id: Some(context_group_id),
+                parent_context_id: None,
+                active: None,
+                rule: None,
+                matched_rules: None,
+                output_bundle_template: None,
+                grounded_bundle: None,
+                created_links: None,
+                bindings: None,
+                outputs: None,
+                preserved: None,
+                old_scope: None,
+                next_scope: None,
+                quiescent: None,
+                handoff_count: None,
+            },
             StructuralTraceEvent::ScopeCommitted {
                 old_members,
                 next_members,
@@ -246,6 +371,9 @@ impl From<StructuralTraceEvent> for RunStructuralFactV1 {
                 handoff_count,
             } => Self {
                 kind: RunStructuralFactKind::ScopeCommitted,
+                context_id: None,
+                context_group_id: None,
+                parent_context_id: None,
                 active: None,
                 rule: None,
                 matched_rules: None,

@@ -154,6 +154,15 @@ pub enum StructuralTraceEvent {
         output_bundle_template: Handle,
         bindings: Vec<StructuralRoleBinding>,
     },
+    ContextCreated {
+        context_id: u32,
+        context_group_id: u32,
+        parent_context_id: Option<u32>,
+        active: Handle,
+        rule: Handle,
+        output_bundle_template: Handle,
+        bindings: Vec<StructuralRoleBinding>,
+    },
     Instantiated {
         active: Handle,
         rule: Handle,
@@ -163,11 +172,25 @@ pub enum StructuralTraceEvent {
         /// this output bundle. Persistent carrier Links; not Context.
         created_links: Vec<StructuralCreatedLink>,
     },
+    ContextUpdated {
+        context_id: u32,
+        context_group_id: u32,
+        grounded_bundle: Handle,
+    },
     Published {
         active: Handle,
         rule: Option<Handle>,
         outputs: Vec<Handle>,
         preserved: bool,
+    },
+    ContextPublished {
+        context_id: u32,
+        context_group_id: u32,
+        outputs: Vec<Handle>,
+    },
+    ContextCollapsed {
+        context_id: u32,
+        context_group_id: u32,
     },
     ScopeCommitted {
         old_members: Vec<Handle>,
@@ -205,6 +228,20 @@ struct StructuralImage {
     rule: Handle,
     output_bundle_template: Handle,
     bindings: Vec<StructuralRoleBinding>,
+}
+
+/// Real transient firing Context. It is runtime scaffolding, not a persistent
+/// A-memory Link and not an observer-only reconstruction. A frame exists from
+/// rule-image admission through grounding/publication and is then dropped.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct StructuralContextFrame {
+    context_id: u32,
+    context_group_id: u32,
+    parent_context_id: Option<u32>,
+    active: Handle,
+    image: StructuralImage,
+    grounded_bundle: Option<Handle>,
+    outputs: Vec<Handle>,
 }
 
 trait StructuralRead {
@@ -1216,6 +1253,11 @@ impl OptimizedStructuralEngine {
         // Phase 1 is strictly read-only. Borrow only dense carrier/index
         // slices, not canonical HashMaps, and discover every old Scope member
         // before publication can append a Link.
+        // R1 Context identity is local to one atomic reaction. It is not a
+        // persistent Link identity. All sibling firings in this reaction share
+        // one group id; observer order among siblings carries no semantics.
+        let mut next_context_id = 1u32;
+        let context_group_id = 1u32;
         let discovered = {
             let execution_view = store.packed_execution_ref();
             let authority =
@@ -1235,18 +1277,50 @@ impl OptimizedStructuralEngine {
                         active,
                         matched_rules: images.len() as u32,
                     });
-                    for image in &images {
-                        trace.events.push(StructuralTraceEvent::RuleMatched {
-                            active,
-                            rule: image.rule,
-                            output_bundle_template:
-                                image.output_bundle_template,
-                            bindings: image.bindings.clone(),
-                        });
-                    }
                     trace.collection_ns += trace_started.elapsed_ns();
                 }
-                discovered.push((active, images));
+
+                let mut contexts = Vec::with_capacity(images.len());
+                for image in images {
+                    let context_id = next_context_id;
+                    next_context_id = next_context_id
+                        .checked_add(1)
+                        .ok_or(StructuralError::Store(
+                            StoreError::CapacityExceeded,
+                        ))?;
+                    let context = StructuralContextFrame {
+                        context_id,
+                        context_group_id,
+                        parent_context_id: None,
+                        active,
+                        image,
+                        grounded_bundle: None,
+                        outputs: Vec::new(),
+                    };
+                    if let Some(trace) = trace.as_deref_mut() {
+                        let trace_started = ProfileTimer::start();
+                        trace.events.push(StructuralTraceEvent::RuleMatched {
+                            active: context.active,
+                            rule: context.image.rule,
+                            output_bundle_template:
+                                context.image.output_bundle_template,
+                            bindings: context.image.bindings.clone(),
+                        });
+                        trace.events.push(StructuralTraceEvent::ContextCreated {
+                            context_id: context.context_id,
+                            context_group_id: context.context_group_id,
+                            parent_context_id: context.parent_context_id,
+                            active: context.active,
+                            rule: context.image.rule,
+                            output_bundle_template:
+                                context.image.output_bundle_template,
+                            bindings: context.image.bindings.clone(),
+                        });
+                        trace.collection_ns += trace_started.elapsed_ns();
+                    }
+                    contexts.push(context);
+                }
+                discovered.push((active, contexts));
             }
             discovered
         };
@@ -1277,8 +1351,8 @@ impl OptimizedStructuralEngine {
                 Ok(())
             };
 
-            for (active, images) in discovered {
-                if images.is_empty() {
+            for (active, contexts) in discovered {
+                if contexts.is_empty() {
                     let publication_started =
                         profile.as_ref().map(|_| ProfileTimer::start());
                     add_next(active)?;
@@ -1303,7 +1377,7 @@ impl OptimizedStructuralEngine {
 
                 transitioned_members = transitioned_members.saturating_add(1);
 
-                for image in images {
+                for mut context in contexts {
                     raw_rule_matches = raw_rule_matches.saturating_add(1);
 
                     let links_before_instantiation = trace
@@ -1313,10 +1387,11 @@ impl OptimizedStructuralEngine {
                         profile.as_ref().map(|_| ProfileTimer::start());
                     let grounded_bundle = instantiate_structural_template_internal(
                         store,
-                        image.output_bundle_template,
-                        &image.bindings,
+                        context.image.output_bundle_template,
+                        &context.image.bindings,
                         profile,
                     )?;
+                    context.grounded_bundle = Some(grounded_bundle);
                     if let Some(profile) = profile.as_deref_mut() {
                         if let Some(started) = instantiation_started {
                             profile.instantiation_ns += started.elapsed_ns();
@@ -1350,22 +1425,29 @@ impl OptimizedStructuralEngine {
                             .collect::<Result<Vec<_>, StructuralError>>()?;
                         trace.events.push(StructuralTraceEvent::Instantiated {
                             active,
-                            rule: image.rule,
+                            rule: context.image.rule,
                             output_bundle_template:
-                                image.output_bundle_template,
+                                context.image.output_bundle_template,
                             grounded_bundle,
                             created_links,
+                        });
+                        trace.events.push(StructuralTraceEvent::ContextUpdated {
+                            context_id: context.context_id,
+                            context_group_id: context.context_group_id,
+                            grounded_bundle: context
+                                .grounded_bundle
+                                .expect("grounded Context bundle"),
                         });
                         trace.collection_ns += trace_started.elapsed_ns();
                     }
 
                     let publication_started =
                         profile.as_ref().map(|_| ProfileTimer::start());
-                    let outputs = read_exact_sequence(store, grounded_bundle)?;
+                    context.outputs = read_exact_sequence(store, grounded_bundle)?;
                     if let Some(profile) = profile.as_deref_mut() {
-                        profile.publication_outputs += outputs.len() as u64;
+                        profile.publication_outputs += context.outputs.len() as u64;
                     }
-                    for successor in outputs.iter().copied() {
+                    for successor in context.outputs.iter().copied() {
                         add_next(successor)?;
                     }
                     if let Some(profile) = profile.as_deref_mut() {
@@ -1377,9 +1459,18 @@ impl OptimizedStructuralEngine {
                         let trace_started = ProfileTimer::start();
                         trace.events.push(StructuralTraceEvent::Published {
                             active,
-                            rule: Some(image.rule),
-                            outputs,
+                            rule: Some(context.image.rule),
+                            outputs: context.outputs.clone(),
                             preserved: false,
+                        });
+                        trace.events.push(StructuralTraceEvent::ContextPublished {
+                            context_id: context.context_id,
+                            context_group_id: context.context_group_id,
+                            outputs: context.outputs.clone(),
+                        });
+                        trace.events.push(StructuralTraceEvent::ContextCollapsed {
+                            context_id: context.context_id,
+                            context_group_id: context.context_group_id,
                         });
                         trace.collection_ns += trace_started.elapsed_ns();
                     }
@@ -1999,6 +2090,25 @@ mod tests {
                         value: caller,
                     }]
         )));
+        assert!(trace.events.iter().any(|event| matches!(
+            event,
+            StructuralTraceEvent::ContextCreated {
+                context_id: 1,
+                context_group_id: 1,
+                parent_context_id: None,
+                active: traced_active,
+                rule: traced_rule,
+                output_bundle_template,
+                bindings,
+            } if *traced_active == active
+                && *traced_rule == rule
+                && *output_bundle_template == bundle
+                && bindings
+                    == &vec![StructuralRoleBinding {
+                        role,
+                        value: caller,
+                    }]
+        )));
         let grounded_bundle = trace
             .events
             .iter()
@@ -2044,6 +2154,14 @@ mod tests {
         );
         assert!(trace.events.iter().any(|event| matches!(
             event,
+            StructuralTraceEvent::ContextUpdated {
+                context_id: 1,
+                context_group_id: 1,
+                grounded_bundle: traced_bundle,
+            } if *traced_bundle == grounded_bundle
+        )));
+        assert!(trace.events.iter().any(|event| matches!(
+            event,
             StructuralTraceEvent::Published {
                 active: traced_active,
                 rule: Some(traced_rule),
@@ -2052,6 +2170,21 @@ mod tests {
             } if *traced_active == active
                 && *traced_rule == rule
                 && outputs == &vec![traced_expected]
+        )));
+        assert!(trace.events.iter().any(|event| matches!(
+            event,
+            StructuralTraceEvent::ContextPublished {
+                context_id: 1,
+                context_group_id: 1,
+                outputs,
+            } if outputs == &vec![traced_expected]
+        )));
+        assert!(trace.events.iter().any(|event| matches!(
+            event,
+            StructuralTraceEvent::ContextCollapsed {
+                context_id: 1,
+                context_group_id: 1,
+            }
         )));
         assert!(trace.events.iter().any(|event| matches!(
             event,
@@ -2112,6 +2245,16 @@ mod tests {
             )),
             "quiescent preserved members must not fabricate persistent Link deltas",
         );
+        assert!(
+            !quiescent_trace.events.iter().any(|event| matches!(
+                event,
+                StructuralTraceEvent::ContextCreated { .. }
+                    | StructuralTraceEvent::ContextUpdated { .. }
+                    | StructuralTraceEvent::ContextPublished { .. }
+                    | StructuralTraceEvent::ContextCollapsed { .. }
+            )),
+            "quiescent preserved members must not fabricate Context lifecycle",
+        );
         assert!(quiescent_trace.events.iter().any(|event| matches!(
             event,
             StructuralTraceEvent::ScopeCommitted {
@@ -2153,6 +2296,21 @@ mod tests {
             } if *traced_active == active
                 && *traced_rule == rule
                 && outputs == &vec![traced_expected]
+        )));
+        assert!(reused_trace.events.iter().any(|event| matches!(
+            event,
+            StructuralTraceEvent::ContextCreated {
+                context_id: 1,
+                context_group_id: 1,
+                ..
+            }
+        )));
+        assert!(reused_trace.events.iter().any(|event| matches!(
+            event,
+            StructuralTraceEvent::ContextCollapsed {
+                context_id: 1,
+                context_group_id: 1,
+            }
         )));
     }
 
@@ -2523,11 +2681,43 @@ mod tests {
         engine.set_interpreter(&store, interpreter).unwrap();
         engine.set_current(&store, &[active]).unwrap();
 
-        let reaction = engine.run(&mut store).unwrap();
+        let (reaction, _profile, trace) =
+            engine.run_traced(&mut store).unwrap();
         assert_eq!(reaction.raw_rule_matches, 2);
         assert_eq!(reaction.transitioned_members, 1);
         assert_eq!(reaction.handoff_count, 1);
         assert_eq!(engine.current(), &[expected]);
+
+        let created_contexts = trace
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                StructuralTraceEvent::ContextCreated {
+                    context_id,
+                    context_group_id,
+                    parent_context_id,
+                    ..
+                } => Some((*context_id, *context_group_id, *parent_context_id)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            created_contexts,
+            vec![(1, 1, None), (2, 1, None)],
+            "fan-out siblings need distinct trace-local Context ids in one atomic group",
+        );
+        let collapsed_contexts = trace
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                StructuralTraceEvent::ContextCollapsed {
+                    context_id,
+                    context_group_id,
+                } => Some((*context_id, *context_group_id)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(collapsed_contexts, vec![(1, 1), (2, 1)]);
     }
 
     #[test]
