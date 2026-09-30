@@ -1349,7 +1349,7 @@ mod tests {
             RunObservationLevel::Full,
         ] {
             let (result, carrier, steps, opened, after) =
-                manual_step_first_run(MUX1_LIFECYCLE, level);
+                bounded_runtime_first_run(MUX1_LIFECYCLE, level);
             let final_scope = steps.last().unwrap().scope_after.clone();
             let semantic = (
                 result,
