@@ -14,8 +14,10 @@ use super::{
         project_radix_memory_session_result, web_prove_radix_memory,
     },
     mux_n::{
-        configure_mux1_session, prepare_mux1_session_program,
-        project_mux1_session_result, web_prove_mux1,
+        configure_mux1_session, configure_mux32_session,
+        prepare_mux1_session_program, prepare_mux32_session_program,
+        project_mux1_session_result, project_mux32_session_result,
+        web_prove_mux1, web_prove_mux32,
     },
     mul32_n::{
         configure_mul32_session, prepare_mul32_session_program,
@@ -320,6 +322,19 @@ const CPU_SCENARIO_ADAPTERS: &[CpuScenarioAdapter] = &[
         },
     },
     CpuScenarioAdapter {
+        profile_id: "a-circuit:mux32",
+        family: "mux",
+        program_id: "mux32",
+        aset_source: "builtin:a-circuit/mux32",
+        implementation: CpuScenarioImplementation::Direct {
+            prepare: prepare_mux32_session_program,
+            configure: configure_mux32_from_inputs,
+            project: project_mux32_result,
+            fresh_instance: fresh_instance_mux32_result,
+            scalar_oracle: scalar_mux32_result,
+        },
+    },
+    CpuScenarioAdapter {
         profile_id: "a-circuit:logic-and32",
         family: "logic-effect",
         program_id: "and32",
@@ -556,6 +571,63 @@ fn fresh_instance_mux1_result(
     Ok(ScenarioNormalizedResultV1 {
         fields,
         result_recursive_wire: Some(proof.result.result_anum),
+    })
+}
+
+fn mux32_inputs(
+    inputs: &BTreeMap<String, Value>,
+) -> Result<(usize, u32, u32), String> {
+    Ok((
+        bit_input(inputs, "S")?,
+        word32_input(inputs, "A")?,
+        word32_input(inputs, "B")?,
+    ))
+}
+
+fn configure_mux32_from_inputs(
+    session: &mut ProofRuntimeSession,
+    load: &WebProofLoadStage,
+    inputs: &BTreeMap<String, Value>,
+) -> Result<ConfiguredRun, String> {
+    let (select, a, b) = mux32_inputs(inputs)?;
+    let (initial, before, after) =
+        configure_mux32_session(session, load, select, a, b)
+            .ok_or_else(|| "MUX32 configuration failed".to_owned())?;
+    Ok(ConfiguredRun {
+        initial,
+        links_before: before as u32,
+        links_after: after as u32,
+    })
+}
+
+fn project_mux32_result(
+    session: &ProofRuntimeSession,
+    load: &WebProofLoadStage,
+) -> Result<ScenarioNormalizedResultV1, String> {
+    let projected = project_mux32_session_result(session, load)
+        .ok_or_else(|| "MUX32 result projection failed".to_owned())?;
+    let mut fields = BTreeMap::new();
+    fields.insert("value".to_owned(), canonical_word32(projected.value));
+    Ok(ScenarioNormalizedResultV1 {
+        fields,
+        result_recursive_wire: Some(projected.result_recursive_wire),
+    })
+}
+
+fn fresh_instance_mux32_result(
+    inputs: &BTreeMap<String, Value>,
+) -> Result<ScenarioNormalizedResultV1, String> {
+    let (select, a, b) = mux32_inputs(inputs)?;
+    let proof = web_prove_mux32(select as u32, a, b)
+        .ok_or_else(|| "fresh MUX32 oracle failed".to_owned())?;
+    let mut fields = BTreeMap::new();
+    fields.insert(
+        "value".to_owned(),
+        canonical_word32(proof.outcome.value),
+    );
+    Ok(ScenarioNormalizedResultV1 {
+        fields,
+        result_recursive_wire: Some(proof.proof.result.result_anum),
     })
 }
 
@@ -1354,6 +1426,18 @@ fn scalar_mux1_result(
     fields.insert(
         "value".to_owned(),
         Value::from((if select == 0 { a } else { b }) as u32),
+    );
+    Ok(fields)
+}
+
+fn scalar_mux32_result(
+    inputs: &BTreeMap<String, Value>,
+) -> Result<BTreeMap<String, Value>, String> {
+    let (select, a, b) = mux32_inputs(inputs)?;
+    let mut fields = BTreeMap::new();
+    fields.insert(
+        "value".to_owned(),
+        canonical_word32(if select == 0 { a } else { b }),
     );
     Ok(fields)
 }
