@@ -364,6 +364,23 @@ try {
       JSON.stringify(second));
   }
 
+  // Open the actual Proof presentation entrypoint in the real browser.
+  await evaluate(cdp, `(() => {
+    document.querySelector('[data-level="proof"]').click();
+    const proofTab = document.querySelector('[data-tab="proof"]');
+    if (!proofTab) throw new Error("Proof tab is missing");
+    proofTab.click();
+    return true;
+  })()`);
+  await waitFor(
+    cdp,
+    `${state}?.level === "proof" &&
+      ${state}?.tab === "proof" &&
+      Boolean(document.querySelector(".wb-verification")) &&
+      Boolean(document.querySelector(".proof-recursive-structure"))`,
+    "Proof/renderer entrypoint",
+  );
+
   // Invalid WORD32 is rejected in the main-thread typed-input adapter before
   // any Worker CONFIGURE request is sent. Session identity/carrier stay intact.
   await evaluate(cdp, `(() => {
