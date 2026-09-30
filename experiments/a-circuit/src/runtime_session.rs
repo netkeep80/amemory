@@ -6,7 +6,7 @@ use amemory_optimized_cpu_probe::{
     structural::{OptimizedStructuralEngine, StructuralRunProfile},
     Handle, OptimizedLinkStore,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 static NEXT_CPU_MEMORY_ID: AtomicU32 = AtomicU32::new(1);
@@ -73,6 +73,183 @@ pub(crate) struct CpuSessionStepOutcomeV1 {
     pub(crate) evidence: CpuSessionReactionEvidenceV1,
     pub(crate) structural_profile: StructuralRunProfile,
     pub(crate) trace_projection_ns: u128,
+}
+
+pub(crate) const CPU_RUN_BUDGET_SCHEMA_VERSION: u32 = 1;
+pub(crate) const DEFAULT_MAX_APPENDED_LINKS_PER_RUN: u32 = 1_000_000;
+pub(crate) const DEFAULT_MAX_TOTAL_LINKS: u32 = 2_000_000;
+pub(crate) const DEFAULT_MAX_SCOPE_WIDTH: u32 = 65_536;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CpuRunBudgetV1 {
+    pub(crate) schema_version: u32,
+    pub(crate) max_reactions: u32,
+    pub(crate) max_appended_links: u32,
+    pub(crate) max_total_links: u32,
+    pub(crate) max_scope_width: u32,
+}
+
+impl CpuRunBudgetV1 {
+    pub(crate) fn scenario_default(max_reactions: u32) -> Self {
+        Self {
+            schema_version: CPU_RUN_BUDGET_SCHEMA_VERSION,
+            max_reactions,
+            max_appended_links: DEFAULT_MAX_APPENDED_LINKS_PER_RUN,
+            max_total_links: DEFAULT_MAX_TOTAL_LINKS,
+            max_scope_width: DEFAULT_MAX_SCOPE_WIDTH,
+        }
+    }
+
+    fn resource_stop_reason(
+        self,
+        links_before_run: u32,
+        links_now: u32,
+        scope_width: u32,
+    ) -> Option<CpuRunStopReasonV1> {
+        if links_now > self.max_total_links {
+            return Some(CpuRunStopReasonV1::TotalLinksBudgetExceeded);
+        }
+        if links_now.saturating_sub(links_before_run)
+            > self.max_appended_links
+        {
+            return Some(
+                CpuRunStopReasonV1::AppendedLinksBudgetExceeded,
+            );
+        }
+        if scope_width > self.max_scope_width {
+            return Some(CpuRunStopReasonV1::ScopeWidthBudgetExceeded);
+        }
+        None
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub(crate) enum CpuRunStopReasonV1 {
+    Quiescent,
+    ReactionBudgetExceeded,
+    AppendedLinksBudgetExceeded,
+    TotalLinksBudgetExceeded,
+    ScopeWidthBudgetExceeded,
+    EngineFailure,
+    InvalidState,
+}
+
+impl CpuRunStopReasonV1 {
+    pub(crate) fn from_step_error(error: CpuSessionStepError) -> Self {
+        match error {
+            CpuSessionStepError::InvalidState(_) => Self::InvalidState,
+            CpuSessionStepError::EngineFailure => Self::EngineFailure,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct CpuControlledStepV1 {
+    pub(crate) step: Option<CpuSessionStepOutcomeV1>,
+    pub(crate) stop_reason: Option<CpuRunStopReasonV1>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct CpuRunControllerV1 {
+    budget: CpuRunBudgetV1,
+    run_id: u64,
+    links_before_run: u32,
+    steps_taken: u32,
+}
+
+impl CpuRunControllerV1 {
+    fn new(
+        budget: CpuRunBudgetV1,
+        run_id: u64,
+        links_before_run: u32,
+    ) -> Self {
+        Self {
+            budget,
+            run_id,
+            links_before_run,
+            steps_taken: 0,
+        }
+    }
+
+    pub(crate) fn run_id(&self) -> u64 {
+        self.run_id
+    }
+
+    pub(crate) fn links_before_run(&self) -> u32 {
+        self.links_before_run
+    }
+
+    pub(crate) fn next(
+        &mut self,
+        session: &mut CpuRuntimeSession,
+        observation_level: RunObservationLevel,
+    ) -> CpuControlledStepV1 {
+        if let Some(reason) = self.budget.resource_stop_reason(
+            self.links_before_run,
+            session.memory.store.link_count() as u32,
+            session.engine.current().len() as u32,
+        ) {
+            session.fail_active_run();
+            return CpuControlledStepV1 {
+                step: None,
+                stop_reason: Some(reason),
+            };
+        }
+
+        if self.steps_taken >= self.budget.max_reactions {
+            session.fail_active_run();
+            return CpuControlledStepV1 {
+                step: None,
+                stop_reason: Some(
+                    CpuRunStopReasonV1::ReactionBudgetExceeded,
+                ),
+            };
+        }
+
+        let step = match session.step(observation_level) {
+            Ok(step) => step,
+            Err(error) => {
+                session.fail_active_run();
+                return CpuControlledStepV1 {
+                    step: None,
+                    stop_reason: Some(
+                        CpuRunStopReasonV1::from_step_error(error),
+                    ),
+                };
+            }
+        };
+        self.steps_taken = self.steps_taken.saturating_add(1);
+
+        if let Some(reason) = self.budget.resource_stop_reason(
+            self.links_before_run,
+            session.memory.store.link_count() as u32,
+            session.engine.current().len() as u32,
+        ) {
+            session.fail_active_run();
+            return CpuControlledStepV1 {
+                step: Some(step),
+                stop_reason: Some(reason),
+            };
+        }
+
+        CpuControlledStepV1 {
+            stop_reason: step
+                .evidence
+                .quiescent
+                .then_some(CpuRunStopReasonV1::Quiescent),
+            step: Some(step),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct CpuBoundedRunV1 {
+    pub(crate) run_id: u64,
+    pub(crate) links_before_run: u32,
+    pub(crate) steps: Vec<CpuSessionStepOutcomeV1>,
+    pub(crate) stop_reason: CpuRunStopReasonV1,
 }
 
 /// Long-lived optimized-CPU execution Session over one loaded A-memory.
@@ -263,7 +440,90 @@ impl CpuRuntimeSession {
         })
     }
 
+    pub(crate) fn begin_budgeted_run(
+        &mut self,
+        initial: Handle,
+        budget: CpuRunBudgetV1,
+    ) -> Result<CpuRunControllerV1, CpuSessionStepError> {
+        let run_id = self.begin_run(initial)?;
+        Ok(CpuRunControllerV1::new(
+            budget,
+            run_id,
+            self.memory.store.link_count() as u32,
+        ))
+    }
+
+    pub(crate) fn run_to_quiescence(
+        &mut self,
+        initial: Handle,
+        budget: CpuRunBudgetV1,
+        observation_level: RunObservationLevel,
+    ) -> Result<CpuBoundedRunV1, CpuSessionStepError> {
+        let mut controller = self.begin_budgeted_run(initial, budget)?;
+        let run_id = controller.run_id();
+        let links_before_run = controller.links_before_run();
+        let mut steps = Vec::new();
+
+        loop {
+            let controlled = controller.next(self, observation_level);
+            if let Some(step) = controlled.step {
+                steps.push(step);
+            }
+            if let Some(stop_reason) = controlled.stop_reason {
+                return Ok(CpuBoundedRunV1 {
+                    run_id,
+                    links_before_run,
+                    steps,
+                    stop_reason,
+                });
+            }
+        }
+    }
+
     pub(crate) fn fail_active_run(&mut self) {
         self.execution_state = CpuSessionState::Failed;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn budget_resource_reasons_are_distinct_and_deterministic() {
+        let budget = CpuRunBudgetV1 {
+            schema_version: CPU_RUN_BUDGET_SCHEMA_VERSION,
+            max_reactions: 8,
+            max_appended_links: 5,
+            max_total_links: 20,
+            max_scope_width: 3,
+        };
+
+        assert_eq!(
+            budget.resource_stop_reason(10, 21, 1),
+            Some(CpuRunStopReasonV1::TotalLinksBudgetExceeded),
+        );
+        assert_eq!(
+            budget.resource_stop_reason(10, 16, 1),
+            Some(CpuRunStopReasonV1::AppendedLinksBudgetExceeded),
+        );
+        assert_eq!(
+            budget.resource_stop_reason(10, 15, 4),
+            Some(CpuRunStopReasonV1::ScopeWidthBudgetExceeded),
+        );
+        assert_eq!(budget.resource_stop_reason(10, 15, 3), None);
+    }
+
+    #[test]
+    fn scenario_budget_policy_is_versioned_and_finite() {
+        let budget = CpuRunBudgetV1::scenario_default(64);
+        assert_eq!(
+            budget.schema_version,
+            CPU_RUN_BUDGET_SCHEMA_VERSION,
+        );
+        assert_eq!(budget.max_reactions, 64);
+        assert!(budget.max_appended_links < u32::MAX);
+        assert!(budget.max_total_links < u32::MAX);
+        assert!(budget.max_scope_width < u32::MAX);
     }
 }
