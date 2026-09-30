@@ -381,3 +381,145 @@ export function verifyLiveStepTrace(reports) {
     finalScope: [...reports.at(-1).evidence.scopeAfter],
   };
 }
+
+
+function requireCompactTopologyColumn(value, label) {
+  if (!Array.isArray(value)) fail(label + " must be an array");
+  return value.map((item, index) =>
+    requireHandle(item, label + "[" + index + "]"));
+}
+
+function compactTopologyColumns(compact) {
+  const topology = requireObject(compact.topology, "compact.topology");
+  const base = requireObject(topology.base, "compact.topology.base");
+  const append = requireObject(topology.append, "compact.topology.append");
+  const baseStarts = requireCompactTopologyColumn(
+    base.starts,
+    "compact.topology.base.starts",
+  );
+  const baseEnds = requireCompactTopologyColumn(
+    base.ends,
+    "compact.topology.base.ends",
+  );
+  const appendStarts = requireCompactTopologyColumn(
+    append.starts,
+    "compact.topology.append.starts",
+  );
+  const appendEnds = requireCompactTopologyColumn(
+    append.ends,
+    "compact.topology.append.ends",
+  );
+  if (baseStarts.length !== baseEnds.length ||
+      appendStarts.length !== appendEnds.length) {
+    fail("compact topology columns have different lengths");
+  }
+  return {
+    starts: baseStarts.concat(appendStarts),
+    ends: baseEnds.concat(appendEnds),
+  };
+}
+
+export function verifyLiveTraceAgainstCompactProof(reports, rawCompactProof) {
+  const live = verifyLiveStepTrace(reports);
+  if (!live.completed) {
+    fail("compact cross-check requires a completed live trace");
+  }
+
+  const compact = requireObject(rawCompactProof, "compact proof");
+  if (compact.schemaVersion !== 2 ||
+      compact.representationId !== "amemory-proof-compact-json" ||
+      compact.representationVersion !== "0.2.0") {
+    fail("unsupported compact proof representation");
+  }
+
+  const execute = requireObject(compact.execute, "compact.execute");
+  if (!Array.isArray(execute.reactions) || execute.reactions.length === 0) {
+    fail("compact execution trace is empty");
+  }
+  if (execute.reactions.length !== reports.length) {
+    fail("live/compact reaction counts differ");
+  }
+  if (requireUint(
+    execute.activeReactionCount,
+    "compact.execute.activeReactionCount",
+  ) !== live.activeReactionCount) {
+    fail("live/compact active reaction counts differ");
+  }
+  if (execute.finalQuiescent !== true) {
+    fail("compact execution is not final-quiescent");
+  }
+
+  for (let index = 0; index < reports.length; index += 1) {
+    const evidence = reports[index].evidence;
+    const recorded = requireObject(
+      execute.reactions[index],
+      "compact.execute.reactions[" + index + "]",
+    );
+    const scopeBefore = requireHandleArray(
+      recorded.scopeBefore,
+      "compact reaction scopeBefore",
+    );
+    const scopeAfter = requireHandleArray(
+      recorded.scopeAfter,
+      "compact reaction scopeAfter",
+    );
+    if (recorded.step !== index ||
+        !sameArray(scopeBefore, evidence.scopeBefore) ||
+        !sameArray(scopeAfter, evidence.scopeAfter) ||
+        recorded.rawRuleMatches !== evidence.rawRuleMatches ||
+        recorded.transitionedMembers !== evidence.transitionedMembers ||
+        recorded.handoffCount !== evidence.handoffCount ||
+        recorded.linksAfter !== evidence.linksAfter ||
+        recorded.quiescent !== evidence.quiescent) {
+      fail("live/compact reaction mismatch at " + index);
+    }
+  }
+
+  const columns = compactTopologyColumns(compact);
+  const result = requireObject(compact.result, "compact.result");
+  const finalEvidence = reports.at(-1).evidence;
+  const linksFinal = requireUint(result.linksFinal, "compact.result.linksFinal");
+  if (columns.starts.length !== linksFinal ||
+      columns.ends.length !== linksFinal ||
+      finalEvidence.linksAfter !== linksFinal) {
+    fail("live/compact final persistent Store size differs");
+  }
+
+  let comparedCreatedLinks = 0;
+  for (const report of reports) {
+    for (const fact of report.evidence.structuralFacts) {
+      if (fact.kind !== "INSTANTIATED") continue;
+      for (const link of fact.createdLinks) {
+        const handle = requireHandle(link.handle, "live created Link handle");
+        if (handle > linksFinal ||
+            columns.starts[handle - 1] !== link.start ||
+            columns.ends[handle - 1] !== link.end) {
+          fail("live created Link L" + handle + " differs from compact topology");
+        }
+        comparedCreatedLinks += 1;
+      }
+    }
+  }
+  if (comparedCreatedLinks !== live.createdLinks) {
+    fail("live/compact created-Link accounting differs");
+  }
+
+  const compactFinalScope = requireHandleArray(
+    execute.reactions.at(-1).scopeAfter,
+    "compact final scope",
+  );
+  if (!sameArray(live.finalScope, compactFinalScope)) {
+    fail("live/compact final Scope differs");
+  }
+
+  return {
+    schemaVersion: TRACE_VERIFIER_SCHEMA_VERSION,
+    traceConsistent: true,
+    compactCrossConsistent: true,
+    reactions: reports.length,
+    activeReactionCount: live.activeReactionCount,
+    comparedCreatedLinks,
+    finalLinks: linksFinal,
+    finalScope: [...live.finalScope],
+  };
+}

@@ -274,6 +274,7 @@ Promise.all([
   {
     verifyLiveReactionEvidence,
     verifyLiveStepTrace,
+    verifyLiveTraceAgainstCompactProof,
   },
 ]) => {
   const w = instance.exports;
@@ -3785,6 +3786,69 @@ Promise.all([
       readInstanceText(instanceA, "proof") !== aProofBefore) {
     throw new Error("B2 instance B overwrote instance A evidence");
   }
+
+  // #244: independently correlate the real Session.step trace with a compact
+  // proof produced for the same deterministic MUX1 inputs.
+  if (w.amemory_i386_lab_instance_run(instanceA, 12, 0, 1, 0) !== 1) {
+    throw new Error("#244 matching compact-proof MUX1 run rejected");
+  }
+  const steppedCompactProof = JSON.parse(
+    readInstanceText(instanceA, "proof")
+  );
+  const steppedCompactSemantic =
+    verifyCompactExecutionProof(steppedCompactProof);
+  const steppedCompactCross = verifyLiveTraceAgainstCompactProof(
+    stepReports,
+    steppedCompactProof
+  );
+  if (steppedCompactSemantic.semanticReplayVerified !== true ||
+      steppedCompactCross.compactCrossConsistent !== true ||
+      steppedCompactCross.reactions !== stepReports.length ||
+      steppedCompactCross.activeReactionCount !== 7 ||
+      steppedCompactCross.comparedCreatedLinks !==
+        liveTraceVerification.createdLinks ||
+      steppedCompactCross.finalLinks !== finalStep.evidence.linksAfter ||
+      (Number(finalStep.result?.fields?.value) >>> 0) !==
+        (steppedCompactProof.result?.decodedValue >>> 0)) {
+    throw new Error(
+      "#244 live trace / compact proof cross-verification mismatch"
+    );
+  }
+
+  const expectCompactCrossReject = (label, mutate) => {
+    const corrupted = JSON.parse(JSON.stringify(steppedCompactProof));
+    mutate(corrupted);
+    let rejected = false;
+    try {
+      verifyLiveTraceAgainstCompactProof(stepReports, corrupted);
+    } catch {
+      rejected = true;
+    }
+    if (!rejected) {
+      throw new Error("#244 compact cross-verifier accepted " + label);
+    }
+  };
+  expectCompactCrossReject("broken reaction", (compact) => {
+    compact.execute.reactions[0].linksAfter += 1;
+  });
+  const liveCreatedLink = stepReports
+    .flatMap((report) => report.evidence.structuralFacts)
+    .filter((fact) => fact.kind === "INSTANTIATED")
+    .flatMap((fact) => fact.createdLinks)[0];
+  if (!liveCreatedLink) {
+    throw new Error("#244 compact cross falsifier needs a created Link");
+  }
+  expectCompactCrossReject("corrupted persistent topology", (compact) => {
+    const baseLength = compact.topology.base.starts.length;
+    const handle = liveCreatedLink.handle;
+    const column = handle <= baseLength
+      ? compact.topology.base.ends
+      : compact.topology.append.ends;
+    const index = handle <= baseLength
+      ? handle - 1
+      : handle - baseLength - 1;
+    column[index] = column[index] === 1 ? 2 : 1;
+  });
   const defaultResultAfterInstances = JSON.stringify(
     readCurrentLabResult("MUX1 default after instance runs", {
       op: 12, a: 1, b: 0, flag: 1,
