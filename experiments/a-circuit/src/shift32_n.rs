@@ -8,7 +8,8 @@ use super::{
     },
     logic_n::{GateSet, LogicProgram},
     proof_n::{
-        execute_to_quiescence, identical_rerun, load_runtime, loaded_handle,
+        execute_session_to_quiescence, execute_to_quiescence,
+        identical_rerun, load_runtime, load_runtime_session, loaded_handle,
         prepare_stage, semantic_source, theory_admissions, visual_snapshot,
         ProofRuntimeMemory, ProofRuntimeSession, WebProofLoadStage,
         WebProofPrepareStage, WebProofResultStage, WebStructuralProof,
@@ -1411,7 +1412,7 @@ fn decode_runtime_shift_effect(
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct Shl32SessionProjection {
+pub(crate) struct Shift32SessionProjection {
     pub(crate) value: u32,
     pub(crate) writeback: u8,
     pub(crate) defined_mask: u32,
@@ -1421,69 +1422,30 @@ pub(crate) struct Shl32SessionProjection {
     pub(crate) result_recursive_wire: String,
 }
 
-pub(crate) fn prepare_shl32_session_program(
+pub(crate) type Shl32SessionProjection = Shift32SessionProjection;
+
+pub(crate) fn prepare_shift32_session_program(
 ) -> Option<WebProofPrepareStage> {
     let mut compiler = FullFixture::new();
     let program = Shift32Program::install(&mut compiler);
 
-    // Static SHIFT program only. Concrete VALUE/COUNT and the invocation
-    // are published after LOAD by CONFIGURE.
+    // One static SHIFT32 Aset supports SHL/SHR/SAR. Concrete operation,
+    // VALUE/COUNT, invocation and initial Scope are CONFIGURE data.
     let prepared_roots = vec![
-        semantic_source(
-            &compiler.store,
-            "function.shift.selected",
-            program.shl,
-        ),
-        semantic_source(
-            &compiler.store,
-            "function.shift.shl",
-            program.shl,
-        ),
-        semantic_source(
-            &compiler.store,
-            "function.shift.shr",
-            program.shr,
-        ),
-        semantic_source(
-            &compiler.store,
-            "function.shift.sar",
-            program.sar,
-        ),
-        semantic_source(
-            &compiler.store,
-            "data.bit.zero",
-            compiler.zero,
-        ),
-        semantic_source(
-            &compiler.store,
-            "data.bit.one",
-            compiler.one,
-        ),
+        semantic_source(&compiler.store, "function.shift.shl", program.shl),
+        semantic_source(&compiler.store, "function.shift.shr", program.shr),
+        semantic_source(&compiler.store, "function.shift.sar", program.sar),
+        semantic_source(&compiler.store, "data.bit.zero", compiler.zero),
+        semantic_source(&compiler.store, "data.bit.one", compiler.one),
         semantic_source(
             &compiler.store,
             "execution.interpreter",
             compiler.interpreter,
         ),
-        semantic_source(
-            &compiler.store,
-            "execution.theory",
-            compiler.theory,
-        ),
-        semantic_source(
-            &compiler.store,
-            "execution.apply",
-            compiler.apply,
-        ),
-        semantic_source(
-            &compiler.store,
-            "context.caller",
-            compiler.k,
-        ),
-        semantic_source(
-            &compiler.store,
-            "result.tag",
-            program.result_tag,
-        ),
+        semantic_source(&compiler.store, "execution.theory", compiler.theory),
+        semantic_source(&compiler.store, "execution.apply", compiler.apply),
+        semantic_source(&compiler.store, "context.caller", compiler.k),
+        semantic_source(&compiler.store, "result.tag", program.result_tag),
         semantic_source(
             &compiler.store,
             "result.flag.set_tag",
@@ -1494,53 +1456,35 @@ pub(crate) fn prepare_shl32_session_program(
             "result.flag.undefined_tag",
             program.schema.undefined_tag,
         ),
-        semantic_source(
-            &compiler.store,
-            "result.flag.cf",
-            program.schema.cf,
-        ),
-        semantic_source(
-            &compiler.store,
-            "result.flag.pf",
-            program.schema.pf,
-        ),
-        semantic_source(
-            &compiler.store,
-            "result.flag.af",
-            program.schema.af,
-        ),
-        semantic_source(
-            &compiler.store,
-            "result.flag.zf",
-            program.schema.zf,
-        ),
-        semantic_source(
-            &compiler.store,
-            "result.flag.sf",
-            program.schema.sf,
-        ),
-        semantic_source(
-            &compiler.store,
-            "result.flag.of",
-            program.schema.of,
-        ),
+        semantic_source(&compiler.store, "result.flag.cf", program.schema.cf),
+        semantic_source(&compiler.store, "result.flag.pf", program.schema.pf),
+        semantic_source(&compiler.store, "result.flag.af", program.schema.af),
+        semantic_source(&compiler.store, "result.flag.zf", program.schema.zf),
+        semantic_source(&compiler.store, "result.flag.sf", program.schema.sf),
+        semantic_source(&compiler.store, "result.flag.of", program.schema.of),
     ];
     let admissions =
         theory_admissions(&compiler.store, compiler.theory)?;
-    Some(prepare_stage(
-        &compiler.store,
-        prepared_roots,
-        admissions,
-    ))
+    Some(prepare_stage(&compiler.store, prepared_roots, admissions))
 }
 
-pub(crate) fn configure_shl32_session(
+fn shift32_function_role(op: u32) -> Option<&'static str> {
+    match op {
+        13 => Some("function.shift.shl"),
+        14 => Some("function.shift.shr"),
+        15 => Some("function.shift.sar"),
+        _ => None,
+    }
+}
+
+pub(crate) fn configure_shift32_session(
     session: &mut ProofRuntimeSession,
     load: &WebProofLoadStage,
+    op: u32,
     value: u32,
     count: u8,
 ) -> Option<(Handle, usize, usize)> {
-    let function = loaded_handle(load, "function.shift.selected")?;
+    let function = loaded_handle(load, shift32_function_role(op)?)?;
     let apply = loaded_handle(load, "execution.apply")?;
     let caller = loaded_handle(load, "context.caller")?;
     let zero = loaded_handle(load, "data.bit.zero")?;
@@ -1548,24 +1492,20 @@ pub(crate) fn configure_shl32_session(
 
     let word = |store: &mut OptimizedLinkStore, width: usize, raw: u32| {
         let bits = (0..width)
-            .map(|bit| {
-                if (raw >> bit) & 1 == 1 { one } else { zero }
-            })
+            .map(|bit| if (raw >> bit) & 1 == 1 { one } else { zero })
             .collect::<Vec<_>>();
         materialize_exact_sequence(store, &bits).ok()
     };
 
     let before = session.memory.store.link_count();
     let value_word = word(&mut session.memory.store, WIDTH, value)?;
-    let count_word =
-        word(&mut session.memory.store, 8, u32::from(count))?;
+    let count_word = word(&mut session.memory.store, 8, u32::from(count))?;
     let args = materialize_exact_sequence(
         &mut session.memory.store,
         &[value_word, count_word],
     )
     .ok()?;
-    let invocation =
-        call(&mut session.memory.store, apply, function, args);
+    let invocation = call(&mut session.memory.store, apply, function, args);
     let initial = session
         .memory
         .store
@@ -1576,10 +1516,10 @@ pub(crate) fn configure_shl32_session(
     Some((initial, before, after))
 }
 
-pub(crate) fn project_shl32_session_result(
+pub(crate) fn project_shift32_session_result(
     session: &ProofRuntimeSession,
     load: &WebProofLoadStage,
-) -> Option<Shl32SessionProjection> {
+) -> Option<Shift32SessionProjection> {
     if session.engine.current().len() != 1 {
         return None;
     }
@@ -1589,8 +1529,7 @@ pub(crate) fn project_shl32_session_result(
     let zero = loaded_handle(load, "data.bit.zero")?;
     let one = loaded_handle(load, "data.bit.one")?;
     let set_tag = loaded_handle(load, "result.flag.set_tag")?;
-    let undefined_tag =
-        loaded_handle(load, "result.flag.undefined_tag")?;
+    let undefined_tag = loaded_handle(load, "result.flag.undefined_tag")?;
     let cf_flag = loaded_handle(load, "result.flag.cf")?;
     let pf_flag = loaded_handle(load, "result.flag.pf")?;
     let af_flag = loaded_handle(load, "result.flag.af")?;
@@ -1626,19 +1565,37 @@ pub(crate) fn project_shl32_session_result(
             (WEB_OF, outcome.of),
         ]);
 
-    Some(Shl32SessionProjection {
+    Some(Shift32SessionProjection {
         value: outcome.value,
         writeback: outcome.writeback,
         defined_mask,
         value_mask,
         undefined_mask,
         preserve_mask,
-        result_recursive_wire: session
-            .memory
-            .store
-            .export_anum(final_link)
-            .ok()?,
+        result_recursive_wire: session.memory.store.export_anum(final_link).ok()?,
     })
+}
+
+// Compatibility facade: SHL32 owns no separate persistent executor.
+pub(crate) fn prepare_shl32_session_program(
+) -> Option<WebProofPrepareStage> {
+    prepare_shift32_session_program()
+}
+
+pub(crate) fn configure_shl32_session(
+    session: &mut ProofRuntimeSession,
+    load: &WebProofLoadStage,
+    value: u32,
+    count: u8,
+) -> Option<(Handle, usize, usize)> {
+    configure_shift32_session(session, load, 13, value, count)
+}
+
+pub(crate) fn project_shl32_session_result(
+    session: &ProofRuntimeSession,
+    load: &WebProofLoadStage,
+) -> Option<Shl32SessionProjection> {
+    project_shift32_session_result(session, load)
 }
 
 pub(crate) fn web_prove_shift32(
@@ -1881,6 +1838,146 @@ pub(crate) fn web_run_shift32(
         steady_link_delta: links_after_second - links_after_first,
         quiescent: 1,
     })
+}
+
+
+#[test]
+fn persistent_shift32_session_four_run_lifecycle_all_ops() {
+    let run_vectors = [
+        (0x8000_0001u32, 1u8),
+        (0x1234_5678u32, 32u8),
+        (0x8000_0001u32, 33u8),
+        (0x8000_0001u32, 1u8),
+    ];
+
+    for (op, kind) in [
+        (13u32, ShiftKind::Shl),
+        (14u32, ShiftKind::Shr),
+        (15u32, ShiftKind::Sar),
+    ] {
+        let prepare = prepare_shift32_session_program()
+            .expect("prepare SHIFT32");
+        let prepared_roles = prepare
+            .semantic_roots
+            .iter()
+            .map(|root| root.role.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+
+        for runtime_role in [
+            "function.shift.selected",
+            "data.value.word",
+            "data.count.word",
+            "invocation.args",
+            "invocation.call",
+            "scope.initial",
+        ] {
+            assert!(
+                !prepared_roles.contains(runtime_role),
+                "op {op}: PREPARE leaked runtime role {runtime_role}",
+            );
+        }
+        for static_role in [
+            "function.shift.shl",
+            "function.shift.shr",
+            "function.shift.sar",
+        ] {
+            assert!(
+                prepared_roles.contains(static_role),
+                "op {op}: static SHIFT32 Aset missing {static_role}",
+            );
+        }
+
+        let (mut session, load) =
+            load_runtime_session(&prepare, 128).expect("load SHIFT32");
+        let memory_id = session.memory.id.clone();
+        let base_link_count = session.base_link_count;
+        let base_carrier = session.memory.store.export_packed_duplets();
+
+        let mut oracle_fixture = FullFixture::new();
+        let oracle_program = Shift32Program::install(&mut oracle_fixture);
+        let oracle_function = function_for(&oracle_program, kind);
+
+        let mut first_projection = None;
+        for (index, (value, count)) in
+            run_vectors.into_iter().enumerate()
+        {
+            let (initial, before, after) = configure_shift32_session(
+                &mut session,
+                &load,
+                op,
+                value,
+                count,
+            )
+            .expect("configure SHIFT32");
+            assert_eq!(session.memory.id, memory_id);
+            assert!(before >= base_link_count);
+            assert!(after >= before);
+
+            if index == 3 {
+                assert_eq!(
+                    after, before,
+                    "op {op}: return-to-first input must reuse canonical configuration Links",
+                );
+            }
+
+            let execute = execute_session_to_quiescence(
+                &mut session,
+                initial,
+                128,
+            )
+            .expect("execute SHIFT32");
+            assert!(execute.final_quiescent);
+            assert_eq!(session.memory.id, memory_id);
+            assert_eq!(session.engine.current().len(), 1);
+
+            let projected = project_shift32_session_result(&session, &load)
+                .expect("project SHIFT32");
+            let expected =
+                expected(&oracle_program, oracle_function, value, count);
+            let (
+                expected_defined,
+                expected_values,
+                expected_undefined,
+                expected_preserve,
+            ) = web_flag_masks([
+                (WEB_CF, expected.cf),
+                (WEB_PF, expected.pf),
+                (WEB_AF, expected.af),
+                (WEB_ZF, expected.zf),
+                (WEB_SF, expected.sf),
+                (WEB_OF, expected.of),
+            ]);
+
+            assert_eq!(
+                execute.active_reaction_count,
+                expected.reactions as u32,
+                "op {op} run {index}: reaction count",
+            );
+            assert_eq!(projected.value, expected.value, "op {op} run {index}");
+            assert_eq!(projected.writeback, expected.writeback);
+            assert_eq!(projected.defined_mask, expected_defined);
+            assert_eq!(projected.value_mask, expected_values);
+            assert_eq!(projected.undefined_mask, expected_undefined);
+            assert_eq!(projected.preserve_mask, expected_preserve);
+
+            let carrier = session.memory.store.export_packed_duplets();
+            assert_eq!(
+                &carrier[..base_link_count],
+                base_carrier.as_slice(),
+                "op {op}: loaded base prefix changed",
+            );
+
+            if index == 0 {
+                first_projection = Some(projected.clone());
+            } else if index == 3 {
+                assert_eq!(
+                    Some(projected),
+                    first_projection,
+                    "op {op}: return-to-first input changed semantic Result",
+                );
+            }
+        }
+    }
 }
 
 
