@@ -136,6 +136,13 @@ impl StructuralRunProfile {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StructuralCreatedLink {
+    pub handle: Handle,
+    pub start: Handle,
+    pub end: Handle,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StructuralTraceEvent {
     DiscoveryComplete {
         active: Handle,
@@ -152,6 +159,9 @@ pub enum StructuralTraceEvent {
         rule: Handle,
         output_bundle_template: Handle,
         grounded_bundle: Handle,
+        /// Exact append-only Store records physically created while grounding
+        /// this output bundle. Persistent carrier Links; not Context.
+        created_links: Vec<StructuralCreatedLink>,
     },
     Published {
         active: Handle,
@@ -1296,6 +1306,9 @@ impl OptimizedStructuralEngine {
                 for image in images {
                     raw_rule_matches = raw_rule_matches.saturating_add(1);
 
+                    let links_before_instantiation = trace
+                        .as_ref()
+                        .map(|_| store.link_count());
                     let instantiation_started =
                         profile.as_ref().map(|_| ProfileTimer::start());
                     let grounded_bundle = instantiate_structural_template_internal(
@@ -1311,12 +1324,37 @@ impl OptimizedStructuralEngine {
                     }
                     if let Some(trace) = trace.as_deref_mut() {
                         let trace_started = ProfileTimer::start();
+                        let links_before_instantiation =
+                            links_before_instantiation
+                                .expect("trace link checkpoint");
+                        let links_after_instantiation = store.link_count();
+                        let created_links = (
+                            links_before_instantiation + 1
+                                ..=links_after_instantiation
+                        )
+                            .map(|raw| {
+                                let handle = Handle::try_from(raw).map_err(
+                                    |_| {
+                                        StructuralError::Store(
+                                            StoreError::CapacityExceeded,
+                                        )
+                                    },
+                                )?;
+                                let (start, end) = store.poles(handle)?;
+                                Ok(StructuralCreatedLink {
+                                    handle,
+                                    start,
+                                    end,
+                                })
+                            })
+                            .collect::<Result<Vec<_>, StructuralError>>()?;
                         trace.events.push(StructuralTraceEvent::Instantiated {
                             active,
                             rule: image.rule,
                             output_bundle_template:
                                 image.output_bundle_template,
                             grounded_bundle,
+                            created_links,
                         });
                         trace.collection_ns += trace_started.elapsed_ns();
                     }
@@ -1910,8 +1948,10 @@ mod tests {
         let profiled_expected =
             profiled_store.ensure_pair(caller, output).unwrap();
 
+        let traced_links_before = traced_store.link_count();
         let (traced_reaction, traced_profile, trace) =
             traced_engine.run_traced(&mut traced_store).unwrap();
+        let traced_links_after = traced_store.link_count();
         let traced_expected =
             traced_store.ensure_pair(caller, output).unwrap();
 
@@ -1968,10 +2008,31 @@ mod tests {
                     rule: traced_rule,
                     output_bundle_template,
                     grounded_bundle,
+                    created_links,
                 } if *traced_active == active
                     && *traced_rule == rule
                     && *output_bundle_template == bundle =>
                 {
+                    let expected_created = (
+                        traced_links_before + 1
+                            ..=traced_links_after
+                    )
+                        .map(|raw| {
+                            let handle = raw as Handle;
+                            let (start, end) =
+                                traced_store.poles(handle).unwrap();
+                            StructuralCreatedLink {
+                                handle,
+                                start,
+                                end,
+                            }
+                        })
+                        .collect::<Vec<_>>();
+                    assert_eq!(
+                        created_links,
+                        &expected_created,
+                        "trace must carry exact handle/start/end records appended by this instantiation",
+                    );
                     Some(*grounded_bundle)
                 }
                 _ => None,
@@ -2044,6 +2105,13 @@ mod tests {
             } if *traced_active == traced_expected
                 && outputs == &vec![traced_expected]
         )));
+        assert!(
+            !quiescent_trace.events.iter().any(|event| matches!(
+                event,
+                StructuralTraceEvent::Instantiated { .. }
+            )),
+            "quiescent preserved members must not fabricate persistent Link deltas",
+        );
         assert!(quiescent_trace.events.iter().any(|event| matches!(
             event,
             StructuralTraceEvent::ScopeCommitted {
@@ -2053,6 +2121,38 @@ mod tests {
                 handoff_count: 0,
             } if old_members == &vec![traced_expected]
                 && next_members == &vec![traced_expected]
+        )));
+
+        // Re-run the same active value after all grounded output topology
+        // already exists. The semantic publication is still real, while the
+        // physical persistent Link delta must now be empty.
+        traced_engine.set_current(&traced_store, &[active]).unwrap();
+        let links_before_reuse = traced_store.link_count();
+        let (reused_reaction, _reused_profile, reused_trace) =
+            traced_engine.run_traced(&mut traced_store).unwrap();
+        assert_eq!(reused_reaction.raw_rule_matches, 1);
+        assert_eq!(traced_store.link_count(), links_before_reuse);
+        assert!(reused_trace.events.iter().any(|event| matches!(
+            event,
+            StructuralTraceEvent::Instantiated {
+                active: traced_active,
+                rule: traced_rule,
+                created_links,
+                ..
+            } if *traced_active == active
+                && *traced_rule == rule
+                && created_links.is_empty()
+        )));
+        assert!(reused_trace.events.iter().any(|event| matches!(
+            event,
+            StructuralTraceEvent::Published {
+                active: traced_active,
+                rule: Some(traced_rule),
+                outputs,
+                preserved: false,
+            } if *traced_active == active
+                && *traced_rule == rule
+                && outputs == &vec![traced_expected]
         )));
     }
 
