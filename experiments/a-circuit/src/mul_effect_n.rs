@@ -9,9 +9,11 @@ use super::{
     logic_n::{install_gate_basis, GateSet},
     mul32_n::Mul32Program,
     proof_n::{
-        execute_to_quiescence, identical_rerun, load_runtime, loaded_handle,
+        execute_session_to_quiescence, execute_to_quiescence,
+        identical_rerun, load_runtime, load_runtime_session, loaded_handle,
         prepare_stage, semantic_source, theory_admissions, visual_snapshot,
-        ProofRuntimeMemory, WebProofResultStage, WebStructuralProof,
+        ProofRuntimeMemory, ProofRuntimeSession, WebProofLoadStage,
+        WebProofPrepareStage, WebProofResultStage, WebStructuralProof,
     },
 };
 use amemory_optimized_cpu_probe::{
@@ -650,6 +652,172 @@ fn decode_runtime_mul_effect(
     ))
 }
 
+
+#[derive(Clone,Debug,PartialEq,Eq)]
+pub(crate) struct MulEffectSessionProjection{
+    pub(crate) lo:u32,
+    pub(crate) hi:u32,
+    pub(crate) defined_mask:u32,
+    pub(crate) value_mask:u32,
+    pub(crate) undefined_mask:u32,
+    pub(crate) preserve_mask:u32,
+    pub(crate) result_recursive_wire:String,
+}
+
+pub(crate) fn prepare_mul_effect_session_program(
+)->Option<WebProofPrepareStage>{
+    let mut compiler=FullFixture::new();
+    let program=MulEffectProgram::install(&mut compiler);
+
+    let prepared_roots=vec![
+        semantic_source(
+            &compiler.store,"function.effect.mul",program.effect,
+        ),
+        semantic_source(
+            &compiler.store,"function.dependency.mul32",program.mul.mul32,
+        ),
+        semantic_source(
+            &compiler.store,"function.dependency.or2",program.gates.or2,
+        ),
+        semantic_source(
+            &compiler.store,"result.dependency.mul32_tag",program.mul.result_tag,
+        ),
+        semantic_source(&compiler.store,"data.bit.zero",compiler.zero),
+        semantic_source(&compiler.store,"data.bit.one",compiler.one),
+        semantic_source(
+            &compiler.store,"execution.interpreter",compiler.interpreter,
+        ),
+        semantic_source(&compiler.store,"execution.theory",compiler.theory),
+        semantic_source(&compiler.store,"execution.apply",compiler.apply),
+        semantic_source(&compiler.store,"context.caller",compiler.k),
+        semantic_source(&compiler.store,"result.tag",program.result_tag),
+        semantic_source(
+            &compiler.store,"result.flag.set_tag",program.schema.set_tag,
+        ),
+        semantic_source(
+            &compiler.store,"result.flag.undefined_tag",
+            program.schema.undefined_tag,
+        ),
+        semantic_source(&compiler.store,"result.flag.cf",program.schema.cf),
+        semantic_source(&compiler.store,"result.flag.pf",program.schema.pf),
+        semantic_source(&compiler.store,"result.flag.af",program.schema.af),
+        semantic_source(&compiler.store,"result.flag.zf",program.schema.zf),
+        semantic_source(&compiler.store,"result.flag.sf",program.schema.sf),
+        semantic_source(&compiler.store,"result.flag.of",program.schema.of),
+    ];
+    let admissions=theory_admissions(&compiler.store,compiler.theory)?;
+    Some(prepare_stage(&compiler.store,prepared_roots,admissions))
+}
+
+pub(crate) fn configure_mul_effect_session(
+    session:&mut ProofRuntimeSession,
+    load:&WebProofLoadStage,
+    a:u32,
+    b:u32,
+)->Option<(Handle,usize,usize)>{
+    let function=loaded_handle(load,"function.effect.mul")?;
+    let apply=loaded_handle(load,"execution.apply")?;
+    let caller=loaded_handle(load,"context.caller")?;
+    let zero=loaded_handle(load,"data.bit.zero")?;
+    let one=loaded_handle(load,"data.bit.one")?;
+
+    let word=|store:&mut OptimizedLinkStore,value:u32|{
+        let bits=(0..WIDTH)
+            .map(|bit|if (value>>bit)&1==1{one}else{zero})
+            .collect::<Vec<_>>();
+        materialize_exact_sequence(store,&bits).ok()
+    };
+
+    let before=session.memory.store.link_count();
+    let aword=word(&mut session.memory.store,a)?;
+    let bword=word(&mut session.memory.store,b)?;
+    let args=materialize_exact_sequence(
+        &mut session.memory.store,&[aword,bword],
+    ).ok()?;
+    let invocation=call(&mut session.memory.store,apply,function,args);
+    let initial=session.memory.store.ensure_pair(caller,invocation).ok()?;
+    let after=session.memory.store.link_count();
+
+    Some((initial,before,after))
+}
+
+pub(crate) fn project_mul_effect_session_result(
+    session:&ProofRuntimeSession,
+    load:&WebProofLoadStage,
+)->Option<MulEffectSessionProjection>{
+    if session.engine.current().len()!=1{return None;}
+
+    let caller=loaded_handle(load,"context.caller")?;
+    let result_tag=loaded_handle(load,"result.tag")?;
+    let zero=loaded_handle(load,"data.bit.zero")?;
+    let one=loaded_handle(load,"data.bit.one")?;
+    let set_tag=loaded_handle(load,"result.flag.set_tag")?;
+    let undefined_tag=loaded_handle(load,"result.flag.undefined_tag")?;
+    let cf_flag=loaded_handle(load,"result.flag.cf")?;
+    let pf_flag=loaded_handle(load,"result.flag.pf")?;
+    let af_flag=loaded_handle(load,"result.flag.af")?;
+    let zf_flag=loaded_handle(load,"result.flag.zf")?;
+    let sf_flag=loaded_handle(load,"result.flag.sf")?;
+    let of_flag=loaded_handle(load,"result.flag.of")?;
+    let final_link=session.engine.current()[0];
+
+    let (actual,_)=decode_runtime_mul_effect(
+        &session.memory,
+        final_link,
+        caller,
+        result_tag,
+        zero,
+        one,
+        set_tag,
+        undefined_tag,
+        cf_flag,
+        pf_flag,
+        af_flag,
+        zf_flag,
+        sf_flag,
+        of_flag,
+        0,
+    )?;
+
+    let mut defined_mask=0u32;
+    let mut value_mask=0u32;
+    let mut undefined_mask=0u32;
+    web_mul_effect_flag(
+        WEB_CF,actual.cf,&mut defined_mask,&mut value_mask,
+        &mut undefined_mask,
+    );
+    web_mul_effect_flag(
+        WEB_PF,actual.pf,&mut defined_mask,&mut value_mask,
+        &mut undefined_mask,
+    );
+    web_mul_effect_flag(
+        WEB_AF,actual.af,&mut defined_mask,&mut value_mask,
+        &mut undefined_mask,
+    );
+    web_mul_effect_flag(
+        WEB_ZF,actual.zf,&mut defined_mask,&mut value_mask,
+        &mut undefined_mask,
+    );
+    web_mul_effect_flag(
+        WEB_SF,actual.sf,&mut defined_mask,&mut value_mask,
+        &mut undefined_mask,
+    );
+    web_mul_effect_flag(
+        WEB_OF,actual.of,&mut defined_mask,&mut value_mask,
+        &mut undefined_mask,
+    );
+
+    Some(MulEffectSessionProjection{
+        lo:actual.product as u32,
+        hi:(actual.product>>32) as u32,
+        defined_mask,
+        value_mask,
+        undefined_mask,
+        preserve_mask:0,
+        result_recursive_wire:session.memory.store.export_anum(final_link).ok()?,
+    })
+}
+
 pub(crate) fn web_prove_mul_effect(
     a: u32,
     b: u32,
@@ -920,6 +1088,126 @@ pub(crate) fn web_run_mul_effect(
     }
 }
 
+
+#[test]
+fn persistent_mul_effect_session_lifecycle(){
+    let run_vectors=[
+        (0u32,0u32),
+        (0x1234_5678u32,1u32),
+        (u32::MAX,2u32),
+        (0x8000_0000u32,2u32),
+        (0u32,0u32),
+    ];
+
+    let prepare=prepare_mul_effect_session_program()
+        .expect("prepare MUL-effect");
+    let prepared_roles=prepare.semantic_roots.iter()
+        .map(|root|root.role.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+
+    for runtime_role in [
+        "data.a.word",
+        "data.b.word",
+        "invocation.args",
+        "invocation.call",
+        "scope.initial",
+    ]{
+        assert!(
+            !prepared_roles.contains(runtime_role),
+            "PREPARE leaked runtime role {runtime_role}",
+        );
+    }
+    for static_role in [
+        "function.effect.mul",
+        "function.dependency.mul32",
+        "function.dependency.or2",
+        "result.dependency.mul32_tag",
+    ]{
+        assert!(
+            prepared_roles.contains(static_role),
+            "static MUL-effect Aset missing {static_role}",
+        );
+    }
+
+    let (mut session,load)=load_runtime_session(&prepare,64)
+        .expect("load MUL-effect");
+    let memory_id=session.memory.id.clone();
+    let base_link_count=session.base_link_count;
+    let base_carrier=session.memory.store.export_packed_duplets();
+
+    let mut first_projection=None;
+    for (index,(a,b)) in run_vectors.into_iter().enumerate(){
+        let (initial,before,after)=configure_mul_effect_session(
+            &mut session,&load,a,b,
+        ).expect("configure MUL-effect");
+        assert_eq!(session.memory.id,memory_id);
+        assert!(before>=base_link_count);
+        assert!(after>=before);
+
+        if index==4{
+            assert_eq!(
+                after,before,
+                "return-to-first must reuse canonical configuration Links",
+            );
+        }
+
+        let expected_reactions=expected_steps(b) as u32;
+        let execute=execute_session_to_quiescence(
+            &mut session,initial,expected_reactions+2,
+        ).expect("execute MUL-effect");
+        assert!(execute.final_quiescent);
+        assert_eq!(session.memory.id,memory_id);
+        assert_eq!(session.engine.current().len(),1);
+        assert_eq!(
+            execute.active_reaction_count,expected_reactions,
+            "run {index}: reaction count",
+        );
+
+        let projected=project_mul_effect_session_result(
+            &session,&load,
+        ).expect("project MUL-effect");
+        let expected=expected(a,b);
+
+        let mut expected_defined=0u32;
+        let mut expected_values=0u32;
+        let mut expected_undefined=0u32;
+        for (flag_mask,state) in [
+            (WEB_CF,expected.cf),
+            (WEB_PF,expected.pf),
+            (WEB_AF,expected.af),
+            (WEB_ZF,expected.zf),
+            (WEB_SF,expected.sf),
+            (WEB_OF,expected.of),
+        ]{
+            web_mul_effect_flag(
+                flag_mask,state,&mut expected_defined,
+                &mut expected_values,&mut expected_undefined,
+            );
+        }
+
+        assert_eq!(projected.lo,expected.product as u32);
+        assert_eq!(projected.hi,(expected.product>>32) as u32);
+        assert_eq!(projected.defined_mask,expected_defined);
+        assert_eq!(projected.value_mask,expected_values);
+        assert_eq!(projected.undefined_mask,expected_undefined);
+        assert_eq!(projected.preserve_mask,0);
+
+        let carrier=session.memory.store.export_packed_duplets();
+        assert_eq!(
+            &carrier[..base_link_count],base_carrier.as_slice(),
+            "loaded base prefix changed",
+        );
+
+        if index==0{
+            first_projection=Some(projected.clone());
+        }else if index==4{
+            assert_eq!(
+                Some(projected),first_projection,
+                "return-to-first changed semantic Result",
+            );
+        }
+    }
+}
 
 #[test]
 #[ignore = "heavy x86 MUL effect suite; dedicated workflow"]
