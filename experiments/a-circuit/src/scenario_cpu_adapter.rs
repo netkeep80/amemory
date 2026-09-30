@@ -35,6 +35,10 @@ use super::{
         web_prove_rotate_carry32,
     },
     scenario::ScenarioProgramProfileV1,
+    unary_arith_n::{
+        configure_unary32_session, prepare_unary32_session_program,
+        project_unary32_session_result, web_prove_unary32,
+    },
     shift32_n::{
         configure_shift32_session, prepare_shift32_session_program,
         project_shift32_session_result, web_prove_shift32,
@@ -84,6 +88,9 @@ enum CpuScenarioImplementation {
     RotateCarry32 {
         op: u32,
     },
+    Unary32 {
+        op: u32,
+    },
 }
 
 pub(crate) struct CpuScenarioAdapter {
@@ -122,6 +129,9 @@ impl CpuScenarioAdapter {
             CpuScenarioImplementation::RotateCarry32 { .. } => {
                 prepare_rotate_carry32_session_program()
             }
+            CpuScenarioImplementation::Unary32 { .. } => {
+                prepare_unary32_session_program()
+            }
         }
     }
 
@@ -154,6 +164,9 @@ impl CpuScenarioAdapter {
                     op, session, load, inputs,
                 )
             }
+            CpuScenarioImplementation::Unary32 { op } => {
+                configure_unary32_from_inputs(op, session, load, inputs)
+            }
         }
     }
 
@@ -181,6 +194,9 @@ impl CpuScenarioAdapter {
             CpuScenarioImplementation::RotateCarry32 { .. } => {
                 project_rotate_carry32_result(session, load)
             }
+            CpuScenarioImplementation::Unary32 { .. } => {
+                project_unary32_result(session, load)
+            }
         }
     }
 
@@ -207,6 +223,9 @@ impl CpuScenarioAdapter {
             CpuScenarioImplementation::RotateCarry32 { op } => {
                 fresh_instance_rotate_carry32_result(op, inputs)
             }
+            CpuScenarioImplementation::Unary32 { op } => {
+                fresh_instance_unary32_result(op, inputs)
+            }
         }
     }
 
@@ -232,6 +251,9 @@ impl CpuScenarioAdapter {
             }
             CpuScenarioImplementation::RotateCarry32 { op } => {
                 scalar_rotate_carry32_result(op, inputs)
+            }
+            CpuScenarioImplementation::Unary32 { op } => {
+                scalar_unary32_result(op, inputs)
             }
         }
     }
@@ -411,6 +433,27 @@ const CPU_SCENARIO_ADAPTERS: &[CpuScenarioAdapter] = &[
         program_id: "rcr32",
         aset_source: "builtin:a-circuit/rotate-carry32/rcr",
         implementation: CpuScenarioImplementation::RotateCarry32 { op: 19 },
+    },
+    CpuScenarioAdapter {
+        profile_id: "a-circuit:unary-inc32",
+        family: "unary-arithmetic-effect",
+        program_id: "inc32",
+        aset_source: "builtin:a-circuit/unary32/inc",
+        implementation: CpuScenarioImplementation::Unary32 { op: 20 },
+    },
+    CpuScenarioAdapter {
+        profile_id: "a-circuit:unary-dec32",
+        family: "unary-arithmetic-effect",
+        program_id: "dec32",
+        aset_source: "builtin:a-circuit/unary32/dec",
+        implementation: CpuScenarioImplementation::Unary32 { op: 21 },
+    },
+    CpuScenarioAdapter {
+        profile_id: "a-circuit:unary-neg32",
+        family: "unary-arithmetic-effect",
+        program_id: "neg32",
+        aset_source: "builtin:a-circuit/unary32/neg",
+        implementation: CpuScenarioImplementation::Unary32 { op: 22 },
     },
     CpuScenarioAdapter {
         profile_id: "a-circuit:mul32",
@@ -932,6 +975,64 @@ fn fresh_instance_rotate_carry32_result(
     ))
 }
 
+fn unary32_input(
+    inputs: &BTreeMap<String, Value>,
+) -> Result<u32, String> {
+    word32_input(inputs, "VALUE")
+}
+
+fn configure_unary32_from_inputs(
+    op: u32,
+    session: &mut ProofRuntimeSession,
+    load: &WebProofLoadStage,
+    inputs: &BTreeMap<String, Value>,
+) -> Result<ConfiguredRun, String> {
+    let value = unary32_input(inputs)?;
+    let (initial, before, after) =
+        configure_unary32_session(session, load, op, value)
+            .ok_or_else(|| format!("Unary32 op {op} configuration failed"))?;
+    Ok(ConfiguredRun {
+        initial,
+        links_before: before as u32,
+        links_after: after as u32,
+    })
+}
+
+fn project_unary32_result(
+    session: &ProofRuntimeSession,
+    load: &WebProofLoadStage,
+) -> Result<ScenarioNormalizedResultV1, String> {
+    let projected = project_unary32_session_result(session, load)
+        .ok_or_else(|| "Unary32 result projection failed".to_owned())?;
+    Ok(effect32_normalized(
+        projected.value,
+        projected.writeback,
+        projected.defined_mask,
+        projected.value_mask,
+        projected.undefined_mask,
+        projected.preserve_mask,
+        projected.result_recursive_wire,
+    ))
+}
+
+fn fresh_instance_unary32_result(
+    op: u32,
+    inputs: &BTreeMap<String, Value>,
+) -> Result<ScenarioNormalizedResultV1, String> {
+    let value = unary32_input(inputs)?;
+    let proof = web_prove_unary32(op, value)
+        .ok_or_else(|| format!("fresh Unary32 op {op} oracle failed"))?;
+    Ok(effect32_normalized(
+        proof.outcome.value,
+        proof.outcome.writeback,
+        proof.outcome.defined_mask,
+        proof.outcome.value_mask,
+        proof.outcome.undefined_mask,
+        proof.outcome.preserve_mask,
+        proof.proof.result.result_anum,
+    ))
+}
+
 fn configure_mul32_from_inputs(
     session: &mut ProofRuntimeSession,
     load: &WebProofLoadStage,
@@ -1386,6 +1487,56 @@ fn scalar_rotate_carry32_result(
             & defined;
     Ok(scalar_effect32_fields(
         result, 1, defined, value_mask, undefined, preserve,
+    ))
+}
+
+fn scalar_unary32_result(
+    op: u32,
+    inputs: &BTreeMap<String, Value>,
+) -> Result<BTreeMap<String, Value>, String> {
+    let input = unary32_input(inputs)?;
+    let (value, cf, af, of) = match op {
+        20 => (
+            input.wrapping_add(1),
+            None,
+            (input & 0x0f) == 0x0f,
+            input == 0x7fff_ffff,
+        ),
+        21 => (
+            input.wrapping_sub(1),
+            None,
+            (input & 0x0f) == 0,
+            input == 0x8000_0000,
+        ),
+        22 => (
+            0u32.wrapping_sub(input),
+            Some(input != 0),
+            (input & 0x0f) != 0,
+            input == 0x8000_0000,
+        ),
+        _ => return Err(format!("unsupported Unary32 op {op}")),
+    };
+
+    let pf = scalar_even_parity_low_byte(value);
+    let zf = value == 0;
+    let sf = value >> 31 != 0;
+    let mut defined =
+        SCALAR_PF | SCALAR_AF | SCALAR_ZF | SCALAR_SF | SCALAR_OF;
+    let mut preserve = SCALAR_CF;
+    let mut value_mask = scalar_status_value_mask(
+        false, pf, af, zf, sf, of,
+    ) & defined;
+
+    if let Some(cf) = cf {
+        defined |= SCALAR_CF;
+        preserve = 0;
+        if cf {
+            value_mask |= SCALAR_CF;
+        }
+    }
+
+    Ok(scalar_effect32_fields(
+        value, 1, defined, value_mask, 0, preserve,
     ))
 }
 
