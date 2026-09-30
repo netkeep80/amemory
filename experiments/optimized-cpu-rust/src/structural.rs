@@ -2093,6 +2093,38 @@ mod tests {
             } if old_members == &vec![traced_expected]
                 && next_members == &vec![traced_expected]
         )));
+
+        // Re-run the same active value after all grounded output topology
+        // already exists. The semantic publication is still real, while the
+        // physical persistent Link delta must now be empty.
+        traced_engine.set_current(&traced_store, &[active]).unwrap();
+        let links_before_reuse = traced_store.link_count();
+        let (reused_reaction, _reused_profile, reused_trace) =
+            traced_engine.run_traced(&mut traced_store).unwrap();
+        assert_eq!(reused_reaction.raw_rule_matches, 1);
+        assert_eq!(traced_store.link_count(), links_before_reuse);
+        assert!(reused_trace.events.iter().any(|event| matches!(
+            event,
+            StructuralTraceEvent::Instantiated {
+                active: traced_active,
+                rule: traced_rule,
+                created_links,
+                ..
+            } if *traced_active == active
+                && *traced_rule == rule
+                && created_links.is_empty()
+        )));
+        assert!(reused_trace.events.iter().any(|event| matches!(
+            event,
+            StructuralTraceEvent::Published {
+                active: traced_active,
+                rule: Some(traced_rule),
+                outputs,
+                preserved: false,
+            } if *traced_active == active
+                && *traced_rule == rule
+                && outputs == &vec![traced_expected]
+        )));
     }
 
     #[test]
