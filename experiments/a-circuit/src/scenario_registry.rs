@@ -20,6 +20,10 @@ const PRESET_SOURCES: &[&str] = &[
     include_str!("../scenarios/or32-lifecycle-v1.json"),
     include_str!("../scenarios/not32-lifecycle-v1.json"),
     include_str!("../scenarios/test32-lifecycle-v1.json"),
+    include_str!("../scenarios/adc32-lifecycle-v1.json"),
+    include_str!("../scenarios/sub32-lifecycle-v1.json"),
+    include_str!("../scenarios/sbb32-lifecycle-v1.json"),
+    include_str!("../scenarios/cmp32-lifecycle-v1.json"),
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -179,7 +183,7 @@ mod tests {
     fn registry_summary_is_derived_from_canonical_mux1_manifest() {
         let registry = load_preset_registry_v1().unwrap();
         assert_eq!(registry.schema_version, 1);
-        assert_eq!(registry.entries.len(), 10);
+        assert_eq!(registry.entries.len(), 14);
 
         let source = preset_manifest_source_by_index_v1(0).unwrap();
         let manifest = parse_and_validate_manifest_v1(source).unwrap();
@@ -290,6 +294,37 @@ mod tests {
         assert_eq!(summary.family, "arithmetic-effect");
         assert_eq!(summary.program_id, "add32");
         assert_eq!(summary.run_count, 4);
+    }
+
+    #[test]
+    fn registry_resolves_complete_arithmetic32_family() {
+        let registry = load_preset_registry_v1().unwrap();
+        for (scenario_id, profile_id, program_id, inputs) in [
+            ("add32-lifecycle", "a-circuit:arithmetic-add32", "add32", 2usize),
+            ("adc32-lifecycle", "a-circuit:arithmetic-adc32", "adc32", 3usize),
+            ("sub32-lifecycle", "a-circuit:arithmetic-sub32", "sub32", 2usize),
+            ("sbb32-lifecycle", "a-circuit:arithmetic-sbb32", "sbb32", 3usize),
+            ("cmp32-lifecycle", "a-circuit:arithmetic-cmp32", "cmp32", 2usize),
+        ] {
+            let source =
+                preset_manifest_source_v1(scenario_id, "1.0.0").unwrap();
+            let manifest = parse_and_validate_manifest_v1(source).unwrap();
+            assert_eq!(manifest.program_profile.profile_id, profile_id);
+            assert_eq!(manifest.program_profile.program_id, program_id);
+            assert_eq!(manifest.input_schema.len(), inputs);
+            assert_eq!(manifest.run_sequence.len(), 4);
+
+            let summary = registry
+                .entries
+                .iter()
+                .find(|entry| entry.scenario_id == scenario_id)
+                .unwrap();
+            assert_eq!(summary.program_profile_id, profile_id);
+            assert_eq!(summary.family, "arithmetic-effect");
+            assert_eq!(summary.program_id, program_id);
+            assert_eq!(summary.run_count, 4);
+            assert_eq!(summary.input_schema.len(), inputs);
+        }
     }
 
     #[test]
