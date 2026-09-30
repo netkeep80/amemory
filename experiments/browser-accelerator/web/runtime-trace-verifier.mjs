@@ -171,6 +171,26 @@ function requireContextId(value, label) {
   return id;
 }
 
+function requireContextIdArray(value, label) {
+  if (value == null) return [];
+  if (!Array.isArray(value)) fail(label + " must be an array");
+  const ids = value.map((item, index) =>
+    requireContextId(item, label + "[" + index + "]"));
+  for (let index = 1; index < ids.length; index += 1) {
+    if (ids[index - 1] >= ids[index]) {
+      fail(label + " must be strictly increasing and duplicate-free");
+    }
+  }
+  return ids;
+}
+
+function addContextParents(target, handle, ids) {
+  const current = target.get(handle) ?? [];
+  const merged = new Set(current);
+  for (const id of ids) merged.add(id);
+  target.set(handle, [...merged].sort((left, right) => left - right));
+}
+
 function verifyContextLifecycle(
   facts,
   matched,
@@ -190,7 +210,9 @@ function verifyContextLifecycle(
       collapsed.length !== rawRuleMatches) {
     fail("Context lifecycle counts disagree with rawRuleMatches");
   }
-  if (rawRuleMatches === 0) return 0;
+  if (rawRuleMatches === 0) {
+    return { count: 0, contexts: [] };
+  }
 
   const states = new Map();
   const groupIds = new Set();
@@ -202,12 +224,15 @@ function verifyContextLifecycle(
         "CONTEXT_CREATED contextGroupId",
       );
       if (states.has(id)) fail("duplicate Context id " + id);
-      if (fact.parentContextId != null) {
-        fail("R1 Context must not fabricate parentContextId");
-      }
+      const parentContextIds = requireContextIdArray(
+        fact.parentContextIds,
+        "CONTEXT_CREATED parentContextIds",
+      );
       states.set(id, {
+        id,
         state: "CREATED",
         groupId,
+        parentContextIds,
         active: requireHandle(fact.active, "CONTEXT_CREATED active"),
         rule: requireHandle(fact.rule, "CONTEXT_CREATED rule"),
         outputBundleTemplate: requireHandle(
@@ -326,7 +351,18 @@ function verifyContextLifecycle(
     fail("Context publication disagrees with persistent publication");
   }
 
-  return states.size;
+  return {
+    count: states.size,
+    contexts: [...states.values()].map((state) => ({
+      id: state.id,
+      groupId: state.groupId,
+      parentContextIds: [...state.parentContextIds],
+      active: state.active,
+      rule: state.rule,
+      groundedBundle: state.groundedBundle,
+      outputs: [...state.outputs],
+    })),
+  };
 }
 
 export function verifyLiveReactionEvidence(rawEvidence) {
@@ -417,7 +453,7 @@ export function verifyLiveReactionEvidence(rawEvidence) {
     requireHandle(fact.active, "INSTANTIATED active") + ":" +
     requireHandle(fact.rule, "INSTANTIATED rule"));
   const activePublished = published.filter((fact) => fact.preserved === false);
-  const contextCount = verifyContextLifecycle(
+  const contextLifecycle = verifyContextLifecycle(
     facts,
     matched,
     instantiated,
@@ -474,7 +510,8 @@ export function verifyLiveReactionEvidence(rawEvidence) {
   return {
     schemaVersion: TRACE_VERIFIER_SCHEMA_VERSION,
     traceConsistent: true,
-    contexts: contextCount,
+    contexts: contextLifecycle.count,
+    contextLineage: contextLifecycle.contexts,
     createdLinks,
     publishedFacts: published.length,
     scopeWidthBefore: scopeBefore.length,
@@ -493,6 +530,10 @@ export function verifyLiveStepTrace(reports) {
   let activeReactionCount = 0;
   let createdLinks = 0;
   let completed = false;
+  let expectedParentsByActive = new Map();
+  const seenContextIds = new Set();
+  let previousContextId = null;
+  let previousContextGroupId = null;
 
   for (let index = 0; index < reports.length; index += 1) {
     const report = requireObject(reports[index], "reports[" + index + "]");
@@ -526,6 +567,65 @@ export function verifyLiveStepTrace(reports) {
         fail("persistent Link-count chain breaks before reaction " + index);
       }
     }
+
+    if (verified.contextLineage.length > 0) {
+      const reactionGroupId = verified.contextLineage[0].groupId;
+      if (previousContextGroupId != null &&
+          reactionGroupId !== previousContextGroupId + 1) {
+        fail("Context group ids are not contiguous across reactions");
+      }
+      for (const context of verified.contextLineage) {
+        if (context.groupId !== reactionGroupId) {
+          fail("one reaction exposed multiple Context groups");
+        }
+        if (seenContextIds.has(context.id)) {
+          fail("Context id was reused inside one execution run");
+        }
+        if (previousContextId != null && context.id !== previousContextId + 1) {
+          fail("Context ids are not contiguous across reactions");
+        }
+        const expectedParents =
+          expectedParentsByActive.get(context.active) ?? [];
+        if (!sameArray(context.parentContextIds, expectedParents)) {
+          fail(
+            "Context parent provenance mismatch for active " +
+            context.active,
+          );
+        }
+        for (const parentContextId of context.parentContextIds) {
+          if (!seenContextIds.has(parentContextId)) {
+            fail("Context references an unseen/future parent");
+          }
+        }
+        seenContextIds.add(context.id);
+        previousContextId = context.id;
+      }
+      previousContextGroupId = reactionGroupId;
+    }
+
+    const nextParentsByActive = new Map();
+    const facts = evidence.structuralFacts;
+    for (const fact of facts) {
+      if (fact.kind === "PUBLISHED" && fact.preserved === true) {
+        const active = requireHandle(fact.active, "preserved active");
+        addContextParents(
+          nextParentsByActive,
+          active,
+          expectedParentsByActive.get(active) ?? [],
+        );
+      }
+    }
+    for (const context of verified.contextLineage) {
+      for (const output of context.outputs) {
+        addContextParents(nextParentsByActive, output, [context.id]);
+      }
+    }
+    for (const active of evidence.scopeAfter) {
+      if (!nextParentsByActive.has(active)) {
+        nextParentsByActive.set(active, []);
+      }
+    }
+    expectedParentsByActive = nextParentsByActive;
 
     if (!verified.quiescent) activeReactionCount += 1;
     if (report.activeReactionCount !== activeReactionCount) {

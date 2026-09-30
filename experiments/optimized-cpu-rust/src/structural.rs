@@ -157,7 +157,7 @@ pub enum StructuralTraceEvent {
     ContextCreated {
         context_id: u32,
         context_group_id: u32,
-        parent_context_id: Option<u32>,
+        parent_context_ids: Vec<u32>,
         active: Handle,
         rule: Handle,
         output_bundle_template: Handle,
@@ -237,7 +237,7 @@ struct StructuralImage {
 struct StructuralContextFrame {
     context_id: u32,
     context_group_id: u32,
-    parent_context_id: Option<u32>,
+    parent_context_ids: Vec<u32>,
     active: Handle,
     image: StructuralImage,
     grounded_bundle: Option<Handle>,
@@ -1124,6 +1124,7 @@ pub struct OptimizedStructuralEngine {
     quiescent: bool,
     metadata_store_instance: Option<u32>,
     rule_metadata_cache: HashMap<Handle, CompiledRuleMetadata>,
+    scope_context_parents: [HashMap<Handle, Vec<u32>>; 2],
     next_context_id: u32,
     next_context_group_id: u32,
 }
@@ -1142,6 +1143,7 @@ impl OptimizedStructuralEngine {
             quiescent: false,
             metadata_store_instance: None,
             rule_metadata_cache: HashMap::new(),
+            scope_context_parents: [HashMap::new(), HashMap::new()],
             next_context_id: 1,
             next_context_group_id: 1,
         }
@@ -1180,6 +1182,10 @@ impl OptimizedStructuralEngine {
             }
         }
         self.scope_banks[self.current_bank] = normalized;
+        // External configuration starts a new lineage root. Context
+        // provenance follows the execution Scope, never persistent Link
+        // handles that may be reused by a later run.
+        self.scope_context_parents[self.current_bank].clear();
         Ok(())
     }
 
@@ -1246,6 +1252,8 @@ impl OptimizedStructuralEngine {
 
         let interpreter = self.interpreter.ok_or(StructuralError::MissingInterpreter)?;
         let old_members = self.scope_banks[self.current_bank].clone();
+        let old_context_parents =
+            self.scope_context_parents[self.current_bank].clone();
 
         if old_members.len() > self.cap {
             return Err(StructuralError::ScopeCapacity {
@@ -1295,7 +1303,10 @@ impl OptimizedStructuralEngine {
                     let context = StructuralContextFrame {
                         context_id,
                         context_group_id,
-                        parent_context_id: None,
+                        parent_context_ids: old_context_parents
+                            .get(&active)
+                            .cloned()
+                            .unwrap_or_default(),
                         active,
                         image,
                         grounded_bundle: None,
@@ -1313,7 +1324,7 @@ impl OptimizedStructuralEngine {
                         trace.events.push(StructuralTraceEvent::ContextCreated {
                             context_id: context.context_id,
                             context_group_id: context.context_group_id,
-                            parent_context_id: context.parent_context_id,
+                            parent_context_ids: context.parent_context_ids.clone(),
                             active: context.active,
                             rule: context.image.rule,
                             output_bundle_template:
@@ -1336,13 +1347,20 @@ impl OptimizedStructuralEngine {
         // succeeds.
         let checkpoint = store.append_checkpoint();
         let cap = self.cap;
-        let publication = (|| -> Result<(Vec<Handle>, u32, u32), StructuralError> {
+        let publication = (|| -> Result<
+            (Vec<Handle>, HashMap<Handle, Vec<u32>>, u32, u32),
+            StructuralError,
+        > {
             let mut next_members = Vec::new();
             let mut next_seen = HashSet::new();
+            let mut next_context_parents = HashMap::<Handle, Vec<u32>>::new();
             let mut raw_rule_matches = 0u32;
             let mut transitioned_members = 0u32;
 
-            let mut add_next = |link: Handle| -> Result<(), StructuralError> {
+            let mut add_next = |
+                link: Handle,
+                parent_context_ids: &[u32],
+            | -> Result<(), StructuralError> {
                 if next_seen.insert(link) {
                     if next_members.len() >= cap {
                         return Err(StructuralError::ScopeCapacity {
@@ -1352,6 +1370,13 @@ impl OptimizedStructuralEngine {
                     }
                     next_members.push(link);
                 }
+                let parents = next_context_parents.entry(link).or_default();
+                for parent_context_id in parent_context_ids {
+                    if !parents.contains(parent_context_id) {
+                        parents.push(*parent_context_id);
+                    }
+                }
+                parents.sort_unstable();
                 Ok(())
             };
 
@@ -1359,7 +1384,11 @@ impl OptimizedStructuralEngine {
                 if contexts.is_empty() {
                     let publication_started =
                         profile.as_ref().map(|_| ProfileTimer::start());
-                    add_next(active)?;
+                    let preserved_parents = old_context_parents
+                        .get(&active)
+                        .map(Vec::as_slice)
+                        .unwrap_or(&[]);
+                    add_next(active, preserved_parents)?;
                     if let Some(profile) = profile.as_deref_mut() {
                         profile.publication_outputs += 1;
                         if let Some(started) = publication_started {
@@ -1451,8 +1480,9 @@ impl OptimizedStructuralEngine {
                     if let Some(profile) = profile.as_deref_mut() {
                         profile.publication_outputs += context.outputs.len() as u64;
                     }
+                    let produced_by = [context.context_id];
                     for successor in context.outputs.iter().copied() {
-                        add_next(successor)?;
+                        add_next(successor, &produced_by)?;
                     }
                     if let Some(profile) = profile.as_deref_mut() {
                         if let Some(started) = publication_started {
@@ -1483,13 +1513,18 @@ impl OptimizedStructuralEngine {
 
             Ok((
                 next_members,
+                next_context_parents,
                 raw_rule_matches,
                 transitioned_members,
             ))
         })();
 
-        let (next_members, raw_rule_matches, transitioned_members) =
-            match publication {
+        let (
+            next_members,
+            next_context_parents,
+            raw_rule_matches,
+            transitioned_members,
+        ) = match publication {
                 Ok(committed) => committed,
                 Err(error) => {
                     store.rollback_append(checkpoint);
@@ -1544,6 +1579,7 @@ impl OptimizedStructuralEngine {
 
         let target_bank = 1usize - self.current_bank;
         self.scope_banks[target_bank] = next_members.clone();
+        self.scope_context_parents[target_bank] = next_context_parents;
         self.current_bank = target_bank;
         self.handoff_count = 1;
         self.quiescent = false;
@@ -2115,7 +2151,7 @@ mod tests {
             StructuralTraceEvent::ContextCreated {
                 context_id: 1,
                 context_group_id: 1,
-                parent_context_id: None,
+                parent_context_ids,
                 active: traced_active,
                 rule: traced_rule,
                 output_bundle_template,
@@ -2123,6 +2159,7 @@ mod tests {
             } if *traced_active == active
                 && *traced_rule == rule
                 && *output_bundle_template == bundle
+                && parent_context_ids.is_empty()
                 && bindings
                     == &vec![StructuralRoleBinding {
                         role,
@@ -2671,8 +2708,10 @@ mod tests {
         let caller = anchors[2];
         let input = anchors[3];
         let output = anchors[4];
+        let final_output = anchors[5];
         let role_a = anchors[30];
         let role_b = anchors[31];
+        let role_c = anchors[32];
 
         let authority_dictionary =
             define_structural_role_dictionary(&mut store, &[]).unwrap();
@@ -2693,6 +2732,25 @@ mod tests {
             let admission = admit_structural_rule(&mut store, theory, rule).unwrap();
             index_structural_rule_trigger(&mut store, trigger_key, admission).unwrap();
         }
+
+        let next_dictionary =
+            define_structural_role_dictionary(&mut store, &[role_c]).unwrap();
+        let next_before = store.ensure_pair(role_c, output).unwrap();
+        let next_after = store.ensure_pair(role_c, final_output).unwrap();
+        let next_bundle =
+            materialize_exact_sequence(&mut store, &[next_after]).unwrap();
+        let next_body = store.ensure_pair(next_before, next_bundle).unwrap();
+        let next_rule =
+            define_structural_rule(&mut store, next_dictionary, next_body).unwrap();
+        let next_admission =
+            admit_structural_rule(&mut store, theory, next_rule).unwrap();
+        let (next_trigger_key, _) = store.poles(output).unwrap();
+        index_structural_rule_trigger(
+            &mut store,
+            next_trigger_key,
+            next_admission,
+        )
+        .unwrap();
 
         let active = store.ensure_pair(caller, input).unwrap();
         let expected = store.ensure_pair(caller, output).unwrap();
@@ -2715,16 +2773,20 @@ mod tests {
                 StructuralTraceEvent::ContextCreated {
                     context_id,
                     context_group_id,
-                    parent_context_id,
+                    parent_context_ids,
                     ..
-                } => Some((*context_id, *context_group_id, *parent_context_id)),
+                } => Some((
+                    *context_id,
+                    *context_group_id,
+                    parent_context_ids.clone(),
+                )),
                 _ => None,
             })
             .collect::<Vec<_>>();
         assert_eq!(
             created_contexts,
-            vec![(1, 1, None), (2, 1, None)],
-            "fan-out siblings need distinct trace-local Context ids in one atomic group",
+            vec![(1, 1, vec![]), (2, 1, vec![])],
+            "fan-out siblings need distinct Context ids in one atomic group",
         );
         let collapsed_contexts = trace
             .events
@@ -2738,6 +2800,26 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(collapsed_contexts, vec![(1, 1), (2, 1)]);
+
+        let (nested_reaction, _nested_profile, nested_trace) =
+            engine.run_traced(&mut store).unwrap();
+        let nested_expected = store.ensure_pair(caller, final_output).unwrap();
+        assert_eq!(nested_reaction.raw_rule_matches, 1);
+        assert_eq!(nested_reaction.transitioned_members, 1);
+        assert_eq!(engine.current(), &[nested_expected]);
+        assert!(nested_trace.events.iter().any(|event| matches!(
+            event,
+            StructuralTraceEvent::ContextCreated {
+                context_id: 3,
+                context_group_id: 2,
+                parent_context_ids,
+                active: nested_active,
+                rule: nested_rule,
+                ..
+            } if *nested_active == expected
+                && *nested_rule == next_rule
+                && parent_context_ids == &vec![1, 2]
+        )));
     }
 
     #[test]
