@@ -1370,7 +1370,7 @@ function render(state) {
 
     '<section class="wb-grid"><div class="wb-card wb-controls"><h3>Сценарий / конструктор</h3>' +
     '<div class="wb-field"><label>Готовый сценарий</label><select id="wb-scenario"' +
-    (openSession ? " disabled" : "") + '>' +
+    (openSession || state.m6Replay ? " disabled" : "") + '>' +
     (state.registry.entries || []).map((entry, i) =>
       '<option value="' + i + '"' + (i === state.scenarioIndex ? " selected" : "") + '>' +
       esc((entry.title || ("Сценарий " + entry.scenarioId)) +
@@ -1378,13 +1378,13 @@ function render(state) {
     '</select><div class="wb-help">' + esc(state.manifest.description || "") + '</div></div>' +
 
     '<div class="wb-mode"><button data-mode="preset" aria-pressed="' + (state.mode === "preset") +
-    '"' + (state.step?.active ? " disabled" : "") +
+    '"' + (state.step?.active || state.m6Replay ? " disabled" : "") +
     '>Готовый</button><button data-mode="manual" aria-pressed="' + (state.mode === "manual") +
-    '"' + (state.step?.active ? " disabled" : "") +
+    '"' + (state.step?.active || state.m6Replay ? " disabled" : "") +
     '>Ручной</button></div>' +
 
     '<div class="wb-field"><label>Готовый запуск</label><select id="wb-preset-run"' +
-    (state.step?.active ? " disabled" : "") + '>' +
+    (state.step?.active || state.m6Replay ? " disabled" : "") + '>' +
     (state.manifest.runSequence || []).map((item, i) =>
       '<option value="' + i + '"' + (i === state.presetIndex ? " selected" : "") + '>' +
       esc("Запуск " + (i + 1) + " · " + (item.runId || ("run-" + (i + 1)))) + '</option>').join("") + '</select></div>' +
@@ -1392,7 +1392,7 @@ function render(state) {
     (state.manifest.inputSchema || []).map((field) => {
       const value = state.inputs[field.key];
       const disabled =
-        state.mode === "preset" || state.step?.active ? " disabled" : "";
+        state.mode === "preset" || state.step?.active || state.m6Replay ? " disabled" : "";
       const control = String(field.type || "").toUpperCase() === "BIT"
         ? '<select data-input-key="' + esc(field.key) + '"' + disabled + '><option value="0"' +
           (Number(value) === 0 ? " selected" : "") + '>0</option><option value="1"' +
@@ -1402,7 +1402,7 @@ function render(state) {
         '</label>' + control + '<div class="wb-help">' + esc(field.description || "") + '</div></div>';
     }).join("") +
 
-    '<div class="wb-field"><label>Исполнитель</label><select id="wb-backend"' + (openSession ? " disabled" : "") + '>' +
+    '<div class="wb-field"><label>Исполнитель</label><select id="wb-backend"' + (openSession || state.m6Replay ? " disabled" : "") + '>' +
     BACKENDS.map(([id, label]) => {
       const supported = (state.manifest.supportedИсполнительs || []).includes(id);
       return '<option value="' + id + '"' + (id === state.backend ? " selected" : "") +
@@ -1418,7 +1418,7 @@ function render(state) {
     '>Начать по шагам</button><button id="wb-m6-replay"' +
       (state.loading || state.step?.active ? " disabled" : "") +
     '>M6A · реальная память по шагам</button><button id="wb-close"' +
-      (!openSession || state.loading ? " disabled" : "") +
+      ((!openSession && !state.m6Replay) || state.loading ? " disabled" : "") +
     '>Закрыть</button></div>' +
     '<div class="wb-help">Готовый и ручной режим используют один и тот же манифест сценария. Изменение входов сохраняет эту же сессию и уже загруженную апамять.</div>' +
     (state.error ? '<p class="wb-error">' + esc(state.error) + '</p>' : '') + '</div>' +
