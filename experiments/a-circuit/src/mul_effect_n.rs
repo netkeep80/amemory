@@ -9,11 +9,23 @@ use super::{
     logic_n::{install_gate_basis, GateSet},
     mul32_n::Mul32Program,
     proof_n::{
-        execute_session_to_quiescence, execute_to_quiescence,
-        identical_rerun, load_runtime, load_runtime_session, loaded_handle,
-        prepare_stage, semantic_source, theory_admissions, visual_snapshot,
-        ProofRuntimeMemory, ProofRuntimeSession, WebProofLoadStage,
-        WebProofPrepareStage, WebProofResultStage, WebStructuralProof,
+        execute_session_to_quiescence,
+        execute_to_quiescence,
+        identical_rerun,
+        load_runtime,
+        load_runtime_session,
+        loaded_handle,
+        prepare_stage,
+        semantic_source,
+        theory_admissions,
+        visual_snapshot,
+        WebProofLoadStage,
+        WebProofPrepareStage,
+        WebProofResultStage,
+        WebStructuralProof,
+    },
+    runtime_session::{
+        CpuMemoryInstance, CpuRuntimeSession
     },
 };
 use amemory_optimized_cpu_probe::{
@@ -526,7 +538,7 @@ fn runtime_mul_effect_bit(
 }
 
 fn runtime_mul_effect_word(
-    memory: &ProofRuntimeMemory,
+    memory: &CpuMemoryInstance,
     word: Handle,
     zero: Handle,
     one: Handle,
@@ -544,7 +556,7 @@ fn runtime_mul_effect_word(
 }
 
 fn runtime_mul_effect_wide(
-    memory: &ProofRuntimeMemory,
+    memory: &CpuMemoryInstance,
     wide: Handle,
     zero: Handle,
     one: Handle,
@@ -559,7 +571,7 @@ fn runtime_mul_effect_wide(
 }
 
 fn runtime_mul_effect_action(
-    memory: &ProofRuntimeMemory,
+    memory: &CpuMemoryInstance,
     action: Handle,
     set_tag: Handle,
     undefined_tag: Handle,
@@ -589,7 +601,7 @@ fn runtime_mul_effect_action(
 
 #[allow(clippy::too_many_arguments)]
 fn decode_runtime_mul_effect(
-    memory: &ProofRuntimeMemory,
+    memory: &CpuMemoryInstance,
     final_link: Handle,
     caller: Handle,
     result_tag: Handle,
@@ -710,7 +722,7 @@ pub(crate) fn prepare_mul_effect_session_program(
 }
 
 pub(crate) fn configure_mul_effect_session(
-    session:&mut ProofRuntimeSession,
+    session:&mut CpuRuntimeSession,
     load:&WebProofLoadStage,
     a:u32,
     b:u32,
@@ -742,7 +754,7 @@ pub(crate) fn configure_mul_effect_session(
 }
 
 pub(crate) fn project_mul_effect_session_result(
-    session:&ProofRuntimeSession,
+    session:&CpuRuntimeSession,
     load:&WebProofLoadStage,
 )->Option<MulEffectSessionProjection>{
     if session.engine.current().len()!=1{return None;}
