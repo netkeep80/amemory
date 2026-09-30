@@ -150,6 +150,9 @@ for (const required of [
   "Открыть апамять",
   "Выполнить полностью",
   "Начать по шагам",
+  "M6A · реальная память по шагам",
+  "TRACE_CONSISTENT · COMPACT_CROSS_CONSISTENT",
+  "runM6EvidenceReplay",
   "Назад",
   "Вперёд",
   "Воспроизвести",
@@ -284,6 +287,7 @@ Promise.all([
     workbenchStepSnapshot,
     workbenchTraceFrames,
     workbenchPlayerSnapshot,
+    workbenchEvidenceReports,
   },
   {
     verifyLiveReactionEvidence,
@@ -3281,7 +3285,11 @@ Promise.all([
   }
   const memoryPayloadM6a =
     readCurrentWitnessPayload("M6a", "memory-radix");
-  if (memoryPayloadM6a.block !== "M6A_RADIX_PAGE" ||
+  if (memoryPayloadM6a.traceSource !==
+        "ProofRuntimeSession.step(TRACE)" ||
+      !Array.isArray(memoryPayloadM6a.trace) ||
+      memoryPayloadM6a.trace.length <= 40 ||
+      memoryPayloadM6a.block !== "M6A_RADIX_PAGE" ||
       (memoryPayloadM6a.address >>> 0) !== 0x25 ||
       (memoryPayloadM6a.offset >>> 0) !== 0x25 ||
       (memoryPayloadM6a.write >>> 0) !== 0xab ||
@@ -3306,8 +3314,10 @@ Promise.all([
   }
   const memoryPayloadM6aFinal =
     readCurrentWitnessPayload("M6a rerun", "memory-radix");
+  const memoryCompactProof =
+    readCurrentCompactProof("M6A_RADIX_PAGE");
   const memoryProof =
-    inflateCompactProof(readCurrentCompactProof("M6A_RADIX_PAGE"));
+    inflateCompactProof(memoryCompactProof);
   if (memoryProof.block !== "M6A_RADIX_PAGE" ||
       memoryProof.schemaVersion !== 4 ||
       !memoryProof.result.oracleMatches ||
@@ -3316,6 +3326,78 @@ Promise.all([
       memoryProof.result.identicalRerunLinkDelta !== 0) {
     throw new Error("M6a compact structural proof result mismatch");
   }
+  const m6FinalResult = {
+    block: memoryPayloadM6aFinal.block,
+    value: memoryPayloadM6aFinal.after >>> 0,
+    compactProofValue:
+      memoryCompactProof.result.decodedValue >>> 0,
+  };
+  const m6ReplayReports = workbenchEvidenceReports(
+    memoryPayloadM6aFinal.trace,
+    m6FinalResult
+  );
+  const m6LiveVerification =
+    verifyLiveStepTrace(m6ReplayReports);
+  const m6CrossVerification =
+    verifyLiveTraceAgainstCompactProof(
+      m6ReplayReports,
+      memoryCompactProof
+    );
+  const m6SemanticVerification =
+    verifyCompactExecutionProof(memoryCompactProof);
+  if (m6LiveVerification.traceConsistent !== true ||
+      m6LiveVerification.completed !== true ||
+      m6LiveVerification.activeReactionCount <= 40 ||
+      m6CrossVerification.compactCrossConsistent !== true ||
+      m6SemanticVerification.semanticReplayVerified !== true ||
+      m6FinalResult.value !== m6FinalResult.compactProofValue) {
+    throw new Error(
+      "#246 M6 real trace / compact proof verification mismatch"
+    );
+  }
+
+  const m6PlayerState = {
+    active: false,
+    begin: {
+      sessionRunId: m6ReplayReports[0].sessionRunId,
+      evidenceSessionId:
+        m6ReplayReports[0].evidence.sessionId,
+    },
+    reports: m6ReplayReports,
+    player: {
+      mode: "reaction",
+      cursor: m6ReplayReports.length - 1,
+      playing: false,
+      speedMs: 800,
+      overlays: {
+        persistent: true,
+        context: true,
+        result: true,
+      },
+    },
+  };
+  const m6ReactionFrames =
+    workbenchTraceFrames(m6PlayerState, "reaction");
+  const m6ContextFrames =
+    workbenchTraceFrames(m6PlayerState, "context");
+  const m6PlayerFinal =
+    workbenchPlayerSnapshot(m6PlayerState).frame;
+  if (m6ReactionFrames.length !== m6ReplayReports.length ||
+      m6ContextFrames.length <= m6ReactionFrames.length ||
+      !m6ContextFrames.some(
+        (frame) => frame.kind === "CONTEXT_CREATED"
+      ) ||
+      !m6ContextFrames.some(
+        (frame) => frame.kind === "CONTEXT_COLLAPSED"
+      ) ||
+      m6PlayerFinal?.completed !== true ||
+      (m6PlayerFinal?.result?.value >>> 0) !==
+        (memoryCompactProof.result.decodedValue >>> 0)) {
+    throw new Error(
+      "#246 M6 Workbench player/final-result acceptance mismatch"
+    );
+  }
+
   const memoryProofId = memoryProof.load.memoryInstanceId;
   if (!memoryProofId ||
       memoryProof.execute.memoryInstanceId !== memoryProofId ||

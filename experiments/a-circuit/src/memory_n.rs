@@ -3,8 +3,9 @@ use super::{
         call, define_bundle_rule, index_rule_for, Fixture as FullFixture,
     },
     proof_n::{
-        execute_to_quiescence, identical_rerun, load_runtime, loaded_handle,
-        prepare_stage, semantic_source, theory_admissions, visual_snapshot,
+        execute_session_traced_to_quiescence, identical_rerun,
+        load_runtime_session, loaded_handle, prepare_stage, semantic_source,
+        theory_admissions, visual_snapshot, SessionReactionEvidenceV1,
         WebProofResultStage, WebStructuralProof,
     },
 };
@@ -1301,6 +1302,7 @@ pub(crate) struct WebRadixMemoryOutcome {
 pub(crate) struct WebRadixMemoryExecution {
     pub(crate) outcome: WebRadixMemoryOutcome,
     pub(crate) proof: WebStructuralProof,
+    pub(crate) trace: Vec<SessionReactionEvidenceV1>,
 }
 
 pub(crate) fn web_prove_radix_memory(
@@ -1398,10 +1400,9 @@ pub(crate) fn web_prove_radix_memory(
         theory_admissions(&compiler.store, compiler.theory)?;
     let prepare =
         prepare_stage(&compiler.store, prepared_roots, admissions);
-    let (mut memory, load) = load_runtime(&prepare)?;
+    let (mut session, load) =
+        load_runtime_session(&prepare, 128)?;
 
-    let interpreter =
-        loaded_handle(&load, "execution.interpreter")?;
     let initial = loaded_handle(&load, "scope.initial")?;
     let expected_old_root =
         loaded_handle(&load, "memory.zero_root")?;
@@ -1412,29 +1413,27 @@ pub(crate) fn web_prove_radix_memory(
     let result_context =
         loaded_handle(&load, "context.result")?;
 
-    let (mut engine, execute) = execute_to_quiescence(
-        &mut memory,
-        interpreter,
+    let (execute, trace) = execute_session_traced_to_quiescence(
+        &mut session,
         initial,
-        128,
         96,
     )?;
-    if engine.current().len() != 1 {
+    if session.engine.current().len() != 1 {
         return None;
     }
 
-    let final_link = engine.current()[0];
-    let (caller, envelope) = memory.store.poles(final_link).ok()?;
+    let final_link = session.engine.current()[0];
+    let (caller, envelope) = session.memory.store.poles(final_link).ok()?;
     if caller != result_context {
         return None;
     }
     let (tag, result_sequence) =
-        memory.store.poles(envelope).ok()?;
+        session.memory.store.poles(envelope).ok()?;
     if tag != result_tag {
         return None;
     }
     let values =
-        read_exact_sequence(&memory.store, result_sequence).ok()?;
+        read_exact_sequence(&session.memory.store, result_sequence).ok()?;
     if values.len() != 5 {
         return None;
     }
@@ -1445,34 +1444,35 @@ pub(crate) fn web_prove_radix_memory(
     let after_byte = values[3];
     let old_after_byte = values[4];
     if old_root != expected_old_root
-        || !memory.store.is_valid(old_root)
-        || !memory.store.is_valid(new_root)
+        || !session.memory.store.is_valid(old_root)
+        || !session.memory.store.is_valid(new_root)
     {
         return None;
     }
 
     let before_value =
-        decode_word8_store(&memory.store, zero, one, before_byte)?;
+        decode_word8_store(&session.memory.store, zero, one, before_byte)?;
     let after_value =
-        decode_word8_store(&memory.store, zero, one, after_byte)?;
+        decode_word8_store(&session.memory.store, zero, one, after_byte)?;
     let old_after_value =
-        decode_word8_store(&memory.store, zero, one, old_after_byte)?;
+        decode_word8_store(&session.memory.store, zero, one, old_after_byte)?;
     let oracle_matches = before_value == 0
         && after_value == byte_value
         && old_after_value == 0;
 
     let result_recursive_wire =
-        memory.store.export_anum(final_link).ok()?;
+        session.memory.store.export_anum(final_link).ok()?;
     let result_sequence_anum =
-        memory.store.export_anum(result_sequence).ok()?;
+        session.memory.store.export_anum(result_sequence).ok()?;
     let identical_rerun_link_delta = identical_rerun(
-        &mut memory,
-        &mut engine,
+        &mut session.memory,
+        &mut session.engine,
         initial,
         &result_recursive_wire,
         96,
     )?;
-    let visual_links = visual_snapshot(&memory, &load.semantic_roots);
+    let visual_links =
+        visual_snapshot(&session.memory, &load.semantic_roots);
 
     let proof = WebStructuralProof {
         schema_version: 4,
@@ -1481,7 +1481,7 @@ pub(crate) fn web_prove_radix_memory(
         load,
         execute,
         result: WebProofResultStage {
-            memory_instance_id: memory.id.clone(),
+            memory_instance_id: session.memory.id.clone(),
             result_anum: result_recursive_wire,
             result_sequence_anum,
             decoded_value: u32::from(after_value),
@@ -1489,7 +1489,7 @@ pub(crate) fn web_prove_radix_memory(
             oracle_value: u32::from(byte_value),
             oracle_value_hi: Some(0),
             oracle_matches,
-            links_final: memory.store.link_count() as u32,
+            links_final: session.memory.store.link_count() as u32,
             identical_rerun_link_delta,
             visual_links,
         },
@@ -1511,6 +1511,7 @@ pub(crate) fn web_prove_radix_memory(
             quiescent: u8::from(proof.execute.final_quiescent),
         },
         proof,
+        trace,
     })
 }
 

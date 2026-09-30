@@ -12,14 +12,30 @@ import {
   loadScenarioPresetManifestByIndex,
   refreshScenarioPresetRegistry,
 } from "./scenario-presets.mjs";
+import { collectBrowserProof } from "./i386-proof-transport.mjs";
+import { readJsonAbi } from "./i386-wasm-json.mjs";
 import { recursiveStructureHtml } from "./proof-view.mjs";
-import { PROOF_VERIFICATION_PROFILE_ID } from "./proof-verifier.mjs";
+import {
+  PROOF_VERIFICATION_PROFILE_ID,
+  verifyCompactExecutionProof,
+} from "./proof-verifier.mjs";
+import {
+  verifyLiveStepTrace,
+  verifyLiveTraceAgainstCompactProof,
+} from "./runtime-trace-verifier.mjs";
 
 const BACKENDS = [
   ["optimized-cpu", "CPU · оптимизированный"],
   ["webgpu", "WebGPU"],
   ["linksdb", "LinksDB"],
 ];
+
+const LAB_RESULT_ABI = Object.freeze({
+  available: "amemory_i386_lab_result_available",
+  length: "amemory_i386_lab_result_json_len",
+  pointer: "amemory_i386_lab_result_json_ptr",
+  byte: "amemory_i386_lab_result_json_byte",
+});
 
 const STAGE_LABELS = Object.freeze({
   PREPARE: "Подготовка",
@@ -219,6 +235,28 @@ function reactionPersistentFacts(evidence) {
         fact.kind === "PUBLISHED" && fact.preserved === false)
       .flatMap((fact) => Array.isArray(fact.outputs) ? fact.outputs : []),
   };
+}
+
+
+export function workbenchEvidenceReports(trace, finalResult) {
+  if (!Array.isArray(trace) || trace.length === 0) {
+    throw new Error("Пустая трасса evidence");
+  }
+  let activeReactionCount = 0;
+  return trace.map((rawEvidence, index) => {
+    const evidence = clone(rawEvidence);
+    if (evidence.quiescent !== true) activeReactionCount += 1;
+    const completed =
+      index === trace.length - 1 && evidence.quiescent === true;
+    return {
+      sessionRunId: evidence.runId,
+      activeReactionCount,
+      completed,
+      evidence,
+      result: completed ? clone(finalResult) : null,
+      assertionResults: [],
+    };
+  });
 }
 
 export function workbenchTraceFrames(stepState, mode = "reaction") {
@@ -830,6 +868,13 @@ async function wasm() {
     "amemory_scenario_live_step_begin_json",
     "amemory_scenario_live_step_json",
     "amemory_scenario_live_close",
+    "amemory_i386_memory_run",
+    "amemory_i386_lab_result_available",
+    "amemory_i386_lab_result_json_len",
+    "amemory_i386_lab_result_json_byte",
+    "amemory_i386_lab_compact_proof_available",
+    "amemory_i386_lab_compact_proof_json_len",
+    "amemory_i386_lab_compact_proof_json_byte",
   ]) {
     if (typeof w[name] !== "function") throw new Error("В WASM отсутствует функция ABI лаборатории: " + name);
   }
@@ -864,6 +909,7 @@ function loadManifest(state, index) {
   state.session = null;
   state.run = null;
   state.step = null;
+  state.m6Replay = null;
   state.history = null;
   state.error = null;
   presetInputs(state);
@@ -883,6 +929,7 @@ async function open(state) {
     state.session = opened.status;
     state.run = null;
     state.step = null;
+    state.m6Replay = null;
     const cap = readScenarioTransportLimits(state.wasm).liveObserver;
     const policy = setScenarioLiveRetentionPolicy(state.wasm, {
       retentionMode: "RING",
@@ -911,6 +958,7 @@ async function execute(state) {
     if (!result.ok) throw new Error(result.error && result.error.message || JSON.stringify(result.error));
     state.session = result.payload.status;
     state.run = result.payload.run;
+    state.m6Replay = null;
     await history(state);
   } catch (error) {
     state.error = "Ошибка исполнения: " + errorText(error);
@@ -971,12 +1019,108 @@ async function stepOnce(state) {
   state.loading = false; render(state);
 }
 
+
+async function runM6EvidenceReplay(state) {
+  stopWorkbenchPlayer(state);
+  state.loading = true;
+  state.error = null;
+  render(state);
+  try {
+    if (state.session) {
+      closeScenarioLiveSession(state.wasm);
+      state.session = null;
+      state.history = null;
+    }
+
+    if (state.wasm.amemory_i386_memory_run(0x25, 0xab) !== 1) {
+      throw new Error("реальный M6A_RADIX_PAGE запуск отклонён");
+    }
+
+    const envelope = readJsonAbi(
+      state.wasm,
+      LAB_RESULT_ABI,
+      "M6A witness result",
+    );
+    const payload = envelope?.payload;
+    if (envelope?.witnessKind !== "memory-radix" ||
+        payload?.block !== "M6A_RADIX_PAGE" ||
+        payload?.traceSource !== "ProofRuntimeSession.step(TRACE)" ||
+        !Array.isArray(payload?.trace) ||
+        payload.trace.length === 0) {
+      throw new Error("M6A не вернул каноническую runtime trace");
+    }
+
+    const collected = collectBrowserProof(state.wasm);
+    const compactProof = collected.compactProof;
+    if (!compactProof) {
+      throw new Error("M6A не вернул compact-proof");
+    }
+
+    const finalResult = {
+      block: payload.block,
+      value: Number(payload.after) >>> 0,
+      compactProofValue: Number(compactProof.result?.decodedValue) >>> 0,
+    };
+    const reports = workbenchEvidenceReports(payload.trace, finalResult);
+    const liveVerification = verifyLiveStepTrace(reports);
+    const crossVerification =
+      verifyLiveTraceAgainstCompactProof(reports, compactProof);
+    const compactVerification =
+      verifyCompactExecutionProof(compactProof);
+
+    if (liveVerification.traceConsistent !== true ||
+        liveVerification.completed !== true ||
+        crossVerification.compactCrossConsistent !== true ||
+        compactVerification.semanticReplayVerified !== true ||
+        finalResult.value !== finalResult.compactProofValue) {
+      throw new Error(
+        "M6A trace/result не прошли независимую проверку против compact-proof",
+      );
+    }
+
+    state.run = null;
+    state.m6Replay = {
+      payload,
+      compactProof,
+      liveVerification,
+      crossVerification,
+      compactVerification,
+    };
+    state.step = {
+      active: false,
+      begin: {
+        sessionRunId: reports[0].sessionRunId,
+        evidenceSessionId: reports[0].evidence.sessionId,
+        sourceLabel: "M6A_RADIX_PAGE · real TRACE",
+        linksBeforeConfigure: reports[0].evidence.linksBefore,
+        linksAfterConfigure: reports[0].evidence.linksBefore,
+      },
+      reports,
+      player: {
+        ...defaultWorkbenchPlayer(),
+        mode: "reaction",
+        cursor: 0,
+      },
+    };
+    state.level = "proof";
+    state.stage = "EVIDENCE";
+    state.tab = "proof";
+  } catch (error) {
+    state.step = null;
+    state.m6Replay = null;
+    state.error = "Не удалось воспроизвести M6A: " + errorText(error);
+  }
+  state.loading = false;
+  render(state);
+}
+
 function close(state) {
   stopWorkbenchPlayer(state);
   if (state.session) closeScenarioLiveSession(state.wasm);
   state.session = null;
   state.run = null;
   state.step = null;
+  state.m6Replay = null;
   state.history = null;
   state.error = null;
   render(state);
@@ -1198,7 +1342,12 @@ function render(state) {
     '<span class="wb-chip">v' + esc(state.build.version) + '</span>' +
     '<span class="wb-chip" title="' + esc(state.build.sha) + '">SHA ' + esc(compact(state.build.sha)) + '</span>' +
     '<span class="wb-chip">исполнитель ' + esc(state.backend) + '</span>' +
-    '<span class="wb-chip">сессия ' + esc(compact(status && status.sessionId)) + '</span>' +
+    '<span class="wb-chip">сессия ' +
+      esc(compact(
+        status?.sessionId ??
+        state.step?.begin?.evidenceSessionId ??
+        null
+      )) + '</span>' +
     '<span class="wb-chip">запуск ' +
       esc(run?.sessionRunId ?? stepSnapshot.sessionRunId ?? 0) +
       '</span>' +
@@ -1266,7 +1415,9 @@ function render(state) {
       (!openSession || state.loading || state.step?.active ? " disabled" : "") +
     '>Выполнить полностью</button><button id="wb-step-start"' +
       (!openSession || state.loading || state.step?.active ? " disabled" : "") +
-    '>Начать по шагам</button><button id="wb-close"' +
+    '>Начать по шагам</button><button id="wb-m6-replay"' +
+      (state.loading || state.step?.active ? " disabled" : "") +
+    '>M6A · реальная память по шагам</button><button id="wb-close"' +
       (!openSession || state.loading ? " disabled" : "") +
     '>Закрыть</button></div>' +
     '<div class="wb-help">Готовый и ручной режим используют один и тот же манифест сценария. Изменение входов сохраняет эту же сессию и уже загруженную апамять.</div>' +
@@ -1279,13 +1430,16 @@ function render(state) {
     '</strong></div>' +
     '<div class="wb-simple-item"><small>Входы</small><code>' + esc(JSON.stringify(state.inputs)) + '</code></div>' +
     '<div class="wb-simple-item"><small>Текущее состояние</small><strong>' +
-      esc(!status
-        ? "апамять закрыта"
-        : state.step?.active
-          ? "пошаговое исполнение · реакция " + stepSnapshot.reactionCount
-          : run
-            ? "запуск №" + run.sessionRunId + " завершён"
-            : "загружено один раз · готово к выполнению") +
+      esc(!status && state.m6Replay
+        ? "M6A evidence · " + stepSnapshot.reactionCount +
+          " реальных реакций в одной A-memory"
+        : !status
+          ? "апамять закрыта"
+          : state.step?.active
+            ? "пошаговое исполнение · реакция " + stepSnapshot.reactionCount
+            : run
+              ? "запуск №" + run.sessionRunId + " завершён"
+              : "загружено один раз · готово к выполнению") +
     '</strong></div></div>' +
     (level === "simple" ? "" :
       '<div class="wb-memory">' +
@@ -1297,6 +1451,13 @@ function render(state) {
       '<div class="wb-metric"><small>Подготовка / загрузка / запуски</small><strong>' + esc(status && status.prepareCount || 0) +
       " / " + esc(status && status.loadCount || 0) + " / " + esc(status && status.completedRuns || 0) + '</strong></div>' +
       '</div>') +
+    (state.m6Replay
+      ? '<div class="wb-help"><strong>M6A проверен:</strong> ' +
+        'TRACE_CONSISTENT · COMPACT_CROSS_CONSISTENT · ' +
+        'SEMANTIC_REPLAY_VERIFIED · final value=' +
+        esc(state.m6Replay.payload.after) + ' = compact decodedValue=' +
+        esc(state.m6Replay.compactProof.result.decodedValue) + '</div>'
+      : '') +
     (state.step ? workbenchPlayerHtml(state.step) : '') +
     (state.step
       ? '<div class="wb-help">Scope показан только из runtime ReactionEvidence. UI не передаёт Scope обратно в исполнитель.</div>'
@@ -1373,6 +1534,9 @@ function render(state) {
     syncInputs(state);
     void beginStep(state);
   });
+  root.querySelector("#wb-m6-replay")?.addEventListener("click", () => {
+    void runM6EvidenceReplay(state);
+  });
   root.querySelector("#wb-step-next")?.addEventListener("click", () => {
     void advanceWorkbenchPlayer(state);
   });
@@ -1424,8 +1588,8 @@ export async function mountWorkbench(root) {
   const state = {
     root, wasm: null, registry: { entries: [] }, manifest: { runSequence: [], inputSchema: [] },
     scenarioIndex: 0, presetIndex: 0, inputs: {}, mode: "preset", backend: "optimized-cpu",
-    session: null, run: null, step: null, history: null, tab: "timeline",
-    playerTimer: null,
+    session: null, run: null, step: null, m6Replay: null,
+    history: null, tab: "timeline", playerTimer: null,
     level: "simple", stage: "RESULT",
     build: { version: "загрузка", sha: "загрузка" }, loading: true, error: null,
   };
