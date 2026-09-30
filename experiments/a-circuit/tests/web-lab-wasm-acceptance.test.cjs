@@ -301,7 +301,7 @@ Promise.all([
     "utf8"
   );
   const presetRegistry = refreshScenarioPresetRegistry(w);
-  if (presetRegistry.entries.length !== 16) {
+  if (presetRegistry.entries.length !== 18) {
     throw new Error("R3d7 preset registry count mismatch");
   }
   const presetSummary = presetRegistry.entries.find(
@@ -434,6 +434,32 @@ Promise.all([
     throw new Error("R5 SHIFT32 preset append changed historical indexes");
   }
 
+
+  for (const [scenarioId, profileId, programId] of [
+    ["rol32-lifecycle", "a-circuit:rotate-rol32", "rol32"],
+    ["ror32-lifecycle", "a-circuit:rotate-ror32", "ror32"],
+  ]) {
+    const summary = presetRegistry.entries.find(
+      (entry) => entry.scenarioId === scenarioId
+    );
+    if (!summary ||
+        summary.scenarioVersion !== "1.0.0" ||
+        summary.programProfileId !== profileId ||
+        summary.family !== "rotate-effect" ||
+        summary.programId !== programId ||
+        summary.runCount !== 6 ||
+        !Array.isArray(summary.inputSchema) ||
+        summary.inputSchema.length !== 2) {
+      throw new Error(
+        "R6 manifest-derived ROTATE32 preset summary mismatch: " + scenarioId
+      );
+    }
+  }
+  if (presetRegistry.entries[15]?.scenarioId !== "sar32-lifecycle" ||
+      presetRegistry.entries[16]?.scenarioId !== "rol32-lifecycle" ||
+      presetRegistry.entries[17]?.scenarioId !== "ror32-lifecycle") {
+    throw new Error("R6 ROTATE32 preset append changed historical indexes");
+  }
 
   const mulPresetSummary = presetRegistry.entries.find(
     (entry) => entry.scenarioId === "mul32-lifecycle"
@@ -1875,6 +1901,75 @@ Promise.all([
           JSON.stringify(shiftCpu.report.runs[0].result)) {
       throw new Error(
         "R5 SHIFT32 masking/canonical reuse mismatch: " + scenarioId
+      );
+    }
+  }
+
+  // R6: ROL32/ROR32 use one persistent ROTATE32 Aset through the
+  // same generic Scenario transport. There is no browser rotate executor.
+  for (const [scenarioId, fileName] of [
+    ["rol32-lifecycle", "rol32-lifecycle-v1.json"],
+    ["ror32-lifecycle", "ror32-lifecycle-v1.json"],
+  ]) {
+    const canonicalRotateSource = fs.readFileSync(
+      "experiments/a-circuit/scenarios/" + fileName,
+      "utf8"
+    );
+    const rotatePreset = loadScenarioPresetManifest(
+      w,
+      presetRegistry,
+      scenarioId,
+      "1.0.0"
+    );
+    if (rotatePreset === null ||
+        rotatePreset.source !== canonicalRotateSource) {
+      throw new Error(
+        "R6 ROTATE32 canonical preset round-trip mismatch: " + scenarioId
+      );
+    }
+    const rotateCpu = executeScenarioManifest(
+      w,
+      JSON.parse(rotatePreset.source),
+      "optimized-cpu"
+    );
+    if (!rotateCpu.ok ||
+        rotateCpu.error !== null ||
+        rotateCpu.report?.scenarioId !== scenarioId ||
+        rotateCpu.report?.overallPass !== true ||
+        rotateCpu.report?.runs?.length !== 6) {
+      throw new Error(
+        "R6 generic ROTATE32 Scenario execution failed: " + scenarioId
+      );
+    }
+    const expectedReactions = [1, 3, 1, 1, 3, 1];
+    for (let index = 0; index < rotateCpu.report.runs.length; index += 1) {
+      const run = rotateCpu.report.runs[index];
+      if ((run.sessionRunId >>> 0) !== index + 1 ||
+          run.observed?.sessionId !== rotateCpu.report.sessionId ||
+          run.observed?.finalQuiescent !== true ||
+          run.observed?.activeReactionCount !== expectedReactions[index] ||
+          run.oracleMatches !== true ||
+          run.freshInstanceMatches !== true ||
+          run.scalarOracleMatches !== true ||
+          !run.pipelineProfile ||
+          run.observed?.profile?.structural?.unificationAttempts <= 0) {
+        throw new Error(
+          "R6 ROTATE32 persistent-session evidence mismatch: " +
+          scenarioId + " run " + index
+        );
+      }
+    }
+    if (JSON.stringify(rotateCpu.report.runs[0].result) !==
+          JSON.stringify(rotateCpu.report.runs[3].result) ||
+        rotateCpu.report.runs[3].configurationReused !== false ||
+        JSON.stringify(rotateCpu.report.runs[1].result) !==
+          JSON.stringify(rotateCpu.report.runs[4].result) ||
+        rotateCpu.report.runs[4].configurationReused !== false ||
+        rotateCpu.report.runs[5].configurationReused !== true ||
+        JSON.stringify(rotateCpu.report.runs[5].result) !==
+          JSON.stringify(rotateCpu.report.runs[0].result)) {
+      throw new Error(
+        "R6 ROTATE32 masking/canonical reuse mismatch: " + scenarioId
       );
     }
   }
