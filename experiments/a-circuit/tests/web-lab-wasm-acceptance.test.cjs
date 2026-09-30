@@ -301,7 +301,7 @@ Promise.all([
     "utf8"
   );
   const presetRegistry = refreshScenarioPresetRegistry(w);
-  if (presetRegistry.entries.length !== 24) {
+  if (presetRegistry.entries.length !== 25) {
     throw new Error("R3d7 preset registry count mismatch");
   }
   const presetSummary = presetRegistry.entries.find(
@@ -534,6 +534,23 @@ Promise.all([
       presetRegistry.entries[23]?.scenarioId !==
         "mul-effect32-lifecycle") {
     throw new Error("R9 manifest-derived MUL-effect preset mismatch");
+  }
+
+  const mux32Summary = presetRegistry.entries.find(
+    (entry) => entry.scenarioId === "mux32-lifecycle"
+  );
+  if (!mux32Summary ||
+      mux32Summary.scenarioVersion !== "1.0.0" ||
+      mux32Summary.programProfileId !== "a-circuit:mux32" ||
+      mux32Summary.family !== "mux" ||
+      mux32Summary.programId !== "mux32" ||
+      mux32Summary.runCount !== 5 ||
+      !Array.isArray(mux32Summary.inputSchema) ||
+      mux32Summary.inputSchema.length !== 3 ||
+      presetRegistry.entries[23]?.scenarioId !==
+        "mul-effect32-lifecycle" ||
+      presetRegistry.entries[24]?.scenarioId !== "mux32-lifecycle") {
+    throw new Error("R10 manifest-derived MUX32 preset mismatch");
   }
 
   const mulPresetSummary = presetRegistry.entries.find(
@@ -2254,6 +2271,60 @@ Promise.all([
       JSON.stringify(mulEffectCpu.report.runs[4].result) !==
         JSON.stringify(mulEffectCpu.report.runs[0].result)) {
     throw new Error("R9 MUL-effect flags/canonical reuse mismatch");
+  }
+
+  // R10: MUX32 completes the maintained lifecycle corpus through
+  // the same generic persistent Scenario transport.
+  const canonicalMux32Source = fs.readFileSync(
+    "experiments/a-circuit/scenarios/mux32-lifecycle-v1.json",
+    "utf8"
+  );
+  const mux32Preset = loadScenarioPresetManifest(
+    w,
+    presetRegistry,
+    "mux32-lifecycle",
+    "1.0.0"
+  );
+  if (mux32Preset === null ||
+      mux32Preset.source !== canonicalMux32Source) {
+    throw new Error("R10 MUX32 canonical preset round-trip mismatch");
+  }
+  const mux32Cpu = executeScenarioManifest(
+    w,
+    JSON.parse(mux32Preset.source),
+    "optimized-cpu"
+  );
+  if (!mux32Cpu.ok ||
+      mux32Cpu.error !== null ||
+      mux32Cpu.report?.scenarioId !== "mux32-lifecycle" ||
+      mux32Cpu.report?.overallPass !== true ||
+      mux32Cpu.report?.runs?.length !== 5) {
+    throw new Error("R10 generic MUX32 Scenario execution failed");
+  }
+  for (let index = 0; index < mux32Cpu.report.runs.length; index += 1) {
+    const item = mux32Cpu.report.runs[index];
+    if ((item.sessionRunId >>> 0) !== index + 1 ||
+        item.observed?.sessionId !== mux32Cpu.report.sessionId ||
+        item.observed?.finalQuiescent !== true ||
+        item.observed?.activeReactionCount !== 257 ||
+        item.oracleMatches !== true ||
+        item.freshInstanceMatches !== true ||
+        item.scalarOracleMatches !== true ||
+        !item.pipelineProfile ||
+        item.observed?.profile?.structural?.unificationAttempts <= 0) {
+      throw new Error(
+        "R10 MUX32 evidence mismatch at run " + index
+      );
+    }
+  }
+  if (mux32Cpu.report.runs[0].result?.fields?.value !== "0x00000000" ||
+      mux32Cpu.report.runs[1].result?.fields?.value !== "0xffffffff" ||
+      mux32Cpu.report.runs[2].result?.fields?.value !== "0x12345678" ||
+      mux32Cpu.report.runs[3].result?.fields?.value !== "0x9abcdef0" ||
+      mux32Cpu.report.runs[4].configurationReused !== true ||
+      JSON.stringify(mux32Cpu.report.runs[4].result) !==
+        JSON.stringify(mux32Cpu.report.runs[0].result)) {
+    throw new Error("R10 MUX32 selection/canonical reuse mismatch");
   }
 
   // R3d4: raw MUL32 Wide64 uses the same generic preset/Scenario path.
