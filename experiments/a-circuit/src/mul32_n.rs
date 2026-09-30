@@ -3,10 +3,21 @@ use super::{
         call, define_bundle_rule, index_rule_for, Fixture as FullFixture,
     },
     proof_n::{
-        execute_to_quiescence, identical_rerun, load_runtime, loaded_handle,
-        prepare_stage, semantic_source, theory_admissions, visual_snapshot,
-        ProofRuntimeMemory, ProofRuntimeSession, WebProofLoadStage,
-        WebProofPrepareStage, WebProofResultStage, WebStructuralProof,
+        execute_to_quiescence,
+        identical_rerun,
+        load_runtime,
+        loaded_handle,
+        prepare_stage,
+        semantic_source,
+        theory_admissions,
+        visual_snapshot,
+        WebProofLoadStage,
+        WebProofPrepareStage,
+        WebProofResultStage,
+        WebStructuralProof,
+    },
+    runtime_session::{
+        CpuMemoryInstance, CpuRuntimeSession
     },
     wide64_n::Wide64Program,
 };
@@ -355,7 +366,7 @@ fn runtime_mul_bit(value: Handle, zero: Handle, one: Handle) -> Option<u8> {
 }
 
 fn runtime_mul_word(
-    memory: &ProofRuntimeMemory,
+    memory: &CpuMemoryInstance,
     word: Handle,
     zero: Handle,
     one: Handle,
@@ -373,7 +384,7 @@ fn runtime_mul_word(
 }
 
 fn runtime_mul_wide(
-    memory: &ProofRuntimeMemory,
+    memory: &CpuMemoryInstance,
     wide: Handle,
     zero: Handle,
     one: Handle,
@@ -388,7 +399,7 @@ fn runtime_mul_wide(
 }
 
 fn decode_runtime_mul_result(
-    memory: &ProofRuntimeMemory,
+    memory: &CpuMemoryInstance,
     final_link: Handle,
     caller: Handle,
     result_tag: Handle,
@@ -460,7 +471,7 @@ pub(crate) fn prepare_mul32_session_program() -> Option<WebProofPrepareStage> {
 }
 
 pub(crate) fn configure_mul32_session(
-    session: &mut ProofRuntimeSession,
+    session: &mut CpuRuntimeSession,
     load: &WebProofLoadStage,
     a: u32,
     b: u32,
@@ -494,7 +505,7 @@ pub(crate) fn configure_mul32_session(
 }
 
 pub(crate) fn project_mul32_session_result(
-    session: &ProofRuntimeSession,
+    session: &CpuRuntimeSession,
     load: &WebProofLoadStage,
 ) -> Option<Mul32SessionProjection> {
     if session.engine.current().len() != 1 {

@@ -3,10 +3,21 @@ use super::{
         call, define_bundle_rule, index_rule_for, Fixture as FullFixture,
     },
     proof_n::{
-        execute_session_to_quiescence, identical_rerun, load_runtime_session,
-        loaded_handle, prepare_stage, semantic_source, theory_admissions,
-        visual_snapshot, ProofRuntimeSession, WebProofLoadStage,
-        WebProofPrepareStage, WebProofResultStage, WebStructuralProof,
+        execute_session_to_quiescence,
+        identical_rerun,
+        load_runtime_session,
+        loaded_handle,
+        prepare_stage,
+        semantic_source,
+        theory_admissions,
+        visual_snapshot,
+        WebProofLoadStage,
+        WebProofPrepareStage,
+        WebProofResultStage,
+        WebStructuralProof,
+    },
+    runtime_session::{
+        CpuRuntimeSession
     },
 };
 use amemory_optimized_cpu_probe::{
@@ -1415,7 +1426,7 @@ fn materialize_runtime_word8(
 }
 
 pub(crate) fn configure_radix_memory_session(
-    session: &mut ProofRuntimeSession,
+    session: &mut CpuRuntimeSession,
     load: &WebProofLoadStage,
     offset_value: u8,
     byte_value: u8,
@@ -1458,7 +1469,7 @@ pub(crate) fn configure_radix_memory_session(
 }
 
 pub(crate) fn project_radix_memory_session_result(
-    session: &ProofRuntimeSession,
+    session: &CpuRuntimeSession,
     load: &WebProofLoadStage,
 ) -> Option<RadixMemorySessionProjection> {
     if session.engine.current().len() != 1 {

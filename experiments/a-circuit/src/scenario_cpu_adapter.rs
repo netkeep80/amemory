@@ -28,7 +28,11 @@ use super::{
         project_mul_effect_session_result, web_prove_mul_effect,
     },
     proof_n::{
-        ProofRuntimeSession, WebProofLoadStage, WebProofPrepareStage,
+        WebProofLoadStage,
+        WebProofPrepareStage,
+    },
+    runtime_session::{
+        CpuRuntimeSession
     },
     rotate32_n::{
         configure_rotate32_session, prepare_rotate32_session_program,
@@ -57,12 +61,12 @@ use std::collections::BTreeMap;
 
 type PrepareFn = fn() -> Option<WebProofPrepareStage>;
 type ConfigureFn = fn(
-    &mut ProofRuntimeSession,
+    &mut CpuRuntimeSession,
     &WebProofLoadStage,
     &BTreeMap<String, Value>,
 ) -> Result<ConfiguredRun, String>;
 type ProjectFn = fn(
-    &ProofRuntimeSession,
+    &CpuRuntimeSession,
     &WebProofLoadStage,
 ) -> Result<ScenarioNormalizedResultV1, String>;
 type FreshInstanceFn = fn(
@@ -143,7 +147,7 @@ impl CpuScenarioAdapter {
 
     pub(crate) fn configure(
         &self,
-        session: &mut ProofRuntimeSession,
+        session: &mut CpuRuntimeSession,
         load: &WebProofLoadStage,
         inputs: &BTreeMap<String, Value>,
     ) -> Result<ConfiguredRun, String> {
@@ -178,7 +182,7 @@ impl CpuScenarioAdapter {
 
     pub(crate) fn project(
         &self,
-        session: &ProofRuntimeSession,
+        session: &CpuRuntimeSession,
         load: &WebProofLoadStage,
     ) -> Result<ScenarioNormalizedResultV1, String> {
         match self.implementation {
@@ -524,7 +528,7 @@ pub(crate) struct ScenarioNormalizedResultV1 {
 }
 
 fn configure_mux1_from_inputs(
-    session: &mut ProofRuntimeSession,
+    session: &mut CpuRuntimeSession,
     load: &WebProofLoadStage,
     inputs: &BTreeMap<String, Value>,
 ) -> Result<ConfiguredRun, String> {
@@ -542,7 +546,7 @@ fn configure_mux1_from_inputs(
 }
 
 fn project_mux1_result(
-    session: &ProofRuntimeSession,
+    session: &CpuRuntimeSession,
     load: &WebProofLoadStage,
 ) -> Result<ScenarioNormalizedResultV1, String> {
     let projected = project_mux1_session_result(session, load)
@@ -585,7 +589,7 @@ fn mux32_inputs(
 }
 
 fn configure_mux32_from_inputs(
-    session: &mut ProofRuntimeSession,
+    session: &mut CpuRuntimeSession,
     load: &WebProofLoadStage,
     inputs: &BTreeMap<String, Value>,
 ) -> Result<ConfiguredRun, String> {
@@ -601,7 +605,7 @@ fn configure_mux32_from_inputs(
 }
 
 fn project_mux32_result(
-    session: &ProofRuntimeSession,
+    session: &CpuRuntimeSession,
     load: &WebProofLoadStage,
 ) -> Result<ScenarioNormalizedResultV1, String> {
     let projected = project_mux32_session_result(session, load)
@@ -726,7 +730,7 @@ fn logic32_inputs(
 
 fn configure_logic32_from_inputs(
     op: u32,
-    session: &mut ProofRuntimeSession,
+    session: &mut CpuRuntimeSession,
     load: &WebProofLoadStage,
     inputs: &BTreeMap<String, Value>,
 ) -> Result<ConfiguredRun, String> {
@@ -742,7 +746,7 @@ fn configure_logic32_from_inputs(
 }
 
 fn project_logic32_result(
-    session: &ProofRuntimeSession,
+    session: &CpuRuntimeSession,
     load: &WebProofLoadStage,
 ) -> Result<ScenarioNormalizedResultV1, String> {
     let projected = project_logic32_session_result(session, load)
@@ -792,7 +796,7 @@ fn arithmetic32_inputs(
 
 fn configure_arithmetic32_from_inputs(
     op: u32,
-    session: &mut ProofRuntimeSession,
+    session: &mut CpuRuntimeSession,
     load: &WebProofLoadStage,
     inputs: &BTreeMap<String, Value>,
 ) -> Result<ConfiguredRun, String> {
@@ -812,7 +816,7 @@ fn configure_arithmetic32_from_inputs(
 }
 
 fn project_arithmetic32_result(
-    session: &ProofRuntimeSession,
+    session: &CpuRuntimeSession,
     load: &WebProofLoadStage,
 ) -> Result<ScenarioNormalizedResultV1, String> {
     let projected = project_arithmetic32_session_result(session, load)
@@ -883,7 +887,7 @@ fn shift32_inputs(
 
 fn configure_shift32_from_inputs(
     op: u32,
-    session: &mut ProofRuntimeSession,
+    session: &mut CpuRuntimeSession,
     load: &WebProofLoadStage,
     inputs: &BTreeMap<String, Value>,
 ) -> Result<ConfiguredRun, String> {
@@ -899,7 +903,7 @@ fn configure_shift32_from_inputs(
 }
 
 fn project_shift32_result(
-    session: &ProofRuntimeSession,
+    session: &CpuRuntimeSession,
     load: &WebProofLoadStage,
 ) -> Result<ScenarioNormalizedResultV1, String> {
     let projected = project_shift32_session_result(session, load)
@@ -944,7 +948,7 @@ fn rotate32_inputs(
 
 fn configure_rotate32_from_inputs(
     op: u32,
-    session: &mut ProofRuntimeSession,
+    session: &mut CpuRuntimeSession,
     load: &WebProofLoadStage,
     inputs: &BTreeMap<String, Value>,
 ) -> Result<ConfiguredRun, String> {
@@ -960,7 +964,7 @@ fn configure_rotate32_from_inputs(
 }
 
 fn project_rotate32_result(
-    session: &ProofRuntimeSession,
+    session: &CpuRuntimeSession,
     load: &WebProofLoadStage,
 ) -> Result<ScenarioNormalizedResultV1, String> {
     let projected = project_rotate32_session_result(session, load)
@@ -1006,7 +1010,7 @@ fn rotate_carry32_inputs(
 
 fn configure_rotate_carry32_from_inputs(
     op: u32,
-    session: &mut ProofRuntimeSession,
+    session: &mut CpuRuntimeSession,
     load: &WebProofLoadStage,
     inputs: &BTreeMap<String, Value>,
 ) -> Result<ConfiguredRun, String> {
@@ -1026,7 +1030,7 @@ fn configure_rotate_carry32_from_inputs(
 }
 
 fn project_rotate_carry32_result(
-    session: &ProofRuntimeSession,
+    session: &CpuRuntimeSession,
     load: &WebProofLoadStage,
 ) -> Result<ScenarioNormalizedResultV1, String> {
     let projected = project_rotate_carry32_session_result(session, load)
@@ -1072,7 +1076,7 @@ fn unary32_input(
 
 fn configure_unary32_from_inputs(
     op: u32,
-    session: &mut ProofRuntimeSession,
+    session: &mut CpuRuntimeSession,
     load: &WebProofLoadStage,
     inputs: &BTreeMap<String, Value>,
 ) -> Result<ConfiguredRun, String> {
@@ -1088,7 +1092,7 @@ fn configure_unary32_from_inputs(
 }
 
 fn project_unary32_result(
-    session: &ProofRuntimeSession,
+    session: &CpuRuntimeSession,
     load: &WebProofLoadStage,
 ) -> Result<ScenarioNormalizedResultV1, String> {
     let projected = project_unary32_session_result(session, load)
@@ -1132,7 +1136,7 @@ fn mul_effect_inputs(
 }
 
 fn configure_mul_effect_from_inputs(
-    session: &mut ProofRuntimeSession,
+    session: &mut CpuRuntimeSession,
     load: &WebProofLoadStage,
     inputs: &BTreeMap<String, Value>,
 ) -> Result<ConfiguredRun, String> {
@@ -1182,7 +1186,7 @@ fn mul_effect_normalized(
 }
 
 fn project_mul_effect_result(
-    session: &ProofRuntimeSession,
+    session: &CpuRuntimeSession,
     load: &WebProofLoadStage,
 ) -> Result<ScenarioNormalizedResultV1, String> {
     let projected = project_mul_effect_session_result(session, load)
@@ -1216,7 +1220,7 @@ fn fresh_instance_mul_effect_result(
 }
 
 fn configure_mul32_from_inputs(
-    session: &mut ProofRuntimeSession,
+    session: &mut CpuRuntimeSession,
     load: &WebProofLoadStage,
     inputs: &BTreeMap<String, Value>,
 ) -> Result<ConfiguredRun, String> {
@@ -1233,7 +1237,7 @@ fn configure_mul32_from_inputs(
 }
 
 fn project_mul32_result(
-    session: &ProofRuntimeSession,
+    session: &CpuRuntimeSession,
     load: &WebProofLoadStage,
 ) -> Result<ScenarioNormalizedResultV1, String> {
     let projected = project_mul32_session_result(session, load)
@@ -1276,7 +1280,7 @@ fn radix_memory_normalized(
 }
 
 fn configure_radix_memory_from_inputs(
-    session: &mut ProofRuntimeSession,
+    session: &mut CpuRuntimeSession,
     load: &WebProofLoadStage,
     inputs: &BTreeMap<String, Value>,
 ) -> Result<ConfiguredRun, String> {
@@ -1298,7 +1302,7 @@ fn configure_radix_memory_from_inputs(
 }
 
 fn project_radix_memory_result(
-    session: &ProofRuntimeSession,
+    session: &CpuRuntimeSession,
     load: &WebProofLoadStage,
 ) -> Result<ScenarioNormalizedResultV1, String> {
     let projected =

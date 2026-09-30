@@ -4,9 +4,19 @@ use super::{
     },
     memory_n::RadixMemoryProgram,
     proof_n::{
-        execute_to_quiescence, identical_rerun, load_runtime, loaded_handle,
-        prepare_stage, semantic_source, theory_admissions, visual_snapshot,
-        ProofRuntimeMemory, WebProofResultStage, WebStructuralProof,
+        execute_to_quiescence,
+        identical_rerun,
+        load_runtime,
+        loaded_handle,
+        prepare_stage,
+        semantic_source,
+        theory_admissions,
+        visual_snapshot,
+        WebProofResultStage,
+        WebStructuralProof,
+    },
+    runtime_session::{
+        CpuMemoryInstance
     },
 };
 use amemory_optimized_cpu_probe::{
@@ -1231,7 +1241,7 @@ fn decode_byte8_store(
 }
 
 fn runtime_read32(
-    memory: &mut ProofRuntimeMemory,
+    memory: &mut CpuMemoryInstance,
     interpreter: Handle,
     apply: Handle,
     read: Handle,
@@ -1465,7 +1475,7 @@ pub(crate) fn web_prove_memory32(
     // verification-only Links that are absent from the recorded reaction trace.
     // Cloning preserves all semantic/local Link identities while giving the
     // verifier its own non-semantic store/cache identity.
-    let mut verification_memory = ProofRuntimeMemory {
+    let mut verification_memory = CpuMemoryInstance {
         id: memory.id.clone(),
         store: memory.store.clone(),
     };

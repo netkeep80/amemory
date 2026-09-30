@@ -7,11 +7,23 @@ use super::{
         call, define_bundle_rule, index_rule_for, Fixture as FullFixture,
     },
     proof_n::{
-        execute_session_to_quiescence, execute_to_quiescence,
-        identical_rerun, load_runtime, load_runtime_session, loaded_handle,
-        prepare_stage, semantic_source, theory_admissions, visual_snapshot,
-        ProofRuntimeMemory, ProofRuntimeSession, WebProofLoadStage,
-        WebProofPrepareStage, WebProofResultStage, WebStructuralProof,
+        execute_session_to_quiescence,
+        execute_to_quiescence,
+        identical_rerun,
+        load_runtime,
+        load_runtime_session,
+        loaded_handle,
+        prepare_stage,
+        semantic_source,
+        theory_admissions,
+        visual_snapshot,
+        WebProofLoadStage,
+        WebProofPrepareStage,
+        WebProofResultStage,
+        WebStructuralProof,
+    },
+    runtime_session::{
+        CpuMemoryInstance, CpuRuntimeSession
     },
 };
 use amemory_optimized_cpu_probe::{
@@ -613,7 +625,7 @@ fn web_arithmetic_masks(out: EffectOutcome) -> (u32, u32) {
 }
 
 fn runtime_bit(
-    memory: &ProofRuntimeMemory,
+    memory: &CpuMemoryInstance,
     bit: Handle,
     zero: Handle,
     one: Handle,
@@ -629,7 +641,7 @@ fn runtime_bit(
 }
 
 fn runtime_word(
-    memory: &ProofRuntimeMemory,
+    memory: &CpuMemoryInstance,
     width: usize,
     word: Handle,
     zero: Handle,
@@ -647,7 +659,7 @@ fn runtime_word(
 }
 
 fn runtime_set(
-    memory: &ProofRuntimeMemory,
+    memory: &CpuMemoryInstance,
     action: Handle,
     set_tag: Handle,
     expected_flag: Handle,
@@ -667,7 +679,7 @@ fn runtime_set(
 
 #[allow(clippy::too_many_arguments)]
 fn decode_runtime_arithmetic_effect(
-    memory: &ProofRuntimeMemory,
+    memory: &CpuMemoryInstance,
     final_link: Handle,
     caller: Handle,
     result_tag: Handle,
@@ -852,7 +864,7 @@ fn arithmetic32_control(
 }
 
 pub(crate) fn configure_arithmetic32_session(
-    session: &mut ProofRuntimeSession,
+    session: &mut CpuRuntimeSession,
     load: &WebProofLoadStage,
     op: u32,
     a: u32,
@@ -899,7 +911,7 @@ pub(crate) fn configure_arithmetic32_session(
 }
 
 pub(crate) fn project_arithmetic32_session_result(
-    session: &ProofRuntimeSession,
+    session: &CpuRuntimeSession,
     load: &WebProofLoadStage,
 ) -> Option<Arithmetic32SessionProjection> {
     if session.engine.current().len() != 1 {
@@ -960,7 +972,7 @@ pub(crate) fn prepare_add32_session_program(
 }
 
 pub(crate) fn configure_add32_session(
-    session: &mut ProofRuntimeSession,
+    session: &mut CpuRuntimeSession,
     load: &WebProofLoadStage,
     a: u32,
     b: u32,
@@ -969,7 +981,7 @@ pub(crate) fn configure_add32_session(
 }
 
 pub(crate) fn project_add32_session_result(
-    session: &ProofRuntimeSession,
+    session: &CpuRuntimeSession,
     load: &WebProofLoadStage,
 ) -> Option<Add32SessionProjection> {
     project_arithmetic32_session_result(session, load)
