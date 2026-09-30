@@ -217,6 +217,7 @@ Promise.all([
   import("../../browser-accelerator/web/scenario-transport.mjs"),
   import("../../browser-accelerator/web/scenario-presets.mjs"),
   import("../../browser-accelerator/web/workbench.mjs"),
+  import("../../browser-accelerator/web/runtime-trace-verifier.mjs"),
 ]).then(([
   {instance},
   { inflateCompactProof, validateCompactProof },
@@ -269,6 +270,10 @@ Promise.all([
     workbenchVerificationLevels,
     workbenchRecursiveStructure,
     workbenchStepSnapshot,
+  },
+  {
+    verifyLiveReactionEvidence,
+    verifyLiveStepTrace,
   },
 ]) => {
   const w = instance.exports;
@@ -1132,6 +1137,72 @@ Promise.all([
     stepReports.push(report);
     if (report.completed) break;
   }
+
+  const liveTraceVerification = verifyLiveStepTrace(stepReports);
+  if (liveTraceVerification.traceConsistent !== true ||
+      liveTraceVerification.completed !== true ||
+      liveTraceVerification.reactions !== stepReports.length ||
+      liveTraceVerification.activeReactionCount !== 7 ||
+      liveTraceVerification.sessionId !== steppedIdentity.sessionId ||
+      liveTraceVerification.sessionRunId !== 1 ||
+      liveTraceVerification.createdLinks <= 0) {
+    throw new Error("#244 independent live trace verification mismatch");
+  }
+  const firstReactionVerification =
+    verifyLiveReactionEvidence(stepReports[0].evidence);
+  if (firstReactionVerification.traceConsistent !== true ||
+      firstReactionVerification.quiescent !== false) {
+    throw new Error("#244 first reaction consistency mismatch");
+  }
+
+  function expectLiveTraceReject(label, mutate) {
+    const corrupted = JSON.parse(JSON.stringify(stepReports));
+    mutate(corrupted);
+    let rejected = false;
+    try {
+      verifyLiveStepTrace(corrupted);
+    } catch {
+      rejected = true;
+    }
+    if (!rejected) {
+      throw new Error("#244 verifier accepted corrupted " + label);
+    }
+  }
+
+  expectLiveTraceReject("Scope chain", (corrupted) => {
+    corrupted[1].evidence.scopeBefore[0] += 100000;
+  });
+  expectLiveTraceReject("match counter", (corrupted) => {
+    corrupted[0].evidence.rawRuleMatches += 1;
+  });
+  expectLiveTraceReject("publication", (corrupted) => {
+    const published = corrupted
+      .flatMap((report) => report.evidence.structuralFacts)
+      .find((fact) =>
+        fact.kind === "PUBLISHED" &&
+        fact.preserved === false &&
+        Array.isArray(fact.outputs) &&
+        fact.outputs.length > 0
+      );
+    if (!published) {
+      throw new Error("#244 falsifier could not find PUBLISHED evidence");
+    }
+    published.outputs[0] = 1;
+  });
+  expectLiveTraceReject("persistent Link topology", (corrupted) => {
+    const instantiated = corrupted
+      .flatMap((report) => report.evidence.structuralFacts)
+      .find((fact) =>
+        fact.kind === "INSTANTIATED" &&
+        Array.isArray(fact.createdLinks) &&
+        fact.createdLinks.length > 0
+      );
+    if (!instantiated) {
+      throw new Error("#244 falsifier could not find createdLinks evidence");
+    }
+    instantiated.createdLinks[0].end =
+      instantiated.createdLinks[0].handle + 1;
+  });
 
   const finalStep = stepReports.at(-1);
   if (stepReports.length !== 8 ||
