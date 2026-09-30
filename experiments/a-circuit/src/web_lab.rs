@@ -720,14 +720,11 @@ pub extern "C" fn amemory_i386_memory_run(
     if set_last_compact_proof(&execution.proof).is_none() {
         return 0;
     }
-    let trace = execution.trace;
     let out = execution.outcome;
     if set_default_witness_result(
         "memory-radix",
         serde_json::json!({
             "block": "M6A_RADIX_PAGE",
-            "traceSource": "ProofRuntimeSession.step(TRACE)",
-            "trace": trace,
             "width": 8,
             "address": out.offset,
             "offset": out.offset,

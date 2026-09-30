@@ -15,6 +15,7 @@ const PRESET_SOURCES: &[&str] = &[
     include_str!("../scenarios/add32-lifecycle-v1.json"),
     include_str!("../scenarios/shl32-lifecycle-v1.json"),
     include_str!("../scenarios/mul32-lifecycle-v1.json"),
+    include_str!("../scenarios/radix-memory8-lifecycle-v1.json"),
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -174,7 +175,7 @@ mod tests {
     fn registry_summary_is_derived_from_canonical_mux1_manifest() {
         let registry = load_preset_registry_v1().unwrap();
         assert_eq!(registry.schema_version, 1);
-        assert_eq!(registry.entries.len(), 5);
+        assert_eq!(registry.entries.len(), 6);
 
         let source = preset_manifest_source_by_index_v1(0).unwrap();
         let manifest = parse_and_validate_manifest_v1(source).unwrap();
@@ -296,6 +297,36 @@ mod tests {
         assert_eq!(summary.family, "mul");
         assert_eq!(summary.program_id, "mul32");
         assert_eq!(summary.run_count, 4);
+    }
+
+    #[test]
+    fn registry_resolves_m6a_radix_memory_canonical_manifest() {
+        let source = preset_manifest_source_v1(
+            "radix-memory8-lifecycle",
+            "1.0.0",
+        )
+        .unwrap();
+        assert_eq!(
+            source,
+            include_str!("../scenarios/radix-memory8-lifecycle-v1.json")
+        );
+
+        let registry = load_preset_registry_v1().unwrap();
+        let summary = registry
+            .entries
+            .iter()
+            .find(|entry| {
+                entry.scenario_id == "radix-memory8-lifecycle"
+            })
+            .unwrap();
+        assert_eq!(
+            summary.program_profile_id,
+            "a-circuit:memory-radix8"
+        );
+        assert_eq!(summary.family, "memory");
+        assert_eq!(summary.program_id, "radix-page8");
+        assert_eq!(summary.run_count, 4);
+        assert_eq!(summary.observation_level, RunObservationLevel::Trace);
     }
 
     #[test]

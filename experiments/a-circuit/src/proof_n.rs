@@ -984,19 +984,17 @@ pub(crate) fn load_runtime_session(
     ))
 }
 
-fn execute_session_collect_to_quiescence(
+pub(crate) fn execute_session_to_quiescence(
     session: &mut ProofRuntimeSession,
     initial: Handle,
     max_steps: u32,
-    observation_level: RunObservationLevel,
-) -> Option<(WebProofExecuteStage, Vec<SessionReactionEvidenceV1>)> {
+) -> Option<WebProofExecuteStage> {
     let memory_instance_id = session.memory.id.clone();
     session.begin_run(initial).ok()?;
 
     let mut reactions = Vec::new();
-    let mut evidence_trace = Vec::new();
     for _ in 0..max_steps {
-        let step = session.step(observation_level).ok()?;
+        let step = session.step(RunObservationLevel::Off).ok()?;
         let evidence = step.evidence;
         let quiescent = evidence.quiescent;
         reactions.push(WebProofReactionStep {
@@ -1016,7 +1014,6 @@ fn execute_session_collect_to_quiescence(
             links_after: evidence.links_after,
             quiescent,
         });
-        evidence_trace.push(evidence);
         if quiescent {
             break;
         }
@@ -1029,42 +1026,12 @@ fn execute_session_collect_to_quiescence(
 
     let active_reaction_count =
         reactions.iter().filter(|step| !step.quiescent).count() as u32;
-    Some((
-        WebProofExecuteStage {
-            memory_instance_id,
-            reactions,
-            active_reaction_count,
-            final_quiescent: true,
-        },
-        evidence_trace,
-    ))
-}
-
-pub(crate) fn execute_session_to_quiescence(
-    session: &mut ProofRuntimeSession,
-    initial: Handle,
-    max_steps: u32,
-) -> Option<WebProofExecuteStage> {
-    execute_session_collect_to_quiescence(
-        session,
-        initial,
-        max_steps,
-        RunObservationLevel::Off,
-    )
-    .map(|(execute, _)| execute)
-}
-
-pub(crate) fn execute_session_traced_to_quiescence(
-    session: &mut ProofRuntimeSession,
-    initial: Handle,
-    max_steps: u32,
-) -> Option<(WebProofExecuteStage, Vec<SessionReactionEvidenceV1>)> {
-    execute_session_collect_to_quiescence(
-        session,
-        initial,
-        max_steps,
-        RunObservationLevel::Trace,
-    )
+    Some(WebProofExecuteStage {
+        memory_instance_id,
+        reactions,
+        active_reaction_count,
+        final_quiescent: true,
+    })
 }
 
 pub(crate) fn execute_session_observed_to_quiescence(

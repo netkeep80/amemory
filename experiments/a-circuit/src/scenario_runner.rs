@@ -7,6 +7,11 @@ use super::{
         configure_xor32_session, prepare_xor32_session_program,
         project_xor32_session_result, web_prove_logic,
     },
+    memory_n::{
+        configure_radix_memory_session,
+        prepare_radix_memory_session_program,
+        project_radix_memory_session_result, web_prove_radix_memory,
+    },
     mux_n::{
         configure_mux1_session, prepare_mux1_session_program,
         project_mux1_session_result, web_prove_mux1,
@@ -165,6 +170,17 @@ const CPU_SCENARIO_ADAPTERS: &[CpuScenarioAdapter] = &[
         project: project_mul32_result,
         fresh_instance: fresh_instance_mul32_result,
         scalar_oracle: scalar_mul32_result,
+    },
+    CpuScenarioAdapter {
+        profile_id: "a-circuit:memory-radix8",
+        family: "memory",
+        program_id: "radix-page8",
+        aset_source: "builtin:a-circuit/memory-radix8",
+        prepare: prepare_radix_memory_session_program,
+        configure: configure_radix_memory_from_inputs,
+        project: project_radix_memory_result,
+        fresh_instance: fresh_instance_radix_memory_result,
+        scalar_oracle: scalar_radix_memory_result,
     },
 ];
 
@@ -1322,6 +1338,18 @@ fn count8_input(
         .map_err(|_| format!("COUNT8 input {key} outside 0..255"))
 }
 
+fn u8_input(
+    inputs: &BTreeMap<String, Value>,
+    key: &str,
+) -> Result<u8, String> {
+    let value = inputs
+        .get(key)
+        .and_then(Value::as_u64)
+        .ok_or_else(|| format!("missing U8 input {key}"))?;
+    u8::try_from(value)
+        .map_err(|_| format!("U8 input {key} outside 0..255"))
+}
+
 fn configure_shl32_from_inputs(
     session: &mut ProofRuntimeSession,
     load: &WebProofLoadStage,
@@ -1416,6 +1444,90 @@ fn fresh_instance_mul32_result(
         proof.outcome.hi,
         proof.proof.result.result_anum,
     ))
+}
+
+fn radix_memory_normalized(
+    before: u32,
+    after: u32,
+    old_after: u32,
+    result_recursive_wire: Option<String>,
+) -> ScenarioNormalizedResultV1 {
+    let mut fields = BTreeMap::new();
+    fields.insert("before".to_owned(), Value::from(before));
+    fields.insert("after".to_owned(), Value::from(after));
+    fields.insert("oldAfter".to_owned(), Value::from(old_after));
+    ScenarioNormalizedResultV1 {
+        fields,
+        result_recursive_wire,
+    }
+}
+
+fn configure_radix_memory_from_inputs(
+    session: &mut ProofRuntimeSession,
+    load: &WebProofLoadStage,
+    inputs: &BTreeMap<String, Value>,
+) -> Result<ConfiguredRun, String> {
+    let offset = u8_input(inputs, "OFFSET")?;
+    let value = u8_input(inputs, "VALUE")?;
+    let (initial, before, after) =
+        configure_radix_memory_session(
+            session,
+            load,
+            offset,
+            value,
+        )
+        .ok_or_else(|| "M6A radix-memory configuration failed".to_owned())?;
+    Ok(ConfiguredRun {
+        initial,
+        links_before: before as u32,
+        links_after: after as u32,
+    })
+}
+
+fn project_radix_memory_result(
+    session: &ProofRuntimeSession,
+    load: &WebProofLoadStage,
+) -> Result<ScenarioNormalizedResultV1, String> {
+    let projected =
+        project_radix_memory_session_result(session, load)
+            .ok_or_else(|| {
+                "M6A radix-memory result projection failed".to_owned()
+            })?;
+    Ok(radix_memory_normalized(
+        projected.before_value,
+        projected.after_value,
+        projected.old_after_value,
+        Some(projected.result_recursive_wire),
+    ))
+}
+
+fn fresh_instance_radix_memory_result(
+    inputs: &BTreeMap<String, Value>,
+) -> Result<ScenarioNormalizedResultV1, String> {
+    let offset = u8_input(inputs, "OFFSET")?;
+    let value = u8_input(inputs, "VALUE")?;
+    let proof = web_prove_radix_memory(offset, value)
+        .ok_or_else(|| "fresh M6A radix-memory witness failed".to_owned())?;
+    Ok(radix_memory_normalized(
+        proof.outcome.before_value,
+        proof.outcome.after_value,
+        proof.outcome.old_after_value,
+        Some(proof.proof.result.result_anum),
+    ))
+}
+
+fn scalar_radix_memory_result(
+    inputs: &BTreeMap<String, Value>,
+) -> Result<BTreeMap<String, Value>, String> {
+    let _offset = u8_input(inputs, "OFFSET")?;
+    let value = u8_input(inputs, "VALUE")?;
+    Ok(radix_memory_normalized(
+        0,
+        u32::from(value),
+        0,
+        None,
+    )
+    .fields)
 }
 
 fn bit_input(
@@ -1609,6 +1721,8 @@ mod tests {
         include_str!("../scenarios/shl32-lifecycle-v1.json");
     const MUL32_LIFECYCLE: &str =
         include_str!("../scenarios/mul32-lifecycle-v1.json");
+    const RADIX_MEMORY8_LIFECYCLE: &str =
+        include_str!("../scenarios/radix-memory8-lifecycle-v1.json");
 
     #[test]
     fn prepared_aset_fingerprint_is_stable_and_program_specific() {
@@ -2232,6 +2346,41 @@ mod tests {
         assert!(
             report.runs[3].configuration_reused,
             "returning to first MUL32 inputs must reuse canonical Links",
+        );
+    }
+
+    #[test]
+    fn canonical_m6a_radix_memory_manifest_runs_through_scenario_session() {
+        let manifest =
+            parse_and_validate_manifest_v1(RADIX_MEMORY8_LIFECYCLE).unwrap();
+        let report = run_scenario_manifest_v1(
+            &manifest,
+            ScenarioBackendV1::OptimizedCpu,
+        )
+        .unwrap();
+
+        assert!(report.overall_pass);
+        assert_eq!(report.runs.len(), 4);
+        assert!(report.runs.iter().all(|run| {
+            run.observed.session_id == report.session_id
+                && run.observed.final_quiescent
+                && run.observed.active_reaction_count > 40
+                && run.oracle_matches == Some(true)
+                && run.fresh_instance_matches == Some(true)
+                && run.scalar_oracle_matches
+        }));
+        assert_eq!(
+            report.runs[0].result.fields.get("after"),
+            Some(&Value::from(0xabu32)),
+        );
+        assert_eq!(
+            report.runs[0].result.fields.get("oldAfter"),
+            Some(&Value::from(0u32)),
+        );
+        assert_eq!(report.runs[0].result, report.runs[3].result);
+        assert!(
+            report.runs[3].configuration_reused,
+            "returning to first M6A inputs must reuse canonical Links",
         );
     }
 

@@ -1,0 +1,168 @@
+{
+  "schemaVersion": 1,
+  "scenarioId": "radix-memory8-lifecycle",
+  "scenarioVersion": "1.0.0",
+  "title": "M6A: структурная память Byte8 в одной апамяти",
+  "description": "Статическая асеть M6A radix-memory загружается один раз; OFFSET/VALUE публикуются связями Links после загрузки и четыре запуска исполняются через общий Scenario Runner в одной постоянной сессии.",
+  "programProfile": {
+    "profileId": "a-circuit:memory-radix8",
+    "family": "memory",
+    "programId": "radix-page8",
+    "asetSource": "builtin:a-circuit/memory-radix8"
+  },
+  "inputSchema": [
+    {
+      "key": "OFFSET",
+      "type": "COUNT8",
+      "description": "8-битное смещение в структурной странице памяти",
+      "default": 37
+    },
+    {
+      "key": "VALUE",
+      "type": "COUNT8",
+      "description": "Записываемый байт",
+      "default": 171
+    }
+  ],
+  "initialInputs": {
+    "OFFSET": 37,
+    "VALUE": 171
+  },
+  "runSequence": [
+    {
+      "runId": "run-1-25-ab",
+      "inputs": {
+        "OFFSET": 37,
+        "VALUE": 171
+      },
+      "executionMode": "TO_QUIESCENCE",
+      "maxReactions": 128,
+      "assertions": [
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "before",
+          "expected": 0
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "after",
+          "expected": 171
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "oldAfter",
+          "expected": 0
+        },
+        {
+          "kind": "QUIESCENT_EQUALS",
+          "expected": true
+        }
+      ]
+    },
+    {
+      "runId": "run-2-a5-7c",
+      "inputs": {
+        "OFFSET": 165,
+        "VALUE": 124
+      },
+      "executionMode": "TO_QUIESCENCE",
+      "maxReactions": 128,
+      "assertions": [
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "before",
+          "expected": 0
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "after",
+          "expected": 124
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "oldAfter",
+          "expected": 0
+        },
+        {
+          "kind": "QUIESCENT_EQUALS",
+          "expected": true
+        }
+      ]
+    },
+    {
+      "runId": "run-3-25-cd",
+      "inputs": {
+        "OFFSET": 37,
+        "VALUE": 205
+      },
+      "executionMode": "TO_QUIESCENCE",
+      "maxReactions": 128,
+      "assertions": [
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "before",
+          "expected": 0
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "after",
+          "expected": 205
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "oldAfter",
+          "expected": 0
+        },
+        {
+          "kind": "QUIESCENT_EQUALS",
+          "expected": true
+        }
+      ]
+    },
+    {
+      "runId": "run-4-return-first",
+      "inputs": {
+        "OFFSET": 37,
+        "VALUE": 171
+      },
+      "executionMode": "TO_QUIESCENCE",
+      "maxReactions": 128,
+      "assertions": [
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "before",
+          "expected": 0
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "after",
+          "expected": 171
+        },
+        {
+          "kind": "RESULT_FIELD_EQUALS",
+          "field": "oldAfter",
+          "expected": 0
+        },
+        {
+          "kind": "QUIESCENT_EQUALS",
+          "expected": true
+        }
+      ]
+    }
+  ],
+  "supportedBackends": [
+    "optimized-cpu"
+  ],
+  "oraclePolicy": "FRESH_INSTANCE",
+  "invariants": [
+    "prepare-once",
+    "load-once",
+    "same-session",
+    "link-only-reconfiguration",
+    "persistent-old-root",
+    "return-to-first-configuration"
+  ],
+  "observationLevel": "TRACE",
+  "profilingPolicy": "FULL",
+  "visualizationProfile": "engineering"
+}
