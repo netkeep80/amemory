@@ -142,8 +142,14 @@ function decodeCompactProof(compact) {
   }
 
   const execute=object(compact.execute,"compact.execute");
+  const linksBeforeExecute=uint(
+    execute.linksBeforeExecute ?? linksAfterLoad,
+    "compact.execute.linksBeforeExecute",
+    linksAfterLoad,
+    finalLinks,
+  );
   const sourceReactions=array(execute.reactions,"compact.execute.reactions");
-  let previousLinks=linksAfterLoad;
+  let previousLinks=linksBeforeExecute;
   const reactions=sourceReactions.map((step,index)=>{
     object(step,"compact reaction["+index+"]");
     if (step.step!==index) fail("compact reaction["+index+"] step index mismatch");
@@ -215,7 +221,7 @@ function decodeCompactProof(compact) {
     roots,
     theoryAdmissions,
     load:{linksBeforeLoad,linksAfterLoad,importedDuplets,carrierRoundTrip:true},
-    execute:{activeReactionCount,finalQuiescent,reactions},
+    execute:{linksBeforeExecute,activeReactionCount,finalQuiescent,reactions},
     result,
   };
 }
@@ -265,6 +271,7 @@ export function inflateCompactProof(compact) {
     },
     execute:{
       memoryInstanceId:decoded.memoryId,
+      linksBeforeExecute:decoded.execute.linksBeforeExecute,
       activeReactionCount:decoded.execute.activeReactionCount,
       finalQuiescent:decoded.execute.finalQuiescent,
       reactions:decoded.execute.reactions.map((step)=>({
