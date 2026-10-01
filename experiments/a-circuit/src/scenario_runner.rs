@@ -1370,6 +1370,58 @@ mod tests {
             ),
         );
         assert!(!profile.full_resident_bytes_available);
+
+        let accounting = profile
+            .budget_accounting
+            .as_ref()
+            .expect("PROFILE must project authoritative runtime budget accounting");
+        let budget = CpuRunBudgetV1::scenario_default(run.max_reactions);
+        assert_eq!(accounting.max_reactions, budget.max_reactions);
+        assert_eq!(
+            accounting.max_appended_links,
+            budget.max_appended_links,
+        );
+        assert_eq!(accounting.max_total_links, budget.max_total_links);
+        assert_eq!(accounting.max_scope_width, budget.max_scope_width);
+        assert_eq!(
+            accounting.max_match_candidates,
+            budget.max_match_candidates,
+        );
+        assert_eq!(
+            accounting.max_unification_nodes,
+            budget.max_unification_nodes,
+        );
+        assert_eq!(
+            accounting.max_instantiation_nodes,
+            budget.max_instantiation_nodes,
+        );
+        assert_eq!(
+            accounting.max_dense_carrier_bytes,
+            budget.max_dense_carrier_bytes,
+        );
+        assert_eq!(accounting.total_links, profile.links_after_run);
+        assert_eq!(
+            accounting.appended_links_consumed,
+            profile.execution_link_delta,
+        );
+        assert_eq!(accounting.scope_width, profile.scope_after_width);
+        assert_eq!(
+            accounting.match_candidates,
+            profile.structural.trigger_incidence_candidates,
+        );
+        assert_eq!(
+            accounting.unification_nodes,
+            profile.structural.unification_nodes_visited,
+        );
+        assert_eq!(
+            accounting.instantiation_nodes,
+            profile.structural.instantiation_nodes_visited,
+        );
+        assert_eq!(
+            accounting.dense_carrier_allocated_bytes,
+            profile.dense_carrier_allocated_bytes.unwrap(),
+        );
+        assert!(!accounting.full_resident_bytes_available);
     }
 
     #[test]
@@ -2243,6 +2295,14 @@ mod tests {
             stopped.stop_reason,
             CpuRunStopReasonV1::MatchWorkBudgetExceeded,
         );
+        assert_eq!(stopped.budget_accounting.max_match_candidates, 0);
+        assert_eq!(
+            stopped.budget_accounting.match_candidates,
+            stopped.steps[0]
+                .structural_profile
+                .trigger_incidence_candidates,
+        );
+        assert!(stopped.budget_accounting.match_candidates > 0);
         assert_eq!(session.execution_state(), CpuSessionState::Failed);
     }
 
@@ -2269,6 +2329,14 @@ mod tests {
             stopped.stop_reason,
             CpuRunStopReasonV1::UnificationWorkBudgetExceeded,
         );
+        assert_eq!(stopped.budget_accounting.max_unification_nodes, 0);
+        assert_eq!(
+            stopped.budget_accounting.unification_nodes,
+            stopped.steps[0]
+                .structural_profile
+                .unification_nodes_visited,
+        );
+        assert!(stopped.budget_accounting.unification_nodes > 0);
         assert_eq!(session.execution_state(), CpuSessionState::Failed);
     }
 
@@ -2295,6 +2363,14 @@ mod tests {
             stopped.stop_reason,
             CpuRunStopReasonV1::InstantiationWorkBudgetExceeded,
         );
+        assert_eq!(stopped.budget_accounting.max_instantiation_nodes, 0);
+        assert_eq!(
+            stopped.budget_accounting.instantiation_nodes,
+            stopped.steps[0]
+                .structural_profile
+                .instantiation_nodes_visited,
+        );
+        assert!(stopped.budget_accounting.instantiation_nodes > 0);
         assert_eq!(session.execution_state(), CpuSessionState::Failed);
     }
 
