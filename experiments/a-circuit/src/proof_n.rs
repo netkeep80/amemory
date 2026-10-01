@@ -774,6 +774,9 @@ pub(crate) fn execute_session_observed_to_quiescence(
 
     let run_id = run.run_id;
     let links_before_run = run.links_before_run;
+    let dense_carrier_allocated_bytes = run.dense_carrier_allocated_bytes;
+    let max_dense_carrier_bytes = run.max_dense_carrier_bytes;
+    let full_resident_bytes_available = run.full_resident_bytes_available;
     let scope_before = run
         .steps
         .first()
@@ -924,6 +927,9 @@ pub(crate) fn execute_session_observed_to_quiescence(
         active_reaction_count,
         execute_ns: ns_u64(structural_profile.total_ns),
         trace_projection_ns: ns_u64(trace_projection_ns),
+        dense_carrier_allocated_bytes,
+        max_dense_carrier_bytes,
+        full_resident_bytes_available,
         structural: StructuralProfileV1::from(&structural_profile),
     });
 
