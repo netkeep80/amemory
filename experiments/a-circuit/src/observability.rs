@@ -490,6 +490,29 @@ impl From<&StructuralRunProfile> for StructuralProfileV1 {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct RunBudgetProfileV1 {
+    pub(crate) schema_version: u32,
+    pub(crate) reactions_consumed: u32,
+    pub(crate) max_reactions: u32,
+    pub(crate) appended_links_consumed: u32,
+    pub(crate) max_appended_links: u32,
+    pub(crate) total_links: u32,
+    pub(crate) max_total_links: u32,
+    pub(crate) scope_width: u32,
+    pub(crate) max_scope_width: u32,
+    pub(crate) match_candidates: u64,
+    pub(crate) max_match_candidates: u64,
+    pub(crate) unification_nodes: u64,
+    pub(crate) max_unification_nodes: u64,
+    pub(crate) instantiation_nodes: u64,
+    pub(crate) max_instantiation_nodes: u64,
+    pub(crate) dense_carrier_allocated_bytes: u64,
+    pub(crate) max_dense_carrier_bytes: u64,
+    pub(crate) full_resident_bytes_available: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct RunProfileV1 {
     pub(crate) schema_version: u32,
     pub(crate) timing_available: bool,
@@ -505,6 +528,11 @@ pub(crate) struct RunProfileV1 {
     pub(crate) active_reaction_count: u32,
     pub(crate) execute_ns: u64,
     pub(crate) trace_projection_ns: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) budget_accounting: Option<RunBudgetProfileV1>,
+    // Profile-v1 compatibility aliases introduced by #393. Keep them until
+    // the profile schema itself is versioned forward; they are not a second
+    // accounting source and are projected from the runtime snapshot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) dense_carrier_allocated_bytes: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -705,6 +733,26 @@ mod tests {
             active_reaction_count: 7,
             execute_ns: 100,
             trace_projection_ns: 9,
+            budget_accounting: Some(RunBudgetProfileV1 {
+                schema_version: 1,
+                reactions_consumed: 7,
+                max_reactions: 8,
+                appended_links_consumed: 7,
+                max_appended_links: 100,
+                total_links: 30,
+                max_total_links: 200,
+                scope_width: 1,
+                max_scope_width: 16,
+                match_candidates: 70,
+                max_match_candidates: 1_000,
+                unification_nodes: 80,
+                max_unification_nodes: 2_000,
+                instantiation_nodes: 90,
+                max_instantiation_nodes: 3_000,
+                dense_carrier_allocated_bytes: 4096,
+                max_dense_carrier_bytes: 8192,
+                full_resident_bytes_available: false,
+            }),
             dense_carrier_allocated_bytes: Some(4096),
             max_dense_carrier_bytes: Some(8192),
             full_resident_bytes_available: false,
@@ -760,6 +808,13 @@ mod tests {
             Some(8192),
         );
         assert!(!run.execute_profile.full_resident_bytes_available);
+        let budget = run.execute_profile.budget_accounting.as_ref().unwrap();
+        assert_eq!(budget.reactions_consumed, 7);
+        assert_eq!(budget.max_reactions, 8);
+        assert_eq!(budget.match_candidates, 70);
+        assert_eq!(budget.max_match_candidates, 1_000);
+        assert_eq!(budget.dense_carrier_allocated_bytes, 4096);
+        assert_eq!(budget.max_dense_carrier_bytes, 8192);
 
         let json = serde_json::to_string(&(open.clone(), run.clone())).unwrap();
         let decoded: (SessionOpenProfileV1, RunPipelineProfileV1) =
@@ -768,10 +823,12 @@ mod tests {
 
         let mut legacy = serde_json::to_value(&run.execute_profile).unwrap();
         let legacy_object = legacy.as_object_mut().unwrap();
+        legacy_object.remove("budgetAccounting");
         legacy_object.remove("denseCarrierAllocatedBytes");
         legacy_object.remove("maxDenseCarrierBytes");
         legacy_object.remove("fullResidentBytesAvailable");
         let legacy: RunProfileV1 = serde_json::from_value(legacy).unwrap();
+        assert_eq!(legacy.budget_accounting, None);
         assert_eq!(legacy.dense_carrier_allocated_bytes, None);
         assert_eq!(legacy.max_dense_carrier_bytes, None);
         assert!(!legacy.full_resident_bytes_available);
