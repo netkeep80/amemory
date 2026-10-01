@@ -3,10 +3,11 @@ use super::runtime_session::{
     CpuRunStopReasonV1, CpuRuntimeSession,
 };
 use super::observability::{
-    ns_u64, ObservationTimer, ObservedRunV1, RunEventKind, RunEventV1,
-    RunBudgetProfileV1, RunObservationLevel, RunProfileV1, RunStage,
-    StructuralProfileV1, OBSERVABILITY_TIMING_AVAILABLE,
-    OPTIMIZED_CPU_BACKEND_ID, RUN_OBSERVABILITY_SCHEMA_VERSION,
+    ns_u64, project_cpu_session_step_v1, ObservationTimer, ObservedRunV1,
+    RunEventKind, RunEventV1, RunBudgetProfileV1, RunObservationLevel,
+    RunProfileV1, RunStage, StructuralProfileV1,
+    OBSERVABILITY_TIMING_AVAILABLE, OPTIMIZED_CPU_BACKEND_ID,
+    RUN_OBSERVABILITY_SCHEMA_VERSION,
 };
 use amemory_optimized_cpu_probe::{
     structural::{OptimizedStructuralEngine, StructuralRunProfile},
@@ -710,7 +711,7 @@ pub(crate) fn execute_session_to_quiescence(
         .run_to_quiescence(
             initial,
             CpuRunBudgetV1::scenario_default(max_steps),
-            RunObservationLevel::Off,
+            RunObservationLevel::Off.runtime_trace_mode(),
         )
         .ok()?;
     if run.stop_reason != CpuRunStopReasonV1::Quiescent {
@@ -722,7 +723,7 @@ pub(crate) fn execute_session_to_quiescence(
         .steps
         .into_iter()
         .map(|step| {
-            let evidence = step.evidence;
+            let evidence = step.reaction;
             WebProofReactionStep {
                 memory_instance_id: memory_instance_id.clone(),
                 step: evidence.reaction_index,
@@ -799,7 +800,7 @@ pub(crate) fn execute_session_observed_to_quiescence(
         .run_to_quiescence(
             initial,
             CpuRunBudgetV1::scenario_default(max_reactions),
-            observation_level,
+            observation_level.runtime_trace_mode(),
         )
         .map_err(|stop_reason| CpuObservedRunStopV1 {
             stop_reason,
@@ -824,7 +825,7 @@ pub(crate) fn execute_session_observed_to_quiescence(
     let scope_before = run
         .steps
         .first()
-        .map(|step| step.evidence.scope_before.clone())
+        .map(|step| step.reaction.scope_before.clone())
         .unwrap_or_default();
     let scope_before_width = scope_before.len() as u32;
 
@@ -861,11 +862,13 @@ pub(crate) fn execute_session_observed_to_quiescence(
     }
 
     for step in run.steps {
-        structural_profile.accumulate(&step.structural_profile);
+        let projected =
+            project_cpu_session_step_v1(step, observation_level);
+        structural_profile.accumulate(&projected.structural_profile);
         trace_projection_ns = trace_projection_ns
-            .saturating_add(step.trace_projection_ns);
+            .saturating_add(projected.trace_projection_ns);
 
-        let evidence = step.evidence;
+        let evidence = projected.evidence;
         let quiescent = evidence.quiescent;
         if !quiescent {
             active_reaction_count =
@@ -1050,7 +1053,7 @@ pub(crate) fn identical_rerun(
     let bounded = session.run_to_quiescence(
         initial,
         CpuRunBudgetV1::scenario_default(max_reactions),
-        RunObservationLevel::Off,
+        RunObservationLevel::Off.runtime_trace_mode(),
     );
 
     let result = match bounded {

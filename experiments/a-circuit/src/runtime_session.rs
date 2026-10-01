@@ -1,9 +1,7 @@
-use super::observability::{
-    ObservationTimer, RunObservationLevel, RunStructuralFactV1,
-    RUN_OBSERVABILITY_SCHEMA_VERSION,
-};
 use amemory_optimized_cpu_probe::{
-    structural::{OptimizedStructuralEngine, StructuralRunProfile},
+    structural::{
+        OptimizedStructuralEngine, StructuralRunProfile, StructuralRunTrace,
+    },
     Handle, OptimizedLinkStore,
 };
 use serde::{Deserialize, Serialize};
@@ -49,10 +47,14 @@ pub(crate) enum CpuSessionStepError {
     EngineFailure,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct CpuSessionReactionEvidenceV1 {
-    pub(crate) schema_version: u32,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CpuRuntimeTraceMode {
+    Profile,
+    Trace,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CpuSessionReactionV1 {
     pub(crate) session_id: String,
     pub(crate) run_id: u64,
     pub(crate) reaction_index: u32,
@@ -64,15 +66,13 @@ pub(crate) struct CpuSessionReactionEvidenceV1 {
     pub(crate) transitioned_members: u32,
     pub(crate) handoff_count: u32,
     pub(crate) quiescent: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) structural_facts: Option<Vec<RunStructuralFactV1>>,
 }
 
 #[derive(Debug)]
 pub(crate) struct CpuSessionStepOutcomeV1 {
-    pub(crate) evidence: CpuSessionReactionEvidenceV1,
+    pub(crate) reaction: CpuSessionReactionV1,
     pub(crate) structural_profile: StructuralRunProfile,
-    pub(crate) trace_projection_ns: u128,
+    pub(crate) structural_trace: Option<StructuralRunTrace>,
 }
 
 pub(crate) const CPU_RUN_BUDGET_SCHEMA_VERSION: u32 = 2;
@@ -328,7 +328,7 @@ impl CpuRunControllerV1 {
     pub(crate) fn next(
         &mut self,
         session: &mut CpuRuntimeSession,
-        observation_level: RunObservationLevel,
+        trace_mode: CpuRuntimeTraceMode,
     ) -> CpuControlledStepV1 {
         if let Some(reason) = self.budget.carrier_stop_reason(
             session.memory.store.dense_carrier_index_allocated_bytes(),
@@ -355,7 +355,7 @@ impl CpuRunControllerV1 {
             );
         }
 
-        let step = match session.step(observation_level) {
+        let step = match session.step(trace_mode) {
             Ok(step) => step,
             Err(error) => {
                 session.fail_active_run();
@@ -391,7 +391,7 @@ impl CpuRunControllerV1 {
         }
 
         let stop_reason = step
-            .evidence
+            .reaction
             .quiescent
             .then_some(CpuRunStopReasonV1::Quiescent);
         CpuControlledStepV1 {
@@ -409,15 +409,6 @@ pub(crate) struct CpuBoundedRunV1 {
     pub(crate) steps: Vec<CpuSessionStepOutcomeV1>,
     pub(crate) stop_reason: CpuRunStopReasonV1,
     pub(crate) budget_accounting: CpuRunBudgetAccountingV1,
-}
-
-fn runtime_metering_level(
-    observation_level: RunObservationLevel,
-) -> RunObservationLevel {
-    match observation_level {
-        RunObservationLevel::Off => RunObservationLevel::Profile,
-        level => level,
-    }
 }
 
 /// Long-lived optimized-CPU execution Session over one loaded A-memory.
@@ -489,7 +480,7 @@ impl CpuRuntimeSession {
 
     pub(crate) fn step(
         &mut self,
-        observation_level: RunObservationLevel,
+        trace_mode: CpuRuntimeTraceMode,
     ) -> Result<CpuSessionStepOutcomeV1, CpuSessionStepError> {
         if !matches!(
             self.execution_state,
@@ -509,68 +500,42 @@ impl CpuRuntimeSession {
         };
         let reaction_index = self.next_reaction_index;
         let links_before = self.memory.store.link_count() as u32;
-        let metering_level = runtime_metering_level(observation_level);
+        let scope_before = self.engine.current().to_vec();
 
-        let mut trace_projection_ns = 0u128;
-        let scope_before = if observation_level.traces() {
-            let projection_started = ObservationTimer::start();
-            let scope = self.engine.current().to_vec();
-            trace_projection_ns = trace_projection_ns
-                .saturating_add(projection_started.elapsed_ns());
-            scope
-        } else {
-            self.engine.current().to_vec()
-        };
-
-        let (reaction, structural_profile, structural_facts) =
-            if metering_level.traces() {
-                let (reaction, profile, native_trace) = match self
-                    .engine
-                    .run_traced(&mut self.memory.store)
-                {
-                    Ok(value) => value,
-                    Err(_) => {
-                        self.execution_state = CpuSessionState::Failed;
-                        return Err(CpuSessionStepError::EngineFailure);
-                    }
-                };
-
-                let projection_started = ObservationTimer::start();
-                let collection_ns = native_trace.collection_ns;
-                let facts = native_trace
-                    .events
-                    .into_iter()
-                    .map(RunStructuralFactV1::from)
-                    .collect::<Vec<_>>();
-                trace_projection_ns = trace_projection_ns
-                    .saturating_add(collection_ns)
-                    .saturating_add(projection_started.elapsed_ns());
-                (reaction, profile, Some(facts))
-            } else {
-                // Runtime safety metering remains active even when profile
-                // projection is suppressed with observation=OFF.
-                let (reaction, profile) = match self
-                    .engine
-                    .run_profiled(&mut self.memory.store)
-                {
-                    Ok(value) => value,
-                    Err(_) => {
-                        self.execution_state = CpuSessionState::Failed;
-                        return Err(CpuSessionStepError::EngineFailure);
-                    }
-                };
-                (reaction, profile, None)
+        // Runtime safety metering is always active. TRACE only requests the
+        // native structural trace; portable evidence projection belongs above
+        // the Session and cannot influence execution.
+        let (reaction, structural_profile, structural_trace) =
+            match trace_mode {
+                CpuRuntimeTraceMode::Trace => {
+                    let (reaction, profile, trace) = match self
+                        .engine
+                        .run_traced(&mut self.memory.store)
+                    {
+                        Ok(value) => value,
+                        Err(_) => {
+                            self.execution_state = CpuSessionState::Failed;
+                            return Err(CpuSessionStepError::EngineFailure);
+                        }
+                    };
+                    (reaction, profile, Some(trace))
+                }
+                CpuRuntimeTraceMode::Profile => {
+                    let (reaction, profile) = match self
+                        .engine
+                        .run_profiled(&mut self.memory.store)
+                    {
+                        Ok(value) => value,
+                        Err(_) => {
+                            self.execution_state = CpuSessionState::Failed;
+                            return Err(CpuSessionStepError::EngineFailure);
+                        }
+                    };
+                    (reaction, profile, None)
+                }
             };
 
-        let scope_after = if observation_level.traces() {
-            let projection_started = ObservationTimer::start();
-            let scope = self.engine.current().to_vec();
-            trace_projection_ns = trace_projection_ns
-                .saturating_add(projection_started.elapsed_ns());
-            scope
-        } else {
-            self.engine.current().to_vec()
-        };
+        let scope_after = self.engine.current().to_vec();
         let quiescent = reaction.quiescent;
 
         self.next_reaction_index =
@@ -582,8 +547,7 @@ impl CpuRuntimeSession {
         };
 
         Ok(CpuSessionStepOutcomeV1 {
-            evidence: CpuSessionReactionEvidenceV1 {
-                schema_version: RUN_OBSERVABILITY_SCHEMA_VERSION,
+            reaction: CpuSessionReactionV1 {
                 session_id: self.memory.id.clone(),
                 run_id,
                 reaction_index,
@@ -595,10 +559,9 @@ impl CpuRuntimeSession {
                 transitioned_members: reaction.transitioned_members,
                 handoff_count: reaction.handoff_count,
                 quiescent,
-                structural_facts,
             },
             structural_profile,
-            trace_projection_ns,
+            structural_trace,
         })
     }
 
@@ -619,7 +582,7 @@ impl CpuRuntimeSession {
         &mut self,
         initial: Handle,
         budget: CpuRunBudgetV1,
-        observation_level: RunObservationLevel,
+        trace_mode: CpuRuntimeTraceMode,
     ) -> Result<CpuBoundedRunV1, CpuRunStopReasonV1> {
         let mut controller = self
             .begin_budgeted_run(initial, budget)
@@ -629,7 +592,7 @@ impl CpuRuntimeSession {
         let mut steps = Vec::new();
 
         loop {
-            let controlled = controller.next(self, observation_level);
+            let controlled = controller.next(self, trace_mode);
             let budget_accounting = controlled.budget_accounting;
             if let Some(step) = controlled.step {
                 steps.push(step);
@@ -800,19 +763,13 @@ mod tests {
     }
 
     #[test]
-    fn observation_off_still_enables_runtime_metering() {
-        assert_eq!(
-            runtime_metering_level(RunObservationLevel::Off),
-            RunObservationLevel::Profile,
+    fn runtime_trace_mode_never_disables_safety_metering() {
+        assert_ne!(
+            CpuRuntimeTraceMode::Profile,
+            CpuRuntimeTraceMode::Trace,
         );
-        assert_eq!(
-            runtime_metering_level(RunObservationLevel::Trace),
-            RunObservationLevel::Trace,
-        );
-        assert_eq!(
-            runtime_metering_level(RunObservationLevel::Full),
-            RunObservationLevel::Full,
-        );
+        // Both modes execute through run_profiled/run_traced, so structural
+        // safety counters are always collected; there is no runtime OFF mode.
     }
 
     #[test]
