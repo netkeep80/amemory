@@ -1,0 +1,87 @@
+{
+  "schema": "amemory-artifact-lifecycle/v1",
+  "authority": {
+    "semanticRepository": "netkeep80/anum_docs",
+    "localContractOwner": "netkeep80/amemory",
+    "digestIsSemanticProof": false,
+    "semanticVerificationOwnerIssue": 331
+  },
+  "current": {
+    "snapshotId": "v0.2",
+    "contractPath": "contracts/amemory-contract-v0.2.json",
+    "conformancePath": "contracts/amemory-conformance-v0.2.json"
+  },
+  "snapshots": [
+    {
+      "id": "v0.1",
+      "immutable": true,
+      "historical": true,
+      "status": "candidate",
+      "accepted": false,
+      "contract": {
+        "path": "contracts/amemory-contract-v0.1.json",
+        "schema": "amemory-contract/v0.1",
+        "gitBlobSha": "8ccaf8f374f707acabe5f131cf15c2127345d4cd"
+      },
+      "conformance": {
+        "path": "contracts/amemory-conformance-v0.1.json",
+        "schema": "amemory-conformance/v0.1",
+        "gitBlobSha": "02b534b4d109a0fd31f425451db45f7a873fa48a"
+      }
+    },
+    {
+      "id": "v0.2",
+      "immutable": true,
+      "historical": false,
+      "status": "candidate",
+      "accepted": false,
+      "contract": {
+        "path": "contracts/amemory-contract-v0.2.json",
+        "schema": "amemory-contract/v0.2",
+        "gitBlobSha": "8be905be3cb50a34027c1727306d42462028607e"
+      },
+      "conformance": {
+        "path": "contracts/amemory-conformance-v0.2.json",
+        "schema": "amemory-conformance/v0.2",
+        "gitBlobSha": "36f13f4f8fe72bf178905f1ba1d6f350c8e16b19"
+      }
+    }
+  ],
+  "versionNamespaces": {
+    "acceptedMtsFoundation": {
+      "source": "current.contract#/normativeAuthority/mtsVersion"
+    },
+    "executionProfile": {
+      "source": "current.contract#/normativeAuthority/executionProfile"
+    },
+    "implementation": {
+      "source": "VERSION",
+      "format": "semver"
+    },
+    "observabilityEvidence": {
+      "source": "experiments/a-circuit/src/observability.rs#RUN_OBSERVABILITY_SCHEMA_VERSION"
+    },
+    "scenario": {
+      "source": "experiments/a-circuit/scenarios/mux1-lifecycle-v1.json#/schemaVersion"
+    },
+    "proofRepresentation": {
+      "source": "experiments/a-circuit/src/proof_n.rs#WEB_STRUCTURAL_PROOF_SCHEMA_VERSION"
+    }
+  },
+  "semanticVerification": {
+    "ownerIssue": 331,
+    "levels": [
+      "TRANSPORT_VALID",
+      "TRACE_CONSISTENT",
+      "SEMANTIC_REPLAY_VERIFIED",
+      "SCALAR_ORACLE_VERIFIED",
+      "FRESH_INSTANCE_MATCH"
+    ],
+    "artifactDigestMeaning": "identity-only-not-semantic-correctness"
+  },
+  "upstreamProjectionLifecycle": {
+    "ownerScript": "scripts/sync-mts-requirements.mjs",
+    "currentLock": "contracts/upstream/mts-v0.14.lock.json",
+    "currentProjection": "contracts/upstream/mts-v0.14-requirements.json"
+  }
+}

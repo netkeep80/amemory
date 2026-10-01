@@ -6,8 +6,10 @@ on:
       - "contracts/upstream/**"
       - "contracts/amemory-contract-v*.json"
       - "contracts/amemory-conformance-v*.json"
+      - "contracts/amemory-artifacts.json"
       - "scripts/sync-mts-requirements.mjs"
       - "scripts/test-mts-upstream-import.mjs"
+      - "scripts/verify-amemory-artifacts.mjs"
       - ".github/workflows/mts-upstream-check.yml"
       - "repo-policy.json"
       - "README.md"
@@ -17,8 +19,10 @@ on:
       - "contracts/upstream/**"
       - "contracts/amemory-contract-v*.json"
       - "contracts/amemory-conformance-v*.json"
+      - "contracts/amemory-artifacts.json"
       - "scripts/sync-mts-requirements.mjs"
       - "scripts/test-mts-upstream-import.mjs"
+      - "scripts/verify-amemory-artifacts.mjs"
       - ".github/workflows/mts-upstream-check.yml"
       - "repo-policy.json"
       - "README.md"
@@ -39,6 +43,9 @@ jobs:
 
       - name: Importer + D7 declaration positive/negative tests
         run: node scripts/test-mts-upstream-import.mjs
+
+      - name: Verify local contract/conformance artifact lifecycle
+        run: node scripts/verify-amemory-artifacts.mjs
 
       - name: Verify exact pinned MTS foundation + execution profile projection
         run: node scripts/sync-mts-requirements.mjs --check
