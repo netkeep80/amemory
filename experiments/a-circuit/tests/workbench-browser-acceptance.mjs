@@ -8,6 +8,7 @@ import {
   proofPipelineHtml,
   recursiveStructureHtml,
 } from "../../browser-accelerator/web/proof-view.mjs";
+import { gpuCarrierReactionShaderSource } from "../../browser-accelerator/web/gpu-carrier.mjs";
 
 const root = process.cwd();
 
@@ -32,6 +33,40 @@ for (const forbidden of [
 ]) {
   if (workbenchSource.includes(forbidden)) {
     throw new Error("Workbench WebGPU witness seeded expected result: " + forbidden);
+  }
+}
+
+const pagesWebGpuSmokeSource = fs.readFileSync(
+  path.join(root, "experiments/browser-accelerator/tests/pages-webgpu-live-smoke.mjs"),
+  "utf8",
+);
+for (const required of [
+  "--enable-unsafe-webgpu",
+  "--use-webgpu-adapter=swiftshader",
+]) {
+  if (!pagesWebGpuSmokeSource.includes(required)) {
+    throw new Error("compute-only WebGPU launch flag missing: " + required);
+  }
+}
+for (const forbidden of [
+  "--use-angle=vulkan",
+  "--use-vulkan=swiftshader",
+  "--enable-features=Vulkan",
+]) {
+  if (pagesWebGpuSmokeSource.includes(forbidden)) {
+    throw new Error("C4c3 compute smoke regained presentation Vulkan: " + forbidden);
+  }
+}
+
+for (const mode of ["single", "sections"]) {
+  const shader = gpuCarrierReactionShaderSource(mode, {
+    currentHandle: 1,
+    interpreterHandle: 1,
+    linkCount: 2,
+    rootHandle: 1,
+  });
+  if (/\bactive\b/.test(shader) || !shader.includes("active_handle")) {
+    throw new Error("C4c3 generated WGSL uses reserved identifier active");
   }
 }
 
