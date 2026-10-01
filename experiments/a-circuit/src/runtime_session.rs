@@ -84,6 +84,10 @@ pub(crate) const DEFAULT_MAX_UNIFICATION_NODES: u64 = 1_000_000_000;
 pub(crate) const DEFAULT_MAX_INSTANTIATION_NODES: u64 = 1_000_000_000;
 pub(crate) const DEFAULT_MAX_DENSE_CARRIER_BYTES: u64 = 256 * 1024 * 1024;
 
+fn default_max_dense_carrier_bytes() -> u64 {
+    DEFAULT_MAX_DENSE_CARRIER_BYTES
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CpuRunBudgetV1 {
@@ -95,6 +99,7 @@ pub(crate) struct CpuRunBudgetV1 {
     pub(crate) max_match_candidates: u64,
     pub(crate) max_unification_nodes: u64,
     pub(crate) max_instantiation_nodes: u64,
+    #[serde(default = "default_max_dense_carrier_bytes")]
     pub(crate) max_dense_carrier_bytes: u64,
 }
 
@@ -677,6 +682,21 @@ mod tests {
                 instantiation_nodes: 30,
             }),
             None,
+        );
+    }
+
+    #[test]
+    fn budget_v2_without_new_byte_field_uses_finite_default() {
+        let mut legacy =
+            serde_json::to_value(CpuRunBudgetV1::scenario_default(8)).unwrap();
+        legacy
+            .as_object_mut()
+            .unwrap()
+            .remove("maxDenseCarrierBytes");
+        let decoded: CpuRunBudgetV1 = serde_json::from_value(legacy).unwrap();
+        assert_eq!(
+            decoded.max_dense_carrier_bytes,
+            DEFAULT_MAX_DENSE_CARRIER_BYTES,
         );
     }
 
