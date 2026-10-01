@@ -780,9 +780,10 @@ Promise.all([
     stepOnceStart
   );
   const stepOnceSource = workbenchSource.slice(stepOnceStart, stepOnceEnd);
-  if (!stepOnceSource.includes("stepScenarioLiveSession(state.wasm)") ||
+  if (!stepOnceSource.includes("await state.worker.step()") ||
       stepOnceSource.includes("scopeBefore") ||
-      stepOnceSource.includes("scopeAfter")) {
+      stepOnceSource.includes("scopeAfter") ||
+      /\.step\s*\([^)]*(scope|current)/i.test(stepOnceSource)) {
     throw new Error(
       "#333 Workbench step action owns or feeds Scope instead of runtime"
     );
