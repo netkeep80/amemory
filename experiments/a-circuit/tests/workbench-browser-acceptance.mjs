@@ -86,6 +86,15 @@ for (const mode of ["single", "sections"]) {
   if (/\bactive\b/.test(shader) || !shader.includes("active_handle")) {
     throw new Error("C4c3 generated WGSL uses reserved identifier active");
   }
+  for (const marker of [
+    "var role_left = 0u",
+    "role_count - role_left - 1u",
+    "roles[role_left] = roles[role_right]",
+  ]) {
+    if (!shader.includes(marker)) {
+      throw new Error("C4c3 WGSL lost canonical role order: " + marker);
+    }
+  }
 }
 
 const syntaxTargets = [
