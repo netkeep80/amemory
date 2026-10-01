@@ -1,6 +1,7 @@
 use super::{
     observability::{
-        run_pipeline_profile_v1, session_open_profile_v1, time_stage,
+        project_cpu_session_step_v1, run_pipeline_profile_v1,
+        session_open_profile_v1, time_stage, CpuSessionReactionEvidenceV1,
         ObservedRunV1, RunObservationLevel, RunPipelineProfileV1,
         SessionOpenProfileV1,
     },
@@ -12,8 +13,7 @@ use super::{
     },
     runtime_session::{
         CpuRunBudgetAccountingV1, CpuRunBudgetV1, CpuRunControllerV1,
-        CpuRunStopReasonV1, CpuRuntimeSession, CpuSessionReactionEvidenceV1,
-        CpuSessionState,
+        CpuRunStopReasonV1, CpuRuntimeSession, CpuSessionState,
     },
     scenario::{
         validate_manifest_v1, ScenarioAssertionV1, ScenarioBackendV1,
@@ -707,7 +707,10 @@ pub(crate) fn step_cpu_scenario_session_v1(
 
     let controlled = active
         .controller
-        .next(&mut live.session, live.manifest.observation_level);
+        .next(
+            &mut live.session,
+            live.manifest.observation_level.runtime_trace_mode(),
+        );
 
     if let Some(stop_reason) = controlled.stop_reason {
         if stop_reason != CpuRunStopReasonV1::Quiescent {
@@ -727,14 +730,18 @@ pub(crate) fn step_cpu_scenario_session_v1(
                 .to_owned(),
         }
     })?;
-    if !step.evidence.quiescent {
+    let projected = project_cpu_session_step_v1(
+        step,
+        live.manifest.observation_level,
+    );
+    if !projected.evidence.quiescent {
         active.active_reaction_count =
             active.active_reaction_count.saturating_add(1);
     }
 
     let completed =
         controlled.stop_reason == Some(CpuRunStopReasonV1::Quiescent);
-    let evidence = step.evidence;
+    let evidence = projected.evidence;
     if !completed {
         let report = ScenarioStepReportV1 {
             schema_version: SCENARIO_REPORT_SCHEMA_VERSION,
@@ -1219,7 +1226,7 @@ mod tests {
             .run_to_quiescence(
                 configured.initial,
                 CpuRunBudgetV1::scenario_default(run.max_reactions),
-                observation_level,
+                observation_level.runtime_trace_mode(),
             )
             .unwrap();
         assert_eq!(bounded.run_id, 1);
@@ -1235,7 +1242,9 @@ mod tests {
         let evidence = bounded
             .steps
             .into_iter()
-            .map(|step| step.evidence)
+            .map(|step| {
+                project_cpu_session_step_v1(step, observation_level).evidence
+            })
             .collect::<Vec<_>>();
         for (index, step) in evidence.iter().enumerate() {
             assert_eq!(step.session_id, opened.session_id);
