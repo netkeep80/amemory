@@ -48,6 +48,27 @@ function replaceRequired(source, from, to, label) {
   return source.replace(from, to);
 }
 
+function attachCiMatrix() {
+  const indexPath = path.join(site, "index.html");
+  let html = fs.readFileSync(indexPath, "utf8");
+  const script = '  <script src="./ci-matrix.js"></script>\n';
+  const marker = "</body>";
+
+  if (!html.includes(script.trim())) {
+    if (!html.includes(marker)) {
+      throw new Error("index.html has no </body> marker");
+    }
+    html = html.replace(marker, script + marker);
+    fs.writeFileSync(indexPath, html);
+  }
+
+  const verified = fs.readFileSync(indexPath, "utf8");
+  if (!verified.includes("ci-matrix.js")) {
+    throw new Error("CI matrix script was not attached");
+  }
+  console.log("PAGES_CI_MATRIX_ATTACH=PASS");
+}
+
 function cacheBust() {
   const sha = requireSha("ACCEPTED_SOURCE_SHA");
 
@@ -140,10 +161,12 @@ function cacheBust() {
 const command = process.argv[2];
 if (command === "build-info") {
   buildInfo();
+} else if (command === "attach-ci-matrix") {
+  attachCiMatrix();
 } else if (command === "cache-bust") {
   cacheBust();
 } else {
   throw new Error(
-    "usage: node scripts/pages-build.mjs <build-info|cache-bust>",
+    "usage: node scripts/pages-build.mjs <build-info|attach-ci-matrix|cache-bust>",
   );
 }
