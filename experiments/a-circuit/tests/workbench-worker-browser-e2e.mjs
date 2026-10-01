@@ -552,7 +552,29 @@ try {
   );
 } finally {
   try { cdp?.close(); } catch {}
-  chrome.kill("SIGTERM");
+
+  if (chrome.exitCode === null) {
+    chrome.kill("SIGTERM");
+    await new Promise((resolve) => {
+      const timer = setTimeout(resolve, 2_000);
+      chrome.once("exit", () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+  }
+  if (chrome.exitCode === null) {
+    chrome.kill("SIGKILL");
+    await new Promise((resolve) => {
+      chrome.once("exit", resolve);
+    });
+  }
+
   await new Promise((resolve) => server.close(resolve));
-  fs.rmSync(profile, { recursive: true, force: true });
+  fs.rmSync(profile, {
+    recursive: true,
+    force: true,
+    maxRetries: 8,
+    retryDelay: 100,
+  });
 }
