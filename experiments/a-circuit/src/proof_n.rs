@@ -1053,7 +1053,7 @@ pub(crate) fn identical_rerun(
     let bounded = session.run_to_quiescence(
         initial,
         CpuRunBudgetV1::scenario_default(max_reactions),
-        RunObservationLevel::Off,
+        RunObservationLevel::Off.runtime_trace_mode(),
     );
 
     let result = match bounded {
