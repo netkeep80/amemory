@@ -1,96 +1,94 @@
-# Browser accelerator prototype
+# Browser accelerator / Workbench
 
-Research owner: [amemory#8](https://github.com/netkeep80/amemory/issues/8).
+Эта директория больше не является отдельным «первым WebGPU spike». Она содержит browser/Pages поверхность единого A-memory Workbench и исследования физических accelerator-backend.
 
-This experiment proves only the browser execution path:
+История раннего spike не копируется в отдельный архивный документ: она остаётся в Git.
 
-```text
-Rust -> WebAssembly -> browser
-browser JS -> WebGPU -> GPU/iGPU compute -> readback
-```
-
-It is **not** an MTS/A-memory semantic implementation yet.
-
-## What the prototype proves
-
-A successful run must show:
+## Текущий исполняющий путь
 
 ```text
-Rust/WASM = LOADED
-CPU control = PASS
-WebGPU = WEBGPU_AVAILABLE
-GPU compute = PASS [2, 3, 4, 5]
+Workbench
+  -> ScenarioWorkerClient
+  -> browser Worker
+  -> amemory-a-circuit WASM
+  -> persistent optimized-CPU Session
+  -> structural execution / result / evidence
 ```
 
-If WebGPU is unavailable, the page must say so explicitly. It must not silently pretend that the CPU/WASM fallback was GPU execution.
+Main thread не владеет второй живой Session. Допустим отдельный read-only catalog WASM для реестра сценариев и presentation metadata.
 
-## Toolchain
+Повторные запуски одной загруженной асети используют ту же Session:
 
-Pinned first-spike Rust toolchain:
+```text
+PREPARE -> LOAD
+        -> CONFIGURE -> EXECUTE -> RESULT
+        -> CONFIGURE -> EXECUTE -> RESULT
+        -> ...
+```
+
+Cancellation, resource budgets и wall-clock watchdog возвращают явный non-success/recovery state. Таймер не является semantic oracle.
+
+## Backend capabilities
+
+| Backend | Browser/Workbench capability |
+|---|---|
+| optimized CPU | поддержан как текущий persistent runtime |
+| reference Rust/WASM | независимый reference/differential backend, не основной Workbench runtime |
+| WebGPU | bounded research; #266 должен доказать authentic packed-carrier MUX1 `discover -> publish`; persistent adapter #279 ещё не реализован |
+| LinksDB | persistent adapter #280 ещё не реализован |
+
+Неподдерживаемый backend обязан fail closed. Silent CPU fallback запрещён.
+
+## WebGPU boundary
+
+Наличие WGSL, dispatch/readback или старого CPU↔GPU differential само по себе не означает полный WebGPU A-memory backend.
+
+Сильный capability claim требует как минимум:
+
+- реальный packed carrier из того же PREPARE path;
+- structural discovery без expected-result seeding;
+- отдельную PUBLISH-границу;
+- browser compile/dispatch/readback;
+- сравнение с независимым CPU/Rust evidence только **после** GPU исполнения;
+- для persistent claim — resident Session lifecycle из #279.
+
+## Версии и authority
+
+Не смешивать:
+
+```text
+MTS foundation        = accepted v0.14
+execution profile     = minimal-portable-amemory-execution / 0.1.0
+profile foundation    = v0.13
+amemory implementation= root VERSION
+evidence/scenario     = собственные schemaVersion
+```
+
+MTS semantic authority находится в `netkeep80/anum_docs`. Browser code, GPU layout, local handles, Worker protocol и визуализация не являются semantic authority.
+
+## Проверка browser поверхности
+
+Pinned Rust toolchain:
 
 ```text
 Rust 1.98.1
 target: wasm32-unknown-unknown
 ```
 
-There are intentionally no Rust crate dependencies in the first witness.
-
-## Build locally
-
-From this directory:
+Быстрая acceptance-проверка browser модулей и renderer/build identity:
 
 ```bash
-rustup toolchain install 1.98.1 --profile minimal
-rustup target add --toolchain 1.98.1 wasm32-unknown-unknown
-
-cargo +1.98.1 build \
-  --manifest-path rust/Cargo.toml \
-  --target wasm32-unknown-unknown \
-  --release
-
-cp rust/target/wasm32-unknown-unknown/release/amemory_browser_probe.wasm \
-  web/amemory_browser_probe.wasm
+node experiments/a-circuit/tests/workbench-browser-acceptance.mjs
 ```
 
-Serve the directory over localhost:
-
-```bash
-python -m http.server 8000 --directory web
-```
-
-Open:
-
-```text
-http://localhost:8000/
-```
-
-Localhost is suitable for development; the public demo is intended to run over HTTPS on GitHub Pages.
+Real browser retained-Session E2E запускается существующим `A-Circuit Workbench real-WASM` workflow после сборки настоящего A-Circuit WASM.
 
 ## GitHub Pages
 
-The repository workflow builds the Rust WASM artifact and deploys this demo as a Pages artifact.
-
-Expected project-site URL:
+Текущая публичная поверхность:
 
 ```text
 https://netkeep80.github.io/amemory/
 ```
 
-The repository may require this one-time setting:
-
-```text
-Settings -> Pages -> Build and deployment -> Source -> GitHub Actions
-```
-
-All browser assets use relative paths so the project-site subpath works.
-
-## Why the first spike uses JS WebGPU directly
-
-The first witness deliberately separates concerns:
-
-- Rust proves native code can become browser WASM;
-- raw WASM exports prove the core can be called without framework glue;
-- direct JavaScript WebGPU proves accelerator dispatch/readback independently;
-- a later experiment can compare this split with Rust + `wgpu` on the web target.
-
-That prevents a larger abstraction stack from hiding whether a failure belongs to Rust/WASM, WebGPU, shader execution, or deployment.
+Pages должен публиковать exact accepted SHA/VERSION/evidence и тот же Workbench, а не отдельную legacy GPU страницу.

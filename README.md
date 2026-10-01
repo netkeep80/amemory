@@ -114,183 +114,80 @@ contracts/amemory-conformance-v0.2.json#/backendMatrix
 
 ### Текущее состояние backend
 
-| Backend | Статус | Current Scope | Физическая история | Нормализованное сравнение | Полный профиль |
-|---|---|---|---|---|---|
-| Rust reference CPU / WASM | prototype / partial | R1–R7: bounded two-bank Scope + published selector | старые Scope bank и Links сохраняются физически | normalized recursive Link wire Scope + matched/handoff | **да — P01–P17** |
-| WebGPU browser | prototype / partial | R1–R7: two-bank Scope buffer + atomic published selector | старые GPU Scope bank и Link pool сохраняются | normalized recursive Link wire Scope + matched/handoff | **да — P01–P17** |
-| future accelerator family | planned | должен быть объявлен до реализации | должен быть объявлен отдельно от semantic currentness | обязательный differential против reference | **нет** |
+Текущий пользовательский путь — **Workbench → browser Worker → A-Circuit WASM → persistent optimized-CPU Session**.
 
-Rust native tests и WASM browser используют одну текущую reference-кодовую базу; это разные поверхности исполнения одного prototype backend, а не разные семантики.
+| Backend / поверхность | Текущий статус | Что реально поддерживается | Чего пока нет |
+|---|---|---|---|
+| Optimized CPU | **основной исполняющий backend** | persistent `MemoryInstance/Session`, PREPARE/LOAD один раз, повторные CONFIGURE/RUN, `step()`, бюджеты/rollback/cancel/watchdog, evidence/profile | не является semantic authority MTS |
+| Rust reference CPU / WASM | независимый reference/differential backend | explicit `ReferenceMemoryInstance`, изолированные instances, structural differential witnesses | не является текущим Workbench runtime |
+| WebGPU | **bounded research capability** | packed-carrier/lookup и накопленные differential witnesses | authentic current MUX1 `discover -> publish` slice #266 ещё не закрыт; persistent Session #279 отсутствует |
+| LinksDB / Doublets | planned / experimental | substrate research | persistent Session adapter #280 отсутствует |
+| future accelerator | planned | только через общий backend/session contract | никаких implicit CPU fallback или backend-specific semantics |
 
-## Что уже доказано браузерным prototype
+Если backend не поддерживает операцию, Workbench/adapter обязан fail closed. Неподдерживаемый WebGPU/LinksDB путь не должен молча исполняться на CPU.
 
-Текущие GREEN witnesses подтверждают полезные части будущего профиля:
-
-- CPU/WebGPU incidence differential;
-- обнаружение намеренного mismatch;
-- canonical pair convergence;
-- stateful физическое хранение между rounds;
-- независимость portable identity от local handles;
-- canonical direct technical recursive Link wire import/export в двух независимо адресованных Memories;
-- fail-closed malformed/foreign/capacity controls.
-
-### Терминология представлений после MTS v0.14
-
-Каноническая публичная поверхность принятого MTS v0.14 разделяет онтологию, рекурсивную структуру и представления:
+### Текущая архитектура Workbench
 
 ```text
-онтология:
-  Link
+Workbench UI
+  -> ScenarioWorkerClient
+  -> browser Worker
+  -> real A-Circuit WASM
+  -> CpuRuntimeSession
+  -> OptimizedStructuralEngine
 
-рекурсивный структурный алфавит:
-  ROOT     8     остенсивно: ∞
-  START_K  9S    остенсивно: ♂S
-  END_K    6S    остенсивно: S♀
-  PAIR     1AB   остенсивно: A ⟼ B
-
-самоинцидентность:
-  ROOT  = 11
-  START_K = 10
-  END_K   = 01
-  PAIR  = 00
+main thread:
+  read-only catalog/presentation only
 ```
 
-`START_K` и `END_K` — **контекстно-относительные роли**. Они появляются только после ориентации Context `K`; до выбора локальной рамки нет абсолютных глобальных START/END. Знаки `♂/♀` на публичных поверхностях означают именно эти локальные роли.
+Worker владеет живой Session. Отмена и wall-clock watchdog наблюдаются как operational non-success; они не определяют semantic quiescence.
 
-`8/9/6/1` — рекурсивный структурный алфавит Link, а не алфавит Anum/Q. `∞/♂/♀/⟼` — остенсивная запись той же структурной формы, а не четыре физических opcode.
-
-Наследованные имена `R/O/C/L/U` и примеры `98/68/19868/16898` остаются допустимыми как зафиксированная v0.13 basis / recursive-prefix запись. Они **не являются** Foundation-global authority для абсолютного START/END в v0.14.
-
-
-Для текущих structural/reaction witnesses используется явное разделение:
+### Версии не смешиваются
 
 ```text
-recursive Link wire
-  !=
-Anum / ExactSequence
+accepted MTS foundation:
+  mts-contract/v0.14
+
+execution profile:
+  minimal-portable-amemory-execution
+  profileVersion = 0.1.0
+  foundationMtsVersion = v0.13
+
+A-memory implementation:
+  VERSION
+
+contract/conformance candidate:
+  amemory-contract/v0.2
+  amemory-conformance/v0.2
 ```
 
-`recursive Link wire` — рекурсивная запись структуры Link для тех поверхностей, где выбран этот codec. Она не объявляет произвольный rooted Link значением Anum.
+Evidence/Scenario/proof schema versions — отдельные namespaces и не равны ни версии MTS, ни версии репозитория. Их текущие источники перечислены в `contracts/amemory-artifacts.json`.
 
-`Anum / ExactSequence` — отдельная sequence-specific линия представления. Поэтому `resultSequenceAnum` остаётся Anum-полем только там, где источник результата действительно прошёл через проверенную ExactSequence/sequence representation.
+### Что означает старый conformance evidence
 
-Исторические имена `anum-boundary.mjs`, `amemory_anum_cpu_*`, `parseAnum`, `cpuImportRaw` и родственные API сохраняются как **compatibility naming** для direct technical recursive-wire materialization. Они не являются семантическим утверждением `recursive Link wire == Anum`.
-
-Но это **не равно полной реализации реакции A-сети**.
-
-Текущая классификация после глобального evidence-аудита #45:
+`contracts/amemory-conformance-v0.2.json` сохраняет проверяемую candidate evidence-линейку, включая строку:
 
 ```text
-R1 fixture:
-  K = 98
-  A = 68
-  B = 16898
-
-  K ⟼ A = 19868
-  A ⟼ B = 16816898
-  K ⟼ B = 19816898
-
-R1 executable subset:
-  P01 P02 P03 P04 P05 P11 P12
-    -> GREEN on real browser CPU/WASM ↔ WebGPU differential
-
-Audit #45 + real browser R6:
-  P06 = exhaustive admitted relations     -> GREEN (1→N distinct MANY)
-  P08 = replace by all outputs            -> GREEN (1→N / N→M)
-  P15 = schedule/order non-semantic       -> GREEN (reversed current + Theory order)
-
-R6 real browser CPU/WASM ↔ WebGPU:
-  1→N distinct MANY                       -> PASS
-  N→M                                     -> PASS
-  reversed current/Theory order           -> PASS
-  bounded-scope fail-closed               -> PASS
-  normalized CPU/GPU differential         -> PASS
-
-Observed R1:
-  before CPU/GPU = [19868]
-  after  CPU/GPU = [19816898]
-  matchedRelations = 1 / 1
-  handoffCount = 1 / 1
-  TheorySnapshot isolation = PASS
-  old Scope retained physically = PASS
-  backend-local handles differ = PASS
-  negative mismatch/no-match/foreign controls = PASS
-
-R2 executable subset:
-  P07 P13
-    -> GREEN on real browser CPU/WASM ↔ WebGPU differential
-
-Observed R2:
-  Scope CPU/GPU = [19868]
-  matchedRelations = 0 / 0
-  handoffCount = 0 / 0
-  quiescent = true / true
-  published Scope unchanged = PASS
-  runtime failure != quiescence = PASS
-
-R3 executable subset:
-  P09 P10
-    -> GREEN on real browser CPU/WASM ↔ WebGPU differential
-
-Observed R3 ZERO:
-  Scope CPU/GPU = []
-  matchedRelations = 1 / 1
-  handoffCount = 1 / 1
-  quiescent = false / false
-  old Scope retained physically = PASS
-
-Observed R3 mixed ZERO + duplicate convergence:
-  Scope CPU/GPU = [19816898]
-  matchedRelations = 3 / 3
-  handoffCount = 1 / 1
-  quiescent = false / false
-  duplicate convergence = PASS (single canonical successor)
-
-R4 executable subset:
-  P14
-    -> GREEN on real browser CPU/WASM ↔ WebGPU trajectory differential
-
-Observed R4:
-  snapshot_t = [A⟼B]
-  live Theory after admission = [A⟼B, B⟼C]
-  reaction t: K⟼A -> K⟼B
-  same-reaction visibility of B⟼C = false
-  snapshot_t+1 sees both relations
-  reaction t+1: K⟼B -> K⟼C
-  stale-snapshot control = PASS
-  normalized CPU/GPU trajectory = PASS
-
-R5 executable subset:
-  P16 P17
-    -> GREEN on real browser CPU/WASM ↔ WebGPU trajectory differential
-
-Observed R5:
-  S0 = [199898]
-  S1 = [199868]  // context-relative K⟼END_K / ♀ continuation
-  S2 = [199898]
-  S3 = [199868]
-  S4 = [199898]
-  matchedRelations = 1 on every step
-  handoffCount = 1 on every step
-  quiescent = false on every step
-  recurrence = PASS
-  structural context-relative END_K / ♀ continuation = PASS
-  bounded witness returned = PASS
-
-AM-C046 R1 = GREEN
-AM-C047 R2 = GREEN
-AM-C048 R3 = GREEN
-AM-C049 R4 = GREEN
-AM-C050 R5 = GREEN
-AM-C045 FULL PROFILE = GREEN
 FULL_REACTION_PROFILE_CONFORMANCE = TRUE
+acceptanceState = READY
 ```
 
-Для двух объявленных prototype-backends — Rust/CPU/WASM и browser WebGPU — реальный browser differential chain R1–R6 напрямую покрывает весь independently pinned `minimal-portable-amemory-execution@0.1.0`: `P01–P17`. R7 отдельно доказывает принятый v0.14 reaction-result basis (`N→{}`, активный `A→A`, `A→A♀`, `A→♂A`) без нового semantic opcode/kernel.
+Это статус **candidate contract/conformance corpus**, а не заявление, что текущий Workbench уже имеет production/persistent WebGPU или LinksDB backend. Текущие capability-границы задаются таблицей выше и открытыми #266/#279/#280.
 
-Текущая downstream-линия — `amemory-contract/v0.2` + `amemory-conformance/v0.2`: все mandatory vectors GREEN, `V14-L1..V14-L14` имеют явный downstream disposition, поэтому repository-wide `acceptanceState = READY`. Сам контракт остаётся `candidate / accepted=false` до отдельного явного решения о принятии.
+Детальная история R1–R7, старых prototype-срезов и промежуточных архитектур не дублируется в README: она остаётся в Git/PR/issue history и в machine-readable conformance evidence.
 
-Реализация продолжает потреблять независимо pinned machine execution profile; accepted v0.14 foundation и profile 0.1.0 не смешиваются в одну версию.
+### Представления после MTS v0.14
+
+```text
+∞ = ROOT / 8
+♂S = START_K / 9S
+S♀ = END_K / 6S
+A ⟼ B = PAIR / 1AB
+
+recursive Link wire != Anum / ExactSequence
+```
+
+Произвольная рекурсивная структура Link не должна называться Anum. `resultSequenceAnum` допустим только для значения, прошедшего sequence/ExactSequence representation. `START_K` / `END_K` — контекстно-относительные роли, а raw carrier start/end не являются semantic orientation authority.
 
 ## Conformance
 
