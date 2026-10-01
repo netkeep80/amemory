@@ -457,14 +457,22 @@ impl ReferenceMemoryInstance {
         len as u32
     }
 
-    pub fn export_recursive_wire(&mut self, handle: u32) -> Option<String> {
-        let len = self.export_tokens(handle);
-        if len == ANUM_CPU_NONE {
+    pub fn export_recursive_wire(&self, handle: u32) -> Option<String> {
+        let mut visiting = [false; ANUM_CPU_SLOTS];
+        let mut output = [0_u32; ANUM_CPU_MAX_TOKENS];
+        let mut len = 0_usize;
+        if !anum_cpu_export_node(
+            &self.pool,
+            handle,
+            &mut visiting,
+            &mut output,
+            &mut len,
+        ) {
             return None;
         }
         let mut out = String::new();
-        for index in 0..len {
-            out.push(char::from_digit(self.output_get(index), 10)?);
+        for token in output[..len].iter().copied() {
+            out.push(char::from_digit(token, 10)?);
         }
         Some(out)
     }
@@ -930,7 +938,7 @@ mod anum_boundary_tests {
         memory.stage_recursive_wire(source)
     }
 
-    fn export(memory: &mut ReferenceMemoryInstance, handle: u32) -> String {
+    fn export(memory: &ReferenceMemoryInstance, handle: u32) -> String {
         memory
             .export_recursive_wire(handle)
             .expect("reference export rejected valid handle")
@@ -945,16 +953,16 @@ mod anum_boundary_tests {
         for (i, source) in fixtures.iter().enumerate() {
             let handle = import(&mut memory, source);
             assert_ne!(handle, ANUM_CPU_NONE, "valid fixture rejected: {source}");
-            assert_eq!(export(&mut memory, handle), *source);
+            assert_eq!(export(&memory, handle), *source);
             handles[i] = handle;
         }
 
         // ROOT must not be mistaken for START or END merely because ROOT=(self,self).
         assert_ne!(handles[0], handles[1]);
         assert_ne!(handles[0], handles[2]);
-        assert_eq!(export(&mut memory, handles[0]), "8");
-        assert_eq!(export(&mut memory, handles[1]), "98");
-        assert_eq!(export(&mut memory, handles[2]), "68");
+        assert_eq!(export(&memory, handles[0]), "8");
+        assert_eq!(export(&memory, handles[1]), "98");
+        assert_eq!(export(&memory, handles[2]), "68");
 
         // Canonical local reuse.
         assert_eq!(import(&mut memory, "19868"), handles[3]);
@@ -1006,7 +1014,7 @@ mod anum_boundary_tests {
         let baseline = import(&mut memory, "998");
         assert_ne!(baseline, ANUM_CPU_NONE);
         let baseline_count = memory.pool_count();
-        assert_eq!(export(&mut memory, baseline), "998");
+        assert_eq!(export(&memory, baseline), "998");
 
         assert_eq!(memory.load_begin(), 1);
         assert_eq!(memory.load_active(), 1);
@@ -1019,7 +1027,7 @@ mod anum_boundary_tests {
         assert_eq!(memory.set_token(0, 5), 1);
         assert_eq!(memory.load_member(1), ANUM_CPU_NONE);
         assert_eq!(memory.pool_count(), baseline_count);
-        assert_eq!(export(&mut memory, baseline), "998");
+        assert_eq!(export(&memory, baseline), "998");
 
         // No ordinary publication or execution may bypass LOADING.
         assert_eq!(import(&mut memory, "68"), ANUM_CPU_NONE);
@@ -1047,9 +1055,9 @@ mod anum_boundary_tests {
 
         // ROOT + START(ROOT) + END(ROOT) + PAIR(START, END).
         assert_eq!(memory.pool_count(), 4);
-        assert_eq!(export(&mut memory, staged[0]), "98");
-        assert_eq!(export(&mut memory, staged[1]), "68");
-        assert_eq!(export(&mut memory, staged[2]), "19868");
+        assert_eq!(export(&memory, staged[0]), "98");
+        assert_eq!(export(&memory, staged[1]), "68");
+        assert_eq!(export(&memory, staged[2]), "19868");
 
         assert_eq!(memory.load_begin(), 1);
         assert_eq!(memory.load_commit(), 0);
@@ -1074,9 +1082,9 @@ mod anum_boundary_tests {
 
         assert_eq!(memory.load_commit(), 1);
         assert_eq!(memory.load_active(), 0);
-        assert_eq!(export(&mut memory, current), "19868");
-        assert_eq!(export(&mut memory, relation), "16816898");
-        assert_eq!(export(&mut memory, successor), "19816898");
+        assert_eq!(export(&memory, current), "19868");
+        assert_eq!(export(&memory, relation), "16816898");
+        assert_eq!(export(&memory, successor), "19816898");
 
         // Configure and execute directly against handles reconstructed by the
         // committed Aset transaction. No ordinary import occurs after commit.
@@ -1094,7 +1102,7 @@ mod anum_boundary_tests {
         assert_eq!(memory.reaction_handoff_count(), 1);
         assert_eq!(memory.reaction_quiescent(), 0);
         assert_eq!(memory.reaction_current_count(), 1);
-        assert_eq!(export(&mut memory, memory.reaction_current_member(0)), "19816898");
+        assert_eq!(export(&memory, memory.reaction_current_member(0)), "19816898");
     }
 
     #[test]
@@ -1154,7 +1162,7 @@ mod anum_boundary_tests {
         let export_started = Instant::now();
         let mut last_export = String::new();
         for _ in 0..ITERS {
-            last_export = export(&mut memory, successor);
+            last_export = export(&memory, successor);
             black_box(&last_export);
         }
         let export_ns = export_started.elapsed().as_nanos() / ITERS;
@@ -1179,7 +1187,7 @@ mod anum_boundary_tests {
             assert_eq!(memory.reaction_snapshot_theory(), 1);
             assert_eq!(memory.reaction_run(), 1);
             let result = memory.reaction_current_member(0);
-            assert_eq!(export(&mut memory, result), "19816898");
+            assert_eq!(export(&memory, result), "19816898");
             black_box(result);
         }
         let lifecycle_ns = lifecycle_started.elapsed().as_nanos() / ITERS;
@@ -1206,9 +1214,9 @@ mod anum_boundary_tests {
         for handle in [k, a, b, current, relation, successor] {
             assert_ne!(handle, ANUM_CPU_NONE);
         }
-        assert_eq!(export(&mut memory, current), "19868");
-        assert_eq!(export(&mut memory, relation), "16816898");
-        assert_eq!(export(&mut memory, successor), "19816898");
+        assert_eq!(export(&memory, current), "19868");
+        assert_eq!(export(&memory, relation), "16816898");
+        assert_eq!(export(&memory, successor), "19816898");
 
         // Positive R1 with explicit reaction-start snapshot.
         memory.reaction_reset();
@@ -1224,19 +1232,19 @@ mod anum_boundary_tests {
         assert_eq!(memory.reaction_set_theory_relation(0, successor), 1);
 
         assert_eq!(memory.reaction_current_bank(), 0);
-        assert_eq!(export(&mut memory, memory.reaction_current_member(0)), "19868");
+        assert_eq!(export(&memory, memory.reaction_current_member(0)), "19868");
         assert_eq!(memory.reaction_run(), 1);
         assert_eq!(memory.reaction_matched_relations(), 1);
         assert_eq!(memory.reaction_handoff_count(), 1);
         assert_eq!(memory.reaction_quiescent(), 0);
         assert_eq!(memory.reaction_current_bank(), 1);
         assert_eq!(memory.reaction_current_count(), 1);
-        assert_eq!(export(&mut memory, memory.reaction_current_member(0)), "19816898");
+        assert_eq!(export(&memory, memory.reaction_current_member(0)), "19816898");
 
         // The old Scope bank and old current truth remain physically available.
         assert_eq!(memory.reaction_bank_count(0), 1);
-        assert_eq!(export(&mut memory, memory.reaction_bank_member(0, 0)), "19868");
-        assert_eq!(export(&mut memory, current), "19868");
+        assert_eq!(export(&memory, memory.reaction_bank_member(0, 0)), "19868");
+        assert_eq!(export(&memory, current), "19868");
 
         // R2 P07/P13: a valid admitted relation with the wrong antecedent
         // yields NO_ADMITTED_RELATION for this current truth.
@@ -1251,7 +1259,7 @@ mod anum_boundary_tests {
         assert_eq!(memory.reaction_handoff_count(), 0);
         assert_eq!(memory.reaction_quiescent(), 1);
         assert_eq!(memory.reaction_current_bank(), 0);
-        assert_eq!(export(&mut memory, memory.reaction_current_member(0)), "19868");
+        assert_eq!(export(&memory, memory.reaction_current_member(0)), "19868");
 
         // Runtime/fail-closed failure is not semantic quiescence.
         memory.reaction_reset();
@@ -1283,8 +1291,8 @@ mod anum_boundary_tests {
         assert_eq!(memory.reaction_current_count(), 0);
         assert_ne!(memory.reaction_current_bank(), zero_old_bank);
         assert_eq!(memory.reaction_bank_count(zero_old_bank), 1);
-        assert_eq!(export(&mut memory, memory.reaction_bank_member(zero_old_bank, 0)), "19868");
-        assert_eq!(export(&mut memory, current), "19868");
+        assert_eq!(export(&memory, memory.reaction_bank_member(zero_old_bank, 0)), "19868");
+        assert_eq!(export(&memory, current), "19868");
 
         // R3 mixed ZERO + duplicate convergence:
         //   current = [K->A, K->R]
@@ -1310,7 +1318,7 @@ mod anum_boundary_tests {
         assert_eq!(memory.reaction_handoff_count(), 1);
         assert_eq!(memory.reaction_quiescent(), 0);
         assert_eq!(memory.reaction_current_count(), 1);
-        assert_eq!(export(&mut memory, memory.reaction_current_member(0)), "19816898");
+        assert_eq!(export(&memory, memory.reaction_current_member(0)), "19816898");
 
         // R6 direct MANY/exhaustiveness witness:
         //   1->N: [K->A] with [A->B, A->C] -> [K->B, K->C]
@@ -1336,8 +1344,8 @@ mod anum_boundary_tests {
         assert_eq!(memory.reaction_handoff_count(), 1);
         assert_eq!(memory.reaction_current_count(), 2);
         let mut one_to_n = [
-            export(&mut memory, memory.reaction_current_member(0)),
-            export(&mut memory, memory.reaction_current_member(1)),
+            export(&memory, memory.reaction_current_member(0)),
+            export(&memory, memory.reaction_current_member(1)),
         ];
         one_to_n.sort();
         assert_eq!(one_to_n, ["19816898".to_string(), "198998".to_string()]);
@@ -1354,8 +1362,8 @@ mod anum_boundary_tests {
         assert_eq!(memory.reaction_matched_relations(), 2);
         assert_eq!(memory.reaction_current_count(), 2);
         let mut n_to_m = [
-            export(&mut memory, memory.reaction_current_member(0)),
-            export(&mut memory, memory.reaction_current_member(1)),
+            export(&memory, memory.reaction_current_member(0)),
+            export(&memory, memory.reaction_current_member(1)),
         ];
         n_to_m.sort();
         assert_eq!(n_to_m, ["19816898".to_string(), "198998".to_string()]);
@@ -1370,8 +1378,8 @@ mod anum_boundary_tests {
         assert_eq!(memory.reaction_snapshot_theory(), 1);
         assert_eq!(memory.reaction_run(), 1);
         let mut reordered = [
-            export(&mut memory, memory.reaction_current_member(0)),
-            export(&mut memory, memory.reaction_current_member(1)),
+            export(&memory, memory.reaction_current_member(0)),
+            export(&memory, memory.reaction_current_member(1)),
         ];
         reordered.sort();
         assert_eq!(reordered, n_to_m);
@@ -1411,7 +1419,7 @@ mod anum_boundary_tests {
         assert_eq!(memory.reaction_matched_relations(), 1);
         assert_eq!(memory.reaction_handoff_count(), 1);
         assert_eq!(memory.reaction_quiescent(), 0);
-        assert_eq!(export(&mut memory, memory.reaction_current_member(0)), "19816898");
+        assert_eq!(export(&memory, memory.reaction_current_member(0)), "19816898");
 
         // reaction t+1 starts with a fresh snapshot and now B->C is visible.
         assert_eq!(memory.reaction_snapshot_theory(), 1);
@@ -1420,7 +1428,7 @@ mod anum_boundary_tests {
         assert_eq!(memory.reaction_matched_relations(), 1);
         assert_eq!(memory.reaction_handoff_count(), 1);
         assert_eq!(memory.reaction_quiescent(), 0);
-        assert_eq!(export(&mut memory, memory.reaction_current_member(0)), "198998");
+        assert_eq!(export(&memory, memory.reaction_current_member(0)), "198998");
 
         // Negative control on an independent substrate state: adding B->C to
         // live Theory without taking a new snapshot leaves K->B unchanged.
@@ -1437,7 +1445,7 @@ mod anum_boundary_tests {
         assert_eq!(memory.reaction_matched_relations(), 0);
         assert_eq!(memory.reaction_handoff_count(), 0);
         assert_eq!(memory.reaction_quiescent(), 1);
-        assert_eq!(export(&mut memory, memory.reaction_current_member(0)), "19816898");
+        assert_eq!(export(&memory, memory.reaction_current_member(0)), "19816898");
 
         // R5 P16/P17: bounded observation of an active recurrence through
         // structural END. The unchanged TheorySnapshot contains both
@@ -1466,7 +1474,7 @@ mod anum_boundary_tests {
         let pool = memory.pool;
         assert_eq!(pool.end[r5_end_value as usize], r5_end_value);
         assert_ne!(pool.start[r5_end_value as usize], r5_end_value);
-        assert_eq!(export(&mut memory, r5_end_value), "68");
+        assert_eq!(export(&memory, r5_end_value), "68");
 
         memory.reaction_reset();
         assert_eq!(memory.reaction_set_current_member(0, r5_state_start), 1);
@@ -1478,13 +1486,13 @@ mod anum_boundary_tests {
         assert_eq!(memory.reaction_snapshot_count(), 2);
 
         let expected = ["199898", "199868", "199898", "199868", "199898"];
-        assert_eq!(export(&mut memory, memory.reaction_current_member(0)), expected[0]);
+        assert_eq!(export(&memory, memory.reaction_current_member(0)), expected[0]);
         for step in 0..4 {
             assert_eq!(memory.reaction_run(), 1);
             assert_eq!(memory.reaction_matched_relations(), 1);
             assert_eq!(memory.reaction_handoff_count(), 1);
             assert_eq!(memory.reaction_quiescent(), 0);
-            assert_eq!(export(&mut memory, memory.reaction_current_member(0)), expected[step + 1]);
+            assert_eq!(export(&memory, memory.reaction_current_member(0)), expected[step + 1]);
         }
 
         // S0=S2=S4 and S1=S3 semantically, with active transitions between.
