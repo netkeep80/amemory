@@ -505,6 +505,9 @@ pub(crate) struct RunProfileV1 {
     pub(crate) active_reaction_count: u32,
     pub(crate) execute_ns: u64,
     pub(crate) trace_projection_ns: u64,
+    pub(crate) dense_carrier_allocated_bytes: u64,
+    pub(crate) max_dense_carrier_bytes: u64,
+    pub(crate) full_resident_bytes_available: bool,
     pub(crate) structural: StructuralProfileV1,
 }
 
@@ -699,6 +702,9 @@ mod tests {
             active_reaction_count: 7,
             execute_ns: 100,
             trace_projection_ns: 9,
+            dense_carrier_allocated_bytes: 4096,
+            max_dense_carrier_bytes: 8192,
+            full_resident_bytes_available: false,
             structural: StructuralProfileV1 {
                 timing_available: STRUCTURAL_PROFILE_TIMING_AVAILABLE,
                 ..StructuralProfileV1::default()
@@ -742,6 +748,9 @@ mod tests {
         assert_eq!(run.stages.result_ns, 7);
         assert_eq!(run.stages.evidence_ns, 22);
         assert_eq!(run.links_after_execute, 30);
+        assert_eq!(run.execute_profile.dense_carrier_allocated_bytes, 4096);
+        assert_eq!(run.execute_profile.max_dense_carrier_bytes, 8192);
+        assert!(!run.execute_profile.full_resident_bytes_available);
 
         let json = serde_json::to_string(&(open.clone(), run.clone())).unwrap();
         let decoded: (SessionOpenProfileV1, RunPipelineProfileV1) =
