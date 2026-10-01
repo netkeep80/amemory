@@ -271,6 +271,8 @@ jobs:
           test -s _site/proof-view.mjs
           test -s _site/scenario-transport.mjs
           test -s _site/scenario-presets.mjs
+          test -s _site/scenario-worker.mjs
+          test -s _site/scenario-worker-client.mjs
           test ! -e _site/app.js
           test ! -e _site/i386-lab.js
           test ! -e _site/i386-lab-view.mjs
@@ -308,6 +310,8 @@ jobs:
           node --check _site/proof-view.mjs
           node --check _site/scenario-transport.mjs
           node --check _site/scenario-presets.mjs
+          node --check _site/scenario-worker.mjs
+          node --check _site/scenario-worker-client.mjs
 
           python3 - <<'PY'
           from pathlib import Path
@@ -418,12 +422,29 @@ jobs:
 
           workbench = Path("_site/workbench.mjs")
           source = workbench.read_text(encoding="utf-8")
-          for module in ("scenario-transport.mjs", "scenario-presets.mjs", "proof-view.mjs"):
+          for module in (
+              "scenario-presets.mjs",
+              "scenario-worker-client.mjs",
+              "proof-view.mjs",
+          ):
               source = source.replace(
                   f'from "./{module}"',
                   f'from "./{module}?v={sha}"',
               )
           workbench.write_text(source, encoding="utf-8")
+
+          worker = Path("_site/scenario-worker.mjs")
+          worker_source = worker.read_text(encoding="utf-8")
+          worker_source = worker_source.replace(
+              'from "./scenario-transport.mjs"',
+              f'from "./scenario-transport.mjs?v={sha}"',
+          )
+          worker.write_text(worker_source, encoding="utf-8")
+
+          if f'scenario-worker-client.mjs?v={sha}' not in source:
+              raise SystemExit("Workbench Worker client cache-bust was not applied")
+          if f'scenario-transport.mjs?v={sha}' not in worker_source:
+              raise SystemExit("Worker transport cache-bust was not applied")
 
           proof = Path("_site/proof-view.mjs")
           proof_source = proof.read_text(encoding="utf-8")
