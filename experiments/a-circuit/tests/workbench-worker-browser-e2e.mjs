@@ -1,7 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
-import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 
@@ -44,16 +43,6 @@ function chromeBinary() {
   return binary;
 }
 
-async function freePort() {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const port = server.address().port;
-      server.close((error) => error ? reject(error) : resolve(port));
-    });
-  });
-}
 
 function contentType(file) {
   if (file.endsWith(".html")) return "text/html; charset=utf-8";
@@ -212,10 +201,10 @@ async function waitFor(cdp, expression, label, attempts = 300) {
 
 const server = await startServer();
 const port = server.address().port;
-const debugPort = await freePort();
 const profile = fs.mkdtempSync(
   path.join(os.tmpdir(), "amemory-chrome-"),
 );
+let chromeStderr = "";
 const chrome = spawn(
   chromeBinary(),
   [
@@ -224,15 +213,46 @@ const chrome = spawn(
     "--disable-gpu",
     "--disable-dev-shm-usage",
     "--remote-debugging-address=127.0.0.1",
-    "--remote-debugging-port=" + debugPort,
+    "--remote-debugging-port=0",
     "--user-data-dir=" + profile,
     "about:blank",
   ],
   { stdio: ["ignore", "pipe", "pipe"] },
 );
+chrome.stderr.on("data", (chunk) => {
+  chromeStderr += chunk.toString();
+  if (chromeStderr.length > 16_384) {
+    chromeStderr = chromeStderr.slice(-16_384);
+  }
+});
+
+async function waitForDevToolsPort(attempts = 150) {
+  const marker = path.join(profile, "DevToolsActivePort");
+  for (let index = 0; index < attempts; index += 1) {
+    if (fs.existsSync(marker)) {
+      const [portLine] = fs
+        .readFileSync(marker, "utf8")
+        .trim()
+        .split("\n");
+      const port = Number(portLine);
+      if (Number.isInteger(port) && port > 0) return port;
+    }
+    if (chrome.exitCode !== null) {
+      throw new Error(
+        "Chrome exited before DevTools became ready: " +
+        chrome.exitCode + "\n" + chromeStderr,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(
+    "Chrome DevToolsActivePort was not created\n" + chromeStderr,
+  );
+}
 
 let cdp = null;
 try {
+  const debugPort = await waitForDevToolsPort();
   await pollJson(
     "http://127.0.0.1:" + debugPort + "/json/version",
   );
