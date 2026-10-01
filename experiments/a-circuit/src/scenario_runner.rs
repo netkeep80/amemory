@@ -2153,7 +2153,10 @@ mod tests {
         let mut controller =
             session.begin_budgeted_run(initial, budget).unwrap();
         let stopped =
-            controller.next(&mut session, RunObservationLevel::Off);
+            controller.next(
+                &mut session,
+                RunObservationLevel::Off.runtime_trace_mode(),
+            );
         assert!(stopped.step.is_none());
         assert_eq!(
             stopped.stop_reason,
@@ -2173,7 +2176,10 @@ mod tests {
         let mut controller =
             session.begin_budgeted_run(initial, budget).unwrap();
         let stopped =
-            controller.next(&mut session, RunObservationLevel::Off);
+            controller.next(
+                &mut session,
+                RunObservationLevel::Off.runtime_trace_mode(),
+            );
         assert!(stopped.step.is_none());
         assert_eq!(
             stopped.stop_reason,
@@ -2194,7 +2200,7 @@ mod tests {
             .run_to_quiescence(
                 initial,
                 budget,
-                RunObservationLevel::Off,
+                RunObservationLevel::Off.runtime_trace_mode(),
             )
             .unwrap();
         assert!(!stopped.steps.is_empty());
@@ -2255,7 +2261,11 @@ mod tests {
             ..CpuRunBudgetV1::scenario_default(64)
         };
         let stopped = session
-            .run_to_quiescence(initial, budget, RunObservationLevel::Off)
+            .run_to_quiescence(
+                initial,
+                budget,
+                RunObservationLevel::Off.runtime_trace_mode(),
+            )
             .unwrap();
 
         assert!(!stopped.steps.is_empty());
@@ -2290,7 +2300,11 @@ mod tests {
             ..CpuRunBudgetV1::scenario_default(64)
         };
         let stopped = session
-            .run_to_quiescence(initial, budget, RunObservationLevel::Off)
+            .run_to_quiescence(
+                initial,
+                budget,
+                RunObservationLevel::Off.runtime_trace_mode(),
+            )
             .unwrap();
 
         assert!(!stopped.steps.is_empty());
@@ -2324,7 +2338,11 @@ mod tests {
             ..CpuRunBudgetV1::scenario_default(64)
         };
         let stopped = session
-            .run_to_quiescence(initial, budget, RunObservationLevel::Off)
+            .run_to_quiescence(
+                initial,
+                budget,
+                RunObservationLevel::Off.runtime_trace_mode(),
+            )
             .unwrap();
 
         assert!(!stopped.steps.is_empty());
@@ -2358,7 +2376,11 @@ mod tests {
             ..CpuRunBudgetV1::scenario_default(64)
         };
         let stopped = session
-            .run_to_quiescence(initial, budget, RunObservationLevel::Off)
+            .run_to_quiescence(
+                initial,
+                budget,
+                RunObservationLevel::Off.runtime_trace_mode(),
+            )
             .unwrap();
 
         assert!(!stopped.steps.is_empty());
