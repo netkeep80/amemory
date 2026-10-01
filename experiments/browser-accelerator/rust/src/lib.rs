@@ -922,209 +922,179 @@ reference_mut_export!(
 #[cfg(test)]
 mod anum_boundary_tests {
     use super::*;
-    use std::sync::Mutex;
-
-    // All current prototype Rust/WASM witnesses share one bounded static pool.
-    // Serialize tests so test-runner scheduling cannot become accidental state authority.
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
-
-    fn import(source: &str) -> u32 {
-        for (i, byte) in source.bytes().enumerate() {
-            let token = if byte.is_ascii_digit() {
-                (byte - b'0') as u32
-            } else {
-                255
-            };
-            assert_eq!(amemory_anum_cpu_set_token(i as u32, token), 1);
-        }
-        amemory_anum_cpu_import(source.len() as u32)
+    fn import(memory: &mut ReferenceMemoryInstance, source: &str) -> u32 {
+        memory.import_recursive_wire(source)
     }
 
-    fn stage_import(source: &str) -> u32 {
-        for (i, byte) in source.bytes().enumerate() {
-            let token = if byte.is_ascii_digit() {
-                (byte - b'0') as u32
-            } else {
-                255
-            };
-            assert_eq!(amemory_anum_cpu_set_token(i as u32, token), 1);
-        }
-        amemory_anum_cpu_load_member(source.len() as u32)
+    fn stage_import(memory: &mut ReferenceMemoryInstance, source: &str) -> u32 {
+        memory.stage_recursive_wire(source)
     }
 
-    fn export(handle: u32) -> String {
-        let len = amemory_anum_cpu_export(handle);
-        assert_ne!(len, ANUM_CPU_NONE);
-        let mut out = String::new();
-        for i in 0..len {
-            out.push(char::from_digit(amemory_anum_cpu_output_get(i), 10).unwrap());
-        }
-        out
+    fn export(memory: &mut ReferenceMemoryInstance, handle: u32) -> String {
+        memory
+            .export_recursive_wire(handle)
+            .expect("reference export rejected valid handle")
     }
 
     #[test]
     fn portable_anum_cpu_boundary() {
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        amemory_anum_cpu_reset_pool();
+        let mut memory = ReferenceMemoryInstance::new();
 
         let fixtures = ["8", "98", "68", "19868", "16898", "198698", "119868968"];
         let mut handles = [0_u32; 7];
         for (i, source) in fixtures.iter().enumerate() {
-            let handle = import(source);
+            let handle = import(&mut memory, source);
             assert_ne!(handle, ANUM_CPU_NONE, "valid fixture rejected: {source}");
-            assert_eq!(export(handle), *source);
+            assert_eq!(export(&mut memory, handle), *source);
             handles[i] = handle;
         }
 
         // ROOT must not be mistaken for START or END merely because ROOT=(self,self).
         assert_ne!(handles[0], handles[1]);
         assert_ne!(handles[0], handles[2]);
-        assert_eq!(export(handles[0]), "8");
-        assert_eq!(export(handles[1]), "98");
-        assert_eq!(export(handles[2]), "68");
+        assert_eq!(export(&mut memory, handles[0]), "8");
+        assert_eq!(export(&mut memory, handles[1]), "98");
+        assert_eq!(export(&mut memory, handles[2]), "68");
 
         // Canonical local reuse.
-        assert_eq!(import("19868"), handles[3]);
+        assert_eq!(import(&mut memory, "19868"), handles[3]);
 
         // Invalid/truncated/trailing forms are transactional.
-        let stable_count = amemory_anum_cpu_pool_count();
+        let stable_count = memory.pool_count();
         for source in ["5", "1", "9", "88", "19868x"] {
-            assert_eq!(import(source), ANUM_CPU_NONE, "invalid fixture accepted: {source}");
-            assert_eq!(amemory_anum_cpu_pool_count(), stable_count);
+            assert_eq!(import(&mut memory, source), ANUM_CPU_NONE, "invalid fixture accepted: {source}");
+            assert_eq!(memory.pool_count(), stable_count);
         }
 
         // A valid but out-of-prototype chain must fail without partial publication.
         let capacity = format!("{}8", "9".repeat(70));
-        assert_eq!(import(&capacity), ANUM_CPU_NONE);
-        assert_eq!(amemory_anum_cpu_pool_count(), stable_count);
+        assert_eq!(import(&mut memory, &capacity), ANUM_CPU_NONE);
+        assert_eq!(memory.pool_count(), stable_count);
     }
 
     #[test]
     fn cpu_topology_getters_are_read_only_technical_coordinates() {
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        amemory_anum_cpu_reset_pool();
+        let mut memory = ReferenceMemoryInstance::new();
 
-        let start_marker = import("98");
-        let end_marker = import("68");
+        let start_marker = import(&mut memory, "98");
+        let end_marker = import(&mut memory, "68");
         assert_ne!(start_marker, ANUM_CPU_NONE);
         assert_ne!(end_marker, ANUM_CPU_NONE);
 
-        assert_eq!(amemory_anum_cpu_used(ANUM_CPU_ROOT), 1);
-        assert_eq!(amemory_anum_cpu_start(ANUM_CPU_ROOT), ANUM_CPU_ROOT);
-        assert_eq!(amemory_anum_cpu_end(ANUM_CPU_ROOT), ANUM_CPU_ROOT);
+        assert_eq!(memory.used(ANUM_CPU_ROOT), 1);
+        assert_eq!(memory.start(ANUM_CPU_ROOT), ANUM_CPU_ROOT);
+        assert_eq!(memory.end(ANUM_CPU_ROOT), ANUM_CPU_ROOT);
 
-        assert_eq!(amemory_anum_cpu_used(start_marker), 1);
-        assert_eq!(amemory_anum_cpu_start(start_marker), start_marker);
-        assert_eq!(amemory_anum_cpu_end(start_marker), ANUM_CPU_ROOT);
+        assert_eq!(memory.used(start_marker), 1);
+        assert_eq!(memory.start(start_marker), start_marker);
+        assert_eq!(memory.end(start_marker), ANUM_CPU_ROOT);
 
-        assert_eq!(amemory_anum_cpu_used(end_marker), 1);
-        assert_eq!(amemory_anum_cpu_start(end_marker), ANUM_CPU_ROOT);
-        assert_eq!(amemory_anum_cpu_end(end_marker), end_marker);
+        assert_eq!(memory.used(end_marker), 1);
+        assert_eq!(memory.start(end_marker), ANUM_CPU_ROOT);
+        assert_eq!(memory.end(end_marker), end_marker);
 
-        assert_eq!(amemory_anum_cpu_used(63), 0);
-        assert_eq!(amemory_anum_cpu_start(63), ANUM_CPU_NONE);
-        assert_eq!(amemory_anum_cpu_end(63), ANUM_CPU_NONE);
-        assert_eq!(amemory_anum_cpu_used(64), ANUM_CPU_NONE);
+        assert_eq!(memory.used(63), 0);
+        assert_eq!(memory.start(63), ANUM_CPU_NONE);
+        assert_eq!(memory.end(63), ANUM_CPU_NONE);
+        assert_eq!(memory.used(64), ANUM_CPU_NONE);
     }
 
     #[test]
     fn atomic_multi_anum_aset_load() {
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        amemory_anum_cpu_reset_pool();
+        let mut memory = ReferenceMemoryInstance::new();
 
-        let baseline = import("998");
+        let baseline = import(&mut memory, "998");
         assert_ne!(baseline, ANUM_CPU_NONE);
-        let baseline_count = amemory_anum_cpu_pool_count();
-        assert_eq!(export(baseline), "998");
+        let baseline_count = memory.pool_count();
+        assert_eq!(export(&mut memory, baseline), "998");
 
-        assert_eq!(amemory_anum_cpu_load_begin(), 1);
-        assert_eq!(amemory_anum_cpu_load_active(), 1);
+        assert_eq!(memory.load_begin(), 1);
+        assert_eq!(memory.load_active(), 1);
 
         for (i, byte) in "98".bytes().enumerate() {
-            assert_eq!(amemory_anum_cpu_set_token(i as u32, (byte - b'0') as u32), 1);
+            assert_eq!(memory.set_token(i as u32, (byte - b'0') as u32), 1);
         }
-        assert_ne!(amemory_anum_cpu_load_member(2), ANUM_CPU_NONE);
+        assert_ne!(memory.load_member(2), ANUM_CPU_NONE);
 
-        assert_eq!(amemory_anum_cpu_set_token(0, 5), 1);
-        assert_eq!(amemory_anum_cpu_load_member(1), ANUM_CPU_NONE);
-        assert_eq!(amemory_anum_cpu_pool_count(), baseline_count);
-        assert_eq!(export(baseline), "998");
+        assert_eq!(memory.set_token(0, 5), 1);
+        assert_eq!(memory.load_member(1), ANUM_CPU_NONE);
+        assert_eq!(memory.pool_count(), baseline_count);
+        assert_eq!(export(&mut memory, baseline), "998");
 
         // No ordinary publication or execution may bypass LOADING.
-        assert_eq!(import("68"), ANUM_CPU_NONE);
-        assert_eq!(amemory_reaction_run(), 0);
-        assert_eq!(amemory_reaction_quiescent(), 0);
+        assert_eq!(import(&mut memory, "68"), ANUM_CPU_NONE);
+        assert_eq!(memory.reaction_run(), 0);
+        assert_eq!(memory.reaction_quiescent(), 0);
 
-        amemory_anum_cpu_load_abort();
-        assert_eq!(amemory_anum_cpu_load_active(), 0);
-        assert_eq!(amemory_anum_cpu_pool_count(), baseline_count);
+        memory.load_abort();
+        assert_eq!(memory.load_active(), 0);
+        assert_eq!(memory.pool_count(), baseline_count);
 
-        assert_eq!(amemory_anum_cpu_load_begin(), 1);
+        assert_eq!(memory.load_begin(), 1);
         let mut staged = [ANUM_CPU_NONE; 3];
         for (index, source) in ["98", "68", "19868"].iter().enumerate() {
             for (i, byte) in source.bytes().enumerate() {
-                assert_eq!(amemory_anum_cpu_set_token(i as u32, (byte - b'0') as u32), 1);
+                assert_eq!(memory.set_token(i as u32, (byte - b'0') as u32), 1);
             }
-            staged[index] = amemory_anum_cpu_load_member(source.len() as u32);
+            staged[index] = memory.load_member(source.len() as u32);
             assert_ne!(staged[index], ANUM_CPU_NONE);
         }
 
         // New Aset is still invisible until the single commit.
-        assert_eq!(amemory_anum_cpu_pool_count(), baseline_count);
-        assert_eq!(amemory_anum_cpu_load_commit(), 1);
-        assert_eq!(amemory_anum_cpu_load_active(), 0);
+        assert_eq!(memory.pool_count(), baseline_count);
+        assert_eq!(memory.load_commit(), 1);
+        assert_eq!(memory.load_active(), 0);
 
         // ROOT + START(ROOT) + END(ROOT) + PAIR(START, END).
-        assert_eq!(amemory_anum_cpu_pool_count(), 4);
-        assert_eq!(export(staged[0]), "98");
-        assert_eq!(export(staged[1]), "68");
-        assert_eq!(export(staged[2]), "19868");
+        assert_eq!(memory.pool_count(), 4);
+        assert_eq!(export(&mut memory, staged[0]), "98");
+        assert_eq!(export(&mut memory, staged[1]), "68");
+        assert_eq!(export(&mut memory, staged[2]), "19868");
 
-        assert_eq!(amemory_anum_cpu_load_begin(), 1);
-        assert_eq!(amemory_anum_cpu_load_commit(), 0);
-        amemory_anum_cpu_load_abort();
-        assert_eq!(amemory_anum_cpu_pool_count(), 4);
+        assert_eq!(memory.load_begin(), 1);
+        assert_eq!(memory.load_commit(), 0);
+        memory.load_abort();
+        assert_eq!(memory.pool_count(), 4);
     }
 
     #[test]
     fn atomic_aset_load_executes_without_reimport() {
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        amemory_anum_cpu_reset_pool();
+        let mut memory = ReferenceMemoryInstance::new();
 
-        assert_eq!(amemory_anum_cpu_load_begin(), 1);
-        let k = stage_import("98");
-        let a = stage_import("68");
-        let b = stage_import("16898");
-        let current = stage_import("19868");
-        let relation = stage_import("16816898");
-        let successor = stage_import("19816898");
+        assert_eq!(memory.load_begin(), 1);
+        let k = stage_import(&mut memory, "98");
+        let a = stage_import(&mut memory, "68");
+        let b = stage_import(&mut memory, "16898");
+        let current = stage_import(&mut memory, "19868");
+        let relation = stage_import(&mut memory, "16816898");
+        let successor = stage_import(&mut memory, "19816898");
         for handle in [k, a, b, current, relation, successor] {
             assert_ne!(handle, ANUM_CPU_NONE);
         }
 
-        assert_eq!(amemory_anum_cpu_load_commit(), 1);
-        assert_eq!(amemory_anum_cpu_load_active(), 0);
-        assert_eq!(export(current), "19868");
-        assert_eq!(export(relation), "16816898");
-        assert_eq!(export(successor), "19816898");
+        assert_eq!(memory.load_commit(), 1);
+        assert_eq!(memory.load_active(), 0);
+        assert_eq!(export(&mut memory, current), "19868");
+        assert_eq!(export(&mut memory, relation), "16816898");
+        assert_eq!(export(&mut memory, successor), "19816898");
 
         // Configure and execute directly against handles reconstructed by the
         // committed Aset transaction. No ordinary import occurs after commit.
-        amemory_reaction_reset();
-        assert_eq!(amemory_reaction_set_current_member(0, current), 1);
-        assert_eq!(amemory_reaction_set_current_count(1), 1);
-        assert_eq!(amemory_reaction_set_theory_relation(0, relation), 1);
-        assert_eq!(amemory_reaction_set_theory_count(1), 1);
-        assert_eq!(amemory_reaction_snapshot_theory(), 1);
+        memory.reaction_reset();
+        assert_eq!(memory.reaction_set_current_member(0, current), 1);
+        assert_eq!(memory.reaction_set_current_count(1), 1);
+        assert_eq!(memory.reaction_set_theory_relation(0, relation), 1);
+        assert_eq!(memory.reaction_set_theory_count(1), 1);
+        assert_eq!(memory.reaction_snapshot_theory(), 1);
 
         // The bounded executor currently requires the canonical successor Link
         // to be present in the loaded A-network; it was part of the batch above.
-        assert_eq!(amemory_reaction_run(), 1);
-        assert_eq!(amemory_reaction_matched_relations(), 1);
-        assert_eq!(amemory_reaction_handoff_count(), 1);
-        assert_eq!(amemory_reaction_quiescent(), 0);
-        assert_eq!(amemory_reaction_current_count(), 1);
-        assert_eq!(export(amemory_reaction_current_member(0)), "19816898");
+        assert_eq!(memory.reaction_run(), 1);
+        assert_eq!(memory.reaction_matched_relations(), 1);
+        assert_eq!(memory.reaction_handoff_count(), 1);
+        assert_eq!(memory.reaction_quiescent(), 0);
+        assert_eq!(memory.reaction_current_count(), 1);
+        assert_eq!(export(&mut memory, memory.reaction_current_member(0)), "19816898");
     }
 
     #[test]
@@ -1133,7 +1103,7 @@ mod anum_boundary_tests {
         use std::hint::black_box;
         use std::time::Instant;
 
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut memory = ReferenceMemoryInstance::new();
         const ITERS: u128 = 1_000_000;
         const SOURCES: [&str; 6] = ["98", "68", "16898", "19868", "16816898", "19816898"];
 
@@ -1142,25 +1112,25 @@ mod anum_boundary_tests {
         let load_started = Instant::now();
         let mut last_handles = [ANUM_CPU_NONE; 6];
         for _ in 0..ITERS {
-            amemory_anum_cpu_reset_pool();
-            assert_eq!(amemory_anum_cpu_load_begin(), 1);
+            memory.reset_pool();
+            assert_eq!(memory.load_begin(), 1);
             for (index, source) in SOURCES.iter().enumerate() {
-                last_handles[index] = stage_import(source);
+                last_handles[index] = stage_import(&mut memory, source);
                 assert_ne!(last_handles[index], ANUM_CPU_NONE);
             }
-            assert_eq!(amemory_anum_cpu_load_commit(), 1);
+            assert_eq!(memory.load_commit(), 1);
             black_box(last_handles);
         }
         let load_ns = load_started.elapsed().as_nanos() / ITERS;
 
         // Reconstruct one stable published R1 Aset for the operation-level probes.
-        amemory_anum_cpu_reset_pool();
-        assert_eq!(amemory_anum_cpu_load_begin(), 1);
+        memory.reset_pool();
+        assert_eq!(memory.load_begin(), 1);
         for (index, source) in SOURCES.iter().enumerate() {
-            last_handles[index] = stage_import(source);
+            last_handles[index] = stage_import(&mut memory, source);
             assert_ne!(last_handles[index], ANUM_CPU_NONE);
         }
-        assert_eq!(amemory_anum_cpu_load_commit(), 1);
+        assert_eq!(memory.load_commit(), 1);
         let current = last_handles[3];
         let relation = last_handles[4];
         let successor = last_handles[5];
@@ -1169,14 +1139,14 @@ mod anum_boundary_tests {
         // TheorySnapshot capture, successor construction and atomic Scope handoff.
         let reaction_started = Instant::now();
         for _ in 0..ITERS {
-            amemory_reaction_reset();
-            assert_eq!(amemory_reaction_set_current_member(0, current), 1);
-            assert_eq!(amemory_reaction_set_current_count(1), 1);
-            assert_eq!(amemory_reaction_set_theory_relation(0, relation), 1);
-            assert_eq!(amemory_reaction_set_theory_count(1), 1);
-            assert_eq!(amemory_reaction_snapshot_theory(), 1);
-            assert_eq!(amemory_reaction_run(), 1);
-            black_box(amemory_reaction_current_member(0));
+            memory.reaction_reset();
+            assert_eq!(memory.reaction_set_current_member(0, current), 1);
+            assert_eq!(memory.reaction_set_current_count(1), 1);
+            assert_eq!(memory.reaction_set_theory_relation(0, relation), 1);
+            assert_eq!(memory.reaction_set_theory_count(1), 1);
+            assert_eq!(memory.reaction_snapshot_theory(), 1);
+            assert_eq!(memory.reaction_run(), 1);
+            black_box(memory.reaction_current_member(0));
         }
         let reaction_ns = reaction_started.elapsed().as_nanos() / ITERS;
 
@@ -1184,7 +1154,7 @@ mod anum_boundary_tests {
         let export_started = Instant::now();
         let mut last_export = String::new();
         for _ in 0..ITERS {
-            last_export = export(successor);
+            last_export = export(&mut memory, successor);
             black_box(&last_export);
         }
         let export_ns = export_started.elapsed().as_nanos() / ITERS;
@@ -1193,23 +1163,23 @@ mod anum_boundary_tests {
         // 4) Full load -> execute -> portable export path.
         let lifecycle_started = Instant::now();
         for _ in 0..ITERS {
-            amemory_anum_cpu_reset_pool();
-            assert_eq!(amemory_anum_cpu_load_begin(), 1);
+            memory.reset_pool();
+            assert_eq!(memory.load_begin(), 1);
             for (index, source) in SOURCES.iter().enumerate() {
-                last_handles[index] = stage_import(source);
+                last_handles[index] = stage_import(&mut memory, source);
                 assert_ne!(last_handles[index], ANUM_CPU_NONE);
             }
-            assert_eq!(amemory_anum_cpu_load_commit(), 1);
+            assert_eq!(memory.load_commit(), 1);
 
-            amemory_reaction_reset();
-            assert_eq!(amemory_reaction_set_current_member(0, last_handles[3]), 1);
-            assert_eq!(amemory_reaction_set_current_count(1), 1);
-            assert_eq!(amemory_reaction_set_theory_relation(0, last_handles[4]), 1);
-            assert_eq!(amemory_reaction_set_theory_count(1), 1);
-            assert_eq!(amemory_reaction_snapshot_theory(), 1);
-            assert_eq!(amemory_reaction_run(), 1);
-            let result = amemory_reaction_current_member(0);
-            assert_eq!(export(result), "19816898");
+            memory.reaction_reset();
+            assert_eq!(memory.reaction_set_current_member(0, last_handles[3]), 1);
+            assert_eq!(memory.reaction_set_current_count(1), 1);
+            assert_eq!(memory.reaction_set_theory_relation(0, last_handles[4]), 1);
+            assert_eq!(memory.reaction_set_theory_count(1), 1);
+            assert_eq!(memory.reaction_snapshot_theory(), 1);
+            assert_eq!(memory.reaction_run(), 1);
+            let result = memory.reaction_current_member(0);
+            assert_eq!(export(&mut memory, result), "19816898");
             black_box(result);
         }
         let lifecycle_ns = lifecycle_started.elapsed().as_nanos() / ITERS;
@@ -1224,264 +1194,263 @@ mod anum_boundary_tests {
 
     #[test]
     fn minimal_grounded_reaction_r1() {
-        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        amemory_anum_cpu_reset_pool();
+        let mut memory = ReferenceMemoryInstance::new();
 
-        let k = import("98");
-        let a = import("68");
-        let b = import("16898");
-        let current = import("19868");
-        let relation = import("16816898");
-        let successor = import("19816898");
+        let k = import(&mut memory, "98");
+        let a = import(&mut memory, "68");
+        let b = import(&mut memory, "16898");
+        let current = import(&mut memory, "19868");
+        let relation = import(&mut memory, "16816898");
+        let successor = import(&mut memory, "19816898");
 
         for handle in [k, a, b, current, relation, successor] {
             assert_ne!(handle, ANUM_CPU_NONE);
         }
-        assert_eq!(export(current), "19868");
-        assert_eq!(export(relation), "16816898");
-        assert_eq!(export(successor), "19816898");
+        assert_eq!(export(&mut memory, current), "19868");
+        assert_eq!(export(&mut memory, relation), "16816898");
+        assert_eq!(export(&mut memory, successor), "19816898");
 
         // Positive R1 with explicit reaction-start snapshot.
-        amemory_reaction_reset();
-        assert_eq!(amemory_reaction_set_current_member(0, current), 1);
-        assert_eq!(amemory_reaction_set_current_count(1), 1);
-        assert_eq!(amemory_reaction_set_theory_relation(0, relation), 1);
-        assert_eq!(amemory_reaction_set_theory_count(1), 1);
-        assert_eq!(amemory_reaction_snapshot_theory(), 1);
-        assert_eq!(amemory_reaction_snapshot_count(), 1);
+        memory.reaction_reset();
+        assert_eq!(memory.reaction_set_current_member(0, current), 1);
+        assert_eq!(memory.reaction_set_current_count(1), 1);
+        assert_eq!(memory.reaction_set_theory_relation(0, relation), 1);
+        assert_eq!(memory.reaction_set_theory_count(1), 1);
+        assert_eq!(memory.reaction_snapshot_theory(), 1);
+        assert_eq!(memory.reaction_snapshot_count(), 1);
 
         // Mutating Theory storage after snapshot must not alter reaction t.
         // successor itself is K->B, therefore its antecedent K does not match A.
-        assert_eq!(amemory_reaction_set_theory_relation(0, successor), 1);
+        assert_eq!(memory.reaction_set_theory_relation(0, successor), 1);
 
-        assert_eq!(amemory_reaction_current_bank(), 0);
-        assert_eq!(export(amemory_reaction_current_member(0)), "19868");
-        assert_eq!(amemory_reaction_run(), 1);
-        assert_eq!(amemory_reaction_matched_relations(), 1);
-        assert_eq!(amemory_reaction_handoff_count(), 1);
-        assert_eq!(amemory_reaction_quiescent(), 0);
-        assert_eq!(amemory_reaction_current_bank(), 1);
-        assert_eq!(amemory_reaction_current_count(), 1);
-        assert_eq!(export(amemory_reaction_current_member(0)), "19816898");
+        assert_eq!(memory.reaction_current_bank(), 0);
+        assert_eq!(export(&mut memory, memory.reaction_current_member(0)), "19868");
+        assert_eq!(memory.reaction_run(), 1);
+        assert_eq!(memory.reaction_matched_relations(), 1);
+        assert_eq!(memory.reaction_handoff_count(), 1);
+        assert_eq!(memory.reaction_quiescent(), 0);
+        assert_eq!(memory.reaction_current_bank(), 1);
+        assert_eq!(memory.reaction_current_count(), 1);
+        assert_eq!(export(&mut memory, memory.reaction_current_member(0)), "19816898");
 
         // The old Scope bank and old current truth remain physically available.
-        assert_eq!(amemory_reaction_bank_count(0), 1);
-        assert_eq!(export(amemory_reaction_bank_member(0, 0)), "19868");
-        assert_eq!(export(current), "19868");
+        assert_eq!(memory.reaction_bank_count(0), 1);
+        assert_eq!(export(&mut memory, memory.reaction_bank_member(0, 0)), "19868");
+        assert_eq!(export(&mut memory, current), "19868");
 
         // R2 P07/P13: a valid admitted relation with the wrong antecedent
         // yields NO_ADMITTED_RELATION for this current truth.
-        amemory_reaction_reset();
-        assert_eq!(amemory_reaction_set_current_member(0, current), 1);
-        assert_eq!(amemory_reaction_set_current_count(1), 1);
-        assert_eq!(amemory_reaction_set_theory_relation(0, successor), 1);
-        assert_eq!(amemory_reaction_set_theory_count(1), 1);
-        assert_eq!(amemory_reaction_snapshot_theory(), 1);
-        assert_eq!(amemory_reaction_run(), 1);
-        assert_eq!(amemory_reaction_matched_relations(), 0);
-        assert_eq!(amemory_reaction_handoff_count(), 0);
-        assert_eq!(amemory_reaction_quiescent(), 1);
-        assert_eq!(amemory_reaction_current_bank(), 0);
-        assert_eq!(export(amemory_reaction_current_member(0)), "19868");
+        memory.reaction_reset();
+        assert_eq!(memory.reaction_set_current_member(0, current), 1);
+        assert_eq!(memory.reaction_set_current_count(1), 1);
+        assert_eq!(memory.reaction_set_theory_relation(0, successor), 1);
+        assert_eq!(memory.reaction_set_theory_count(1), 1);
+        assert_eq!(memory.reaction_snapshot_theory(), 1);
+        assert_eq!(memory.reaction_run(), 1);
+        assert_eq!(memory.reaction_matched_relations(), 0);
+        assert_eq!(memory.reaction_handoff_count(), 0);
+        assert_eq!(memory.reaction_quiescent(), 1);
+        assert_eq!(memory.reaction_current_bank(), 0);
+        assert_eq!(export(&mut memory, memory.reaction_current_member(0)), "19868");
 
         // Runtime/fail-closed failure is not semantic quiescence.
-        amemory_reaction_reset();
-        assert_eq!(amemory_reaction_set_current_count(1), 1);
-        assert_eq!(amemory_reaction_set_theory_relation(0, successor), 1);
-        assert_eq!(amemory_reaction_set_theory_count(1), 1);
-        assert_eq!(amemory_reaction_snapshot_theory(), 1);
-        assert_eq!(amemory_reaction_run(), 0);
-        assert_eq!(amemory_reaction_quiescent(), 0);
+        memory.reaction_reset();
+        assert_eq!(memory.reaction_set_current_count(1), 1);
+        assert_eq!(memory.reaction_set_theory_relation(0, successor), 1);
+        assert_eq!(memory.reaction_set_theory_count(1), 1);
+        assert_eq!(memory.reaction_snapshot_theory(), 1);
+        assert_eq!(memory.reaction_run(), 0);
+        assert_eq!(memory.reaction_quiescent(), 0);
 
         // R3 ZERO: A -> ExactSequence() is encoded structurally as A -> ROOT.
-        let root = import("8");
-        let zero_relation = import("1688");
+        let root = import(&mut memory, "8");
+        let zero_relation = import(&mut memory, "1688");
         assert_ne!(root, ANUM_CPU_NONE);
         assert_ne!(zero_relation, ANUM_CPU_NONE);
 
-        amemory_reaction_reset();
-        assert_eq!(amemory_reaction_set_current_member(0, current), 1);
-        assert_eq!(amemory_reaction_set_current_count(1), 1);
-        assert_eq!(amemory_reaction_set_theory_relation(0, zero_relation), 1);
-        assert_eq!(amemory_reaction_set_theory_count(1), 1);
-        assert_eq!(amemory_reaction_snapshot_theory(), 1);
-        let zero_old_bank = amemory_reaction_current_bank();
+        memory.reaction_reset();
+        assert_eq!(memory.reaction_set_current_member(0, current), 1);
+        assert_eq!(memory.reaction_set_current_count(1), 1);
+        assert_eq!(memory.reaction_set_theory_relation(0, zero_relation), 1);
+        assert_eq!(memory.reaction_set_theory_count(1), 1);
+        assert_eq!(memory.reaction_snapshot_theory(), 1);
+        let zero_old_bank = memory.reaction_current_bank();
 
-        assert_eq!(amemory_reaction_run(), 1);
-        assert_eq!(amemory_reaction_matched_relations(), 1);
-        assert_eq!(amemory_reaction_handoff_count(), 1);
-        assert_eq!(amemory_reaction_quiescent(), 0);
-        assert_eq!(amemory_reaction_current_count(), 0);
-        assert_ne!(amemory_reaction_current_bank(), zero_old_bank);
-        assert_eq!(amemory_reaction_bank_count(zero_old_bank), 1);
-        assert_eq!(export(amemory_reaction_bank_member(zero_old_bank, 0)), "19868");
-        assert_eq!(export(current), "19868");
+        assert_eq!(memory.reaction_run(), 1);
+        assert_eq!(memory.reaction_matched_relations(), 1);
+        assert_eq!(memory.reaction_handoff_count(), 1);
+        assert_eq!(memory.reaction_quiescent(), 0);
+        assert_eq!(memory.reaction_current_count(), 0);
+        assert_ne!(memory.reaction_current_bank(), zero_old_bank);
+        assert_eq!(memory.reaction_bank_count(zero_old_bank), 1);
+        assert_eq!(export(&mut memory, memory.reaction_bank_member(zero_old_bank, 0)), "19868");
+        assert_eq!(export(&mut memory, current), "19868");
 
         // R3 mixed ZERO + duplicate convergence:
         //   current = [K->A, K->R]
         //   theory  = [A->R(ZERO), A->B, R->B]
         // Both non-zero branches derive the same K->B and must converge.
-        let current_root = import("1988");
-        let root_to_b = import("1816898");
+        let current_root = import(&mut memory, "1988");
+        let root_to_b = import(&mut memory, "1816898");
         assert_ne!(current_root, ANUM_CPU_NONE);
         assert_ne!(root_to_b, ANUM_CPU_NONE);
 
-        amemory_reaction_reset();
-        assert_eq!(amemory_reaction_set_current_member(0, current), 1);
-        assert_eq!(amemory_reaction_set_current_member(1, current_root), 1);
-        assert_eq!(amemory_reaction_set_current_count(2), 1);
-        assert_eq!(amemory_reaction_set_theory_relation(0, zero_relation), 1);
-        assert_eq!(amemory_reaction_set_theory_relation(1, relation), 1);
-        assert_eq!(amemory_reaction_set_theory_relation(2, root_to_b), 1);
-        assert_eq!(amemory_reaction_set_theory_count(3), 1);
-        assert_eq!(amemory_reaction_snapshot_theory(), 1);
+        memory.reaction_reset();
+        assert_eq!(memory.reaction_set_current_member(0, current), 1);
+        assert_eq!(memory.reaction_set_current_member(1, current_root), 1);
+        assert_eq!(memory.reaction_set_current_count(2), 1);
+        assert_eq!(memory.reaction_set_theory_relation(0, zero_relation), 1);
+        assert_eq!(memory.reaction_set_theory_relation(1, relation), 1);
+        assert_eq!(memory.reaction_set_theory_relation(2, root_to_b), 1);
+        assert_eq!(memory.reaction_set_theory_count(3), 1);
+        assert_eq!(memory.reaction_snapshot_theory(), 1);
 
-        assert_eq!(amemory_reaction_run(), 1);
-        assert_eq!(amemory_reaction_matched_relations(), 3);
-        assert_eq!(amemory_reaction_handoff_count(), 1);
-        assert_eq!(amemory_reaction_quiescent(), 0);
-        assert_eq!(amemory_reaction_current_count(), 1);
-        assert_eq!(export(amemory_reaction_current_member(0)), "19816898");
+        assert_eq!(memory.reaction_run(), 1);
+        assert_eq!(memory.reaction_matched_relations(), 3);
+        assert_eq!(memory.reaction_handoff_count(), 1);
+        assert_eq!(memory.reaction_quiescent(), 0);
+        assert_eq!(memory.reaction_current_count(), 1);
+        assert_eq!(export(&mut memory, memory.reaction_current_member(0)), "19816898");
 
         // R6 direct MANY/exhaustiveness witness:
         //   1->N: [K->A] with [A->B, A->C] -> [K->B, K->C]
         //   N->M: [K->A, K->ROOT] with [A->B, ROOT->C] -> [K->B, K->C]
         // Reversing both physical iteration orders must preserve the normalized result.
-        let c = import("998");
-        let relation_ac = import("168998");
-        let root_to_c = import("18998");
-        let successor_c = import("198998");
+        let c = import(&mut memory, "998");
+        let relation_ac = import(&mut memory, "168998");
+        let root_to_c = import(&mut memory, "18998");
+        let successor_c = import(&mut memory, "198998");
         for handle in [c, relation_ac, root_to_c, successor_c] {
             assert_ne!(handle, ANUM_CPU_NONE);
         }
 
-        amemory_reaction_reset();
-        assert_eq!(amemory_reaction_set_current_member(0, current), 1);
-        assert_eq!(amemory_reaction_set_current_count(1), 1);
-        assert_eq!(amemory_reaction_set_theory_relation(0, relation), 1);
-        assert_eq!(amemory_reaction_set_theory_relation(1, relation_ac), 1);
-        assert_eq!(amemory_reaction_set_theory_count(2), 1);
-        assert_eq!(amemory_reaction_snapshot_theory(), 1);
-        assert_eq!(amemory_reaction_run(), 1);
-        assert_eq!(amemory_reaction_matched_relations(), 2);
-        assert_eq!(amemory_reaction_handoff_count(), 1);
-        assert_eq!(amemory_reaction_current_count(), 2);
+        memory.reaction_reset();
+        assert_eq!(memory.reaction_set_current_member(0, current), 1);
+        assert_eq!(memory.reaction_set_current_count(1), 1);
+        assert_eq!(memory.reaction_set_theory_relation(0, relation), 1);
+        assert_eq!(memory.reaction_set_theory_relation(1, relation_ac), 1);
+        assert_eq!(memory.reaction_set_theory_count(2), 1);
+        assert_eq!(memory.reaction_snapshot_theory(), 1);
+        assert_eq!(memory.reaction_run(), 1);
+        assert_eq!(memory.reaction_matched_relations(), 2);
+        assert_eq!(memory.reaction_handoff_count(), 1);
+        assert_eq!(memory.reaction_current_count(), 2);
         let mut one_to_n = [
-            export(amemory_reaction_current_member(0)),
-            export(amemory_reaction_current_member(1)),
+            export(&mut memory, memory.reaction_current_member(0)),
+            export(&mut memory, memory.reaction_current_member(1)),
         ];
         one_to_n.sort();
         assert_eq!(one_to_n, ["19816898".to_string(), "198998".to_string()]);
 
-        amemory_reaction_reset();
-        assert_eq!(amemory_reaction_set_current_member(0, current), 1);
-        assert_eq!(amemory_reaction_set_current_member(1, current_root), 1);
-        assert_eq!(amemory_reaction_set_current_count(2), 1);
-        assert_eq!(amemory_reaction_set_theory_relation(0, relation), 1);
-        assert_eq!(amemory_reaction_set_theory_relation(1, root_to_c), 1);
-        assert_eq!(amemory_reaction_set_theory_count(2), 1);
-        assert_eq!(amemory_reaction_snapshot_theory(), 1);
-        assert_eq!(amemory_reaction_run(), 1);
-        assert_eq!(amemory_reaction_matched_relations(), 2);
-        assert_eq!(amemory_reaction_current_count(), 2);
+        memory.reaction_reset();
+        assert_eq!(memory.reaction_set_current_member(0, current), 1);
+        assert_eq!(memory.reaction_set_current_member(1, current_root), 1);
+        assert_eq!(memory.reaction_set_current_count(2), 1);
+        assert_eq!(memory.reaction_set_theory_relation(0, relation), 1);
+        assert_eq!(memory.reaction_set_theory_relation(1, root_to_c), 1);
+        assert_eq!(memory.reaction_set_theory_count(2), 1);
+        assert_eq!(memory.reaction_snapshot_theory(), 1);
+        assert_eq!(memory.reaction_run(), 1);
+        assert_eq!(memory.reaction_matched_relations(), 2);
+        assert_eq!(memory.reaction_current_count(), 2);
         let mut n_to_m = [
-            export(amemory_reaction_current_member(0)),
-            export(amemory_reaction_current_member(1)),
+            export(&mut memory, memory.reaction_current_member(0)),
+            export(&mut memory, memory.reaction_current_member(1)),
         ];
         n_to_m.sort();
         assert_eq!(n_to_m, ["19816898".to_string(), "198998".to_string()]);
 
-        amemory_reaction_reset();
-        assert_eq!(amemory_reaction_set_current_member(0, current_root), 1);
-        assert_eq!(amemory_reaction_set_current_member(1, current), 1);
-        assert_eq!(amemory_reaction_set_current_count(2), 1);
-        assert_eq!(amemory_reaction_set_theory_relation(0, root_to_c), 1);
-        assert_eq!(amemory_reaction_set_theory_relation(1, relation), 1);
-        assert_eq!(amemory_reaction_set_theory_count(2), 1);
-        assert_eq!(amemory_reaction_snapshot_theory(), 1);
-        assert_eq!(amemory_reaction_run(), 1);
+        memory.reaction_reset();
+        assert_eq!(memory.reaction_set_current_member(0, current_root), 1);
+        assert_eq!(memory.reaction_set_current_member(1, current), 1);
+        assert_eq!(memory.reaction_set_current_count(2), 1);
+        assert_eq!(memory.reaction_set_theory_relation(0, root_to_c), 1);
+        assert_eq!(memory.reaction_set_theory_relation(1, relation), 1);
+        assert_eq!(memory.reaction_set_theory_count(2), 1);
+        assert_eq!(memory.reaction_snapshot_theory(), 1);
+        assert_eq!(memory.reaction_run(), 1);
         let mut reordered = [
-            export(amemory_reaction_current_member(0)),
-            export(amemory_reaction_current_member(1)),
+            export(&mut memory, memory.reaction_current_member(0)),
+            export(&mut memory, memory.reaction_current_member(1)),
         ];
         reordered.sort();
         assert_eq!(reordered, n_to_m);
 
         // Valid semantic cardinality outside this bounded CPU prototype scope
         // is rejected at the substrate boundary with no handoff/publication.
-        amemory_reaction_reset();
-        assert_eq!(amemory_reaction_set_current_count(17), 0);
-        assert_eq!(amemory_reaction_current_count(), 0);
-        assert_eq!(amemory_reaction_handoff_count(), 0);
+        memory.reaction_reset();
+        assert_eq!(memory.reaction_set_current_count(17), 0);
+        assert_eq!(memory.reaction_current_count(), 0);
+        assert_eq!(memory.reaction_handoff_count(), 0);
 
         // R4 P14: a new live Theory admission added after snapshot_t is
         // invisible to reaction t and becomes executable only after the next
         // explicit reaction-start snapshot.
-        let relation_bc = import("116898998");
+        let relation_bc = import(&mut memory, "116898998");
         for handle in [c, relation_bc, successor_c] {
             assert_ne!(handle, ANUM_CPU_NONE);
         }
 
-        amemory_reaction_reset();
-        assert_eq!(amemory_reaction_set_current_member(0, current), 1);
-        assert_eq!(amemory_reaction_set_current_count(1), 1);
-        assert_eq!(amemory_reaction_set_theory_relation(0, relation), 1);
-        assert_eq!(amemory_reaction_set_theory_count(1), 1);
-        assert_eq!(amemory_reaction_snapshot_theory(), 1);
-        assert_eq!(amemory_reaction_theory_count(), 1);
-        assert_eq!(amemory_reaction_snapshot_count(), 1);
+        memory.reaction_reset();
+        assert_eq!(memory.reaction_set_current_member(0, current), 1);
+        assert_eq!(memory.reaction_set_current_count(1), 1);
+        assert_eq!(memory.reaction_set_theory_relation(0, relation), 1);
+        assert_eq!(memory.reaction_set_theory_count(1), 1);
+        assert_eq!(memory.reaction_snapshot_theory(), 1);
+        assert_eq!(memory.reaction_theory_count(), 1);
+        assert_eq!(memory.reaction_snapshot_count(), 1);
 
         // Add B->C to live Theory only. Snapshot_t remains [A->B].
-        assert_eq!(amemory_reaction_set_theory_relation(1, relation_bc), 1);
-        assert_eq!(amemory_reaction_set_theory_count(2), 1);
-        assert_eq!(amemory_reaction_theory_count(), 2);
-        assert_eq!(amemory_reaction_snapshot_count(), 1);
+        assert_eq!(memory.reaction_set_theory_relation(1, relation_bc), 1);
+        assert_eq!(memory.reaction_set_theory_count(2), 1);
+        assert_eq!(memory.reaction_theory_count(), 2);
+        assert_eq!(memory.reaction_snapshot_count(), 1);
 
         // reaction t: K->A -> K->B. The new B->C admission must not leak.
-        assert_eq!(amemory_reaction_run(), 1);
-        assert_eq!(amemory_reaction_matched_relations(), 1);
-        assert_eq!(amemory_reaction_handoff_count(), 1);
-        assert_eq!(amemory_reaction_quiescent(), 0);
-        assert_eq!(export(amemory_reaction_current_member(0)), "19816898");
+        assert_eq!(memory.reaction_run(), 1);
+        assert_eq!(memory.reaction_matched_relations(), 1);
+        assert_eq!(memory.reaction_handoff_count(), 1);
+        assert_eq!(memory.reaction_quiescent(), 0);
+        assert_eq!(export(&mut memory, memory.reaction_current_member(0)), "19816898");
 
         // reaction t+1 starts with a fresh snapshot and now B->C is visible.
-        assert_eq!(amemory_reaction_snapshot_theory(), 1);
-        assert_eq!(amemory_reaction_snapshot_count(), 2);
-        assert_eq!(amemory_reaction_run(), 1);
-        assert_eq!(amemory_reaction_matched_relations(), 1);
-        assert_eq!(amemory_reaction_handoff_count(), 1);
-        assert_eq!(amemory_reaction_quiescent(), 0);
-        assert_eq!(export(amemory_reaction_current_member(0)), "198998");
+        assert_eq!(memory.reaction_snapshot_theory(), 1);
+        assert_eq!(memory.reaction_snapshot_count(), 2);
+        assert_eq!(memory.reaction_run(), 1);
+        assert_eq!(memory.reaction_matched_relations(), 1);
+        assert_eq!(memory.reaction_handoff_count(), 1);
+        assert_eq!(memory.reaction_quiescent(), 0);
+        assert_eq!(export(&mut memory, memory.reaction_current_member(0)), "198998");
 
         // Negative control on an independent substrate state: adding B->C to
         // live Theory without taking a new snapshot leaves K->B unchanged.
-        amemory_reaction_reset();
-        assert_eq!(amemory_reaction_set_current_member(0, successor), 1);
-        assert_eq!(amemory_reaction_set_current_count(1), 1);
-        assert_eq!(amemory_reaction_set_theory_relation(0, relation), 1);
-        assert_eq!(amemory_reaction_set_theory_count(1), 1);
-        assert_eq!(amemory_reaction_snapshot_theory(), 1);
-        assert_eq!(amemory_reaction_set_theory_relation(1, relation_bc), 1);
-        assert_eq!(amemory_reaction_set_theory_count(2), 1);
-        assert_eq!(amemory_reaction_snapshot_count(), 1);
-        assert_eq!(amemory_reaction_run(), 1);
-        assert_eq!(amemory_reaction_matched_relations(), 0);
-        assert_eq!(amemory_reaction_handoff_count(), 0);
-        assert_eq!(amemory_reaction_quiescent(), 1);
-        assert_eq!(export(amemory_reaction_current_member(0)), "19816898");
+        memory.reaction_reset();
+        assert_eq!(memory.reaction_set_current_member(0, successor), 1);
+        assert_eq!(memory.reaction_set_current_count(1), 1);
+        assert_eq!(memory.reaction_set_theory_relation(0, relation), 1);
+        assert_eq!(memory.reaction_set_theory_count(1), 1);
+        assert_eq!(memory.reaction_snapshot_theory(), 1);
+        assert_eq!(memory.reaction_set_theory_relation(1, relation_bc), 1);
+        assert_eq!(memory.reaction_set_theory_count(2), 1);
+        assert_eq!(memory.reaction_snapshot_count(), 1);
+        assert_eq!(memory.reaction_run(), 1);
+        assert_eq!(memory.reaction_matched_relations(), 0);
+        assert_eq!(memory.reaction_handoff_count(), 0);
+        assert_eq!(memory.reaction_quiescent(), 1);
+        assert_eq!(export(&mut memory, memory.reaction_current_member(0)), "19816898");
 
         // R5 P16/P17: bounded observation of an active recurrence through
         // structural END. The unchanged TheorySnapshot contains both
         // directions, so the same semantic states can repeat indefinitely
         // without ever becoming quiescent. END is ordinary structural data,
         // not a global halt condition.
-        let r5_context = import("998");
-        let r5_start_value = import("98");
-        let r5_end_value = import("68");
-        let r5_state_start = import("199898");
-        let r5_state_end = import("199868");
-        let r5_relation_start_end = import("19868");
-        let r5_relation_end_start = import("16898");
+        let r5_context = import(&mut memory, "998");
+        let r5_start_value = import(&mut memory, "98");
+        let r5_end_value = import(&mut memory, "68");
+        let r5_state_start = import(&mut memory, "199898");
+        let r5_state_end = import(&mut memory, "199868");
+        let r5_relation_start_end = import(&mut memory, "19868");
+        let r5_relation_end_start = import(&mut memory, "16898");
         for handle in [
             r5_context,
             r5_start_value,
@@ -1494,28 +1463,28 @@ mod anum_boundary_tests {
             assert_ne!(handle, ANUM_CPU_NONE);
         }
 
-        let pool = AnumCpuPool::snapshot();
+        let pool = memory.pool;
         assert_eq!(pool.end[r5_end_value as usize], r5_end_value);
         assert_ne!(pool.start[r5_end_value as usize], r5_end_value);
-        assert_eq!(export(r5_end_value), "68");
+        assert_eq!(export(&mut memory, r5_end_value), "68");
 
-        amemory_reaction_reset();
-        assert_eq!(amemory_reaction_set_current_member(0, r5_state_start), 1);
-        assert_eq!(amemory_reaction_set_current_count(1), 1);
-        assert_eq!(amemory_reaction_set_theory_relation(0, r5_relation_start_end), 1);
-        assert_eq!(amemory_reaction_set_theory_relation(1, r5_relation_end_start), 1);
-        assert_eq!(amemory_reaction_set_theory_count(2), 1);
-        assert_eq!(amemory_reaction_snapshot_theory(), 1);
-        assert_eq!(amemory_reaction_snapshot_count(), 2);
+        memory.reaction_reset();
+        assert_eq!(memory.reaction_set_current_member(0, r5_state_start), 1);
+        assert_eq!(memory.reaction_set_current_count(1), 1);
+        assert_eq!(memory.reaction_set_theory_relation(0, r5_relation_start_end), 1);
+        assert_eq!(memory.reaction_set_theory_relation(1, r5_relation_end_start), 1);
+        assert_eq!(memory.reaction_set_theory_count(2), 1);
+        assert_eq!(memory.reaction_snapshot_theory(), 1);
+        assert_eq!(memory.reaction_snapshot_count(), 2);
 
         let expected = ["199898", "199868", "199898", "199868", "199898"];
-        assert_eq!(export(amemory_reaction_current_member(0)), expected[0]);
+        assert_eq!(export(&mut memory, memory.reaction_current_member(0)), expected[0]);
         for step in 0..4 {
-            assert_eq!(amemory_reaction_run(), 1);
-            assert_eq!(amemory_reaction_matched_relations(), 1);
-            assert_eq!(amemory_reaction_handoff_count(), 1);
-            assert_eq!(amemory_reaction_quiescent(), 0);
-            assert_eq!(export(amemory_reaction_current_member(0)), expected[step + 1]);
+            assert_eq!(memory.reaction_run(), 1);
+            assert_eq!(memory.reaction_matched_relations(), 1);
+            assert_eq!(memory.reaction_handoff_count(), 1);
+            assert_eq!(memory.reaction_quiescent(), 0);
+            assert_eq!(export(&mut memory, memory.reaction_current_member(0)), expected[step + 1]);
         }
 
         // S0=S2=S4 and S1=S3 semantically, with active transitions between.
@@ -1525,6 +1494,75 @@ mod anum_boundary_tests {
         assert_eq!(expected[1], expected[3]);
         assert_eq!(expected[1], "199868");
         assert_eq!(expected[2], "199898");
+    }
+
+    #[test]
+    fn opaque_wasm_instances_are_isolated_and_stale_ids_fail_closed() {
+        fn abi_import(id: u32, source: &str) -> u32 {
+            for (index, byte) in source.bytes().enumerate() {
+                let token = if byte.is_ascii_digit() {
+                    (byte - b'0') as u32
+                } else {
+                    255
+                };
+                assert_eq!(amemory_reference_set_token(id, index as u32, token), 1);
+            }
+            amemory_reference_import(id, source.len() as u32)
+        }
+
+        let first = amemory_reference_create();
+        let second = amemory_reference_create();
+        assert_ne!(first, 0);
+        assert_ne!(second, 0);
+        assert_ne!(first, second);
+
+        let current = abi_import(first, "19868");
+        let relation = abi_import(first, "16816898");
+        let successor = abi_import(first, "19816898");
+        for handle in [current, relation, successor] {
+            assert_ne!(handle, ANUM_CPU_NONE);
+        }
+
+        assert!(amemory_reference_pool_count(first) > 1);
+        assert_eq!(amemory_reference_pool_count(second), 1);
+        assert_eq!(
+            amemory_reference_reaction_set_current_member(first, 0, current),
+            1
+        );
+        assert_eq!(
+            amemory_reference_reaction_set_current_count(first, 1),
+            1
+        );
+        assert_eq!(
+            amemory_reference_reaction_set_theory_relation(first, 0, relation),
+            1
+        );
+        assert_eq!(
+            amemory_reference_reaction_set_theory_count(first, 1),
+            1
+        );
+        assert_eq!(amemory_reference_reaction_snapshot_theory(first), 1);
+        assert_eq!(amemory_reference_reaction_run(first), 1);
+        assert_eq!(
+            amemory_reference_reaction_current_member(first, 0),
+            successor
+        );
+
+        assert_eq!(amemory_reference_reaction_current_count(second), 0);
+        assert_eq!(amemory_reference_reaction_matched_relations(second), 0);
+
+        assert_eq!(amemory_reference_destroy(first), 1);
+        assert_eq!(amemory_reference_pool_count(first), ANUM_CPU_NONE);
+        assert_eq!(amemory_reference_reaction_run(first), 0);
+
+        let replacement = amemory_reference_create();
+        assert_ne!(replacement, 0);
+        assert_ne!(replacement, first, "generation must invalidate stale ids");
+        assert_eq!(amemory_reference_pool_count(replacement), 1);
+
+        assert_eq!(amemory_reference_destroy(second), 1);
+        assert_eq!(amemory_reference_destroy(replacement), 1);
+        assert_eq!(amemory_reference_destroy(first), 0);
     }
 
 }
