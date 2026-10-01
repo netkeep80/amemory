@@ -38,17 +38,8 @@ const ANUM_CPU_MAX_HANDLE: u32 = 63;
 const ANUM_CPU_ROOT: u32 = 1;
 const ANUM_CPU_MAX_TOKENS: usize = 256;
 const ANUM_CPU_NONE: u32 = u32::MAX;
-
-static mut ANUM_CPU_START: [u32; ANUM_CPU_SLOTS] = [0; ANUM_CPU_SLOTS];
-static mut ANUM_CPU_END: [u32; ANUM_CPU_SLOTS] = [0; ANUM_CPU_SLOTS];
-static mut ANUM_CPU_USED: [u32; ANUM_CPU_SLOTS] = [0; ANUM_CPU_SLOTS];
-static mut ANUM_CPU_INPUT: [u32; ANUM_CPU_MAX_TOKENS] = [0; ANUM_CPU_MAX_TOKENS];
-static mut ANUM_CPU_OUTPUT: [u32; ANUM_CPU_MAX_TOKENS] = [0; ANUM_CPU_MAX_TOKENS];
-static mut ANUM_CPU_STAGE_START: [u32; ANUM_CPU_SLOTS] = [0; ANUM_CPU_SLOTS];
-static mut ANUM_CPU_STAGE_END: [u32; ANUM_CPU_SLOTS] = [0; ANUM_CPU_SLOTS];
-static mut ANUM_CPU_STAGE_USED: [u32; ANUM_CPU_SLOTS] = [0; ANUM_CPU_SLOTS];
-static mut ANUM_CPU_STAGE_ACTIVE: u32 = 0;
-static mut ANUM_CPU_STAGE_MEMBER_COUNT: u32 = 0;
+const REACTION_SCOPE_CAP: usize = 16;
+const REACTION_NONE: u32 = u32::MAX;
 
 #[derive(Clone, Copy)]
 struct AnumCpuPool {
@@ -58,34 +49,16 @@ struct AnumCpuPool {
 }
 
 impl AnumCpuPool {
-    fn snapshot() -> Self {
+    fn root_only() -> Self {
         let mut pool = Self {
             start: [0; ANUM_CPU_SLOTS],
             end: [0; ANUM_CPU_SLOTS],
             used: [0; ANUM_CPU_SLOTS],
         };
-        let mut i = 0;
-        while i < ANUM_CPU_SLOTS {
-            unsafe {
-                pool.start[i] = ANUM_CPU_START[i];
-                pool.end[i] = ANUM_CPU_END[i];
-                pool.used[i] = ANUM_CPU_USED[i];
-            }
-            i += 1;
-        }
+        pool.used[ANUM_CPU_ROOT as usize] = 1;
+        pool.start[ANUM_CPU_ROOT as usize] = ANUM_CPU_ROOT;
+        pool.end[ANUM_CPU_ROOT as usize] = ANUM_CPU_ROOT;
         pool
-    }
-
-    fn publish(&self) {
-        let mut i = 0;
-        while i < ANUM_CPU_SLOTS {
-            unsafe {
-                ANUM_CPU_START[i] = self.start[i];
-                ANUM_CPU_END[i] = self.end[i];
-                ANUM_CPU_USED[i] = self.used[i];
-            }
-            i += 1;
-        }
     }
 
     fn valid(&self, handle: u32) -> bool {
@@ -95,141 +68,72 @@ impl AnumCpuPool {
     }
 
     fn find_start(&self, child: u32) -> Option<u32> {
-        let mut handle = 1;
-        while handle <= ANUM_CPU_MAX_HANDLE {
-            let i = handle as usize;
-            if self.used[i] != 0
-                && self.start[i] == handle
+        (1..=ANUM_CPU_MAX_HANDLE).find(|handle| {
+            let i = *handle as usize;
+            self.used[i] != 0
+                && self.start[i] == *handle
                 && self.end[i] == child
-                && self.end[i] != handle
-            {
-                return Some(handle);
-            }
-            handle += 1;
-        }
-        None
+                && self.end[i] != *handle
+        })
     }
 
     fn find_end(&self, child: u32) -> Option<u32> {
-        let mut handle = 1;
-        while handle <= ANUM_CPU_MAX_HANDLE {
-            let i = handle as usize;
-            if self.used[i] != 0
+        (1..=ANUM_CPU_MAX_HANDLE).find(|handle| {
+            let i = *handle as usize;
+            self.used[i] != 0
                 && self.start[i] == child
-                && self.end[i] == handle
-                && self.start[i] != handle
-            {
-                return Some(handle);
-            }
-            handle += 1;
-        }
-        None
+                && self.end[i] == *handle
+                && self.start[i] != *handle
+        })
     }
 
     fn find_pair(&self, start: u32, end: u32) -> Option<u32> {
-        let mut handle = 1;
-        while handle <= ANUM_CPU_MAX_HANDLE {
-            let i = handle as usize;
-            if self.used[i] != 0
+        (1..=ANUM_CPU_MAX_HANDLE).find(|handle| {
+            let i = *handle as usize;
+            self.used[i] != 0
                 && self.start[i] == start
                 && self.end[i] == end
-                && self.start[i] != handle
-                && self.end[i] != handle
-            {
-                return Some(handle);
-            }
-            handle += 1;
-        }
-        None
+                && self.start[i] != *handle
+                && self.end[i] != *handle
+        })
     }
 
     fn allocate(&mut self, start: u32, end: u32, aspect: u32) -> Option<u32> {
-        let mut handle = 2;
-        while handle <= ANUM_CPU_MAX_HANDLE {
+        for handle in 2..=ANUM_CPU_MAX_HANDLE {
             let i = handle as usize;
             if self.used[i] == 0 {
                 self.used[i] = 1;
-                if aspect == 1 {
-                    self.start[i] = handle;
-                    self.end[i] = end;
-                } else if aspect == 2 {
-                    self.start[i] = start;
-                    self.end[i] = handle;
-                } else {
-                    self.start[i] = start;
-                    self.end[i] = end;
+                match aspect {
+                    1 => {
+                        self.start[i] = handle;
+                        self.end[i] = end;
+                    }
+                    2 => {
+                        self.start[i] = start;
+                        self.end[i] = handle;
+                    }
+                    _ => {
+                        self.start[i] = start;
+                        self.end[i] = end;
+                    }
                 }
                 return Some(handle);
             }
-            handle += 1;
         }
         None
     }
 
     fn ensure_start(&mut self, child: u32) -> Option<u32> {
-        if let Some(handle) = self.find_start(child) {
-            return Some(handle);
-        }
-        self.allocate(0, child, 1)
+        self.find_start(child).or_else(|| self.allocate(0, child, 1))
     }
 
     fn ensure_end(&mut self, child: u32) -> Option<u32> {
-        if let Some(handle) = self.find_end(child) {
-            return Some(handle);
-        }
-        self.allocate(child, 0, 2)
+        self.find_end(child).or_else(|| self.allocate(child, 0, 2))
     }
 
     fn ensure_pair(&mut self, start: u32, end: u32) -> Option<u32> {
-        if let Some(handle) = self.find_pair(start, end) {
-            return Some(handle);
-        }
-        self.allocate(start, end, 3)
-    }
-}
-
-fn anum_cpu_root_only_pool() -> AnumCpuPool {
-    let mut pool = AnumCpuPool {
-        start: [0; ANUM_CPU_SLOTS],
-        end: [0; ANUM_CPU_SLOTS],
-        used: [0; ANUM_CPU_SLOTS],
-    };
-    pool.used[ANUM_CPU_ROOT as usize] = 1;
-    pool.start[ANUM_CPU_ROOT as usize] = ANUM_CPU_ROOT;
-    pool.end[ANUM_CPU_ROOT as usize] = ANUM_CPU_ROOT;
-    pool
-}
-
-fn anum_cpu_stage_snapshot() -> Option<AnumCpuPool> {
-    if unsafe { ANUM_CPU_STAGE_ACTIVE } == 0 {
-        return None;
-    }
-    let mut pool = AnumCpuPool {
-        start: [0; ANUM_CPU_SLOTS],
-        end: [0; ANUM_CPU_SLOTS],
-        used: [0; ANUM_CPU_SLOTS],
-    };
-    let mut i = 0;
-    while i < ANUM_CPU_SLOTS {
-        unsafe {
-            pool.start[i] = ANUM_CPU_STAGE_START[i];
-            pool.end[i] = ANUM_CPU_STAGE_END[i];
-            pool.used[i] = ANUM_CPU_STAGE_USED[i];
-        }
-        i += 1;
-    }
-    Some(pool)
-}
-
-fn anum_cpu_stage_publish(pool: &AnumCpuPool) {
-    let mut i = 0;
-    while i < ANUM_CPU_SLOTS {
-        unsafe {
-            ANUM_CPU_STAGE_START[i] = pool.start[i];
-            ANUM_CPU_STAGE_END[i] = pool.end[i];
-            ANUM_CPU_STAGE_USED[i] = pool.used[i];
-        }
-        i += 1;
+        self.find_pair(start, end)
+            .or_else(|| self.allocate(start, end, 3))
     }
 }
 
@@ -241,10 +145,8 @@ fn anum_cpu_import_node(
     if *cursor >= tokens.len() {
         return None;
     }
-
     let token = tokens[*cursor];
     *cursor += 1;
-
     match token {
         8 => Some(ANUM_CPU_ROOT),
         9 => {
@@ -264,7 +166,11 @@ fn anum_cpu_import_node(
     }
 }
 
-fn anum_cpu_push_output(output: &mut [u32; ANUM_CPU_MAX_TOKENS], len: &mut usize, token: u32) -> bool {
+fn anum_cpu_push_output(
+    output: &mut [u32; ANUM_CPU_MAX_TOKENS],
+    len: &mut usize,
+    token: u32,
+) -> bool {
     if *len >= output.len() {
         return false;
     }
@@ -283,7 +189,6 @@ fn anum_cpu_export_node(
     if !pool.valid(handle) {
         return false;
     }
-
     let i = handle as usize;
     if visiting[i] {
         return false;
@@ -292,7 +197,6 @@ fn anum_cpu_export_node(
 
     let start = pool.start[i];
     let end = pool.end[i];
-
     let ok = if start == handle && end == handle {
         anum_cpu_push_output(output, len, 8)
     } else if start == handle {
@@ -311,255 +215,6 @@ fn anum_cpu_export_node(
     ok
 }
 
-#[no_mangle]
-pub extern "C" fn amemory_anum_cpu_reset_pool() {
-    unsafe {
-        let mut i = 0;
-        while i < ANUM_CPU_SLOTS {
-            ANUM_CPU_START[i] = 0;
-            ANUM_CPU_END[i] = 0;
-            ANUM_CPU_USED[i] = 0;
-            ANUM_CPU_STAGE_START[i] = 0;
-            ANUM_CPU_STAGE_END[i] = 0;
-            ANUM_CPU_STAGE_USED[i] = 0;
-            i += 1;
-        }
-        ANUM_CPU_USED[ANUM_CPU_ROOT as usize] = 1;
-        ANUM_CPU_START[ANUM_CPU_ROOT as usize] = ANUM_CPU_ROOT;
-        ANUM_CPU_END[ANUM_CPU_ROOT as usize] = ANUM_CPU_ROOT;
-        ANUM_CPU_STAGE_ACTIVE = 0;
-        ANUM_CPU_STAGE_MEMBER_COUNT = 0;
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn amemory_anum_cpu_set_token(index: u32, token: u32) -> u32 {
-    let i = index as usize;
-    if i >= ANUM_CPU_MAX_TOKENS {
-        return 0;
-    }
-    unsafe {
-        ANUM_CPU_INPUT[i] = token;
-    }
-    1
-}
-
-/// Begin an atomic Aset replacement load. The published pool remains untouched
-/// until commit; staging starts from the canonical ROOT-only pool.
-#[no_mangle]
-pub extern "C" fn amemory_anum_cpu_load_begin() -> u32 {
-    let stage = anum_cpu_root_only_pool();
-    anum_cpu_stage_publish(&stage);
-    unsafe {
-        ANUM_CPU_STAGE_ACTIVE = 1;
-        ANUM_CPU_STAGE_MEMBER_COUNT = 0;
-    }
-    1
-}
-
-/// Import one complete Anum into the unpublished Aset staging pool.
-/// A failed member alters neither published state nor prior staged members.
-#[no_mangle]
-pub extern "C" fn amemory_anum_cpu_load_member(token_count: u32) -> u32 {
-    if unsafe { ANUM_CPU_STAGE_ACTIVE } == 0 {
-        return ANUM_CPU_NONE;
-    }
-    let count = token_count as usize;
-    if count == 0 || count > ANUM_CPU_MAX_TOKENS {
-        return ANUM_CPU_NONE;
-    }
-
-    let mut tokens = [0_u32; ANUM_CPU_MAX_TOKENS];
-    let mut i = 0;
-    while i < count {
-        unsafe { tokens[i] = ANUM_CPU_INPUT[i]; }
-        i += 1;
-    }
-
-    let Some(mut scratch) = anum_cpu_stage_snapshot() else {
-        return ANUM_CPU_NONE;
-    };
-    let mut cursor = 0;
-    let Some(handle) = anum_cpu_import_node(&tokens[..count], &mut cursor, &mut scratch) else {
-        return ANUM_CPU_NONE;
-    };
-    if cursor != count {
-        return ANUM_CPU_NONE;
-    }
-
-    anum_cpu_stage_publish(&scratch);
-    unsafe { ANUM_CPU_STAGE_MEMBER_COUNT += 1; }
-    handle
-}
-
-/// Publish the complete staged Aset in one handoff.
-#[no_mangle]
-pub extern "C" fn amemory_anum_cpu_load_commit() -> u32 {
-    if unsafe { ANUM_CPU_STAGE_ACTIVE } == 0 || unsafe { ANUM_CPU_STAGE_MEMBER_COUNT } == 0 {
-        return 0;
-    }
-    let Some(stage) = anum_cpu_stage_snapshot() else {
-        return 0;
-    };
-    stage.publish();
-    unsafe {
-        ANUM_CPU_STAGE_ACTIVE = 0;
-        ANUM_CPU_STAGE_MEMBER_COUNT = 0;
-    }
-    1
-}
-
-#[no_mangle]
-pub extern "C" fn amemory_anum_cpu_load_abort() {
-    unsafe {
-        ANUM_CPU_STAGE_ACTIVE = 0;
-        ANUM_CPU_STAGE_MEMBER_COUNT = 0;
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn amemory_anum_cpu_load_active() -> u32 {
-    unsafe { ANUM_CPU_STAGE_ACTIVE }
-}
-
-/// Transactional bounded single-Anum import. It is disabled while a batch Aset
-/// load is active so published state cannot bypass the staging boundary.
-#[no_mangle]
-pub extern "C" fn amemory_anum_cpu_import(token_count: u32) -> u32 {
-    if unsafe { ANUM_CPU_STAGE_ACTIVE } != 0 {
-        return ANUM_CPU_NONE;
-    }
-    let count = token_count as usize;
-    if count == 0 || count > ANUM_CPU_MAX_TOKENS {
-        return ANUM_CPU_NONE;
-    }
-
-    let mut tokens = [0_u32; ANUM_CPU_MAX_TOKENS];
-    let mut i = 0;
-    while i < count {
-        unsafe {
-            tokens[i] = ANUM_CPU_INPUT[i];
-        }
-        i += 1;
-    }
-
-    let mut scratch = AnumCpuPool::snapshot();
-    let mut cursor = 0;
-    let Some(handle) = anum_cpu_import_node(&tokens[..count], &mut cursor, &mut scratch) else {
-        return ANUM_CPU_NONE;
-    };
-    if cursor != count {
-        return ANUM_CPU_NONE;
-    }
-
-    scratch.publish();
-    handle
-}
-
-#[no_mangle]
-pub extern "C" fn amemory_anum_cpu_export(handle: u32) -> u32 {
-    let pool = AnumCpuPool::snapshot();
-    let mut visiting = [false; ANUM_CPU_SLOTS];
-    let mut output = [0_u32; ANUM_CPU_MAX_TOKENS];
-    let mut len = 0_usize;
-
-    if !anum_cpu_export_node(&pool, handle, &mut visiting, &mut output, &mut len) {
-        return ANUM_CPU_NONE;
-    }
-
-    let mut i = 0;
-    while i < len {
-        unsafe {
-            ANUM_CPU_OUTPUT[i] = output[i];
-        }
-        i += 1;
-    }
-    len as u32
-}
-
-#[no_mangle]
-pub extern "C" fn amemory_anum_cpu_output_get(index: u32) -> u32 {
-    let i = index as usize;
-    if i >= ANUM_CPU_MAX_TOKENS {
-        return ANUM_CPU_NONE;
-    }
-    unsafe { ANUM_CPU_OUTPUT[i] }
-}
-
-#[no_mangle]
-pub extern "C" fn amemory_anum_cpu_pool_count() -> u32 {
-    let mut count = 0_u32;
-    let mut handle = 1_u32;
-    while handle <= ANUM_CPU_MAX_HANDLE {
-        unsafe {
-            if ANUM_CPU_USED[handle as usize] != 0 {
-                count += 1;
-            }
-        }
-        handle += 1;
-    }
-    count
-}
-
-/// Read-only technical carrier occupancy. This is substrate observation only;
-/// it does not assign semantic START/END meaning to either stored coordinate.
-#[no_mangle]
-pub extern "C" fn amemory_anum_cpu_used(handle: u32) -> u32 {
-    if handle == 0 || handle > ANUM_CPU_MAX_HANDLE {
-        return ANUM_CPU_NONE;
-    }
-    unsafe { ANUM_CPU_USED[handle as usize] }
-}
-
-/// Read-only first technical carrier coordinate for one published Link.
-#[no_mangle]
-pub extern "C" fn amemory_anum_cpu_start(handle: u32) -> u32 {
-    if handle == 0 || handle > ANUM_CPU_MAX_HANDLE {
-        return ANUM_CPU_NONE;
-    }
-    unsafe {
-        if ANUM_CPU_USED[handle as usize] == 0 {
-            ANUM_CPU_NONE
-        } else {
-            ANUM_CPU_START[handle as usize]
-        }
-    }
-}
-
-/// Read-only second technical carrier coordinate for one published Link.
-#[no_mangle]
-pub extern "C" fn amemory_anum_cpu_end(handle: u32) -> u32 {
-    if handle == 0 || handle > ANUM_CPU_MAX_HANDLE {
-        return ANUM_CPU_NONE;
-    }
-    unsafe {
-        if ANUM_CPU_USED[handle as usize] == 0 {
-            ANUM_CPU_NONE
-        } else {
-            ANUM_CPU_END[handle as usize]
-        }
-    }
-}
-
-
-const REACTION_SCOPE_CAP: usize = 16;
-const REACTION_NONE: u32 = u32::MAX;
-
-static mut REACTION_SCOPE0: [u32; REACTION_SCOPE_CAP] = [REACTION_NONE; REACTION_SCOPE_CAP];
-static mut REACTION_SCOPE1: [u32; REACTION_SCOPE_CAP] = [REACTION_NONE; REACTION_SCOPE_CAP];
-static mut REACTION_SCOPE0_COUNT: u32 = 0;
-static mut REACTION_SCOPE1_COUNT: u32 = 0;
-static mut REACTION_CURRENT_BANK: u32 = 0;
-
-static mut REACTION_THEORY: [u32; REACTION_SCOPE_CAP] = [REACTION_NONE; REACTION_SCOPE_CAP];
-static mut REACTION_THEORY_COUNT: u32 = 0;
-static mut REACTION_SNAPSHOT: [u32; REACTION_SCOPE_CAP] = [REACTION_NONE; REACTION_SCOPE_CAP];
-static mut REACTION_SNAPSHOT_COUNT: u32 = 0;
-
-static mut REACTION_MATCHED_RELATIONS: u32 = 0;
-static mut REACTION_HANDOFF_COUNT: u32 = 0;
-static mut REACTION_QUIESCENT: u32 = 0;
-
 fn reaction_pair_poles(pool: &AnumCpuPool, handle: u32) -> Option<(u32, u32)> {
     if !pool.valid(handle) {
         return None;
@@ -567,10 +222,6 @@ fn reaction_pair_poles(pool: &AnumCpuPool, handle: u32) -> Option<(u32, u32)> {
     let i = handle as usize;
     let start = pool.start[i];
     let end = pool.end[i];
-
-    // The bounded R1 executor consumes ordinary PAIR Links as current truths
-    // and grounded Theory relations. ROOT/START/END remain valid Links but are
-    // not silently reinterpreted as binary reaction records.
     if start == handle || end == handle || !pool.valid(start) || !pool.valid(end) {
         return None;
     }
@@ -590,12 +241,8 @@ fn reaction_append_unique(
     count: &mut usize,
     handle: u32,
 ) -> bool {
-    let mut i = 0;
-    while i < *count {
-        if values[i] == handle {
-            return true;
-        }
-        i += 1;
+    if values[..*count].contains(&handle) {
+        return true;
     }
     if *count >= REACTION_SCOPE_CAP {
         return false;
@@ -605,364 +252,672 @@ fn reaction_append_unique(
     true
 }
 
-#[no_mangle]
-pub extern "C" fn amemory_reaction_reset() {
-    unsafe {
-        let mut i = 0;
-        while i < REACTION_SCOPE_CAP {
-            REACTION_SCOPE0[i] = REACTION_NONE;
-            REACTION_SCOPE1[i] = REACTION_NONE;
-            REACTION_THEORY[i] = REACTION_NONE;
-            REACTION_SNAPSHOT[i] = REACTION_NONE;
-            i += 1;
-        }
-        REACTION_SCOPE0_COUNT = 0;
-        REACTION_SCOPE1_COUNT = 0;
-        REACTION_CURRENT_BANK = 0;
-        REACTION_THEORY_COUNT = 0;
-        REACTION_SNAPSHOT_COUNT = 0;
-        REACTION_MATCHED_RELATIONS = 0;
-        REACTION_HANDOFF_COUNT = 0;
-        REACTION_QUIESCENT = 0;
-    }
+#[derive(Clone)]
+struct ReferenceReactionState {
+    scope: [[u32; REACTION_SCOPE_CAP]; 2],
+    scope_count: [u32; 2],
+    current_bank: u32,
+    theory: [u32; REACTION_SCOPE_CAP],
+    theory_count: u32,
+    snapshot: [u32; REACTION_SCOPE_CAP],
+    snapshot_count: u32,
+    matched_relations: u32,
+    handoff_count: u32,
+    quiescent: u32,
 }
 
-#[no_mangle]
-pub extern "C" fn amemory_reaction_set_current_member(index: u32, handle: u32) -> u32 {
-    let i = index as usize;
-    if i >= REACTION_SCOPE_CAP || !AnumCpuPool::snapshot().valid(handle) {
-        return 0;
-    }
-    unsafe {
-        if REACTION_CURRENT_BANK == 0 {
-            REACTION_SCOPE0[i] = handle;
-        } else {
-            REACTION_SCOPE1[i] = handle;
+impl ReferenceReactionState {
+    fn new() -> Self {
+        Self {
+            scope: [[REACTION_NONE; REACTION_SCOPE_CAP]; 2],
+            scope_count: [0; 2],
+            current_bank: 0,
+            theory: [REACTION_NONE; REACTION_SCOPE_CAP],
+            theory_count: 0,
+            snapshot: [REACTION_NONE; REACTION_SCOPE_CAP],
+            snapshot_count: 0,
+            matched_relations: 0,
+            handoff_count: 0,
+            quiescent: 0,
         }
     }
-    1
+
+    fn reset(&mut self) {
+        *self = Self::new();
+    }
 }
 
-#[no_mangle]
-pub extern "C" fn amemory_reaction_set_current_count(count: u32) -> u32 {
-    if count as usize > REACTION_SCOPE_CAP {
-        return 0;
-    }
-    unsafe {
-        if REACTION_CURRENT_BANK == 0 {
-            REACTION_SCOPE0_COUNT = count;
-        } else {
-            REACTION_SCOPE1_COUNT = count;
-        }
-    }
-    1
-}
-
-#[no_mangle]
-pub extern "C" fn amemory_reaction_set_theory_relation(index: u32, handle: u32) -> u32 {
-    let i = index as usize;
-    if i >= REACTION_SCOPE_CAP || reaction_pair_poles(&AnumCpuPool::snapshot(), handle).is_none() {
-        return 0;
-    }
-    unsafe {
-        REACTION_THEORY[i] = handle;
-    }
-    1
-}
-
-#[no_mangle]
-pub extern "C" fn amemory_reaction_set_theory_count(count: u32) -> u32 {
-    if count as usize > REACTION_SCOPE_CAP {
-        return 0;
-    }
-    unsafe {
-        REACTION_THEORY_COUNT = count;
-    }
-    1
-}
-
-/// Capture the explicit reaction-start TheorySnapshot_t.
+/// Explicit owner for one bounded reference CPU/WASM A-memory.
 ///
-/// Later writes to REACTION_THEORY do not alter this snapshot. The snapshot is
-/// substrate state for the portable visibility boundary; it is not a new MTS
-/// entity or portable identity.
-#[no_mangle]
-pub extern "C" fn amemory_reaction_snapshot_theory() -> u32 {
-    let pool = AnumCpuPool::snapshot();
-    let count = unsafe { REACTION_THEORY_COUNT as usize };
-    if count > REACTION_SCOPE_CAP {
-        return 0;
+/// Local handles and instance ids are physical identity only. They are not
+/// portable semantic identity and do not alter the execution profile.
+pub struct ReferenceMemoryInstance {
+    pool: AnumCpuPool,
+    input: [u32; ANUM_CPU_MAX_TOKENS],
+    output: [u32; ANUM_CPU_MAX_TOKENS],
+    stage: Option<AnumCpuPool>,
+    stage_member_count: u32,
+    reaction: ReferenceReactionState,
+}
+
+impl Default for ReferenceMemoryInstance {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ReferenceMemoryInstance {
+    pub fn new() -> Self {
+        Self {
+            pool: AnumCpuPool::root_only(),
+            input: [0; ANUM_CPU_MAX_TOKENS],
+            output: [0; ANUM_CPU_MAX_TOKENS],
+            stage: None,
+            stage_member_count: 0,
+            reaction: ReferenceReactionState::new(),
+        }
     }
 
-    let mut scratch = [REACTION_NONE; REACTION_SCOPE_CAP];
-    let mut i = 0;
-    while i < count {
-        let relation = unsafe { REACTION_THEORY[i] };
-        if reaction_pair_poles(&pool, relation).is_none() {
+    pub fn reset_pool(&mut self) {
+        self.pool = AnumCpuPool::root_only();
+        self.stage = None;
+        self.stage_member_count = 0;
+    }
+
+    pub fn set_token(&mut self, index: u32, token: u32) -> u32 {
+        let i = index as usize;
+        if i >= ANUM_CPU_MAX_TOKENS {
             return 0;
         }
-        scratch[i] = relation;
-        i += 1;
+        self.input[i] = token;
+        1
     }
 
-    unsafe {
-        let mut j = 0;
-        while j < REACTION_SCOPE_CAP {
-            REACTION_SNAPSHOT[j] = scratch[j];
-            j += 1;
+    pub fn load_begin(&mut self) -> u32 {
+        self.stage = Some(AnumCpuPool::root_only());
+        self.stage_member_count = 0;
+        1
+    }
+
+    pub fn load_member(&mut self, token_count: u32) -> u32 {
+        let count = token_count as usize;
+        if self.stage.is_none() || count == 0 || count > ANUM_CPU_MAX_TOKENS {
+            return ANUM_CPU_NONE;
         }
-        REACTION_SNAPSHOT_COUNT = count as u32;
-    }
-    1
-}
 
-/// Execute one bounded grounded reaction against the captured TheorySnapshot_t.
-///
-/// Successor members are assembled in local scratch first. Only after the
-/// complete successor is valid are they copied into the non-current Scope bank
-/// and the current-bank selector is switched exactly once.
-///
-/// For matchedRelations == 0, the published Scope is unchanged and no handoff
-/// occurs (P07/P13). A matched relation whose image is structural ROOT denotes
-/// the canonical empty ExactSequence() for the bounded R3 ZERO witness: it counts
-/// as an admitted match but contributes no successor member.
-#[no_mangle]
-pub extern "C" fn amemory_reaction_run() -> u32 {
-    // Quiescence is a semantic result of a successful complete reaction evaluation,
-    // never a stale scheduler/runtime condition. Clear it before any fail-closed exit.
-    unsafe { REACTION_QUIESCENT = 0; }
-
-    // An Aset still in staging is not a published executable network.
-    if unsafe { ANUM_CPU_STAGE_ACTIVE } != 0 {
-        return 0;
-    }
-
-    let pool = AnumCpuPool::snapshot();
-
-    let current_bank = unsafe { REACTION_CURRENT_BANK };
-    if current_bank > 1 {
-        return 0;
-    }
-    let current_count = unsafe {
-        if current_bank == 0 {
-            REACTION_SCOPE0_COUNT as usize
-        } else {
-            REACTION_SCOPE1_COUNT as usize
+        let mut scratch = self.stage.expect("stage checked above");
+        let mut cursor = 0;
+        let Some(handle) =
+            anum_cpu_import_node(&self.input[..count], &mut cursor, &mut scratch)
+        else {
+            return ANUM_CPU_NONE;
+        };
+        if cursor != count {
+            return ANUM_CPU_NONE;
         }
-    };
-    let snapshot_count = unsafe { REACTION_SNAPSHOT_COUNT as usize };
-    if current_count > REACTION_SCOPE_CAP || snapshot_count > REACTION_SCOPE_CAP {
-        return 0;
+
+        self.stage = Some(scratch);
+        self.stage_member_count += 1;
+        handle
     }
 
-    let mut current = [REACTION_NONE; REACTION_SCOPE_CAP];
-    let mut snapshot = [REACTION_NONE; REACTION_SCOPE_CAP];
-    let mut i = 0;
-    while i < current_count {
-        current[i] = unsafe {
-            if current_bank == 0 {
-                REACTION_SCOPE0[i]
+    pub fn load_commit(&mut self) -> u32 {
+        if self.stage_member_count == 0 {
+            return 0;
+        }
+        let Some(stage) = self.stage.take() else {
+            return 0;
+        };
+        self.pool = stage;
+        self.stage_member_count = 0;
+        1
+    }
+
+    pub fn load_abort(&mut self) {
+        self.stage = None;
+        self.stage_member_count = 0;
+    }
+
+    pub fn load_active(&self) -> u32 {
+        u32::from(self.stage.is_some())
+    }
+
+    pub fn import_tokens(&mut self, token_count: u32) -> u32 {
+        if self.stage.is_some() {
+            return ANUM_CPU_NONE;
+        }
+        let count = token_count as usize;
+        if count == 0 || count > ANUM_CPU_MAX_TOKENS {
+            return ANUM_CPU_NONE;
+        }
+
+        let mut scratch = self.pool;
+        let mut cursor = 0;
+        let Some(handle) =
+            anum_cpu_import_node(&self.input[..count], &mut cursor, &mut scratch)
+        else {
+            return ANUM_CPU_NONE;
+        };
+        if cursor != count {
+            return ANUM_CPU_NONE;
+        }
+
+        self.pool = scratch;
+        handle
+    }
+
+    pub fn import_recursive_wire(&mut self, source: &str) -> u32 {
+        if source.len() > ANUM_CPU_MAX_TOKENS {
+            return ANUM_CPU_NONE;
+        }
+        for (index, byte) in source.bytes().enumerate() {
+            let token = if byte.is_ascii_digit() {
+                (byte - b'0') as u32
             } else {
-                REACTION_SCOPE1[i]
-            }
-        };
-        i += 1;
-    }
-    let mut j = 0;
-    while j < snapshot_count {
-        snapshot[j] = unsafe { REACTION_SNAPSHOT[j] };
-        j += 1;
-    }
-
-    let mut successor = [REACTION_NONE; REACTION_SCOPE_CAP];
-    let mut successor_count = 0_usize;
-    let mut matched = 0_u32;
-
-    let mut member_index = 0;
-    while member_index < current_count {
-        let member = current[member_index];
-        let Some((context, antecedent)) = reaction_pair_poles(&pool, member) else {
-            return 0;
-        };
-
-        let mut member_matches = 0_u32;
-        let mut relation_index = 0;
-        while relation_index < snapshot_count {
-            let relation = snapshot[relation_index];
-            let Some((relation_antecedent, output)) = reaction_pair_poles(&pool, relation) else {
-                return 0;
+                255
             };
-
-            if relation_antecedent == antecedent {
-                matched = matched.saturating_add(1);
-                member_matches = member_matches.saturating_add(1);
-
-                // P09 bounded ZERO witness: ExactSequence() is ROOT. ZERO is an
-                // admitted match, so the current truth is replaced, but it adds
-                // no successor contribution and does not veto sibling matches.
-                if !reaction_is_root(&pool, output) {
-                    let Some(candidate) = pool.find_pair(context, output) else {
-                        // The bounded prototype requires result Links to exist
-                        // physically before semantic publication.
-                        return 0;
-                    };
-                    // P10: canonical Link identity makes duplicate logical
-                    // contributions converge before successor publication.
-                    if !reaction_append_unique(&mut successor, &mut successor_count, candidate) {
-                        return 0;
-                    }
-                }
+            if self.set_token(index as u32, token) != 1 {
+                return ANUM_CPU_NONE;
             }
-            relation_index += 1;
         }
+        self.import_tokens(source.len() as u32)
+    }
 
-        if member_matches == 0
-            && !reaction_append_unique(&mut successor, &mut successor_count, member)
+    pub fn stage_recursive_wire(&mut self, source: &str) -> u32 {
+        if source.len() > ANUM_CPU_MAX_TOKENS {
+            return ANUM_CPU_NONE;
+        }
+        for (index, byte) in source.bytes().enumerate() {
+            let token = if byte.is_ascii_digit() {
+                (byte - b'0') as u32
+            } else {
+                255
+            };
+            if self.set_token(index as u32, token) != 1 {
+                return ANUM_CPU_NONE;
+            }
+        }
+        self.load_member(source.len() as u32)
+    }
+
+    pub fn export_tokens(&mut self, handle: u32) -> u32 {
+        let mut visiting = [false; ANUM_CPU_SLOTS];
+        let mut output = [0_u32; ANUM_CPU_MAX_TOKENS];
+        let mut len = 0_usize;
+        if !anum_cpu_export_node(
+            &self.pool,
+            handle,
+            &mut visiting,
+            &mut output,
+            &mut len,
+        ) {
+            return ANUM_CPU_NONE;
+        }
+        self.output[..len].copy_from_slice(&output[..len]);
+        len as u32
+    }
+
+    pub fn export_recursive_wire(&mut self, handle: u32) -> Option<String> {
+        let len = self.export_tokens(handle);
+        if len == ANUM_CPU_NONE {
+            return None;
+        }
+        let mut out = String::new();
+        for index in 0..len {
+            out.push(char::from_digit(self.output_get(index), 10)?);
+        }
+        Some(out)
+    }
+
+    pub fn output_get(&self, index: u32) -> u32 {
+        self.output
+            .get(index as usize)
+            .copied()
+            .unwrap_or(ANUM_CPU_NONE)
+    }
+
+    pub fn pool_count(&self) -> u32 {
+        (1..=ANUM_CPU_MAX_HANDLE)
+            .filter(|handle| self.pool.used[*handle as usize] != 0)
+            .count() as u32
+    }
+
+    pub fn used(&self, handle: u32) -> u32 {
+        if handle == 0 || handle > ANUM_CPU_MAX_HANDLE {
+            return ANUM_CPU_NONE;
+        }
+        self.pool.used[handle as usize]
+    }
+
+    pub fn start(&self, handle: u32) -> u32 {
+        if handle == 0 || handle > ANUM_CPU_MAX_HANDLE {
+            return ANUM_CPU_NONE;
+        }
+        if self.pool.used[handle as usize] == 0 {
+            ANUM_CPU_NONE
+        } else {
+            self.pool.start[handle as usize]
+        }
+    }
+
+    pub fn end(&self, handle: u32) -> u32 {
+        if handle == 0 || handle > ANUM_CPU_MAX_HANDLE {
+            return ANUM_CPU_NONE;
+        }
+        if self.pool.used[handle as usize] == 0 {
+            ANUM_CPU_NONE
+        } else {
+            self.pool.end[handle as usize]
+        }
+    }
+
+    pub fn reaction_reset(&mut self) {
+        self.reaction.reset();
+    }
+
+    pub fn reaction_set_current_member(&mut self, index: u32, handle: u32) -> u32 {
+        let i = index as usize;
+        if i >= REACTION_SCOPE_CAP || !self.pool.valid(handle) {
+            return 0;
+        }
+        let bank = self.reaction.current_bank as usize;
+        self.reaction.scope[bank][i] = handle;
+        1
+    }
+
+    pub fn reaction_set_current_count(&mut self, count: u32) -> u32 {
+        if count as usize > REACTION_SCOPE_CAP {
+            return 0;
+        }
+        self.reaction.scope_count[self.reaction.current_bank as usize] = count;
+        1
+    }
+
+    pub fn reaction_set_theory_relation(&mut self, index: u32, handle: u32) -> u32 {
+        let i = index as usize;
+        if i >= REACTION_SCOPE_CAP
+            || reaction_pair_poles(&self.pool, handle).is_none()
         {
             return 0;
         }
-
-        member_index += 1;
+        self.reaction.theory[i] = handle;
+        1
     }
 
-    unsafe {
-        REACTION_MATCHED_RELATIONS = matched;
-        REACTION_HANDOFF_COUNT = 0;
+    pub fn reaction_set_theory_count(&mut self, count: u32) -> u32 {
+        if count as usize > REACTION_SCOPE_CAP {
+            return 0;
+        }
+        self.reaction.theory_count = count;
+        1
     }
 
-    if matched == 0 {
-        // P07/P13: a complete successful evaluation with no applicable admitted
-        // relation preserves the published Scope, performs no handoff, and is
-        // explicitly quiescent. No scheduler or END-state inference is involved.
-        unsafe { REACTION_QUIESCENT = 1; }
-        return 1;
-    }
+    pub fn reaction_snapshot_theory(&mut self) -> u32 {
+        let count = self.reaction.theory_count as usize;
+        if count > REACTION_SCOPE_CAP {
+            return 0;
+        }
 
-    let target_bank = 1 - current_bank;
-
-    // Commit the complete successor bank first.
-    unsafe {
-        let mut k = 0;
-        while k < REACTION_SCOPE_CAP {
-            if target_bank == 0 {
-                REACTION_SCOPE0[k] = successor[k];
-            } else {
-                REACTION_SCOPE1[k] = successor[k];
+        let mut scratch = [REACTION_NONE; REACTION_SCOPE_CAP];
+        for (index, relation) in self.reaction.theory[..count].iter().copied().enumerate() {
+            if reaction_pair_poles(&self.pool, relation).is_none() {
+                return 0;
             }
-            k += 1;
+            scratch[index] = relation;
         }
-        if target_bank == 0 {
-            REACTION_SCOPE0_COUNT = successor_count as u32;
-        } else {
-            REACTION_SCOPE1_COUNT = successor_count as u32;
-        }
-
-        // The single publication boundary for the bounded CPU/WASM prototype.
-        REACTION_CURRENT_BANK = target_bank;
-        REACTION_HANDOFF_COUNT = 1;
+        self.reaction.snapshot = scratch;
+        self.reaction.snapshot_count = count as u32;
+        1
     }
 
+    pub fn reaction_run(&mut self) -> u32 {
+        self.reaction.quiescent = 0;
+        if self.stage.is_some() {
+            return 0;
+        }
+
+        let pool = self.pool;
+        let current_bank = self.reaction.current_bank as usize;
+        if current_bank > 1 {
+            return 0;
+        }
+        let current_count = self.reaction.scope_count[current_bank] as usize;
+        let snapshot_count = self.reaction.snapshot_count as usize;
+        if current_count > REACTION_SCOPE_CAP || snapshot_count > REACTION_SCOPE_CAP {
+            return 0;
+        }
+
+        let current = self.reaction.scope[current_bank];
+        let snapshot = self.reaction.snapshot;
+        let mut successor = [REACTION_NONE; REACTION_SCOPE_CAP];
+        let mut successor_count = 0_usize;
+        let mut matched = 0_u32;
+
+        for member in current[..current_count].iter().copied() {
+            let Some((context, antecedent)) = reaction_pair_poles(&pool, member) else {
+                return 0;
+            };
+
+            let mut member_matches = 0_u32;
+            for relation in snapshot[..snapshot_count].iter().copied() {
+                let Some((relation_antecedent, output)) =
+                    reaction_pair_poles(&pool, relation)
+                else {
+                    return 0;
+                };
+
+                if relation_antecedent == antecedent {
+                    matched = matched.saturating_add(1);
+                    member_matches = member_matches.saturating_add(1);
+
+                    if !reaction_is_root(&pool, output) {
+                        let Some(candidate) = pool.find_pair(context, output) else {
+                            return 0;
+                        };
+                        if !reaction_append_unique(
+                            &mut successor,
+                            &mut successor_count,
+                            candidate,
+                        ) {
+                            return 0;
+                        }
+                    }
+                }
+            }
+
+            if member_matches == 0
+                && !reaction_append_unique(
+                    &mut successor,
+                    &mut successor_count,
+                    member,
+                )
+            {
+                return 0;
+            }
+        }
+
+        self.reaction.matched_relations = matched;
+        self.reaction.handoff_count = 0;
+
+        if matched == 0 {
+            self.reaction.quiescent = 1;
+            return 1;
+        }
+
+        let target_bank = 1 - current_bank;
+        self.reaction.scope[target_bank] = successor;
+        self.reaction.scope_count[target_bank] = successor_count as u32;
+        self.reaction.current_bank = target_bank as u32;
+        self.reaction.handoff_count = 1;
+        1
+    }
+
+    pub fn reaction_current_bank(&self) -> u32 {
+        self.reaction.current_bank
+    }
+
+    pub fn reaction_current_count(&self) -> u32 {
+        self.reaction.scope_count[self.reaction.current_bank as usize]
+    }
+
+    pub fn reaction_current_member(&self, index: u32) -> u32 {
+        self.reaction_bank_member(self.reaction.current_bank, index)
+    }
+
+    pub fn reaction_bank_count(&self, bank: u32) -> u32 {
+        self.reaction
+            .scope_count
+            .get(bank as usize)
+            .copied()
+            .unwrap_or(0)
+    }
+
+    pub fn reaction_bank_member(&self, bank: u32, index: u32) -> u32 {
+        let Some(count) = self.reaction.scope_count.get(bank as usize).copied() else {
+            return REACTION_NONE;
+        };
+        if index >= count {
+            return REACTION_NONE;
+        }
+        self.reaction.scope[bank as usize]
+            .get(index as usize)
+            .copied()
+            .unwrap_or(REACTION_NONE)
+    }
+
+    pub fn reaction_theory_count(&self) -> u32 {
+        self.reaction.theory_count
+    }
+
+    pub fn reaction_snapshot_count(&self) -> u32 {
+        self.reaction.snapshot_count
+    }
+
+    pub fn reaction_matched_relations(&self) -> u32 {
+        self.reaction.matched_relations
+    }
+
+    pub fn reaction_handoff_count(&self) -> u32 {
+        self.reaction.handoff_count
+    }
+
+    pub fn reaction_quiescent(&self) -> u32 {
+        self.reaction.quiescent
+    }
+}
+
+struct ReferenceMemorySlot {
+    generation: u16,
+    instance: Option<ReferenceMemoryInstance>,
+}
+
+static REFERENCE_MEMORY_ARENA: std::sync::Mutex<Vec<ReferenceMemorySlot>> =
+    std::sync::Mutex::new(Vec::new());
+
+fn reference_instance_id(index: usize, generation: u16) -> u32 {
+    ((generation as u32) << 16) | ((index as u32) + 1)
+}
+
+fn reference_instance_parts(id: u32) -> Option<(usize, u16)> {
+    let slot = (id & 0xffff) as usize;
+    let generation = (id >> 16) as u16;
+    if slot == 0 || generation == 0 {
+        None
+    } else {
+        Some((slot - 1, generation))
+    }
+}
+
+fn with_reference_instance_mut<T>(
+    id: u32,
+    f: impl FnOnce(&mut ReferenceMemoryInstance) -> T,
+) -> Option<T> {
+    let (index, generation) = reference_instance_parts(id)?;
+    let mut arena = REFERENCE_MEMORY_ARENA
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let slot = arena.get_mut(index)?;
+    if slot.generation != generation {
+        return None;
+    }
+    slot.instance.as_mut().map(f)
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_reference_create() -> u32 {
+    let mut arena = REFERENCE_MEMORY_ARENA
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+    for (index, slot) in arena.iter_mut().enumerate() {
+        if slot.instance.is_none() {
+            let next = slot.generation.wrapping_add(1);
+            slot.generation = if next == 0 { 1 } else { next };
+            slot.instance = Some(ReferenceMemoryInstance::new());
+            return reference_instance_id(index, slot.generation);
+        }
+    }
+
+    if arena.len() >= u16::MAX as usize {
+        return 0;
+    }
+    arena.push(ReferenceMemorySlot {
+        generation: 1,
+        instance: Some(ReferenceMemoryInstance::new()),
+    });
+    reference_instance_id(arena.len() - 1, 1)
+}
+
+#[no_mangle]
+pub extern "C" fn amemory_reference_destroy(id: u32) -> u32 {
+    let Some((index, generation)) = reference_instance_parts(id) else {
+        return 0;
+    };
+    let mut arena = REFERENCE_MEMORY_ARENA
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let Some(slot) = arena.get_mut(index) else {
+        return 0;
+    };
+    if slot.generation != generation || slot.instance.is_none() {
+        return 0;
+    }
+    slot.instance = None;
     1
 }
 
-#[no_mangle]
-pub extern "C" fn amemory_reaction_current_bank() -> u32 {
-    unsafe { REACTION_CURRENT_BANK }
+macro_rules! reference_mut_export {
+    ($name:ident, $method:ident, ($($arg:ident : $ty:ty),*), $invalid:expr) => {
+        #[no_mangle]
+        pub extern "C" fn $name(id: u32, $($arg: $ty),*) -> u32 {
+            with_reference_instance_mut(id, |instance| instance.$method($($arg),*))
+                .unwrap_or($invalid)
+        }
+    };
 }
 
-#[no_mangle]
-pub extern "C" fn amemory_reaction_current_count() -> u32 {
-    unsafe {
-        if REACTION_CURRENT_BANK == 0 {
-            REACTION_SCOPE0_COUNT
-        } else {
-            REACTION_SCOPE1_COUNT
-        }
+reference_mut_export!(amemory_reference_reset_pool, reset_pool_export, (), 0);
+
+impl ReferenceMemoryInstance {
+    fn reset_pool_export(&mut self) -> u32 {
+        self.reset_pool();
+        1
+    }
+    fn load_abort_export(&mut self) -> u32 {
+        self.load_abort();
+        1
+    }
+    fn reaction_reset_export(&mut self) -> u32 {
+        self.reaction_reset();
+        1
     }
 }
 
-#[no_mangle]
-pub extern "C" fn amemory_reaction_current_member(index: u32) -> u32 {
-    let i = index as usize;
-    if i >= REACTION_SCOPE_CAP {
-        return REACTION_NONE;
-    }
-    unsafe {
-        let count = if REACTION_CURRENT_BANK == 0 {
-            REACTION_SCOPE0_COUNT
-        } else {
-            REACTION_SCOPE1_COUNT
-        };
-        if index >= count {
-            return REACTION_NONE;
-        }
-        if REACTION_CURRENT_BANK == 0 {
-            REACTION_SCOPE0[i]
-        } else {
-            REACTION_SCOPE1[i]
-        }
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn amemory_reaction_bank_count(bank: u32) -> u32 {
-    unsafe {
-        match bank {
-            0 => REACTION_SCOPE0_COUNT,
-            1 => REACTION_SCOPE1_COUNT,
-            _ => 0,
-        }
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn amemory_reaction_bank_member(bank: u32, index: u32) -> u32 {
-    let i = index as usize;
-    if i >= REACTION_SCOPE_CAP {
-        return REACTION_NONE;
-    }
-    unsafe {
-        let count = match bank {
-            0 => REACTION_SCOPE0_COUNT,
-            1 => REACTION_SCOPE1_COUNT,
-            _ => return REACTION_NONE,
-        };
-        if index >= count {
-            return REACTION_NONE;
-        }
-        if bank == 0 {
-            REACTION_SCOPE0[i]
-        } else {
-            REACTION_SCOPE1[i]
-        }
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn amemory_reaction_theory_count() -> u32 {
-    unsafe { REACTION_THEORY_COUNT }
-}
-
-#[no_mangle]
-pub extern "C" fn amemory_reaction_snapshot_count() -> u32 {
-    unsafe { REACTION_SNAPSHOT_COUNT }
-}
-
-#[no_mangle]
-pub extern "C" fn amemory_reaction_matched_relations() -> u32 {
-    unsafe { REACTION_MATCHED_RELATIONS }
-}
-
-#[no_mangle]
-pub extern "C" fn amemory_reaction_handoff_count() -> u32 {
-    unsafe { REACTION_HANDOFF_COUNT }
-}
-
-#[no_mangle]
-pub extern "C" fn amemory_reaction_quiescent() -> u32 {
-    unsafe { REACTION_QUIESCENT }
-}
-
+reference_mut_export!(amemory_reference_set_token, set_token, (index: u32, token: u32), 0);
+reference_mut_export!(amemory_reference_load_begin, load_begin, (), 0);
+reference_mut_export!(amemory_reference_load_member, load_member, (token_count: u32), ANUM_CPU_NONE);
+reference_mut_export!(amemory_reference_load_commit, load_commit, (), 0);
+reference_mut_export!(amemory_reference_load_abort, load_abort_export, (), 0);
+reference_mut_export!(amemory_reference_load_active, load_active, (), ANUM_CPU_NONE);
+reference_mut_export!(amemory_reference_import, import_tokens, (token_count: u32), ANUM_CPU_NONE);
+reference_mut_export!(amemory_reference_export, export_tokens, (handle: u32), ANUM_CPU_NONE);
+reference_mut_export!(amemory_reference_output_get, output_get, (index: u32), ANUM_CPU_NONE);
+reference_mut_export!(amemory_reference_pool_count, pool_count, (), ANUM_CPU_NONE);
+reference_mut_export!(amemory_reference_used, used, (handle: u32), ANUM_CPU_NONE);
+reference_mut_export!(amemory_reference_start, start, (handle: u32), ANUM_CPU_NONE);
+reference_mut_export!(amemory_reference_end, end, (handle: u32), ANUM_CPU_NONE);
+reference_mut_export!(amemory_reference_reaction_reset, reaction_reset_export, (), 0);
+reference_mut_export!(
+    amemory_reference_reaction_set_current_member,
+    reaction_set_current_member,
+    (index: u32, handle: u32),
+    0
+);
+reference_mut_export!(
+    amemory_reference_reaction_set_current_count,
+    reaction_set_current_count,
+    (count: u32),
+    0
+);
+reference_mut_export!(
+    amemory_reference_reaction_set_theory_relation,
+    reaction_set_theory_relation,
+    (index: u32, handle: u32),
+    0
+);
+reference_mut_export!(
+    amemory_reference_reaction_set_theory_count,
+    reaction_set_theory_count,
+    (count: u32),
+    0
+);
+reference_mut_export!(
+    amemory_reference_reaction_snapshot_theory,
+    reaction_snapshot_theory,
+    (),
+    0
+);
+reference_mut_export!(amemory_reference_reaction_run, reaction_run, (), 0);
+reference_mut_export!(
+    amemory_reference_reaction_current_bank,
+    reaction_current_bank,
+    (),
+    ANUM_CPU_NONE
+);
+reference_mut_export!(
+    amemory_reference_reaction_current_count,
+    reaction_current_count,
+    (),
+    ANUM_CPU_NONE
+);
+reference_mut_export!(
+    amemory_reference_reaction_current_member,
+    reaction_current_member,
+    (index: u32),
+    ANUM_CPU_NONE
+);
+reference_mut_export!(
+    amemory_reference_reaction_bank_count,
+    reaction_bank_count,
+    (bank: u32),
+    ANUM_CPU_NONE
+);
+reference_mut_export!(
+    amemory_reference_reaction_bank_member,
+    reaction_bank_member,
+    (bank: u32, index: u32),
+    ANUM_CPU_NONE
+);
+reference_mut_export!(
+    amemory_reference_reaction_theory_count,
+    reaction_theory_count,
+    (),
+    ANUM_CPU_NONE
+);
+reference_mut_export!(
+    amemory_reference_reaction_snapshot_count,
+    reaction_snapshot_count,
+    (),
+    ANUM_CPU_NONE
+);
+reference_mut_export!(
+    amemory_reference_reaction_matched_relations,
+    reaction_matched_relations,
+    (),
+    ANUM_CPU_NONE
+);
+reference_mut_export!(
+    amemory_reference_reaction_handoff_count,
+    reaction_handoff_count,
+    (),
+    ANUM_CPU_NONE
+);
+reference_mut_export!(
+    amemory_reference_reaction_quiescent,
+    reaction_quiescent,
+    (),
+    ANUM_CPU_NONE
+);
 
 #[cfg(test)]
 mod anum_boundary_tests {
