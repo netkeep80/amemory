@@ -2283,7 +2283,7 @@ mod tests {
     }
 
     fn reference_export(
-        memory: &mut ReferenceMemoryInstance,
+        memory: &ReferenceMemoryInstance,
         handle: u32,
     ) -> String {
         memory
@@ -2415,12 +2415,12 @@ mod tests {
     }
 
     fn reference_observe(
-        memory: &mut ReferenceMemoryInstance,
+        memory: &ReferenceMemoryInstance,
     ) -> PortableReactionResult {
         let count = memory.reaction_current_count();
         let mut scope = Vec::new();
         for index in 0..count {
-            scope.push(reference_export(&mut reference_memory, 
+            scope.push(reference_export(&reference_memory, 
                 memory,
                 memory.reaction_current_member(index),
             ));
@@ -2536,11 +2536,11 @@ mod tests {
             let reference = reference_import(&mut reference_memory, source);
             assert_ne!(reference, u32::MAX, "reference rejected {source}");
             let optimized_handle = optimized.import_anum(source).expect("optimized import");
-            assert_eq!(reference_export(&mut reference_memory, reference), source);
+            assert_eq!(reference_export(&reference_memory, reference), source);
             assert_eq!(optimized.export_anum(optimized_handle).unwrap(), source);
             assert_eq!(
                 optimized.export_anum(optimized_handle).unwrap(),
-                reference_export(&mut reference_memory, reference),
+                reference_export(&reference_memory, reference),
                 "portable differential mismatch for {source}"
             );
         }
@@ -3445,7 +3445,7 @@ mod tests {
             ReactionError::MissingPreexistingSuccessor { .. }
         ));
 
-        let reference_after = reference_observe(&mut reference_memory);
+        let reference_after = reference_observe(&reference_memory);
         let optimized_after = engine.portable_result(&store).unwrap();
         assert_eq!(reference_after, optimized_after);
         assert_eq!(reference_after.scope, vec!["19868"]);
@@ -3571,7 +3571,7 @@ mod tests {
         let target = optimized.import_anum("19868").unwrap();
 
         // Local count/handle layout are explicitly not portable identity.
-        assert_eq!(reference_export(&mut reference_memory, reference), optimized.export_anum(target).unwrap());
+        assert_eq!(reference_export(&reference_memory, reference), optimized.export_anum(target).unwrap());
         assert!(reference_memory.pool_count() >= 1);
         assert!(optimized.link_count() >= 1);
     }
