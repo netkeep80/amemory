@@ -2420,7 +2420,7 @@ mod tests {
         let count = memory.reaction_current_count();
         let mut scope = Vec::new();
         for index in 0..count {
-            scope.push(reference_export(&reference_memory, 
+            scope.push(reference_export(
                 memory,
                 memory.reaction_current_member(index),
             ));
@@ -3274,7 +3274,11 @@ mod tests {
         optimized_configure(&mut engine, &store, &optimized, &["19868"], &["16816898"]);
 
         // Admit B->C only after snapshot_t.
-        reference_set_live_theory(&reference, &["16816898", "116898998"]);
+        reference_set_live_theory(
+            &mut reference_memory,
+            &reference,
+            &["16816898", "116898998"],
+        );
         engine
             .set_theory(
                 &store,
@@ -3314,7 +3318,11 @@ mod tests {
             &["19816898"],
             &["16816898"],
         );
-        reference_set_live_theory(&reference, &["16816898", "116898998"]);
+        reference_set_live_theory(
+            &mut reference_memory,
+            &reference,
+            &["16816898", "116898998"],
+        );
         engine
             .set_theory(
                 &store,
