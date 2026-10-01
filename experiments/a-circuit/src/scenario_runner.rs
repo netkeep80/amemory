@@ -1334,6 +1334,36 @@ mod tests {
     }
 
     #[test]
+    fn profile_projects_exact_dense_carrier_budget_boundary() {
+        let mut manifest = parse_and_validate_manifest_v1(MUX1_LIFECYCLE).unwrap();
+        manifest.run_sequence.truncate(1);
+        manifest.observation_level = RunObservationLevel::Profile;
+        let run = manifest.run_sequence[0].clone();
+        let mut live = open_cpu_scenario_session_v1(&manifest).unwrap();
+
+        let report = run_cpu_scenario_session_once_v1(&mut live, &run).unwrap();
+        let profile = report
+            .observed
+            .profile
+            .as_ref()
+            .expect("PROFILE observation must project runtime resource evidence");
+
+        assert_eq!(
+            profile.dense_carrier_allocated_bytes,
+            live.session
+                .memory
+                .store
+                .dense_carrier_index_allocated_bytes(),
+        );
+        assert_eq!(
+            profile.max_dense_carrier_bytes,
+            CpuRunBudgetV1::scenario_default(run.max_reactions)
+                .max_dense_carrier_bytes,
+        );
+        assert!(!profile.full_resident_bytes_available);
+    }
+
+    #[test]
     fn observation_level_changes_evidence_not_step_semantics() {
         let mut reference: Option<(
             ScenarioNormalizedResultV1,
