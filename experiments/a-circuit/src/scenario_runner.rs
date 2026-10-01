@@ -2107,38 +2107,49 @@ mod tests {
 
     #[test]
     fn dense_carrier_byte_budget_stops_after_atomic_growth() {
-        let (mut probe, _load, initial) =
-            configured_mux1_for_budget_test();
-        let before = probe
-            .memory
-            .store
-            .dense_carrier_index_allocated_bytes();
-        let completed = probe
-            .run_to_quiescence(
-                initial,
-                CpuRunBudgetV1::scenario_default(64),
-                RunObservationLevel::Off,
-            )
-            .unwrap();
-        assert_eq!(completed.stop_reason, CpuRunStopReasonV1::Quiescent);
-        let after = probe
-            .memory
-            .store
-            .dense_carrier_index_allocated_bytes();
-        assert!(
-            after > before,
-            "MUX1 fixture must grow dense carrier allocation for this falsifier",
-        );
-
         let (mut session, _load, initial) =
             configured_mux1_for_budget_test();
+
+        // Fill exactly the current measured Vec slack with unrelated canonical
+        // START forms. This changes no configured current/theory handles and
+        // makes the next appended Link force a real dense-buffer allocation.
+        let spare = session
+            .memory
+            .store
+            .dense_carrier_index_min_spare_links();
+        let latest = session.memory.store.link_count() as Handle;
+        let mut source = session
+            .memory
+            .store
+            .export_anum(latest)
+            .unwrap();
+        let target_links = session
+            .memory
+            .store
+            .link_count()
+            .saturating_add(spare);
+        while session.memory.store.link_count() < target_links {
+            source.insert(0, '9');
+            let before_links = session.memory.store.link_count();
+            session.memory.store.import_anum(&source).unwrap();
+            let after_links = session.memory.store.link_count();
+            assert!(
+                after_links == before_links || after_links == before_links + 1,
+                "one nested START import may append at most one new outer form",
+            );
+        }
         assert_eq!(
             session
                 .memory
                 .store
-                .dense_carrier_index_allocated_bytes(),
-            before,
+                .dense_carrier_index_min_spare_links(),
+            0,
         );
+
+        let before = session
+            .memory
+            .store
+            .dense_carrier_index_allocated_bytes();
         let budget = CpuRunBudgetV1 {
             max_dense_carrier_bytes: before,
             ..CpuRunBudgetV1::scenario_default(64)
