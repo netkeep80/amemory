@@ -88,6 +88,13 @@ cargo_pinned test \
   optimized_reaction_benchmark_baseline \
   -- --ignored --nocapture --test-threads=1
 
+echo "=== REFERENCE CPU INFORMATIONAL BASELINE ==="
+cargo_pinned test \
+  --release \
+  --manifest-path "experiments/browser-accelerator/rust/Cargo.toml" \
+  reference_cpu_benchmark_baseline \
+  -- --ignored --nocapture --test-threads=1
+
 echo "SCALE_PERFORMANCE_CLASS=PASS"
 echo "SCALE_PERFORMANCE_POLICY=informational-only-no-performance-threshold"
 echo "SCALE_PERFORMANCE_STORAGE_MAX_LINKS=10000000"
