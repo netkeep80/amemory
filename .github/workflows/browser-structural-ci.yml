@@ -51,58 +51,7 @@ jobs:
           node --check experiments/browser-accelerator/web/reaction.mjs
 
       - name: MTS v0.14 public terminology surface
-        run: |
-          node --input-type=module <<'NODE'
-          import fs from "node:fs";
-
-          const page = fs.readFileSync(
-            "experiments/browser-accelerator/web/index.html",
-            "utf8"
-          );
-          const readme = fs.readFileSync("README.md", "utf8");
-
-          for (const required of [
-            "∞ = ROOT / 8",
-            "♂S = START_K / 9S",
-            "S♀ = END_K / 6S",
-            "A ⟼ B = PAIR / 1AB",
-            "recursive Link wire ≠ Anum / ExactSequence",
-          ]) {
-            if (!page.includes(required)) {
-              throw new Error("dashboard lost v0.14 notation: " + required);
-            }
-          }
-          for (const required of [
-            "START_K",
-            "END_K",
-            "∞",
-            "♂",
-            "♀",
-            "⟼",
-            "recursive Link wire",
-            "Anum / ExactSequence",
-          ]) {
-            if (!readme.includes(required)) {
-              throw new Error("README lost v0.14 terminology: " + required);
-            }
-          }
-          for (const forbidden of [
-            "Anum boundary",
-            "Multi-Anum",
-            "Scope Anums",
-            "Anum import CPU:",
-            "Anum export CPU:",
-            "Two-memory Anum differential:",
-          ]) {
-            if (page.includes(forbidden)) {
-              throw new Error(
-                "legacy representation term leaked to public dashboard: " +
-                  forbidden
-              );
-            }
-          }
-          console.log("MTS v0.14 public terminology surface PASS");
-          NODE
+        run: node experiments/browser-accelerator/tests/public-terminology.test.mjs
 
       - name: Recursive Link wire + semantic orientation witnesses
         run: node experiments/browser-accelerator/tests/anum-boundary.test.mjs
@@ -127,14 +76,6 @@ jobs:
       - name: Native Rust oracle witnesses
         run: cargo +1.98.1 test --manifest-path experiments/browser-accelerator/rust/Cargo.toml
 
-      - name: Reference CPU informational baseline
-        run: |
-          cargo +1.98.1 test \
-            --release \
-            --manifest-path experiments/browser-accelerator/rust/Cargo.toml \
-            reference_cpu_benchmark_baseline \
-            -- --ignored --nocapture --test-threads=1
-
       - name: Compile Rust/WASM oracle once
         run: |
           cargo +1.98.1 build \
@@ -146,4 +87,4 @@ jobs:
         run: |
           echo "Recursive-wire/orientation, state-store, canonicalization, differential and reaction checks share one runner."
           echo "Node, Rust and the WASM build are each initialized once."
-          echo "The reference CPU benchmark is informational and shares this runner."
+          echo "Informational performance baselines live in the scheduled/manual scale class."
