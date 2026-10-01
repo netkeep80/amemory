@@ -57,30 +57,8 @@ fn run_once(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use amemory_browser_probe::{
-        amemory_anum_cpu_export,
-        amemory_anum_cpu_import,
-        amemory_anum_cpu_output_get,
-        amemory_anum_cpu_reset_pool,
-        amemory_anum_cpu_set_token,
-        amemory_reaction_current_count,
-        amemory_reaction_current_member,
-        amemory_reaction_handoff_count,
-        amemory_reaction_matched_relations,
-        amemory_reaction_quiescent,
-        amemory_reaction_reset,
-        amemory_reaction_run,
-        amemory_reaction_set_current_count,
-        amemory_reaction_set_current_member,
-        amemory_reaction_set_theory_count,
-        amemory_reaction_set_theory_relation,
-        amemory_reaction_snapshot_theory,
-    };
+    use amemory_browser_probe::ReferenceMemoryInstance;
     use amemory_optimized_cpu_probe::PortableReactionResult;
-    use std::sync::Mutex;
-
-    static REFERENCE_LOCK: Mutex<()> = Mutex::new(());
-
     // Benchmark-local role assignment over already accepted ROOT-basis Links.
     // No claim is made that O "means AND" or C "means APPLY" in MTS itself.
     // They are simply distinct portable structural symbols used by this fixture.
@@ -127,53 +105,53 @@ mod tests {
         pair(function, argument)
     }
 
-    fn reference_import(source: &str) -> u32 {
-        for (index, byte) in source.bytes().enumerate() {
-            let token = if byte.is_ascii_digit() {
-                (byte - b'0') as u32
-            } else {
-                255
-            };
-            assert_eq!(amemory_anum_cpu_set_token(index as u32, token), 1);
-        }
-        amemory_anum_cpu_import(source.len() as u32)
+    fn reference_import(
+        memory: &mut ReferenceMemoryInstance,
+        source: &str,
+    ) -> u32 {
+        memory.import_recursive_wire(source)
     }
 
-    fn reference_export(handle: u32) -> String {
-        let len = amemory_anum_cpu_export(handle);
-        assert_ne!(len, u32::MAX);
-        let mut out = String::new();
-        for index in 0..len {
-            out.push(char::from_digit(amemory_anum_cpu_output_get(index), 10).unwrap());
-        }
-        out
+    fn reference_export(
+        memory: &ReferenceMemoryInstance,
+        handle: u32,
+    ) -> String {
+        memory
+            .export_recursive_wire(handle)
+            .expect("reference export rejected valid handle")
     }
 
-    fn reference_observe() -> PortableReactionResult {
-        let count = amemory_reaction_current_count();
+    fn reference_observe(
+        memory: &ReferenceMemoryInstance,
+    ) -> PortableReactionResult {
+        let count = memory.reaction_current_count();
         let mut scope = Vec::new();
         for index in 0..count {
-            scope.push(reference_export(amemory_reaction_current_member(index)));
+            scope.push(reference_export(
+                memory,
+                memory.reaction_current_member(index),
+            ));
         }
         scope.sort();
         scope.dedup();
         PortableReactionResult {
             scope,
-            matched_relations: amemory_reaction_matched_relations(),
-            handoff: amemory_reaction_handoff_count(),
-            quiescent: amemory_reaction_quiescent() == 1,
+            matched_relations: memory.reaction_matched_relations(),
+            handoff: memory.reaction_handoff_count(),
+            quiescent: memory.reaction_quiescent() == 1,
         }
     }
 
     fn reference_prepare(
+        memory: &mut ReferenceMemoryInstance,
         theory_sources: &[String],
         other_sources: &[String],
     ) -> (Vec<u32>, Vec<u32>) {
-        amemory_anum_cpu_reset_pool();
+        memory.reset_pool();
         let theory = theory_sources
             .iter()
             .map(|source| {
-                let handle = reference_import(source);
+                let handle = reference_import(memory, source);
                 assert_ne!(handle, u32::MAX, "reference rejected Theory {source}");
                 handle
             })
@@ -181,32 +159,37 @@ mod tests {
         let other = other_sources
             .iter()
             .map(|source| {
-                let handle = reference_import(source);
+                let handle = reference_import(memory, source);
                 assert_ne!(handle, u32::MAX, "reference rejected fixture {source}");
                 handle
             })
             .collect::<Vec<_>>();
 
-        amemory_reaction_reset();
+        memory.reaction_reset();
         for (index, relation) in theory.iter().enumerate() {
             assert_eq!(
-                amemory_reaction_set_theory_relation(index as u32, *relation),
+                memory.reaction_set_theory_relation(index as u32, *relation),
                 1
             );
         }
-        assert_eq!(amemory_reaction_set_theory_count(theory.len() as u32), 1);
-        assert_eq!(amemory_reaction_snapshot_theory(), 1);
+        assert_eq!(memory.reaction_set_theory_count(theory.len() as u32), 1);
+        assert_eq!(memory.reaction_snapshot_theory(), 1);
         (theory, other)
     }
 
-    fn reference_set_single_current(handle: u32) {
-        assert_eq!(amemory_reaction_set_current_member(0, handle), 1);
-        assert_eq!(amemory_reaction_set_current_count(1), 1);
+    fn reference_set_single_current(
+        memory: &mut ReferenceMemoryInstance,
+        handle: u32,
+    ) {
+        assert_eq!(memory.reaction_set_current_member(0, handle), 1);
+        assert_eq!(memory.reaction_set_current_count(1), 1);
     }
 
-    fn reference_run() -> PortableReactionResult {
-        assert_eq!(amemory_reaction_run(), 1);
-        reference_observe()
+    fn reference_run(
+        memory: &mut ReferenceMemoryInstance,
+    ) -> PortableReactionResult {
+        assert_eq!(memory.reaction_run(), 1);
+        reference_observe(memory)
     }
 
     fn optimized_prepare(
@@ -470,7 +453,7 @@ mod tests {
 
     #[test]
     fn s1_sequential_and_returns_portable_partial_function_then_value() {
-        let _guard = REFERENCE_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut reference_memory = ReferenceMemoryInstance::new();
         let theory = sequential_theory();
 
         for a in [BIT0, BIT1] {
@@ -495,9 +478,9 @@ mod tests {
                 ];
 
                 // Reference CPU: one fixed TheorySnapshot for both applications.
-                let (_, reference_fixture) = reference_prepare(&theory, &fixture);
-                reference_set_single_current(reference_fixture[0]);
-                let reference_first = reference_run();
+                let (_, reference_fixture) = reference_prepare(&mut reference_memory, &theory, &fixture);
+                reference_set_single_current(&mut reference_memory, reference_fixture[0]);
+                let reference_first = reference_run(&mut reference_memory);
                 assert_eq!(reference_first.scope, vec![first_successor.clone()]);
                 assert_eq!(reference_first.matched_relations, 1);
                 assert_eq!(reference_first.handoff, 1);
@@ -506,8 +489,8 @@ mod tests {
                 // The actual first result is the portable partial function under K.
                 assert_eq!(reference_first.scope[0], pair(K, &expected_partial));
 
-                reference_set_single_current(reference_fixture[2]);
-                let reference_second = reference_run();
+                reference_set_single_current(&mut reference_memory, reference_fixture[2]);
+                let reference_second = reference_run(&mut reference_memory);
                 assert_eq!(reference_second.scope, vec![second_successor.clone()]);
                 assert_eq!(reference_second.matched_relations, 1);
                 assert_eq!(reference_second.handoff, 1);
@@ -539,7 +522,7 @@ mod tests {
 
     #[test]
     fn p1_parallel_and_maps_one_root_originating_sequence_directly_to_value() {
-        let _guard = REFERENCE_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut reference_memory = ReferenceMemoryInstance::new();
         let theory = parallel_theory();
 
         for a in [BIT0, BIT1] {
@@ -551,9 +534,9 @@ mod tests {
                 let successor = pair(K, expected_value);
                 let fixture = vec![current.clone(), successor.clone()];
 
-                let (_, reference_fixture) = reference_prepare(&theory, &fixture);
-                reference_set_single_current(reference_fixture[0]);
-                let reference = reference_run();
+                let (_, reference_fixture) = reference_prepare(&mut reference_memory, &theory, &fixture);
+                reference_set_single_current(&mut reference_memory, reference_fixture[0]);
+                let reference = reference_run(&mut reference_memory);
                 assert_eq!(reference.scope, vec![successor.clone()]);
                 assert_eq!(reference.matched_relations, 1);
                 assert_eq!(reference.handoff, 1);
@@ -609,7 +592,7 @@ mod tests {
 
     #[test]
     fn c2a_sequential_half_adder_returns_partial_function_then_sum_carry_sequence() {
-        let _guard = REFERENCE_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut reference_memory = ReferenceMemoryInstance::new();
         let theory = sequential_half_theory();
 
         for a in [BIT0, BIT1] {
@@ -631,16 +614,16 @@ mod tests {
                     second_successor.clone(),
                 ];
 
-                let (_, reference_fixture) = reference_prepare(&theory, &fixture);
-                reference_set_single_current(reference_fixture[0]);
-                let reference_first = reference_run();
+                let (_, reference_fixture) = reference_prepare(&mut reference_memory, &theory, &fixture);
+                reference_set_single_current(&mut reference_memory, reference_fixture[0]);
+                let reference_first = reference_run(&mut reference_memory);
                 assert_eq!(reference_first.scope, vec![first_successor.clone()]);
                 assert_eq!(reference_first.matched_relations, 1);
                 assert_eq!(reference_first.handoff, 1);
                 assert!(!reference_first.quiescent);
 
-                reference_set_single_current(reference_fixture[2]);
-                let reference_second = reference_run();
+                reference_set_single_current(&mut reference_memory, reference_fixture[2]);
+                let reference_second = reference_run(&mut reference_memory);
                 assert_eq!(reference_second.scope, vec![second_successor.clone()]);
                 assert_eq!(reference_second.matched_relations, 1);
                 assert_eq!(reference_second.handoff, 1);
@@ -671,7 +654,7 @@ mod tests {
 
     #[test]
     fn c2a_parallel_half_adder_maps_argument_sequence_to_sum_carry_sequence() {
-        let _guard = REFERENCE_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut reference_memory = ReferenceMemoryInstance::new();
         let theory = parallel_half_theory();
 
         for a in [BIT0, BIT1] {
@@ -682,9 +665,9 @@ mod tests {
                 let successor = pair(K, &result_sequence);
                 let fixture = vec![current.clone(), successor.clone()];
 
-                let (_, reference_fixture) = reference_prepare(&theory, &fixture);
-                reference_set_single_current(reference_fixture[0]);
-                let reference = reference_run();
+                let (_, reference_fixture) = reference_prepare(&mut reference_memory, &theory, &fixture);
+                reference_set_single_current(&mut reference_memory, reference_fixture[0]);
+                let reference = reference_run(&mut reference_memory);
 
                 assert_eq!(reference.scope, vec![successor.clone()]);
                 assert_eq!(reference.matched_relations, 1);
