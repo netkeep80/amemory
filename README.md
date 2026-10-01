@@ -179,6 +179,11 @@ acceptanceState = READY
 ### Представления после MTS v0.14
 
 ```text
+∞ = ROOT / 8
+♂S = START_K / 9S
+S♀ = END_K / 6S
+A ⟼ B = PAIR / 1AB
+
 recursive Link wire != Anum / ExactSequence
 ```
 
