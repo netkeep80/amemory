@@ -541,6 +541,112 @@ try {
       JSON.stringify(cancelled));
   }
 
+  // Wall-clock is a host safety boundary only. A zero limit deterministically
+  // expires at the first safe boundary before a reaction can be reported as a
+  // semantic success; explicit reopen must create a new Session identity.
+  const watchdog = await evaluate(cdp, `(async () => {
+    const mod = await import("./workbench.mjs");
+    const s = ${state};
+    const reopened = await s.worker.open(s.manifest, "optimized-cpu");
+    const oldSessionId = reopened.status.sessionId;
+    const run = mod.createWorkbenchRun(
+      s.manifest,
+      0,
+      { A: "0x12345678", B: "0xffffffff" },
+      1,
+      "manual",
+    );
+    try {
+      await s.worker.run(run, { wallClockLimitMs: 0 });
+      return { ok: true };
+    } catch (error) {
+      const status = await s.worker.status();
+      const reopenedAgain = await s.worker.open(
+        s.manifest,
+        "optimized-cpu",
+      );
+      const newSessionId = reopenedAgain.status.sessionId;
+      await s.worker.closeSession();
+      return {
+        ok: false,
+        code: error.code,
+        recovery: error.recovery,
+        atReactionBoundary: error.atReactionBoundary,
+        hardAbort: error.details?.hardAbort,
+        completedSteps: error.details?.completedSteps,
+        workerState: status.worker.state,
+        sessionOpen: status.worker.sessionOpen,
+        oldSessionId,
+        newSessionId,
+      };
+    }
+  })()`);
+  if (watchdog.ok ||
+      watchdog.code !== "WALL_CLOCK_SAFETY_ABORT" ||
+      watchdog.recovery !== "REOPEN_REQUIRED" ||
+      watchdog.atReactionBoundary !== true ||
+      watchdog.hardAbort !== false ||
+      watchdog.completedSteps !== 0 ||
+      watchdog.workerState !== "WALL_CLOCK_SAFETY_ABORT" ||
+      watchdog.sessionOpen !== false ||
+      watchdog.oldSessionId === watchdog.newSessionId) {
+    throw new Error("reaction-boundary watchdog mismatch: " +
+      JSON.stringify(watchdog));
+  }
+
+  // The client also owns a harder watchdog for a Worker that never returns to
+  // a reaction boundary at all. A silent Worker makes that path deterministic
+  // without adding timing-sensitive semantic execution to CI.
+  const hardWatchdog = await evaluate(cdp, `(async () => {
+    const { ScenarioWorkerClient } =
+      await import("./scenario-worker-client.mjs");
+    class SilentWorker {
+      constructor() {
+        this.onmessage = null;
+        this.onerror = null;
+        this.terminated = false;
+      }
+      postMessage() {}
+      terminate() { this.terminated = true; }
+    }
+
+    const client = new ScenarioWorkerClient({
+      WorkerCtor: SilentWorker,
+      runWallClockLimitMs: 0,
+      hardWatchdogGraceMs: 0,
+    });
+    try {
+      await client.run({});
+      return { ok: true };
+    } catch (error) {
+      let closedCode = null;
+      try {
+        await client.init();
+      } catch (closed) {
+        closedCode = closed.code;
+      }
+      return {
+        ok: false,
+        code: error.code,
+        recovery: error.recovery,
+        atReactionBoundary: error.atReactionBoundary,
+        hardAbort: error.details?.hardAbort,
+        terminated: client.worker.terminated,
+        closedCode,
+      };
+    }
+  })()`);
+  if (hardWatchdog.ok ||
+      hardWatchdog.code !== "WALL_CLOCK_SAFETY_ABORT" ||
+      hardWatchdog.recovery !== "RECREATE_WORKER" ||
+      hardWatchdog.atReactionBoundary !== false ||
+      hardWatchdog.hardAbort !== true ||
+      hardWatchdog.terminated !== true ||
+      hardWatchdog.closedCode !== "WORKER_CLIENT_CLOSED") {
+    throw new Error("hard Worker watchdog mismatch: " +
+      JSON.stringify(hardWatchdog));
+  }
+
   console.log(
     "WORKBENCH_WORKER_BROWSER_E2E=GREEN " +
     JSON.stringify({
@@ -548,6 +654,8 @@ try {
       firstRun: first.value,
       secondRun: second.value,
       cancellationBoundaries: cancelled.boundaries,
+      watchdogBoundaryAbort: watchdog.code,
+      hardWatchdogAbort: hardWatchdog.code,
     }),
   );
 } finally {
