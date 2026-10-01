@@ -115,16 +115,18 @@ for (const forbidden of [
 for (const required of [
   "refreshScenarioPresetRegistry",
   "loadScenarioPresetManifestByIndex",
-  "openScenarioLiveSession",
-  "runScenarioLiveSession",
-  "beginScenarioLiveStepRun",
-  "stepScenarioLiveSession",
+  "ScenarioWorkerClient",
+  "state.worker.open",
+  "state.worker.run",
+  "state.worker.beginStep",
+  "state.worker.step",
+  "state.worker.history",
+  "state.worker.cancelActive",
+  "state.worker.closeSession",
+  "catalogWasm",
   "workbenchStepSnapshot",
   "workbenchTraceFrames",
   "workbenchPlayerSnapshot",
-  "refreshScenarioLiveHistoryStatus",
-  "setScenarioLiveRetentionPolicy",
-  "closeScenarioLiveSession",
   "PREPARE",
   "LOAD",
   "CONFIGURE",
@@ -171,6 +173,22 @@ for (const required of [
 ]) {
   if (!workbenchSource.includes(required)) {
     throw new Error("R4 Workbench runtime wiring missing: " + required);
+  }
+}
+for (const forbidden of [
+  "openScenarioLiveSession",
+  "runScenarioLiveSession",
+  "beginScenarioLiveStepRun",
+  "stepScenarioLiveSession",
+  "refreshScenarioLiveHistoryStatus",
+  "setScenarioLiveRetentionPolicy",
+  "closeScenarioLiveSession",
+]) {
+  if (workbenchSource.includes(forbidden)) {
+    throw new Error(
+      "R4 Workbench still owns direct live Session runtime wiring: " +
+      forbidden
+    );
   }
 }
 for (const required of [
