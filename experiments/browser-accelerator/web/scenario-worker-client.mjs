@@ -1,4 +1,13 @@
 export const SCENARIO_WORKER_PROTOCOL_VERSION = 1;
+export const DEFAULT_RUN_WALL_CLOCK_LIMIT_MS = 120_000;
+export const DEFAULT_HARD_WATCHDOG_GRACE_MS = 1_000;
+
+function nonNegativeFinite(value, label) {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(label + " must be a finite non-negative number");
+  }
+  return value;
+}
 
 export class ScenarioWorkerError extends Error {
   constructor(error) {
@@ -32,6 +41,14 @@ export class ScenarioWorkerClient {
     this.pending = new Map();
     this.activeRunRequestId = null;
     this.closed = false;
+    this.runWallClockLimitMs = nonNegativeFinite(
+      options.runWallClockLimitMs ?? DEFAULT_RUN_WALL_CLOCK_LIMIT_MS,
+      "runWallClockLimitMs",
+    );
+    this.hardWatchdogGraceMs = nonNegativeFinite(
+      options.hardWatchdogGraceMs ?? DEFAULT_HARD_WATCHDOG_GRACE_MS,
+      "hardWatchdogGraceMs",
+    );
 
     this.worker.onmessage = (event) => {
       this.#onMessage(event?.data || {});
@@ -42,12 +59,41 @@ export class ScenarioWorkerClient {
         message: event?.message || "Scenario Worker crashed",
         recovery: "RECREATE_WORKER",
       });
-      for (const entry of this.pending.values()) {
-        entry.reject(error);
-      }
-      this.pending.clear();
-      this.activeRunRequestId = null;
+      this.closed = true;
+      this.#rejectPending(error);
     };
+  }
+
+  #clearEntryTimer(entry) {
+    if (entry?.timer != null) clearTimeout(entry.timer);
+  }
+
+  #rejectPending(error) {
+    for (const entry of this.pending.values()) {
+      this.#clearEntryTimer(entry);
+      entry.reject(error);
+    }
+    this.pending.clear();
+    this.activeRunRequestId = null;
+  }
+
+  #hardAbortRun(requestId, wallClockLimitMs) {
+    if (!this.pending.has(requestId)) return;
+
+    const error = new ScenarioWorkerError({
+      code: "WALL_CLOCK_SAFETY_ABORT",
+      message: "Worker did not return to a reaction boundary before the host watchdog",
+      recovery: "RECREATE_WORKER",
+      atReactionBoundary: false,
+      details: {
+        wallClockLimitMs,
+        hardAbort: true,
+      },
+    });
+
+    this.closed = true;
+    this.worker.terminate();
+    this.#rejectPending(error);
   }
 
   #onMessage(message) {
@@ -65,6 +111,7 @@ export class ScenarioWorkerClient {
     if (message.type !== "RESPONSE") return;
 
     this.pending.delete(message.requestId);
+    this.#clearEntryTimer(entry);
     if (this.activeRunRequestId === message.requestId) {
       this.activeRunRequestId = null;
     }
@@ -90,11 +137,22 @@ export class ScenarioWorkerClient {
 
     const requestId = this.nextRequestId++;
     const promise = new Promise((resolve, reject) => {
-      this.pending.set(requestId, {
+      const entry = {
         resolve,
         reject,
         onProgress: options.onProgress || null,
-      });
+        timer: null,
+      };
+      this.pending.set(requestId, entry);
+      if (options.hardTimeoutMs != null) {
+        entry.timer = setTimeout(
+          () => this.#hardAbortRun(
+            requestId,
+            options.wallClockLimitMs,
+          ),
+          options.hardTimeoutMs,
+        );
+      }
       this.worker.postMessage({
         schemaVersion: SCENARIO_WORKER_PROTOCOL_VERSION,
         requestId,
@@ -115,10 +173,19 @@ export class ScenarioWorkerClient {
   }
 
   async run(run, options = {}) {
+    const wallClockLimitMs = nonNegativeFinite(
+      options.wallClockLimitMs ?? this.runWallClockLimitMs,
+      "wallClockLimitMs",
+    );
     const request = this.#request(
       "RUN",
-      { run },
-      { onProgress: options.onProgress },
+      { run, wallClockLimitMs },
+      {
+        onProgress: options.onProgress,
+        wallClockLimitMs,
+        hardTimeoutMs:
+          wallClockLimitMs + this.hardWatchdogGraceMs,
+      },
     );
     this.activeRunRequestId = request.requestId;
     return request.promise;
@@ -159,10 +226,6 @@ export class ScenarioWorkerClient {
       message: "Scenario Worker client terminated",
       recovery: "RECREATE_WORKER",
     });
-    for (const entry of this.pending.values()) {
-      entry.reject(error);
-    }
-    this.pending.clear();
-    this.activeRunRequestId = null;
+    this.#rejectPending(error);
   }
 }
