@@ -35,6 +35,20 @@ const clone = (value) => value == null
 const boundaryYield = () =>
   new Promise((resolve) => setTimeout(resolve, 0));
 
+const monotonicNowMs = () =>
+  globalThis.performance?.now?.() ?? Date.now();
+
+function normalizeWallClockLimitMs(value) {
+  if (value == null) return null;
+  if (!Number.isFinite(value) || value < 0) {
+    throw protocolError(
+      "INVALID_WALL_CLOCK_LIMIT",
+      "wallClockLimitMs must be a finite non-negative number",
+    );
+  }
+  return value;
+}
+
 function post(message) {
   globalThis.postMessage({
     schemaVersion: SCENARIO_WORKER_PROTOCOL_VERSION,
@@ -240,6 +254,10 @@ async function runToBoundaryCompletion(requestId, payload) {
   requireOpenSession();
   cancelRequested = false;
 
+  const wallClockLimitMs =
+    normalizeWallClockLimitMs(payload.wallClockLimitMs);
+  const hostStartedMs = monotonicNowMs();
+
   const run = clone(payload.run);
   run.executionMode = "STEP";
 
@@ -250,6 +268,32 @@ async function runToBoundaryCompletion(requestId, payload) {
   const reports = [];
   const begin = begun.payload.begin;
   let latestStatus = begun.payload.status;
+
+  const abortIfDeadlineExpired = () => {
+    if (wallClockLimitMs === null) return;
+    const elapsedMs = Math.max(0, monotonicNowMs() - hostStartedMs);
+    if (elapsedMs < wallClockLimitMs) return;
+
+    const completedSteps = reports.length;
+    closeOwnedSession("WALL_CLOCK_SAFETY_ABORT");
+    const aborted = {
+      ...errorRecord(
+        "WALL_CLOCK_SAFETY_ABORT",
+        "Host wall-clock safety deadline expired at a reaction boundary",
+        "REOPEN_REQUIRED",
+        {
+          completedSteps,
+          wallClockLimitMs,
+          elapsedMs,
+          hardAbort: false,
+        },
+      ),
+      atReactionBoundary: true,
+    };
+    const error = new Error(aborted.message);
+    error.workerError = aborted;
+    throw error;
+  };
 
   post({
     type: "PROGRESS",
@@ -284,6 +328,8 @@ async function runToBoundaryCompletion(requestId, payload) {
       throw error;
     }
 
+    abortIfDeadlineExpired();
+
     const stepped = stepScenarioLiveSession(wasm);
     if (!stepped.ok) {
       const normalized = normalizeTransportError(stepped.error, true);
@@ -300,6 +346,11 @@ async function runToBoundaryCompletion(requestId, payload) {
     latestStatus = stepped.payload.status;
     reports.push(stepped.payload.step);
     const latest = stepped.payload.step;
+
+    // The reaction is complete and atomic here. If the host deadline elapsed
+    // while it was running, the outcome is still operational non-success:
+    // wall-clock time never becomes a semantic quiescence oracle.
+    abortIfDeadlineExpired();
 
     post({
       type: "PROGRESS",
@@ -327,7 +378,8 @@ async function runToBoundaryCompletion(requestId, payload) {
       };
     }
 
-    // Yield strictly after a complete atomic reaction so CANCEL can be read.
+    // Yield strictly after a complete atomic reaction so CANCEL and the
+    // cooperative host deadline can be observed without splitting a reaction.
     await boundaryYield();
   }
 }
