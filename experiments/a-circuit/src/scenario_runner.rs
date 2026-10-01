@@ -2047,11 +2047,8 @@ mod tests {
             configured_mux1_for_budget_test();
         let current_links = session.memory.store.link_count() as u32;
         let budget = CpuRunBudgetV1 {
-            schema_version: 1,
-            max_reactions: 64,
-            max_appended_links: u32::MAX,
             max_total_links: current_links.saturating_sub(1),
-            max_scope_width: u32::MAX,
+            ..CpuRunBudgetV1::scenario_default(64)
         };
         let mut controller =
             session.begin_budgeted_run(initial, budget).unwrap();
@@ -2070,11 +2067,8 @@ mod tests {
         let (mut session, _load, initial) =
             configured_mux1_for_budget_test();
         let budget = CpuRunBudgetV1 {
-            schema_version: 1,
-            max_reactions: 64,
-            max_appended_links: u32::MAX,
-            max_total_links: u32::MAX,
             max_scope_width: 0,
+            ..CpuRunBudgetV1::scenario_default(64)
         };
         let mut controller =
             session.begin_budgeted_run(initial, budget).unwrap();
@@ -2093,11 +2087,8 @@ mod tests {
         let (mut session, _load, initial) =
             configured_mux1_for_budget_test();
         let budget = CpuRunBudgetV1 {
-            schema_version: 1,
-            max_reactions: 64,
             max_appended_links: 0,
-            max_total_links: u32::MAX,
-            max_scope_width: u32::MAX,
+            ..CpuRunBudgetV1::scenario_default(64)
         };
         let stopped = session
             .run_to_quiescence(
