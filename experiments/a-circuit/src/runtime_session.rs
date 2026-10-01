@@ -75,10 +75,13 @@ pub(crate) struct CpuSessionStepOutcomeV1 {
     pub(crate) trace_projection_ns: u128,
 }
 
-pub(crate) const CPU_RUN_BUDGET_SCHEMA_VERSION: u32 = 1;
+pub(crate) const CPU_RUN_BUDGET_SCHEMA_VERSION: u32 = 2;
 pub(crate) const DEFAULT_MAX_APPENDED_LINKS_PER_RUN: u32 = 1_000_000;
 pub(crate) const DEFAULT_MAX_TOTAL_LINKS: u32 = 2_000_000;
 pub(crate) const DEFAULT_MAX_SCOPE_WIDTH: u32 = 65_536;
+pub(crate) const DEFAULT_MAX_MATCH_CANDIDATES: u64 = 1_000_000_000;
+pub(crate) const DEFAULT_MAX_UNIFICATION_NODES: u64 = 1_000_000_000;
+pub(crate) const DEFAULT_MAX_INSTANTIATION_NODES: u64 = 1_000_000_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -88,6 +91,9 @@ pub(crate) struct CpuRunBudgetV1 {
     pub(crate) max_appended_links: u32,
     pub(crate) max_total_links: u32,
     pub(crate) max_scope_width: u32,
+    pub(crate) max_match_candidates: u64,
+    pub(crate) max_unification_nodes: u64,
+    pub(crate) max_instantiation_nodes: u64,
 }
 
 impl CpuRunBudgetV1 {
@@ -98,6 +104,9 @@ impl CpuRunBudgetV1 {
             max_appended_links: DEFAULT_MAX_APPENDED_LINKS_PER_RUN,
             max_total_links: DEFAULT_MAX_TOTAL_LINKS,
             max_scope_width: DEFAULT_MAX_SCOPE_WIDTH,
+            max_match_candidates: DEFAULT_MAX_MATCH_CANDIDATES,
+            max_unification_nodes: DEFAULT_MAX_UNIFICATION_NODES,
+            max_instantiation_nodes: DEFAULT_MAX_INSTANTIATION_NODES,
         }
     }
 
@@ -122,6 +131,47 @@ impl CpuRunBudgetV1 {
         }
         None
     }
+
+    fn work_stop_reason(
+        self,
+        usage: CpuRunWorkUsageV1,
+    ) -> Option<CpuRunStopReasonV1> {
+        if usage.match_candidates > self.max_match_candidates {
+            return Some(CpuRunStopReasonV1::MatchWorkBudgetExceeded);
+        }
+        if usage.unification_nodes > self.max_unification_nodes {
+            return Some(
+                CpuRunStopReasonV1::UnificationWorkBudgetExceeded,
+            );
+        }
+        if usage.instantiation_nodes > self.max_instantiation_nodes {
+            return Some(
+                CpuRunStopReasonV1::InstantiationWorkBudgetExceeded,
+            );
+        }
+        None
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct CpuRunWorkUsageV1 {
+    pub(crate) match_candidates: u64,
+    pub(crate) unification_nodes: u64,
+    pub(crate) instantiation_nodes: u64,
+}
+
+impl CpuRunWorkUsageV1 {
+    fn accumulate(&mut self, profile: &StructuralRunProfile) {
+        self.match_candidates = self
+            .match_candidates
+            .saturating_add(profile.trigger_incidence_candidates);
+        self.unification_nodes = self
+            .unification_nodes
+            .saturating_add(profile.unification_nodes_visited);
+        self.instantiation_nodes = self
+            .instantiation_nodes
+            .saturating_add(profile.instantiation_nodes_visited);
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -132,6 +182,9 @@ pub(crate) enum CpuRunStopReasonV1 {
     AppendedLinksBudgetExceeded,
     TotalLinksBudgetExceeded,
     ScopeWidthBudgetExceeded,
+    MatchWorkBudgetExceeded,
+    UnificationWorkBudgetExceeded,
+    InstantiationWorkBudgetExceeded,
     EngineFailure,
     InvalidState,
 }
@@ -157,6 +210,7 @@ pub(crate) struct CpuRunControllerV1 {
     run_id: u64,
     links_before_run: u32,
     steps_taken: u32,
+    work_usage: CpuRunWorkUsageV1,
 }
 
 impl CpuRunControllerV1 {
@@ -170,6 +224,7 @@ impl CpuRunControllerV1 {
             run_id,
             links_before_run,
             steps_taken: 0,
+            work_usage: CpuRunWorkUsageV1::default(),
         }
     }
 
@@ -221,12 +276,21 @@ impl CpuRunControllerV1 {
             }
         };
         self.steps_taken = self.steps_taken.saturating_add(1);
+        self.work_usage.accumulate(&step.structural_profile);
 
         if let Some(reason) = self.budget.resource_stop_reason(
             self.links_before_run,
             session.memory.store.link_count() as u32,
             session.engine.current().len() as u32,
         ) {
+            session.fail_active_run();
+            return CpuControlledStepV1 {
+                step: Some(step),
+                stop_reason: Some(reason),
+            };
+        }
+
+        if let Some(reason) = self.budget.work_stop_reason(self.work_usage) {
             session.fail_active_run();
             return CpuControlledStepV1 {
                 step: Some(step),
@@ -250,6 +314,15 @@ pub(crate) struct CpuBoundedRunV1 {
     pub(crate) links_before_run: u32,
     pub(crate) steps: Vec<CpuSessionStepOutcomeV1>,
     pub(crate) stop_reason: CpuRunStopReasonV1,
+}
+
+fn runtime_metering_level(
+    observation_level: RunObservationLevel,
+) -> RunObservationLevel {
+    match observation_level {
+        RunObservationLevel::Off => RunObservationLevel::Profile,
+        level => level,
+    }
 }
 
 /// Long-lived optimized-CPU execution Session over one loaded A-memory.
@@ -341,6 +414,7 @@ impl CpuRuntimeSession {
         };
         let reaction_index = self.next_reaction_index;
         let links_before = self.memory.store.link_count() as u32;
+        let metering_level = runtime_metering_level(observation_level);
 
         let mut trace_projection_ns = 0u128;
         let scope_before = if observation_level.traces() {
@@ -354,7 +428,7 @@ impl CpuRuntimeSession {
         };
 
         let (reaction, structural_profile, structural_facts) =
-            if observation_level.traces() {
+            if metering_level.traces() {
                 let (reaction, profile, native_trace) = match self
                     .engine
                     .run_traced(&mut self.memory.store)
@@ -377,7 +451,9 @@ impl CpuRuntimeSession {
                     .saturating_add(collection_ns)
                     .saturating_add(projection_started.elapsed_ns());
                 (reaction, profile, Some(facts))
-            } else if observation_level.profiles() {
+            } else {
+                // Runtime safety metering remains active even when profile
+                // projection is suppressed with observation=OFF.
                 let (reaction, profile) = match self
                     .engine
                     .run_profiled(&mut self.memory.store)
@@ -389,15 +465,6 @@ impl CpuRuntimeSession {
                     }
                 };
                 (reaction, profile, None)
-            } else {
-                let reaction = match self.engine.run(&mut self.memory.store) {
-                    Ok(value) => value,
-                    Err(_) => {
-                        self.execution_state = CpuSessionState::Failed;
-                        return Err(CpuSessionStepError::EngineFailure);
-                    }
-                };
-                (reaction, StructuralRunProfile::default(), None)
             };
 
         let scope_after = if observation_level.traces() {
@@ -499,6 +566,9 @@ mod tests {
             max_appended_links: 5,
             max_total_links: 20,
             max_scope_width: 3,
+            max_match_candidates: 100,
+            max_unification_nodes: 100,
+            max_instantiation_nodes: 100,
         };
 
         assert_eq!(
@@ -517,6 +587,66 @@ mod tests {
     }
 
     #[test]
+    fn budget_work_reasons_are_distinct_and_deterministic() {
+        let budget = CpuRunBudgetV1 {
+            schema_version: CPU_RUN_BUDGET_SCHEMA_VERSION,
+            max_reactions: 8,
+            max_appended_links: 5,
+            max_total_links: 20,
+            max_scope_width: 3,
+            max_match_candidates: 10,
+            max_unification_nodes: 20,
+            max_instantiation_nodes: 30,
+        };
+
+        assert_eq!(
+            budget.work_stop_reason(CpuRunWorkUsageV1 {
+                match_candidates: 11,
+                ..CpuRunWorkUsageV1::default()
+            }),
+            Some(CpuRunStopReasonV1::MatchWorkBudgetExceeded),
+        );
+        assert_eq!(
+            budget.work_stop_reason(CpuRunWorkUsageV1 {
+                unification_nodes: 21,
+                ..CpuRunWorkUsageV1::default()
+            }),
+            Some(CpuRunStopReasonV1::UnificationWorkBudgetExceeded),
+        );
+        assert_eq!(
+            budget.work_stop_reason(CpuRunWorkUsageV1 {
+                instantiation_nodes: 31,
+                ..CpuRunWorkUsageV1::default()
+            }),
+            Some(CpuRunStopReasonV1::InstantiationWorkBudgetExceeded),
+        );
+        assert_eq!(
+            budget.work_stop_reason(CpuRunWorkUsageV1 {
+                match_candidates: 10,
+                unification_nodes: 20,
+                instantiation_nodes: 30,
+            }),
+            None,
+        );
+    }
+
+    #[test]
+    fn observation_off_still_enables_runtime_metering() {
+        assert_eq!(
+            runtime_metering_level(RunObservationLevel::Off),
+            RunObservationLevel::Profile,
+        );
+        assert_eq!(
+            runtime_metering_level(RunObservationLevel::Trace),
+            RunObservationLevel::Trace,
+        );
+        assert_eq!(
+            runtime_metering_level(RunObservationLevel::Full),
+            RunObservationLevel::Full,
+        );
+    }
+
+    #[test]
     fn stop_reasons_are_stable_machine_values() {
         assert_eq!(
             serde_json::to_string(&CpuRunStopReasonV1::Quiescent).unwrap(),
@@ -528,6 +658,27 @@ mod tests {
             )
             .unwrap(),
             "\"REACTION_BUDGET_EXCEEDED\"",
+        );
+        assert_eq!(
+            serde_json::to_string(
+                &CpuRunStopReasonV1::MatchWorkBudgetExceeded,
+            )
+            .unwrap(),
+            ""MATCH_WORK_BUDGET_EXCEEDED"",
+        );
+        assert_eq!(
+            serde_json::to_string(
+                &CpuRunStopReasonV1::UnificationWorkBudgetExceeded,
+            )
+            .unwrap(),
+            ""UNIFICATION_WORK_BUDGET_EXCEEDED"",
+        );
+        assert_eq!(
+            serde_json::to_string(
+                &CpuRunStopReasonV1::InstantiationWorkBudgetExceeded,
+            )
+            .unwrap(),
+            ""INSTANTIATION_WORK_BUDGET_EXCEEDED"",
         );
         assert_eq!(
             CpuRunStopReasonV1::from_step_error(
@@ -556,5 +707,8 @@ mod tests {
         assert!(budget.max_appended_links < u32::MAX);
         assert!(budget.max_total_links < u32::MAX);
         assert!(budget.max_scope_width < u32::MAX);
+        assert!(budget.max_match_candidates < u64::MAX);
+        assert!(budget.max_unification_nodes < u64::MAX);
+        assert!(budget.max_instantiation_nodes < u64::MAX);
     }
 }
