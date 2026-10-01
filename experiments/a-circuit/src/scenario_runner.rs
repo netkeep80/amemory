@@ -1350,15 +1350,19 @@ mod tests {
 
         assert_eq!(
             profile.dense_carrier_allocated_bytes,
-            live.session
-                .memory
-                .store
-                .dense_carrier_index_allocated_bytes(),
+            Some(
+                live.session
+                    .memory
+                    .store
+                    .dense_carrier_index_allocated_bytes(),
+            ),
         );
         assert_eq!(
             profile.max_dense_carrier_bytes,
-            CpuRunBudgetV1::scenario_default(run.max_reactions)
-                .max_dense_carrier_bytes,
+            Some(
+                CpuRunBudgetV1::scenario_default(run.max_reactions)
+                    .max_dense_carrier_bytes,
+            ),
         );
         assert!(!profile.full_resident_bytes_available);
     }
