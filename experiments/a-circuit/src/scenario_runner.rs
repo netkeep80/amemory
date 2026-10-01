@@ -2106,6 +2106,59 @@ mod tests {
     }
 
     #[test]
+    fn dense_carrier_byte_budget_stops_after_atomic_growth() {
+        let (mut probe, _load, initial) =
+            configured_mux1_for_budget_test();
+        let before = probe
+            .memory
+            .store
+            .dense_carrier_index_allocated_bytes();
+        let completed = probe
+            .run_to_quiescence(
+                initial,
+                CpuRunBudgetV1::scenario_default(64),
+                RunObservationLevel::Off,
+            )
+            .unwrap();
+        assert_eq!(completed.stop_reason, CpuRunStopReasonV1::Quiescent);
+        let after = probe
+            .memory
+            .store
+            .dense_carrier_index_allocated_bytes();
+        assert!(
+            after > before,
+            "MUX1 fixture must grow dense carrier allocation for this falsifier",
+        );
+
+        let (mut session, _load, initial) =
+            configured_mux1_for_budget_test();
+        assert_eq!(
+            session
+                .memory
+                .store
+                .dense_carrier_index_allocated_bytes(),
+            before,
+        );
+        let budget = CpuRunBudgetV1 {
+            max_dense_carrier_bytes: before,
+            ..CpuRunBudgetV1::scenario_default(64)
+        };
+        let stopped = session
+            .run_to_quiescence(initial, budget, RunObservationLevel::Off)
+            .unwrap();
+
+        assert!(!stopped.steps.is_empty());
+        assert_eq!(
+            stopped.stop_reason,
+            CpuRunStopReasonV1::CarrierBytesBudgetExceeded,
+        );
+        assert!(stopped.dense_carrier_allocated_bytes > before);
+        assert_eq!(stopped.max_dense_carrier_bytes, before);
+        assert!(!stopped.full_resident_bytes_available);
+        assert_eq!(session.execution_state(), CpuSessionState::Failed);
+    }
+
+    #[test]
     fn match_work_budget_stops_after_atomic_reaction_with_observation_off() {
         let (mut session, _load, initial) =
             configured_mux1_for_budget_test();
