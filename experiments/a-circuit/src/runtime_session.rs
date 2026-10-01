@@ -664,21 +664,21 @@ mod tests {
                 &CpuRunStopReasonV1::MatchWorkBudgetExceeded,
             )
             .unwrap(),
-            ""MATCH_WORK_BUDGET_EXCEEDED"",
+            "\\\"MATCH_WORK_BUDGET_EXCEEDED\\\"",
         );
         assert_eq!(
             serde_json::to_string(
                 &CpuRunStopReasonV1::UnificationWorkBudgetExceeded,
             )
             .unwrap(),
-            ""UNIFICATION_WORK_BUDGET_EXCEEDED"",
+            "\\\"UNIFICATION_WORK_BUDGET_EXCEEDED\\\"",
         );
         assert_eq!(
             serde_json::to_string(
                 &CpuRunStopReasonV1::InstantiationWorkBudgetExceeded,
             )
             .unwrap(),
-            ""INSTANTIATION_WORK_BUDGET_EXCEEDED"",
+            "\\\"INSTANTIATION_WORK_BUDGET_EXCEEDED\\\"",
         );
         assert_eq!(
             CpuRunStopReasonV1::from_step_error(
