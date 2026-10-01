@@ -1385,6 +1385,44 @@ impl OptimizedLinkStore {
         self.starts.len() - 1
     }
 
+    /// Exact heap bytes reserved by the dense carrier and incidence Vec buffers.
+    ///
+    /// This deliberately excludes HashMap allocator/control overhead and must
+    /// not be interpreted as full Store resident bytes or process RSS.
+    pub fn dense_carrier_index_allocated_bytes(&self) -> u64 {
+        let handle_bytes = std::mem::size_of::<Handle>() as u64;
+        [
+            self.starts.capacity(),
+            self.ends.capacity(),
+            self.start_head.capacity(),
+            self.end_head.capacity(),
+            self.next_by_start.capacity(),
+            self.next_by_end.capacity(),
+        ]
+        .into_iter()
+        .fold(0u64, |bytes, capacity| {
+            bytes.saturating_add(
+                (capacity as u64).saturating_mul(handle_bytes),
+            )
+        })
+    }
+
+    /// Exact number of additional dense Link slots that fit before at least
+    /// one measured Vec buffer must grow.
+    pub fn dense_carrier_index_min_spare_links(&self) -> usize {
+        [
+            self.starts.capacity().saturating_sub(self.starts.len()),
+            self.ends.capacity().saturating_sub(self.ends.len()),
+            self.start_head.capacity().saturating_sub(self.start_head.len()),
+            self.end_head.capacity().saturating_sub(self.end_head.len()),
+            self.next_by_start.capacity().saturating_sub(self.next_by_start.len()),
+            self.next_by_end.capacity().saturating_sub(self.next_by_end.len()),
+        ]
+        .into_iter()
+        .min()
+        .unwrap_or(0)
+    }
+
     pub(crate) fn instance_id(&self) -> u32 {
         self.instance_id
     }
@@ -2314,6 +2352,44 @@ mod tests {
             map.insert(source, handle);
         }
         map
+    }
+
+    #[test]
+    fn dense_carrier_index_bytes_match_real_vec_capacities() {
+        let mut store = OptimizedLinkStore::new();
+        let expected = [
+            store.starts.capacity(),
+            store.ends.capacity(),
+            store.start_head.capacity(),
+            store.end_head.capacity(),
+            store.next_by_start.capacity(),
+            store.next_by_end.capacity(),
+        ]
+        .into_iter()
+        .map(|capacity| {
+            (capacity as u64)
+                .saturating_mul(std::mem::size_of::<Handle>() as u64)
+        })
+        .sum::<u64>();
+
+        assert_eq!(store.dense_carrier_index_allocated_bytes(), expected);
+        assert_eq!(
+            store.dense_carrier_index_min_spare_links(),
+            [
+                store.starts.capacity().saturating_sub(store.starts.len()),
+                store.ends.capacity().saturating_sub(store.ends.len()),
+                store.start_head.capacity().saturating_sub(store.start_head.len()),
+                store.end_head.capacity().saturating_sub(store.end_head.len()),
+                store.next_by_start.capacity().saturating_sub(store.next_by_start.len()),
+                store.next_by_end.capacity().saturating_sub(store.next_by_end.len()),
+            ]
+            .into_iter()
+            .min()
+            .unwrap(),
+        );
+        let before = expected;
+        store.import_anum("16816898").unwrap();
+        assert!(store.dense_carrier_index_allocated_bytes() >= before);
     }
 
     fn load_optimized_fixture() -> (OptimizedLinkStore, StdHashMap<&'static str, Handle>) {

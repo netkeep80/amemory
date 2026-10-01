@@ -1334,6 +1334,40 @@ mod tests {
     }
 
     #[test]
+    fn profile_projects_exact_dense_carrier_budget_boundary() {
+        let mut manifest = parse_and_validate_manifest_v1(MUX1_LIFECYCLE).unwrap();
+        manifest.run_sequence.truncate(1);
+        manifest.observation_level = RunObservationLevel::Profile;
+        let run = manifest.run_sequence[0].clone();
+        let mut live = open_cpu_scenario_session_v1(&manifest).unwrap();
+
+        let report = run_cpu_scenario_session_once_v1(&mut live, &run).unwrap();
+        let profile = report
+            .observed
+            .profile
+            .as_ref()
+            .expect("PROFILE observation must project runtime resource evidence");
+
+        assert_eq!(
+            profile.dense_carrier_allocated_bytes,
+            Some(
+                live.session
+                    .memory
+                    .store
+                    .dense_carrier_index_allocated_bytes(),
+            ),
+        );
+        assert_eq!(
+            profile.max_dense_carrier_bytes,
+            Some(
+                CpuRunBudgetV1::scenario_default(run.max_reactions)
+                    .max_dense_carrier_bytes,
+            ),
+        );
+        assert!(!profile.full_resident_bytes_available);
+    }
+
+    #[test]
     fn observation_level_changes_evidence_not_step_semantics() {
         let mut reference: Option<(
             ScenarioNormalizedResultV1,
@@ -2102,6 +2136,70 @@ mod tests {
             stopped.stop_reason,
             CpuRunStopReasonV1::AppendedLinksBudgetExceeded,
         );
+        assert_eq!(session.execution_state(), CpuSessionState::Failed);
+    }
+
+    #[test]
+    fn dense_carrier_byte_budget_stops_after_atomic_growth() {
+        let (mut session, _load, initial) =
+            configured_mux1_for_budget_test();
+
+        // Fill exactly the current measured Vec slack with unrelated canonical
+        // START forms. This changes no configured current/theory handles and
+        // makes the next appended Link force a real dense-buffer allocation.
+        let spare = session
+            .memory
+            .store
+            .dense_carrier_index_min_spare_links();
+        let latest = session.memory.store.link_count() as Handle;
+        let mut source = session
+            .memory
+            .store
+            .export_anum(latest)
+            .unwrap();
+        let target_links = session
+            .memory
+            .store
+            .link_count()
+            .saturating_add(spare);
+        while session.memory.store.link_count() < target_links {
+            source.insert(0, '9');
+            let before_links = session.memory.store.link_count();
+            session.memory.store.import_anum(&source).unwrap();
+            let after_links = session.memory.store.link_count();
+            assert!(
+                after_links == before_links || after_links == before_links + 1,
+                "one nested START import may append at most one new outer form",
+            );
+        }
+        assert_eq!(
+            session
+                .memory
+                .store
+                .dense_carrier_index_min_spare_links(),
+            0,
+        );
+
+        let before = session
+            .memory
+            .store
+            .dense_carrier_index_allocated_bytes();
+        let budget = CpuRunBudgetV1 {
+            max_dense_carrier_bytes: before,
+            ..CpuRunBudgetV1::scenario_default(64)
+        };
+        let stopped = session
+            .run_to_quiescence(initial, budget, RunObservationLevel::Off)
+            .unwrap();
+
+        assert!(!stopped.steps.is_empty());
+        assert_eq!(
+            stopped.stop_reason,
+            CpuRunStopReasonV1::CarrierBytesBudgetExceeded,
+        );
+        assert!(stopped.dense_carrier_allocated_bytes > before);
+        assert_eq!(stopped.max_dense_carrier_bytes, before);
+        assert!(!stopped.full_resident_bytes_available);
         assert_eq!(session.execution_state(), CpuSessionState::Failed);
     }
 

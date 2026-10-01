@@ -505,6 +505,12 @@ pub(crate) struct RunProfileV1 {
     pub(crate) active_reaction_count: u32,
     pub(crate) execute_ns: u64,
     pub(crate) trace_projection_ns: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) dense_carrier_allocated_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) max_dense_carrier_bytes: Option<u64>,
+    #[serde(default)]
+    pub(crate) full_resident_bytes_available: bool,
     pub(crate) structural: StructuralProfileV1,
 }
 
@@ -699,6 +705,9 @@ mod tests {
             active_reaction_count: 7,
             execute_ns: 100,
             trace_projection_ns: 9,
+            dense_carrier_allocated_bytes: Some(4096),
+            max_dense_carrier_bytes: Some(8192),
+            full_resident_bytes_available: false,
             structural: StructuralProfileV1 {
                 timing_available: STRUCTURAL_PROFILE_TIMING_AVAILABLE,
                 ..StructuralProfileV1::default()
@@ -742,11 +751,30 @@ mod tests {
         assert_eq!(run.stages.result_ns, 7);
         assert_eq!(run.stages.evidence_ns, 22);
         assert_eq!(run.links_after_execute, 30);
+        assert_eq!(
+            run.execute_profile.dense_carrier_allocated_bytes,
+            Some(4096),
+        );
+        assert_eq!(
+            run.execute_profile.max_dense_carrier_bytes,
+            Some(8192),
+        );
+        assert!(!run.execute_profile.full_resident_bytes_available);
 
         let json = serde_json::to_string(&(open.clone(), run.clone())).unwrap();
         let decoded: (SessionOpenProfileV1, RunPipelineProfileV1) =
             serde_json::from_str(&json).unwrap();
-        assert_eq!(decoded, (open, run));
+        assert_eq!(decoded, (open, run.clone()));
+
+        let mut legacy = serde_json::to_value(&run.execute_profile).unwrap();
+        let legacy_object = legacy.as_object_mut().unwrap();
+        legacy_object.remove("denseCarrierAllocatedBytes");
+        legacy_object.remove("maxDenseCarrierBytes");
+        legacy_object.remove("fullResidentBytesAvailable");
+        let legacy: RunProfileV1 = serde_json::from_value(legacy).unwrap();
+        assert_eq!(legacy.dense_carrier_allocated_bytes, None);
+        assert_eq!(legacy.max_dense_carrier_bytes, None);
+        assert!(!legacy.full_resident_bytes_available);
     }
 
     #[test]

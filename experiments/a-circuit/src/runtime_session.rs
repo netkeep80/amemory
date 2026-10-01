@@ -82,6 +82,11 @@ pub(crate) const DEFAULT_MAX_SCOPE_WIDTH: u32 = 65_536;
 pub(crate) const DEFAULT_MAX_MATCH_CANDIDATES: u64 = 1_000_000_000;
 pub(crate) const DEFAULT_MAX_UNIFICATION_NODES: u64 = 1_000_000_000;
 pub(crate) const DEFAULT_MAX_INSTANTIATION_NODES: u64 = 1_000_000_000;
+pub(crate) const DEFAULT_MAX_DENSE_CARRIER_BYTES: u64 = 256 * 1024 * 1024;
+
+fn default_max_dense_carrier_bytes() -> u64 {
+    DEFAULT_MAX_DENSE_CARRIER_BYTES
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -94,6 +99,8 @@ pub(crate) struct CpuRunBudgetV1 {
     pub(crate) max_match_candidates: u64,
     pub(crate) max_unification_nodes: u64,
     pub(crate) max_instantiation_nodes: u64,
+    #[serde(default = "default_max_dense_carrier_bytes")]
+    pub(crate) max_dense_carrier_bytes: u64,
 }
 
 impl CpuRunBudgetV1 {
@@ -107,6 +114,7 @@ impl CpuRunBudgetV1 {
             max_match_candidates: DEFAULT_MAX_MATCH_CANDIDATES,
             max_unification_nodes: DEFAULT_MAX_UNIFICATION_NODES,
             max_instantiation_nodes: DEFAULT_MAX_INSTANTIATION_NODES,
+            max_dense_carrier_bytes: DEFAULT_MAX_DENSE_CARRIER_BYTES,
         }
     }
 
@@ -128,6 +136,16 @@ impl CpuRunBudgetV1 {
         }
         if scope_width > self.max_scope_width {
             return Some(CpuRunStopReasonV1::ScopeWidthBudgetExceeded);
+        }
+        None
+    }
+
+    fn carrier_stop_reason(
+        self,
+        dense_carrier_allocated_bytes: u64,
+    ) -> Option<CpuRunStopReasonV1> {
+        if dense_carrier_allocated_bytes > self.max_dense_carrier_bytes {
+            return Some(CpuRunStopReasonV1::CarrierBytesBudgetExceeded);
         }
         None
     }
@@ -185,6 +203,7 @@ pub(crate) enum CpuRunStopReasonV1 {
     MatchWorkBudgetExceeded,
     UnificationWorkBudgetExceeded,
     InstantiationWorkBudgetExceeded,
+    CarrierBytesBudgetExceeded,
     EngineFailure,
     InvalidState,
 }
@@ -236,11 +255,25 @@ impl CpuRunControllerV1 {
         self.links_before_run
     }
 
+    pub(crate) fn max_dense_carrier_bytes(&self) -> u64 {
+        self.budget.max_dense_carrier_bytes
+    }
+
     pub(crate) fn next(
         &mut self,
         session: &mut CpuRuntimeSession,
         observation_level: RunObservationLevel,
     ) -> CpuControlledStepV1 {
+        if let Some(reason) = self.budget.carrier_stop_reason(
+            session.memory.store.dense_carrier_index_allocated_bytes(),
+        ) {
+            session.fail_active_run();
+            return CpuControlledStepV1 {
+                step: None,
+                stop_reason: Some(reason),
+            };
+        }
+
         if let Some(reason) = self.budget.resource_stop_reason(
             self.links_before_run,
             session.memory.store.link_count() as u32,
@@ -290,6 +323,16 @@ impl CpuRunControllerV1 {
             };
         }
 
+        if let Some(reason) = self.budget.carrier_stop_reason(
+            session.memory.store.dense_carrier_index_allocated_bytes(),
+        ) {
+            session.fail_active_run();
+            return CpuControlledStepV1 {
+                step: Some(step),
+                stop_reason: Some(reason),
+            };
+        }
+
         if let Some(reason) = self.budget.work_stop_reason(self.work_usage) {
             session.fail_active_run();
             return CpuControlledStepV1 {
@@ -314,6 +357,9 @@ pub(crate) struct CpuBoundedRunV1 {
     pub(crate) links_before_run: u32,
     pub(crate) steps: Vec<CpuSessionStepOutcomeV1>,
     pub(crate) stop_reason: CpuRunStopReasonV1,
+    pub(crate) dense_carrier_allocated_bytes: u64,
+    pub(crate) max_dense_carrier_bytes: u64,
+    pub(crate) full_resident_bytes_available: bool,
 }
 
 fn runtime_metering_level(
@@ -531,6 +577,7 @@ impl CpuRuntimeSession {
             .map_err(CpuRunStopReasonV1::from_step_error)?;
         let run_id = controller.run_id();
         let links_before_run = controller.links_before_run();
+        let max_dense_carrier_bytes = controller.max_dense_carrier_bytes();
         let mut steps = Vec::new();
 
         loop {
@@ -544,6 +591,12 @@ impl CpuRuntimeSession {
                     links_before_run,
                     steps,
                     stop_reason,
+                    dense_carrier_allocated_bytes: self
+                        .memory
+                        .store
+                        .dense_carrier_index_allocated_bytes(),
+                    max_dense_carrier_bytes,
+                    full_resident_bytes_available: false,
                 });
             }
         }
@@ -569,6 +622,7 @@ mod tests {
             max_match_candidates: 100,
             max_unification_nodes: 100,
             max_instantiation_nodes: 100,
+            max_dense_carrier_bytes: 1_000,
         };
 
         assert_eq!(
@@ -597,6 +651,7 @@ mod tests {
             max_match_candidates: 10,
             max_unification_nodes: 20,
             max_instantiation_nodes: 30,
+            max_dense_carrier_bytes: 1_000,
         };
 
         assert_eq!(
@@ -627,6 +682,34 @@ mod tests {
                 instantiation_nodes: 30,
             }),
             None,
+        );
+    }
+
+    #[test]
+    fn budget_v2_without_new_byte_field_uses_finite_default() {
+        let mut legacy =
+            serde_json::to_value(CpuRunBudgetV1::scenario_default(8)).unwrap();
+        legacy
+            .as_object_mut()
+            .unwrap()
+            .remove("maxDenseCarrierBytes");
+        let decoded: CpuRunBudgetV1 = serde_json::from_value(legacy).unwrap();
+        assert_eq!(
+            decoded.max_dense_carrier_bytes,
+            DEFAULT_MAX_DENSE_CARRIER_BYTES,
+        );
+    }
+
+    #[test]
+    fn carrier_byte_reason_is_exact_and_resident_bytes_are_not_claimed() {
+        let budget = CpuRunBudgetV1 {
+            max_dense_carrier_bytes: 99,
+            ..CpuRunBudgetV1::scenario_default(8)
+        };
+        assert_eq!(budget.carrier_stop_reason(99), None);
+        assert_eq!(
+            budget.carrier_stop_reason(100),
+            Some(CpuRunStopReasonV1::CarrierBytesBudgetExceeded),
         );
     }
 
@@ -681,6 +764,13 @@ mod tests {
             "\"INSTANTIATION_WORK_BUDGET_EXCEEDED\"",
         );
         assert_eq!(
+            serde_json::to_string(
+                &CpuRunStopReasonV1::CarrierBytesBudgetExceeded,
+            )
+            .unwrap(),
+            "\"CARRIER_BYTES_BUDGET_EXCEEDED\"",
+        );
+        assert_eq!(
             CpuRunStopReasonV1::from_step_error(
                 CpuSessionStepError::EngineFailure,
             ),
@@ -710,5 +800,6 @@ mod tests {
         assert!(budget.max_match_candidates < u64::MAX);
         assert!(budget.max_unification_nodes < u64::MAX);
         assert!(budget.max_instantiation_nodes < u64::MAX);
+        assert!(budget.max_dense_carrier_bytes < u64::MAX);
     }
 }
