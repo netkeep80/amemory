@@ -1200,6 +1200,13 @@ function carrierReactionCommonShader(args) {
     "    loop { if (ri >= role_count) { break; } if (roles[ri] == role) { duplicate = true; break; } ri = ri + 1u; }",
     "    if (duplicate) { return 0u; } roles[role_count] = role; role_count = role_count + 1u; seq = s(cell); seq_guard = seq_guard + 1u;",
     "  }",
+    "  var role_left = 0u;",
+    "  loop {",
+    "    if (role_left >= role_count / 2u) { break; }",
+    "    let role_right = role_count - role_left - 1u;",
+    "    let role_swap = roles[role_left]; roles[role_left] = roles[role_right]; roles[role_right] = role_swap;",
+    "    role_left = role_left + 1u;",
+    "  }",
     "  let before = s(body); let bundle = e(body);",
     "  var ts: array<u32, 128>; var cs: array<u32, 128>; var sp = 1u; var visited = 0u; ts[0] = before; cs[0] = active_handle;",
     "  loop {",
@@ -1544,22 +1551,25 @@ export async function runGpuCarrierReaction(
       observed.appendEnds.every(
         (value, i) => value === expected.appendEnds[i],
       );
-    if (observed.discoveryStatus !== 1 ||
-        observed.publishStatus !== 1 ||
-        observed.rawRuleMatches !== expected.rawRuleMatches ||
-        observed.currentHandle !== expected.currentHandle ||
-        observed.interpreterHandle !== expected.interpreterHandle ||
-        observed.theoryHandle !== expected.theoryHandle ||
-        observed.triggerKey !== expected.triggerKey ||
-        observed.ruleHandle !== expected.ruleHandle ||
-        observed.admissionHandle !== expected.admissionHandle ||
-        observed.outputBundleTemplate !== expected.outputBundleTemplate ||
-        observed.groundedBundle !== expected.groundedBundle ||
-        observed.publishedHandle !== expected.candidateHandle ||
-        !sameBindings ||
-        !sameAppend) {
+    const mismatches = [];
+    if (observed.discoveryStatus !== 1) mismatches.push("discoveryStatus");
+    if (observed.publishStatus !== 1) mismatches.push("publishStatus");
+    if (observed.rawRuleMatches !== expected.rawRuleMatches) mismatches.push("rawRuleMatches");
+    if (observed.currentHandle !== expected.currentHandle) mismatches.push("currentHandle");
+    if (observed.interpreterHandle !== expected.interpreterHandle) mismatches.push("interpreterHandle");
+    if (observed.theoryHandle !== expected.theoryHandle) mismatches.push("theoryHandle");
+    if (observed.triggerKey !== expected.triggerKey) mismatches.push("triggerKey");
+    if (observed.ruleHandle !== expected.ruleHandle) mismatches.push("ruleHandle");
+    if (observed.admissionHandle !== expected.admissionHandle) mismatches.push("admissionHandle");
+    if (observed.outputBundleTemplate !== expected.outputBundleTemplate) mismatches.push("outputBundleTemplate");
+    if (observed.groundedBundle !== expected.groundedBundle) mismatches.push("groundedBundle");
+    if (observed.publishedHandle !== expected.candidateHandle) mismatches.push("publishedHandle");
+    if (!sameBindings) mismatches.push("roleBindings");
+    if (!sameAppend) mismatches.push("appendOverlay");
+    if (mismatches.length) {
       throw new Error(
-        "WebGPU structural reaction diverged from CPU virtual-overlay oracle",
+        "WebGPU structural reaction diverged from CPU virtual-overlay oracle: " +
+        mismatches.join(", "),
       );
     }
     return Object.freeze({ plan, expected, observed, differential: true });
