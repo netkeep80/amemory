@@ -220,24 +220,7 @@ jobs:
           ' _site/ci-results.json >/dev/null
 
       - name: Attach automatic CI matrix to dashboard
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          path = Path("_site/index.html")
-          html = path.read_text(encoding="utf-8")
-          script = '  <script src="./ci-matrix.js"></script>\n'
-          marker = "</body>"
-
-          if script not in html:
-              if marker not in html:
-                  raise SystemExit("index.html has no </body> marker")
-              html = html.replace(marker, script + marker, 1)
-              path.write_text(html, encoding="utf-8")
-
-          if "ci-matrix.js" not in path.read_text(encoding="utf-8"):
-              raise SystemExit("CI matrix script was not attached")
-          PY
+        run: node scripts/pages-build.mjs attach-ci-matrix
 
       - name: Verify published Workbench payload
         run: node scripts/pages-verify.mjs
