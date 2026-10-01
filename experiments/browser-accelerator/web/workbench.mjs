@@ -802,6 +802,7 @@ function styles() {
     ".wb-proof-structure{margin-top:10px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2)}.proof-recursive-structure{margin-top:8px;border:1px solid var(--line);border-radius:9px;background:var(--surface)}.proof-recursive-structure summary{cursor:pointer;padding:8px 10px}.proof-recursive-structure>code{display:block;padding:10px;max-height:280px;overflow:auto;overflow-wrap:anywhere}",
     ".wb-levels{display:flex;gap:5px;flex-wrap:wrap}.wb-levels button{border:1px solid var(--line);border-radius:999px;background:var(--surface-2);color:var(--muted);padding:5px 8px;cursor:pointer;font-size:.76rem}.wb-levels button[aria-pressed=true]{border-color:var(--accent);color:var(--text);font-weight:800}",
     ".wb-simple-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:12px}.wb-simple-item{padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);min-width:0}.wb-simple-item small{display:block;color:var(--muted)}.wb-simple-item strong,.wb-simple-item code{display:block;margin-top:5px;overflow-wrap:anywhere}.wb-result.pass{border-color:var(--good)}.wb-result.fail{border-color:var(--bad)}",
+    ".wb-gpu-witness{display:grid;gap:8px;margin-top:12px;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2)}.wb-gpu-witness>div:first-child{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.wb-gpu-witness small,.wb-gpu-witness code{display:block;overflow-wrap:anywhere}.wb-gpu-witness button{justify-self:start}",
 
     "@media(max-width:1000px){.wb-grid{grid-template-columns:1fr}.wb-memory{grid-template-columns:1fr 1fr}.wb-pipe{grid-template-columns:repeat(3,1fr)}}@media(max-width:620px){.wb-memory,.wb-pipe{grid-template-columns:1fr}}",
   ].join("\n");
@@ -842,6 +843,183 @@ async function buildInfo() {
   } catch {
     return { version: "неизвестно", sha: "неизвестно" };
   }
+}
+
+
+const GPU_WITNESS_COMPACT_ABI = Object.freeze({
+  available: "amemory_i386_lab_compact_proof_available",
+  length: "amemory_i386_lab_compact_proof_json_len",
+  pointer: "amemory_i386_lab_compact_proof_json_ptr",
+  byte: "amemory_i386_lab_compact_proof_json_byte",
+});
+
+function sameU32Array(actual, expected) {
+  return Array.isArray(expected) &&
+    actual.length === expected.length &&
+    actual.every((value, index) => (value >>> 0) === (expected[index] >>> 0));
+}
+
+export async function runWorkbenchWebGpuWitness(
+  catalogWasm,
+  sourceSha = null,
+) {
+  if (!globalThis.navigator?.gpu) {
+    return {
+      status: "unavailable",
+      reason: "WebGPU API недоступен в этом браузере.",
+    };
+  }
+  if (typeof catalogWasm?.amemory_i386_lab_gpu_carrier_prepare !== "function" ||
+      catalogWasm.amemory_i386_lab_gpu_carrier_prepare() !== 1) {
+    throw new Error("A-Circuit WASM не подготовил C4c3 packed carrier");
+  }
+
+  const suffix = /^[0-9a-f]{40}$/.test(sourceSha || "")
+    ? "?v=" + sourceSha
+    : "";
+  const [gpuModule, jsonModule] = await Promise.all([
+    import("./gpu-carrier.mjs" + suffix),
+    import("./i386-wasm-json.mjs" + suffix),
+  ]);
+  const carrier = gpuModule.readGpuCarrierWordsAbi(
+    catalogWasm,
+    undefined,
+    "Workbench C4c3 carrier",
+  );
+  const compact = jsonModule.readJsonAbi(
+    catalogWasm,
+    GPU_WITNESS_COMPACT_ABI,
+    "Workbench C4c3 compact proof",
+  );
+  if (!carrier || !compact ||
+      compact.schemaVersion !== 2 ||
+      compact.representationId !== "amemory-proof-compact-json" ||
+      compact.sourceProofSchemaVersion !== 4) {
+    throw new Error("C4c3 carrier/proof provenance mismatch");
+  }
+
+  const input = gpuModule.deriveGpuCarrierReactionInput(
+    carrier,
+    compact.roots,
+  );
+  const adapter = await navigator.gpu.requestAdapter();
+  if (!adapter) {
+    return {
+      status: "unavailable",
+      reason: "WebGPU adapter недоступен на этом устройстве.",
+    };
+  }
+
+  const device = await adapter.requestDevice();
+  try {
+    const gpu = await gpuModule.runGpuCarrierReaction(
+      device,
+      carrier,
+      input,
+    );
+    const first = compact.execute?.reactions?.[0];
+    const append = compact.topology?.append;
+    if (!first ||
+        first.quiescent === true ||
+        !Array.isArray(first.scopeBefore) ||
+        first.scopeBefore.length !== 1 ||
+        !Array.isArray(first.scopeAfter) ||
+        first.scopeAfter.length !== 1) {
+      throw new Error("Rust/WASM reaction-0 evidence is incomplete");
+    }
+
+    const proofAppendCount =
+      (first.linksAfter >>> 0) - (compact.load.linksAfterLoad >>> 0);
+    const observed = gpu.observed;
+    const sameAppend =
+      proofAppendCount === observed.appendCount &&
+      sameU32Array(observed.appendStarts, append?.starts) &&
+      sameU32Array(observed.appendEnds, append?.ends);
+    const sameScope =
+      (first.scopeBefore[0] >>> 0) === input.currentHandle &&
+      (first.scopeAfter[0] >>> 0) === observed.publishedHandle;
+    const sameMatches =
+      (first.rawRuleMatches >>> 0) === observed.rawRuleMatches;
+
+    if (!gpu.differential || !sameAppend || !sameScope || !sameMatches) {
+      throw new Error(
+        "C4c3 live differential: CPU/GPU/Rust-WASM disagreement",
+      );
+    }
+
+    return {
+      status: "verified",
+      tripleDifferential: true,
+      sourceSha: /^[0-9a-f]{40}$/.test(sourceSha || "")
+        ? sourceSha
+        : null,
+      planMode: gpu.plan.mode,
+      linkCount: carrier.layout.linkCount,
+      rawRuleMatches: observed.rawRuleMatches,
+      ruleHandle: observed.ruleHandle,
+      roleBindings: observed.roleBindings,
+      appendCount: observed.appendCount,
+      publishedHandle: observed.publishedHandle,
+      rustWasmScopeAfter: first.scopeAfter[0] >>> 0,
+      cpuGpuDifferential: gpu.differential === true,
+    };
+  } finally {
+    device.destroy?.();
+  }
+}
+
+async function runGpuWitness(state) {
+  state.gpuWitness = { status: "running" };
+  render(state);
+  try {
+    state.gpuWitness = await runWorkbenchWebGpuWitness(
+      state.catalogWasm,
+      state.build.sha,
+    );
+  } catch (error) {
+    state.gpuWitness = {
+      status: "failed",
+      reason: errorText(error),
+    };
+  }
+  render(state);
+  return state.gpuWitness;
+}
+
+function gpuWitnessHtml(state) {
+  const witness = state.gpuWitness || { status: "idle" };
+  const status = witness.status || "idle";
+  const labels = {
+    idle: "НЕ ЗАПУЩЕНО",
+    running: "ВЫПОЛНЯЕТСЯ",
+    verified: "ПОДТВЕРЖДЕНО",
+    unavailable: "НЕДОСТУПНО",
+    failed: "ОШИБКА",
+  };
+  const detail = status === "verified"
+    ? '<strong>CPU = WebGPU = Rust/WASM</strong>' +
+      '<small>DISCOVER → PUBLISH · ' +
+      esc(witness.planMode) + ' · Links ' +
+      esc(witness.linkCount) + ' · append ' +
+      esc(witness.appendCount) + '</small>' +
+      '<code>Rule L' + esc(witness.ruleHandle) +
+      ' → Scope L' + esc(witness.publishedHandle) + '</code>'
+    : status === "running"
+      ? '<small>Реальный браузер компилирует WGSL, выполняет DISCOVER и отдельный PUBLISH и читает результат обратно.</small>'
+      : '<small>' + esc(
+          witness.reason ||
+          "Ограниченный C4c3-свидетель ещё не запускался.",
+        ) + '</small>';
+
+  return '<div class="wb-gpu-witness"><div><strong>WebGPU C4c3 · живой ограниченный свидетель</strong>' +
+    '<span class="wb-chip ' +
+    (status === "verified" ? "good" : status === "failed" ? "bad" : "") +
+    '">' + esc(labels[status] || status) + '</span></div>' +
+    detail +
+    '<button id="wb-gpu-witness"' +
+    (status === "running" ? " disabled" : "") +
+    '>Проверить WebGPU C4c3</button>' +
+    '<div class="wb-help">Это одна настоящая структурная реакция на packed carrier, а не persistent WebGPU Session. Полная Session отслеживается в #279; CPU fallback здесь запрещён.</div></div>';
 }
 
 function presetInputs(state) {
@@ -1354,6 +1532,7 @@ function render(state) {
       return '<option value="' + id + '"' + (id === state.backend ? " selected" : "") +
         (supported ? "" : " disabled") + '>' + esc(label + (supported ? "" : " — не поддерживается")) + '</option>';
     }).join("") + '</select><div class="wb-help">Неподдерживаемые исполнители показаны явно; скрытого переключения на другой исполнитель нет.</div></div>' +
+    gpuWitnessHtml(state) +
 
     '<div class="wb-actions"><button id="wb-open"' +
       (openSession || state.loading ? " disabled" : "") +
@@ -1466,6 +1645,9 @@ function render(state) {
   root.querySelector("#wb-backend")?.addEventListener("change", (event) => {
     state.backend = event.target.value; render(state);
   });
+  root.querySelector("#wb-gpu-witness")?.addEventListener("click", () => {
+    void runGpuWitness(state);
+  });
   for (const input of root.querySelectorAll("[data-input-key]")) {
     input.addEventListener("change", () => { state.inputs[input.dataset.inputKey] = input.value; });
   }
@@ -1541,6 +1723,7 @@ export async function mountWorkbench(root) {
     scenarioIndex: 0, presetIndex: 0, inputs: {}, mode: "preset",
     backend: "optimized-cpu",
     session: null, run: null, step: null, history: null, tab: "timeline",
+    gpuWitness: { status: "idle" },
     workerRunActive: false, workerProgress: null, cancelling: false,
     playerTimer: null,
     level: "simple", stage: "RESULT",
@@ -1565,6 +1748,10 @@ export async function mountWorkbench(root) {
     state.loading = false;
     render(state);
     await open(state);
+    if (typeof location !== "undefined" &&
+        new URLSearchParams(location.search).get("webgpuWitness") === "1") {
+      await runGpuWitness(state);
+    }
   } catch (error) {
     state.loading = false; state.error = "Не удалось запустить рабочую лабораторию: " + errorText(error); render(state);
   }

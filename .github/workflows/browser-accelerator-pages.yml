@@ -297,3 +297,9 @@ jobs:
 
           echo "Live Pages proof visualization entrypoints PASS: ${base}"
 
+      - name: Verify deployed C4c3 WebGPU execution
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+          EXPECTED_SOURCE_SHA: ${{ needs.build.outputs.source_sha }}
+        run: node experiments/browser-accelerator/tests/pages-webgpu-live-smoke.mjs
+
