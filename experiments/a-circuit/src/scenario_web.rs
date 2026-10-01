@@ -136,9 +136,12 @@ struct ScenarioLiveObserverHistoryV1 {
     policy: ScenarioLiveHistoryPolicyV1,
     runs: VecDeque<RetainedLiveRunV1>,
     retained_events: u32,
+    // Exact sum of serialized report representation bytes retained in `runs`.
+    // This is deliberately not Rust heap usage or process RSS.
     retained_bytes: u32,
-    latest_report: Option<ScenarioRunReportV1>,
-    latest_report_bytes: u32,
+    // A standalone complete report is owned only by EXPLICIT_EXPORT mode.
+    // LATEST/RING derive their latest report from `runs.back()`.
+    explicit_latest_report: Option<RetainedLiveRunV1>,
     profile_trend: VecDeque<RunPipelineProfileV1>,
 }
 
@@ -197,10 +200,13 @@ impl ScenarioLiveObserverHistoryV1 {
             runs: VecDeque::new(),
             retained_events: 0,
             retained_bytes: 0,
-            latest_report: None,
-            latest_report_bytes: 0,
+            explicit_latest_report: None,
             profile_trend: VecDeque::new(),
         }
+    }
+
+    fn latest_entry(&self) -> Option<&RetainedLiveRunV1> {
+        self.runs.back().or(self.explicit_latest_report.as_ref())
     }
 
     fn status(&self, export_available: bool) -> ScenarioLiveHistoryStatusV1 {
@@ -220,9 +226,15 @@ impl ScenarioLiveObserverHistoryV1 {
                 self.runs.front().map(|entry| entry.report.session_run_id),
             last_run_id:
                 self.runs.back().map(|entry| entry.report.session_run_id),
-            latest_run_id:
-                self.latest_report.as_ref().map(|report| report.session_run_id),
-            latest_report_bytes: self.latest_report_bytes,
+            latest_run_id: self
+                .latest_entry()
+                .map(|entry| entry.report.session_run_id),
+            // Exact serialized representation bytes for the latest complete
+            // report, regardless of which retention mode owns it.
+            latest_report_bytes: self
+                .latest_entry()
+                .map(|entry| entry.serialized_bytes)
+                .unwrap_or(0),
             profile_points:
                 self.profile_trend.len().min(u32::MAX as usize) as u32,
             max_profile_points: self.policy.max_profile_points,
@@ -259,18 +271,22 @@ impl ScenarioLiveObserverHistoryV1 {
 
     fn clear_history(&mut self) {
         self.clear_raw();
-        self.latest_report = None;
-        self.latest_report_bytes = 0;
+        self.explicit_latest_report = None;
     }
 
     fn enforce_policy(&mut self) {
         match self.policy.retention_mode {
             LiveRetentionModeV1::Latest => {
-                while self.runs.len() > 1 {
+                self.explicit_latest_report = None;
+                while self.runs.len() > 1
+                    || self.retained_events > self.policy.max_retained_events
+                    || self.retained_bytes > self.policy.max_retained_bytes
+                {
                     self.remove_oldest();
                 }
             }
             LiveRetentionModeV1::Ring => {
+                self.explicit_latest_report = None;
                 while self.runs.len()
                     > self.policy.max_retained_runs as usize
                     || self.retained_events > self.policy.max_retained_events
@@ -279,21 +295,20 @@ impl ScenarioLiveObserverHistoryV1 {
                     self.remove_oldest();
                 }
             }
-            LiveRetentionModeV1::ExplicitExport => self.clear_raw(),
-        }
-
-        let latest_events = self
-            .latest_report
-            .as_ref()
-            .map(|report| {
-                report.observed.events.len().min(u32::MAX as usize) as u32
-            })
-            .unwrap_or(0);
-        if self.latest_report_bytes > self.policy.max_retained_bytes
-            || latest_events > self.policy.max_retained_events
-        {
-            self.latest_report = None;
-            self.latest_report_bytes = 0;
+            LiveRetentionModeV1::ExplicitExport => {
+                self.clear_raw();
+                let exceeds_limit = self
+                    .explicit_latest_report
+                    .as_ref()
+                    .is_some_and(|entry| {
+                        entry.serialized_bytes > self.policy.max_retained_bytes
+                            || entry.event_count
+                                > self.policy.max_retained_events
+                    });
+                if exceeds_limit {
+                    self.explicit_latest_report = None;
+                }
+            }
         }
 
         while self.profile_trend.len()
@@ -304,6 +319,33 @@ impl ScenarioLiveObserverHistoryV1 {
     }
 
     fn set_policy(&mut self, policy: ScenarioLiveHistoryPolicyV1) {
+        if self.policy.retention_mode != policy.retention_mode {
+            match policy.retention_mode {
+                LiveRetentionModeV1::ExplicitExport => {
+                    // Move, do not clone, the newest complete report into the
+                    // standalone export slot before raw history is cleared.
+                    let latest = self
+                        .runs
+                        .pop_back()
+                        .or_else(|| self.explicit_latest_report.take());
+                    self.clear_raw();
+                    self.explicit_latest_report = latest;
+                }
+                LiveRetentionModeV1::Latest | LiveRetentionModeV1::Ring => {
+                    // A report retained by EXPLICIT_EXPORT becomes ordinary
+                    // raw history again so LATEST/RING have no hidden owner.
+                    if self.runs.is_empty() {
+                        if let Some(entry) = self.explicit_latest_report.take() {
+                            self.retained_events = entry.event_count;
+                            self.retained_bytes = entry.serialized_bytes;
+                            self.runs.push_back(entry);
+                        }
+                    } else {
+                        self.explicit_latest_report = None;
+                    }
+                }
+            }
+        }
         self.policy = policy;
         self.enforce_policy();
     }
@@ -356,26 +398,23 @@ impl ScenarioLiveObserverHistoryV1 {
             });
         }
 
-        self.latest_report = Some(report.clone());
-        self.latest_report_bytes = serialized_bytes;
+        let retained = RetainedLiveRunV1 {
+            report: report.clone(),
+            event_count,
+            serialized_bytes,
+        };
 
         match self.policy.retention_mode {
             LiveRetentionModeV1::Latest => {
+                self.explicit_latest_report = None;
                 self.clear_raw();
-                self.runs.push_back(RetainedLiveRunV1 {
-                    report: report.clone(),
-                    event_count,
-                    serialized_bytes,
-                });
+                self.runs.push_back(retained);
                 self.retained_events = event_count;
                 self.retained_bytes = serialized_bytes;
             }
             LiveRetentionModeV1::Ring => {
-                self.runs.push_back(RetainedLiveRunV1 {
-                    report: report.clone(),
-                    event_count,
-                    serialized_bytes,
-                });
+                self.explicit_latest_report = None;
+                self.runs.push_back(retained);
                 self.retained_events =
                     self.retained_events.saturating_add(event_count);
                 self.retained_bytes =
@@ -383,9 +422,10 @@ impl ScenarioLiveObserverHistoryV1 {
                 self.enforce_policy();
             }
             LiveRetentionModeV1::ExplicitExport => {
-                // Keep only the latest complete report for an explicit export
-                // action. No automatic raw run history is retained.
+                // One complete report is retained exactly once for an explicit
+                // export action. No automatic raw run history is retained.
                 self.clear_raw();
+                self.explicit_latest_report = Some(retained);
             }
         }
         Ok(())
@@ -397,8 +437,9 @@ impl ScenarioLiveObserverHistoryV1 {
             .find(|entry| entry.report.session_run_id == run_id)
             .map(|entry| entry.report.clone())
             .or_else(|| {
-                self.latest_report
+                self.explicit_latest_report
                     .as_ref()
+                    .map(|entry| &entry.report)
                     .filter(|report| report.session_run_id == run_id)
                     .cloned()
             })
@@ -406,7 +447,10 @@ impl ScenarioLiveObserverHistoryV1 {
 
     fn available_runs(&self) -> Vec<ScenarioRunReportV1> {
         if self.runs.is_empty() {
-            self.latest_report.iter().cloned().collect()
+            self.explicit_latest_report
+                .iter()
+                .map(|entry| entry.report.clone())
+                .collect()
         } else {
             self.runs.iter().map(|entry| entry.report.clone()).collect()
         }
@@ -1156,14 +1200,10 @@ pub extern "C" fn amemory_scenario_live_history_clear() -> u32 {
         };
         history.clear_history();
     }
-    *SCENARIO_LIVE_OUTPUT_JSON
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner()) =
-        String::new();
-    *SCENARIO_LIVE_HISTORY_JSON
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner()) =
-        String::new();
+    // A history clear is also a retention clear: do not leave a complete
+    // serialized export snapshot alive after the owned history is gone.
+    clear_live_output_and_error();
+    clear_live_history_buffers(true);
     1
 }
 
@@ -2000,6 +2040,149 @@ mod tests {
             ),
             Err(ScenarioTransportErrorV1::LiveHistoryPolicy { .. })
         ));
+    }
+
+    fn live_history_fixture(
+    ) -> (ScenarioLiveObserverHistoryV1, Vec<ScenarioRunReportV1>) {
+        let manifest = parse_and_validate_manifest_v1(MUX1_LIFECYCLE).unwrap();
+        let mut session = open_cpu_scenario_session_v1(&manifest).unwrap();
+        let status = session.status_v1();
+        let reports = manifest
+            .run_sequence
+            .iter()
+            .take(3)
+            .map(|run| {
+                run_cpu_scenario_session_once_v1(&mut session, run).unwrap()
+            })
+            .collect();
+        (ScenarioLiveObserverHistoryV1::new(&status), reports)
+    }
+
+    #[test]
+    fn live_history_latest_and_ring_own_complete_reports_once() {
+        let (mut history, reports) = live_history_fixture();
+
+        history.set_policy(
+            validate_live_history_policy(
+                0,
+                2,
+                DEFAULT_LIVE_RETAINED_EVENTS,
+                DEFAULT_LIVE_RETAINED_BYTES,
+            )
+            .unwrap(),
+        );
+        history.record_run(&reports[0]).unwrap();
+        history.record_run(&reports[1]).unwrap();
+
+        assert_eq!(history.runs.len(), 1);
+        assert!(history.explicit_latest_report.is_none());
+        assert_eq!(
+            history.runs.back().unwrap().report.session_run_id,
+            reports[1].session_run_id
+        );
+        assert_eq!(
+            history.retained_bytes,
+            history
+                .runs
+                .iter()
+                .map(|entry| entry.serialized_bytes)
+                .sum::<u32>()
+        );
+        assert_eq!(
+            history.status(false).latest_report_bytes,
+            history.runs.back().unwrap().serialized_bytes
+        );
+
+        history.set_policy(
+            validate_live_history_policy(
+                1,
+                2,
+                DEFAULT_LIVE_RETAINED_EVENTS,
+                DEFAULT_LIVE_RETAINED_BYTES,
+            )
+            .unwrap(),
+        );
+        history.record_run(&reports[2]).unwrap();
+
+        assert_eq!(history.runs.len(), 2);
+        assert!(history.explicit_latest_report.is_none());
+        assert_eq!(
+            history.retained_events,
+            history
+                .runs
+                .iter()
+                .map(|entry| entry.event_count)
+                .sum::<u32>()
+        );
+        assert_eq!(
+            history.retained_bytes,
+            history
+                .runs
+                .iter()
+                .map(|entry| entry.serialized_bytes)
+                .sum::<u32>()
+        );
+        assert_eq!(
+            history.status(false).latest_run_id,
+            Some(reports[2].session_run_id)
+        );
+    }
+
+    #[test]
+    fn live_history_explicit_export_moves_latest_without_duplicate_owner() {
+        let (mut history, reports) = live_history_fixture();
+        history.record_run(&reports[0]).unwrap();
+        history.record_run(&reports[1]).unwrap();
+        let profile_points = history.profile_trend.len();
+
+        history.set_policy(
+            validate_live_history_policy(
+                2,
+                DEFAULT_LIVE_RETAINED_RUNS,
+                DEFAULT_LIVE_RETAINED_EVENTS,
+                DEFAULT_LIVE_RETAINED_BYTES,
+            )
+            .unwrap(),
+        );
+
+        assert!(history.runs.is_empty());
+        assert_eq!(history.retained_events, 0);
+        assert_eq!(history.retained_bytes, 0);
+        assert_eq!(
+            history
+                .explicit_latest_report
+                .as_ref()
+                .unwrap()
+                .report
+                .session_run_id,
+            reports[1].session_run_id
+        );
+        assert_eq!(history.available_runs().len(), 1);
+        assert_eq!(history.profile_trend.len(), profile_points);
+
+        history.set_policy(
+            validate_live_history_policy(
+                0,
+                DEFAULT_LIVE_RETAINED_RUNS,
+                DEFAULT_LIVE_RETAINED_EVENTS,
+                DEFAULT_LIVE_RETAINED_BYTES,
+            )
+            .unwrap(),
+        );
+
+        assert_eq!(history.runs.len(), 1);
+        assert!(history.explicit_latest_report.is_none());
+        assert_eq!(
+            history.retained_bytes,
+            history.runs.back().unwrap().serialized_bytes
+        );
+
+        history.clear_history();
+        assert!(history.runs.is_empty());
+        assert!(history.explicit_latest_report.is_none());
+        assert!(history.available_runs().is_empty());
+        assert_eq!(history.status(false).latest_run_id, None);
+        assert_eq!(history.profile_trend.len(), profile_points);
     }
 
     #[test]
