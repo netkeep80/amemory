@@ -127,7 +127,7 @@ mod tests {
         let count = memory.reaction_current_count();
         let mut scope = Vec::new();
         for index in 0..count {
-            scope.push(reference_export(&reference_memory, 
+            scope.push(reference_export(
                 memory,
                 memory.reaction_current_member(index),
             ));
