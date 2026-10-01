@@ -11,8 +11,9 @@ use super::{
         WebProofPrepareStage,
     },
     runtime_session::{
-        CpuRunBudgetV1, CpuRunControllerV1, CpuRunStopReasonV1,
-        CpuRuntimeSession, CpuSessionReactionEvidenceV1, CpuSessionState,
+        CpuRunBudgetAccountingV1, CpuRunBudgetV1, CpuRunControllerV1,
+        CpuRunStopReasonV1, CpuRuntimeSession, CpuSessionReactionEvidenceV1,
+        CpuSessionState,
     },
     scenario::{
         validate_manifest_v1, ScenarioAssertionV1, ScenarioBackendV1,
@@ -213,6 +214,8 @@ pub(crate) enum ScenarioRunnerErrorV1 {
         run_id: String,
         max_reactions: u32,
         stop_reason: CpuRunStopReasonV1,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        budget_accounting: Option<CpuRunBudgetAccountingV1>,
     },
     ProjectResultFailed {
         run_id: String,
@@ -516,10 +519,11 @@ pub(crate) fn run_cpu_scenario_session_once_v1(
         run.max_reactions,
         live.manifest.observation_level,
     )
-    .map_err(|stop_reason| ScenarioRunnerErrorV1::ExecuteFailed {
+    .map_err(|stop| ScenarioRunnerErrorV1::ExecuteFailed {
         run_id: run.run_id.clone(),
         max_reactions: run.max_reactions,
-        stop_reason,
+        stop_reason: stop.stop_reason,
+        budget_accounting: stop.budget_accounting,
     })?;
 
     let links_before_result = live.session.memory.store.link_count();
@@ -711,6 +715,7 @@ pub(crate) fn step_cpu_scenario_session_v1(
                 run_id: active.run.run_id,
                 max_reactions: active.run.max_reactions,
                 stop_reason,
+                budget_accounting: Some(controlled.budget_accounting),
             });
         }
     }
@@ -2294,15 +2299,27 @@ mod tests {
         )
         .unwrap_err();
 
-        assert_eq!(
-            error,
+        match error {
             ScenarioRunnerErrorV1::ExecuteFailed {
-                run_id: "run-1-zero-ones".to_owned(),
-                max_reactions: 1,
-                stop_reason:
+                run_id,
+                max_reactions,
+                stop_reason,
+                budget_accounting: Some(accounting),
+            } => {
+                assert_eq!(run_id, "run-1-zero-ones");
+                assert_eq!(max_reactions, 1);
+                assert_eq!(
+                    stop_reason,
                     CpuRunStopReasonV1::ReactionBudgetExceeded,
-            },
-        );
+                );
+                assert_eq!(accounting.reactions_consumed, 1);
+                assert_eq!(accounting.max_reactions, 1);
+                assert!(accounting.total_links > 0);
+                assert!(accounting.max_total_links >= accounting.total_links);
+                assert!(!accounting.full_resident_bytes_available);
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 
     #[test]
