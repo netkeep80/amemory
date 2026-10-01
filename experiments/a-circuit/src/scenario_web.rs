@@ -2043,10 +2043,7 @@ mod tests {
         ));
     }
 
-    fn live_history_fixture() -> (
-        ScenarioLiveObserverHistoryV1,
-        Vec<ScenarioRunReportV1>,
-    ) {
+    fn live_history_fixture() -> (ScenarioLiveObserverHistoryV1, Vec<ScenarioRunReportV1>) {
         let manifest = parse_and_validate_manifest_v1(MUX1_LIFECYCLE).unwrap();
         let mut session = open_cpu_scenario_session_v1(&manifest).unwrap();
         let status = session.status_v1();
