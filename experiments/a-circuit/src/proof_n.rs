@@ -1,10 +1,10 @@
 use super::runtime_session::{
-    CpuMemoryInstance, CpuRunBudgetV1, CpuRunStopReasonV1,
-    CpuRuntimeSession,
+    CpuMemoryInstance, CpuRunBudgetAccountingV1, CpuRunBudgetV1,
+    CpuRunStopReasonV1, CpuRuntimeSession,
 };
 use super::observability::{
     ns_u64, ObservationTimer, ObservedRunV1, RunEventKind, RunEventV1,
-    RunObservationLevel, RunProfileV1, RunStage,
+    RunBudgetProfileV1, RunObservationLevel, RunProfileV1, RunStage,
     StructuralProfileV1, OBSERVABILITY_TIMING_AVAILABLE,
     OPTIMIZED_CPU_BACKEND_ID, RUN_OBSERVABILITY_SCHEMA_VERSION,
 };
@@ -754,12 +754,45 @@ pub(crate) fn execute_session_to_quiescence(
     })
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CpuObservedRunStopV1 {
+    pub(crate) stop_reason: CpuRunStopReasonV1,
+    pub(crate) budget_accounting: Option<CpuRunBudgetAccountingV1>,
+}
+
+fn project_budget_profile(
+    accounting: CpuRunBudgetAccountingV1,
+) -> RunBudgetProfileV1 {
+    RunBudgetProfileV1 {
+        schema_version: accounting.schema_version,
+        reactions_consumed: accounting.reactions_consumed,
+        max_reactions: accounting.max_reactions,
+        appended_links_consumed: accounting.appended_links_consumed,
+        max_appended_links: accounting.max_appended_links,
+        total_links: accounting.total_links,
+        max_total_links: accounting.max_total_links,
+        scope_width: accounting.scope_width,
+        max_scope_width: accounting.max_scope_width,
+        match_candidates: accounting.match_candidates,
+        max_match_candidates: accounting.max_match_candidates,
+        unification_nodes: accounting.unification_nodes,
+        max_unification_nodes: accounting.max_unification_nodes,
+        instantiation_nodes: accounting.instantiation_nodes,
+        max_instantiation_nodes: accounting.max_instantiation_nodes,
+        dense_carrier_allocated_bytes:
+            accounting.dense_carrier_allocated_bytes,
+        max_dense_carrier_bytes: accounting.max_dense_carrier_bytes,
+        full_resident_bytes_available:
+            accounting.full_resident_bytes_available,
+    }
+}
+
 pub(crate) fn execute_session_observed_to_quiescence(
     session: &mut CpuRuntimeSession,
     initial: Handle,
     max_reactions: u32,
     observation_level: RunObservationLevel,
-) -> Result<ObservedRunV1, CpuRunStopReasonV1> {
+) -> Result<ObservedRunV1, CpuObservedRunStopV1> {
     let session_id = session.memory.id.clone();
     let run_started = ObservationTimer::start();
     let run = session
@@ -767,16 +800,27 @@ pub(crate) fn execute_session_observed_to_quiescence(
             initial,
             CpuRunBudgetV1::scenario_default(max_reactions),
             observation_level,
-        )?;
+        )
+        .map_err(|stop_reason| CpuObservedRunStopV1 {
+            stop_reason,
+            budget_accounting: None,
+        })?;
     if run.stop_reason != CpuRunStopReasonV1::Quiescent {
-        return Err(run.stop_reason);
+        return Err(CpuObservedRunStopV1 {
+            stop_reason: run.stop_reason,
+            budget_accounting: Some(run.budget_accounting),
+        });
     }
 
     let run_id = run.run_id;
     let links_before_run = run.links_before_run;
-    let dense_carrier_allocated_bytes = run.dense_carrier_allocated_bytes;
-    let max_dense_carrier_bytes = run.max_dense_carrier_bytes;
-    let full_resident_bytes_available = run.full_resident_bytes_available;
+    let budget_accounting = run.budget_accounting;
+    let dense_carrier_allocated_bytes =
+        budget_accounting.dense_carrier_allocated_bytes;
+    let max_dense_carrier_bytes =
+        budget_accounting.max_dense_carrier_bytes;
+    let full_resident_bytes_available =
+        budget_accounting.full_resident_bytes_available;
     let scope_before = run
         .steps
         .first()
@@ -927,6 +971,7 @@ pub(crate) fn execute_session_observed_to_quiescence(
         active_reaction_count,
         execute_ns: ns_u64(structural_profile.total_ns),
         trace_projection_ns: ns_u64(trace_projection_ns),
+        budget_accounting: Some(project_budget_profile(budget_accounting)),
         dense_carrier_allocated_bytes: Some(dense_carrier_allocated_bytes),
         max_dense_carrier_bytes: Some(max_dense_carrier_bytes),
         full_resident_bytes_available,
