@@ -11,6 +11,30 @@ import {
 
 const root = process.cwd();
 
+const workbenchSource = fs.readFileSync(
+  path.join(root, "experiments/browser-accelerator/web/workbench.mjs"),
+  "utf8",
+);
+for (const required of [
+  "runWorkbenchWebGpuWitness",
+  "Проверить WebGPU C4c3",
+  "CPU = WebGPU = Rust/WASM",
+  "webgpuWitness",
+  "amemory_i386_lab_gpu_carrier_prepare",
+]) {
+  if (!workbenchSource.includes(required)) {
+    throw new Error("live WebGPU Workbench witness missing: " + required);
+  }
+}
+for (const forbidden of [
+  "scopeAfter: expected.",
+  "publishedHandle: expected.",
+]) {
+  if (workbenchSource.includes(forbidden)) {
+    throw new Error("Workbench WebGPU witness seeded expected result: " + forbidden);
+  }
+}
+
 const syntaxTargets = [
   "experiments/browser-accelerator/web/workbench.mjs",
   "experiments/browser-accelerator/web/proof-view.mjs",
@@ -22,6 +46,7 @@ const syntaxTargets = [
   "experiments/browser-accelerator/web/scenario-worker.mjs",
   "experiments/browser-accelerator/web/scenario-worker-client.mjs",
   "experiments/a-circuit/tests/workbench-worker-browser-e2e.mjs",
+  "experiments/browser-accelerator/tests/pages-webgpu-live-smoke.mjs",
 ];
 
 for (const target of syntaxTargets) {
