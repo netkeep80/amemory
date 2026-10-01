@@ -927,8 +927,8 @@ pub(crate) fn execute_session_observed_to_quiescence(
         active_reaction_count,
         execute_ns: ns_u64(structural_profile.total_ns),
         trace_projection_ns: ns_u64(trace_projection_ns),
-        dense_carrier_allocated_bytes,
-        max_dense_carrier_bytes,
+        dense_carrier_allocated_bytes: Some(dense_carrier_allocated_bytes),
+        max_dense_carrier_bytes: Some(max_dense_carrier_bytes),
         full_resident_bytes_available,
         structural: StructuralProfileV1::from(&structural_profile),
     });
