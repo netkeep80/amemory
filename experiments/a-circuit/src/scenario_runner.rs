@@ -2202,9 +2202,21 @@ mod tests {
             stopped.stop_reason,
             CpuRunStopReasonV1::CarrierBytesBudgetExceeded,
         );
-        assert!(stopped.dense_carrier_allocated_bytes > before);
-        assert_eq!(stopped.max_dense_carrier_bytes, before);
-        assert!(!stopped.full_resident_bytes_available);
+        assert!(
+            stopped
+                .budget_accounting
+                .dense_carrier_allocated_bytes
+                > before
+        );
+        assert_eq!(
+            stopped.budget_accounting.max_dense_carrier_bytes,
+            before,
+        );
+        assert!(
+            !stopped
+                .budget_accounting
+                .full_resident_bytes_available
+        );
         assert_eq!(session.execution_state(), CpuSessionState::Failed);
     }
 
