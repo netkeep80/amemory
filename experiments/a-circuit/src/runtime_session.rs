@@ -747,7 +747,7 @@ mod tests {
     #[test]
     fn budget_accounting_snapshot_uses_controller_and_live_runtime_state() {
         let mut memory = CpuMemoryInstance::new();
-        let initial = memory.store.ensure(1, 1);
+        let initial = memory.store.ensure_pair(1, 1);
         let mut session = CpuRuntimeSession::new(
             memory,
             OptimizedStructuralEngine::new(8),
