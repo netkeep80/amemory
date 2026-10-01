@@ -2047,11 +2047,8 @@ mod tests {
             configured_mux1_for_budget_test();
         let current_links = session.memory.store.link_count() as u32;
         let budget = CpuRunBudgetV1 {
-            schema_version: 1,
-            max_reactions: 64,
-            max_appended_links: u32::MAX,
             max_total_links: current_links.saturating_sub(1),
-            max_scope_width: u32::MAX,
+            ..CpuRunBudgetV1::scenario_default(64)
         };
         let mut controller =
             session.begin_budgeted_run(initial, budget).unwrap();
@@ -2070,11 +2067,8 @@ mod tests {
         let (mut session, _load, initial) =
             configured_mux1_for_budget_test();
         let budget = CpuRunBudgetV1 {
-            schema_version: 1,
-            max_reactions: 64,
-            max_appended_links: u32::MAX,
-            max_total_links: u32::MAX,
             max_scope_width: 0,
+            ..CpuRunBudgetV1::scenario_default(64)
         };
         let mut controller =
             session.begin_budgeted_run(initial, budget).unwrap();
@@ -2093,11 +2087,8 @@ mod tests {
         let (mut session, _load, initial) =
             configured_mux1_for_budget_test();
         let budget = CpuRunBudgetV1 {
-            schema_version: 1,
-            max_reactions: 64,
             max_appended_links: 0,
-            max_total_links: u32::MAX,
-            max_scope_width: u32::MAX,
+            ..CpuRunBudgetV1::scenario_default(64)
         };
         let stopped = session
             .run_to_quiescence(
@@ -2110,6 +2101,84 @@ mod tests {
         assert_eq!(
             stopped.stop_reason,
             CpuRunStopReasonV1::AppendedLinksBudgetExceeded,
+        );
+        assert_eq!(session.execution_state(), CpuSessionState::Failed);
+    }
+
+    #[test]
+    fn match_work_budget_stops_after_atomic_reaction_with_observation_off() {
+        let (mut session, _load, initial) =
+            configured_mux1_for_budget_test();
+        let budget = CpuRunBudgetV1 {
+            max_match_candidates: 0,
+            ..CpuRunBudgetV1::scenario_default(64)
+        };
+        let stopped = session
+            .run_to_quiescence(initial, budget, RunObservationLevel::Off)
+            .unwrap();
+
+        assert!(!stopped.steps.is_empty());
+        assert!(
+            stopped.steps[0]
+                .structural_profile
+                .trigger_incidence_candidates
+                > 0,
+        );
+        assert_eq!(
+            stopped.stop_reason,
+            CpuRunStopReasonV1::MatchWorkBudgetExceeded,
+        );
+        assert_eq!(session.execution_state(), CpuSessionState::Failed);
+    }
+
+    #[test]
+    fn unification_work_budget_stops_from_authoritative_profile() {
+        let (mut session, _load, initial) =
+            configured_mux1_for_budget_test();
+        let budget = CpuRunBudgetV1 {
+            max_unification_nodes: 0,
+            ..CpuRunBudgetV1::scenario_default(64)
+        };
+        let stopped = session
+            .run_to_quiescence(initial, budget, RunObservationLevel::Off)
+            .unwrap();
+
+        assert!(!stopped.steps.is_empty());
+        assert!(
+            stopped.steps[0]
+                .structural_profile
+                .unification_nodes_visited
+                > 0,
+        );
+        assert_eq!(
+            stopped.stop_reason,
+            CpuRunStopReasonV1::UnificationWorkBudgetExceeded,
+        );
+        assert_eq!(session.execution_state(), CpuSessionState::Failed);
+    }
+
+    #[test]
+    fn instantiation_work_budget_stops_from_authoritative_profile() {
+        let (mut session, _load, initial) =
+            configured_mux1_for_budget_test();
+        let budget = CpuRunBudgetV1 {
+            max_instantiation_nodes: 0,
+            ..CpuRunBudgetV1::scenario_default(64)
+        };
+        let stopped = session
+            .run_to_quiescence(initial, budget, RunObservationLevel::Off)
+            .unwrap();
+
+        assert!(!stopped.steps.is_empty());
+        assert!(
+            stopped.steps[0]
+                .structural_profile
+                .instantiation_nodes_visited
+                > 0,
+        );
+        assert_eq!(
+            stopped.stop_reason,
+            CpuRunStopReasonV1::InstantiationWorkBudgetExceeded,
         );
         assert_eq!(session.execution_state(), CpuSessionState::Failed);
     }
