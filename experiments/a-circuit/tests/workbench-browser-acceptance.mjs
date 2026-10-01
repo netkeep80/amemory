@@ -46,6 +46,7 @@ const syntaxTargets = [
   "experiments/browser-accelerator/web/scenario-worker.mjs",
   "experiments/browser-accelerator/web/scenario-worker-client.mjs",
   "experiments/a-circuit/tests/workbench-worker-browser-e2e.mjs",
+  "experiments/browser-accelerator/tests/pages-webgpu-live-smoke.mjs",
 ];
 
 for (const target of syntaxTargets) {
