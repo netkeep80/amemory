@@ -300,11 +300,12 @@ impl ScenarioLiveObserverHistoryV1 {
                 let exceeds_limit = self
                     .explicit_latest_report
                     .as_ref()
-                    .is_some_and(|entry| {
+                    .map(|entry| {
                         entry.serialized_bytes > self.policy.max_retained_bytes
                             || entry.event_count
                                 > self.policy.max_retained_events
-                    });
+                    })
+                    .unwrap_or(false);
                 if exceeds_limit {
                     self.explicit_latest_report = None;
                 }
@@ -2042,8 +2043,10 @@ mod tests {
         ));
     }
 
-    fn live_history_fixture(
-    ) -> (ScenarioLiveObserverHistoryV1, Vec<ScenarioRunReportV1>) {
+    fn live_history_fixture() -> (
+        ScenarioLiveObserverHistoryV1,
+        Vec<ScenarioRunReportV1>,
+    ) {
         let manifest = parse_and_validate_manifest_v1(MUX1_LIFECYCLE).unwrap();
         let mut session = open_cpu_scenario_session_v1(&manifest).unwrap();
         let status = session.status_v1();
