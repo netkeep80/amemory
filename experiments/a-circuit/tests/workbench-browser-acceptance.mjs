@@ -58,6 +58,24 @@ for (const forbidden of [
   }
 }
 
+for (const required of [
+  "async function stopChrome()",
+  'chrome.kill("SIGTERM")',
+  'chrome.kill("SIGKILL")',
+  "maxRetries: 10",
+  "retryDelay: 100",
+  "C4c3 cleanup warning",
+]) {
+  if (!pagesWebGpuSmokeSource.includes(required)) {
+    throw new Error("C4c3 bounded cleanup contract missing: " + required);
+  }
+}
+if (pagesWebGpuSmokeSource.includes(
+  "fs.rmSync(profile, { recursive: true, force: true });",
+)) {
+  throw new Error("C4c3 smoke regained immediate profile removal race");
+}
+
 for (const mode of ["single", "sections"]) {
   const shader = gpuCarrierReactionShaderSource(mode, {
     currentHandle: 1,

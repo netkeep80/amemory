@@ -97,6 +97,24 @@ async function fetchJson(url, attempts = 100) {
   throw last || new Error("fetch failed: " + url);
 }
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function stopChrome() {
+  if (chrome.exitCode !== null || chrome.signalCode !== null) return;
+
+  chrome.kill("SIGTERM");
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (chrome.exitCode !== null || chrome.signalCode !== null) return;
+    await sleep(100);
+  }
+
+  chrome.kill("SIGKILL");
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (chrome.exitCode !== null || chrome.signalCode !== null) return;
+    await sleep(100);
+  }
+}
+
 const profile = fs.mkdtempSync(
   path.join(os.tmpdir(), "amemory-pages-webgpu-"),
 );
@@ -207,6 +225,18 @@ try {
   );
 } finally {
   cdp?.close();
-  chrome.kill("SIGTERM");
-  fs.rmSync(profile, { recursive: true, force: true });
+  try {
+    await stopChrome();
+    fs.rmSync(profile, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 100,
+    });
+  } catch (cleanupError) {
+    console.warn(
+      "C4c3 cleanup warning: " +
+      (cleanupError?.stack || cleanupError?.message || String(cleanupError)),
+    );
+  }
 }
