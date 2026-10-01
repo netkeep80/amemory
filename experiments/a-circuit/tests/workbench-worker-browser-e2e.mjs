@@ -571,10 +571,26 @@ try {
   }
 
   await new Promise((resolve) => server.close(resolve));
-  fs.rmSync(profile, {
-    recursive: true,
-    force: true,
-    maxRetries: 8,
-    retryDelay: 100,
-  });
+
+  // Chrome may report its parent process exit before profile-writing child
+  // processes have released every Default/ file. Cleanup is test hygiene,
+  // not semantic evidence, so give those writers a bounded grace period and
+  // never turn an already-GREEN browser execution into a false semantic RED.
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  try {
+    fs.rmSync(profile, {
+      recursive: true,
+      force: true,
+      maxRetries: 20,
+      retryDelay: 200,
+    });
+  } catch (error) {
+    console.warn(
+      "WORKBENCH_WORKER_BROWSER_E2E_PROFILE_CLEANUP_WARNING " +
+      JSON.stringify({
+        code: error?.code || "UNKNOWN",
+        path: error?.path || profile,
+      }),
+    );
+  }
 }
