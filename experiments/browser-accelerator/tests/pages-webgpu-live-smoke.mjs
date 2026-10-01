@@ -112,6 +112,8 @@ const chrome = spawn(
     "--enable-features=Vulkan",
     "--use-angle=vulkan",
     "--use-vulkan=swiftshader",
+    "--use-webgpu-adapter=swiftshader",
+    "--disable-vulkan-surface",
     "--remote-debugging-address=127.0.0.1",
     "--remote-debugging-port=0",
     "--user-data-dir=" + profile,
