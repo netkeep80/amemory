@@ -1,3 +1,6 @@
+use super::runtime_session::{
+    CpuRuntimeTraceMode, CpuSessionReactionV1, CpuSessionStepOutcomeV1,
+};
 use amemory_optimized_cpu_probe::structural::{
     StructuralRunProfile, StructuralTraceEvent,
     STRUCTURAL_PROFILE_TIMING_AVAILABLE,
@@ -54,6 +57,14 @@ impl RunObservationLevel {
 
     pub(crate) fn traces(self) -> bool {
         matches!(self, Self::Trace | Self::Full)
+    }
+
+    pub(crate) fn runtime_trace_mode(self) -> CpuRuntimeTraceMode {
+        if self.traces() {
+            CpuRuntimeTraceMode::Trace
+        } else {
+            CpuRuntimeTraceMode::Profile
+        }
     }
 }
 
@@ -393,6 +404,86 @@ impl From<StructuralTraceEvent> for RunStructuralFactV1 {
                 handoff_count: Some(handoff_count),
             },
         }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CpuSessionReactionEvidenceV1 {
+    pub(crate) schema_version: u32,
+    pub(crate) session_id: String,
+    pub(crate) run_id: u64,
+    pub(crate) reaction_index: u32,
+    pub(crate) scope_before: Vec<u32>,
+    pub(crate) scope_after: Vec<u32>,
+    pub(crate) links_before: u32,
+    pub(crate) links_after: u32,
+    pub(crate) raw_rule_matches: u32,
+    pub(crate) transitioned_members: u32,
+    pub(crate) handoff_count: u32,
+    pub(crate) quiescent: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) structural_facts: Option<Vec<RunStructuralFactV1>>,
+}
+
+#[derive(Debug)]
+pub(crate) struct ProjectedCpuSessionStepV1 {
+    pub(crate) evidence: CpuSessionReactionEvidenceV1,
+    pub(crate) structural_profile: StructuralRunProfile,
+    pub(crate) trace_projection_ns: u128,
+}
+
+fn project_reaction_v1(
+    reaction: CpuSessionReactionV1,
+    structural_facts: Option<Vec<RunStructuralFactV1>>,
+) -> CpuSessionReactionEvidenceV1 {
+    CpuSessionReactionEvidenceV1 {
+        schema_version: RUN_OBSERVABILITY_SCHEMA_VERSION,
+        session_id: reaction.session_id,
+        run_id: reaction.run_id,
+        reaction_index: reaction.reaction_index,
+        scope_before: reaction.scope_before,
+        scope_after: reaction.scope_after,
+        links_before: reaction.links_before,
+        links_after: reaction.links_after,
+        raw_rule_matches: reaction.raw_rule_matches,
+        transitioned_members: reaction.transitioned_members,
+        handoff_count: reaction.handoff_count,
+        quiescent: reaction.quiescent,
+        structural_facts,
+    }
+}
+
+pub(crate) fn project_cpu_session_step_v1(
+    step: CpuSessionStepOutcomeV1,
+    observation_level: RunObservationLevel,
+) -> ProjectedCpuSessionStepV1 {
+    let projection_started = ObservationTimer::start();
+    let collection_ns = step
+        .structural_trace
+        .as_ref()
+        .map(|trace| trace.collection_ns)
+        .unwrap_or(0);
+    let structural_facts = if observation_level.traces() {
+        step.structural_trace.map(|trace| {
+            trace.events
+                .into_iter()
+                .map(RunStructuralFactV1::from)
+                .collect::<Vec<_>>()
+        })
+    } else {
+        None
+    };
+    let trace_projection_ns = if observation_level.traces() {
+        collection_ns.saturating_add(projection_started.elapsed_ns())
+    } else {
+        0
+    };
+
+    ProjectedCpuSessionStepV1 {
+        evidence: project_reaction_v1(step.reaction, structural_facts),
+        structural_profile: step.structural_profile,
+        trace_projection_ns,
     }
 }
 
