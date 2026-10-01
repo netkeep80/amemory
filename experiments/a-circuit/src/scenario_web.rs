@@ -1201,10 +1201,11 @@ pub extern "C" fn amemory_scenario_live_history_clear() -> u32 {
         };
         history.clear_history();
     }
-    // A history clear is also a retention clear: do not leave a complete
-    // serialized export snapshot alive after the owned history is gone.
+    // Raw history and explicit export are independent observer surfaces.
+    // Clearing retained history must not invalidate an already materialized
+    // export snapshot; export has its own explicit clear/close lifecycle.
     clear_live_output_and_error();
-    clear_live_history_buffers(true);
+    clear_live_history_buffers(false);
     1
 }
 
