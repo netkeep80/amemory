@@ -13,7 +13,11 @@ use super::{
     },
     runtime_session::{
         CpuRunBudgetAccountingV1, CpuRunBudgetV1, CpuRunControllerV1,
-        CpuRunStopReasonV1, CpuRuntimeSession, CpuSessionState,
+        CpuRunStopReasonV1, CpuRuntimeSession,
+    },
+    session_contract::{
+        CapabilitySupportV1, RuntimeSessionV1, SessionCapabilitiesV1,
+        SessionStateV1,
     },
     scenario::{
         validate_manifest_v1, ScenarioAssertionV1, ScenarioBackendV1,
@@ -328,6 +332,9 @@ pub(crate) struct ScenarioLiveSessionStatusV1 {
     pub(crate) schema_version: u32,
     pub(crate) backend: ScenarioBackendV1,
     pub(crate) session_id: String,
+    pub(crate) memory_instance_id: String,
+    pub(crate) runtime_state: SessionStateV1,
+    pub(crate) runtime_capabilities: SessionCapabilitiesV1,
     pub(crate) store_instance_id: String,
     pub(crate) engine_instance_id: String,
     pub(crate) program_profile: ScenarioProgramProfileV1,
@@ -343,18 +350,21 @@ pub(crate) struct ScenarioLiveSessionStatusV1 {
 
 impl ScenarioCpuSessionV1 {
     pub(crate) fn status_v1(&self) -> ScenarioLiveSessionStatusV1 {
+        let runtime = self.session.runtime_snapshot_v1();
         ScenarioLiveSessionStatusV1 {
             schema_version: SCENARIO_REPORT_SCHEMA_VERSION,
             backend: ScenarioBackendV1::OptimizedCpu,
-            session_id: self.session.memory.id.clone(),
+            session_id: runtime.identity.session_id,
+            memory_instance_id: runtime.identity.memory_instance_id,
+            runtime_state: runtime.state,
+            runtime_capabilities: runtime.capabilities,
             store_instance_id: self.store_instance_id.clone(),
             engine_instance_id: self.engine_instance_id.clone(),
             program_profile: self.program_profile.clone(),
             manifest_field_semantics: scenario_manifest_field_semantics_v1(),
             program_fingerprint: self.program_fingerprint.clone(),
-            base_link_count: self.loaded_link_count as u32,
-            current_link_count:
-                self.session.memory.store.link_count() as u32,
+            base_link_count: runtime.base_link_count,
+            current_link_count: runtime.current_link_count,
             completed_runs: self.completed_runs,
             prepare_count: 1,
             load_count: 1,
@@ -420,7 +430,7 @@ pub(crate) fn open_cpu_scenario_session_v1(
     })?;
 
     let session_open_profile = session_open_profile_v1(
-        session.memory.id.clone(),
+        session.id.clone(),
         prepare_ns,
         load_ns,
         prepared_links,
@@ -456,9 +466,9 @@ fn ensure_cpu_session_configurable(
     run_id: &str,
 ) -> Result<(), ScenarioRunnerErrorV1> {
     if matches!(
-        live.session.execution_state(),
-        CpuSessionState::Open
-            | CpuSessionState::Quiescent
+        live.session.runtime_state_v1(),
+        SessionStateV1::Open
+            | SessionStateV1::Quiescent
     ) {
         return Ok(());
     }
@@ -467,7 +477,7 @@ fn ensure_cpu_session_configurable(
         run_id: run_id.to_owned(),
         message: format!(
             "Session is not configurable in state {:?}",
-            live.session.execution_state(),
+            live.session.runtime_state_v1(),
         ),
     })
 }
@@ -861,7 +871,7 @@ pub(crate) fn run_scenario_manifest_v1(
     }
 
     let mut live = open_cpu_scenario_session_v1(manifest)?;
-    let session_id = live.session.memory.id.clone();
+    let session_id = live.session.runtime_identity_v1().session_id;
     let session_open_profile = live.session_open_profile.clone();
     let program_fingerprint = live.program_fingerprint.clone();
     let program_profile = live.program_profile.clone();
@@ -1159,6 +1169,18 @@ mod tests {
             vec![1, 2, 3],
         );
         assert_eq!(opened.session_id, after.session_id);
+        assert_eq!(opened.memory_instance_id, after.memory_instance_id);
+        assert_ne!(opened.session_id, opened.memory_instance_id);
+        assert_eq!(opened.runtime_state, SessionStateV1::Open);
+        assert_eq!(after.runtime_state, SessionStateV1::Quiescent);
+        assert_eq!(
+            opened.runtime_capabilities.step,
+            CapabilitySupportV1::Supported,
+        );
+        assert_eq!(
+            opened.runtime_capabilities.explicit_close,
+            CapabilitySupportV1::Unsupported,
+        );
         assert_eq!(opened.store_instance_id, after.store_instance_id);
         assert_eq!(opened.engine_instance_id, after.engine_instance_id);
         assert_eq!(opened.base_link_count, after.base_link_count);
@@ -1235,8 +1257,8 @@ mod tests {
             CpuRunStopReasonV1::Quiescent,
         );
         assert_eq!(
-            live.session.execution_state(),
-            CpuSessionState::Quiescent,
+            live.session.runtime_state_v1(),
+            SessionStateV1::Quiescent,
         );
 
         let evidence = bounded
@@ -2162,7 +2184,7 @@ mod tests {
             stopped.stop_reason,
             Some(CpuRunStopReasonV1::TotalLinksBudgetExceeded),
         );
-        assert_eq!(session.execution_state(), CpuSessionState::Failed);
+        assert_eq!(session.runtime_state_v1(), SessionStateV1::Failed);
     }
 
     #[test]
@@ -2185,7 +2207,7 @@ mod tests {
             stopped.stop_reason,
             Some(CpuRunStopReasonV1::ScopeWidthBudgetExceeded),
         );
-        assert_eq!(session.execution_state(), CpuSessionState::Failed);
+        assert_eq!(session.runtime_state_v1(), SessionStateV1::Failed);
     }
 
     #[test]
@@ -2208,7 +2230,7 @@ mod tests {
             stopped.stop_reason,
             CpuRunStopReasonV1::AppendedLinksBudgetExceeded,
         );
-        assert_eq!(session.execution_state(), CpuSessionState::Failed);
+        assert_eq!(session.runtime_state_v1(), SessionStateV1::Failed);
     }
 
     #[test]
@@ -2288,7 +2310,7 @@ mod tests {
                 .budget_accounting
                 .full_resident_bytes_available
         );
-        assert_eq!(session.execution_state(), CpuSessionState::Failed);
+        assert_eq!(session.runtime_state_v1(), SessionStateV1::Failed);
     }
 
     #[test]
@@ -2326,7 +2348,7 @@ mod tests {
                 .trigger_incidence_candidates,
         );
         assert!(stopped.budget_accounting.match_candidates > 0);
-        assert_eq!(session.execution_state(), CpuSessionState::Failed);
+        assert_eq!(session.runtime_state_v1(), SessionStateV1::Failed);
     }
 
     #[test]
@@ -2364,7 +2386,7 @@ mod tests {
                 .unification_nodes_visited,
         );
         assert!(stopped.budget_accounting.unification_nodes > 0);
-        assert_eq!(session.execution_state(), CpuSessionState::Failed);
+        assert_eq!(session.runtime_state_v1(), SessionStateV1::Failed);
     }
 
     #[test]
@@ -2402,7 +2424,7 @@ mod tests {
                 .instantiation_nodes_visited,
         );
         assert!(stopped.budget_accounting.instantiation_nodes > 0);
-        assert_eq!(session.execution_state(), CpuSessionState::Failed);
+        assert_eq!(session.runtime_state_v1(), SessionStateV1::Failed);
     }
 
     #[test]

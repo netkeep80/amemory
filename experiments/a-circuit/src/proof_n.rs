@@ -794,7 +794,7 @@ pub(crate) fn execute_session_observed_to_quiescence(
     max_reactions: u32,
     observation_level: RunObservationLevel,
 ) -> Result<ObservedRunV1, CpuObservedRunStopV1> {
-    let session_id = session.memory.id.clone();
+    let session_id = session.id.clone();
     let run_started = ObservationTimer::start();
     let run = session
         .run_to_quiescence(

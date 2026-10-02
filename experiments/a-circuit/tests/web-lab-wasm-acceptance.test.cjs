@@ -1037,8 +1037,18 @@ Promise.all([
       liveOpened.status?.completedRuns !== 0 ||
       liveOpened.status?.prepareCount !== 1 ||
       liveOpened.status?.loadCount !== 1 ||
+      typeof liveOpened.status?.memoryInstanceId !== "string" ||
+      liveOpened.status.memoryInstanceId.length === 0 ||
       liveOpened.status?.storeInstanceId !==
-        liveOpened.status?.sessionId ||
+        liveOpened.status?.memoryInstanceId ||
+      liveOpened.status?.sessionId ===
+        liveOpened.status?.memoryInstanceId ||
+      liveOpened.status?.runtimeState !== "OPEN" ||
+      liveOpened.status?.runtimeCapabilities?.step !== "SUPPORTED" ||
+      liveOpened.status?.runtimeCapabilities?.runToQuiescence !== "SUPPORTED" ||
+      liveOpened.status?.runtimeCapabilities?.reconfigureWithoutReload !==
+        "SUPPORTED" ||
+      liveOpened.status?.runtimeCapabilities?.explicitClose !== "UNSUPPORTED" ||
       typeof liveOpened.status?.engineInstanceId !== "string" ||
       liveOpened.status.engineInstanceId.length === 0 ||
       !PROGRAM_FINGERPRINT_RE.test(
@@ -1060,6 +1070,7 @@ Promise.all([
   }
   const liveIdentity = {
     sessionId: liveOpened.status.sessionId,
+    memoryInstanceId: liveOpened.status.memoryInstanceId,
     storeInstanceId: liveOpened.status.storeInstanceId,
     engineInstanceId: liveOpened.status.engineInstanceId,
     baseLinkCount: liveOpened.status.baseLinkCount,
@@ -1121,6 +1132,7 @@ Promise.all([
     const run = result.payload?.run;
     if (!result.ok ||
         status?.sessionId !== liveIdentity.sessionId ||
+        status?.memoryInstanceId !== liveIdentity.memoryInstanceId ||
         status?.storeInstanceId !== liveIdentity.storeInstanceId ||
         status?.engineInstanceId !== liveIdentity.engineInstanceId ||
         status?.baseLinkCount !== liveIdentity.baseLinkCount ||
@@ -1183,6 +1195,7 @@ Promise.all([
   const thirdRun = liveThird.payload?.run;
   if (!liveThird.ok ||
       thirdStatus?.sessionId !== liveIdentity.sessionId ||
+      thirdStatus?.memoryInstanceId !== liveIdentity.memoryInstanceId ||
       thirdStatus?.storeInstanceId !== liveIdentity.storeInstanceId ||
       thirdStatus?.engineInstanceId !== liveIdentity.engineInstanceId ||
       thirdStatus?.baseLinkCount !== liveIdentity.baseLinkCount ||
@@ -1294,6 +1307,8 @@ Promise.all([
   if (!liveRefreshed.ok ||
       liveRefreshed.status?.completedRuns !== 6 ||
       liveRefreshed.status?.sessionId !== liveIdentity.sessionId ||
+      liveRefreshed.status?.memoryInstanceId !==
+        liveIdentity.memoryInstanceId ||
       liveRefreshed.status?.engineInstanceId !==
         liveIdentity.engineInstanceId) {
     throw new Error("R4a retained Session status refresh mismatch");
@@ -1332,6 +1347,7 @@ Promise.all([
   }
   const steppedIdentity = {
     sessionId: steppedOpen.status.sessionId,
+    memoryInstanceId: steppedOpen.status.memoryInstanceId,
     storeInstanceId: steppedOpen.status.storeInstanceId,
     engineInstanceId: steppedOpen.status.engineInstanceId,
     baseLinkCount: steppedOpen.status.baseLinkCount,
@@ -1347,6 +1363,8 @@ Promise.all([
       stepBegin.payload?.begin?.sessionRunId !== 1 ||
       stepBegin.payload?.begin?.manifestRunId !== "live-step-mux1" ||
       stepBegin.payload?.status?.sessionId !== steppedIdentity.sessionId ||
+      stepBegin.payload?.status?.memoryInstanceId !==
+        steppedIdentity.memoryInstanceId ||
       stepBegin.payload?.status?.storeInstanceId !==
         steppedIdentity.storeInstanceId ||
       stepBegin.payload?.status?.engineInstanceId !==
@@ -1383,6 +1401,7 @@ Promise.all([
     const status = stepped.payload?.status;
     const report = stepped.payload?.step;
     if (status?.sessionId !== steppedIdentity.sessionId ||
+        status?.memoryInstanceId !== steppedIdentity.memoryInstanceId ||
         status?.storeInstanceId !== steppedIdentity.storeInstanceId ||
         status?.engineInstanceId !== steppedIdentity.engineInstanceId ||
         status?.baseLinkCount !== steppedIdentity.baseLinkCount ||

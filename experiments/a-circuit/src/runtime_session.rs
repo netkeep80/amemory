@@ -4,10 +4,16 @@ use amemory_optimized_cpu_probe::{
     },
     Handle, OptimizedLinkStore,
 };
+use super::session_contract::{
+    CapabilitySupportV1, RuntimeBackendV1, RuntimeSessionV1,
+    SessionCapabilitiesV1, SessionIdentityV1, SessionStateV1,
+    SESSION_CONTRACT_SCHEMA_VERSION,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 static NEXT_CPU_MEMORY_ID: AtomicU32 = AtomicU32::new(1);
+static NEXT_CPU_SESSION_ID: AtomicU32 = AtomicU32::new(1);
 
 /// One physical optimized-CPU A-memory instance.
 ///
@@ -30,20 +36,9 @@ impl CpuMemoryInstance {
     }
 }
 
-/// Execution-control state of one long-lived optimized-CPU A-memory Session.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub(crate) enum CpuSessionState {
-    Open,
-    Configured,
-    Running,
-    Quiescent,
-    Failed,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CpuSessionStepError {
-    InvalidState(CpuSessionState),
+    InvalidState(SessionStateV1),
     EngineFailure,
 }
 
@@ -418,11 +413,12 @@ pub(crate) struct CpuBoundedRunV1 {
 /// run-to-quiescence APIs are bounded loops over this primitive.
 #[derive(Debug)]
 pub(crate) struct CpuRuntimeSession {
+    pub(crate) id: String,
     pub(crate) memory: CpuMemoryInstance,
     pub(crate) engine: OptimizedStructuralEngine,
     pub(crate) base_link_count: usize,
     next_run_id: u64,
-    execution_state: CpuSessionState,
+    execution_state: SessionStateV1,
     active_run_id: Option<u64>,
     next_reaction_index: u32,
 }
@@ -433,19 +429,18 @@ impl CpuRuntimeSession {
         engine: OptimizedStructuralEngine,
         base_link_count: usize,
     ) -> Self {
+        let session_number =
+            NEXT_CPU_SESSION_ID.fetch_add(1, Ordering::SeqCst);
         Self {
+            id: format!("A-session#{}", session_number),
             memory,
             engine,
             base_link_count,
             next_run_id: 1,
-            execution_state: CpuSessionState::Open,
+            execution_state: SessionStateV1::Open,
             active_run_id: None,
             next_reaction_index: 0,
         }
-    }
-
-    pub(crate) fn execution_state(&self) -> CpuSessionState {
-        self.execution_state
     }
 
     pub(crate) fn begin_run(
@@ -454,7 +449,7 @@ impl CpuRuntimeSession {
     ) -> Result<u64, CpuSessionStepError> {
         if !matches!(
             self.execution_state,
-            CpuSessionState::Open | CpuSessionState::Quiescent
+            SessionStateV1::Open | SessionStateV1::Quiescent
         ) {
             return Err(CpuSessionStepError::InvalidState(
                 self.execution_state,
@@ -466,7 +461,7 @@ impl CpuRuntimeSession {
             .set_current(&self.memory.store, &[initial])
             .is_err()
         {
-            self.execution_state = CpuSessionState::Failed;
+            self.execution_state = SessionStateV1::Failed;
             return Err(CpuSessionStepError::EngineFailure);
         }
 
@@ -474,7 +469,7 @@ impl CpuRuntimeSession {
         self.next_run_id = self.next_run_id.saturating_add(1);
         self.active_run_id = Some(run_id);
         self.next_reaction_index = 0;
-        self.execution_state = CpuSessionState::Configured;
+        self.execution_state = SessionStateV1::Configured;
         Ok(run_id)
     }
 
@@ -484,7 +479,7 @@ impl CpuRuntimeSession {
     ) -> Result<CpuSessionStepOutcomeV1, CpuSessionStepError> {
         if !matches!(
             self.execution_state,
-            CpuSessionState::Configured | CpuSessionState::Running
+            SessionStateV1::Configured | SessionStateV1::Running
         ) {
             return Err(CpuSessionStepError::InvalidState(
                 self.execution_state,
@@ -494,7 +489,7 @@ impl CpuRuntimeSession {
         let run_id = match self.active_run_id {
             Some(run_id) => run_id,
             None => {
-                self.execution_state = CpuSessionState::Failed;
+                self.execution_state = SessionStateV1::Failed;
                 return Err(CpuSessionStepError::EngineFailure);
             }
         };
@@ -514,7 +509,7 @@ impl CpuRuntimeSession {
                     {
                         Ok(value) => value,
                         Err(_) => {
-                            self.execution_state = CpuSessionState::Failed;
+                            self.execution_state = SessionStateV1::Failed;
                             return Err(CpuSessionStepError::EngineFailure);
                         }
                     };
@@ -527,7 +522,7 @@ impl CpuRuntimeSession {
                     {
                         Ok(value) => value,
                         Err(_) => {
-                            self.execution_state = CpuSessionState::Failed;
+                            self.execution_state = SessionStateV1::Failed;
                             return Err(CpuSessionStepError::EngineFailure);
                         }
                     };
@@ -541,14 +536,14 @@ impl CpuRuntimeSession {
         self.next_reaction_index =
             self.next_reaction_index.saturating_add(1);
         self.execution_state = if quiescent {
-            CpuSessionState::Quiescent
+            SessionStateV1::Quiescent
         } else {
-            CpuSessionState::Running
+            SessionStateV1::Running
         };
 
         Ok(CpuSessionStepOutcomeV1 {
             reaction: CpuSessionReactionV1 {
-                session_id: self.memory.id.clone(),
+                session_id: self.id.clone(),
                 run_id,
                 reaction_index,
                 scope_before,
@@ -610,13 +605,90 @@ impl CpuRuntimeSession {
     }
 
     pub(crate) fn fail_active_run(&mut self) {
-        self.execution_state = CpuSessionState::Failed;
+        self.execution_state = SessionStateV1::Failed;
+    }
+}
+
+impl RuntimeSessionV1 for CpuRuntimeSession {
+    fn runtime_backend_v1(&self) -> RuntimeBackendV1 {
+        RuntimeBackendV1::OptimizedCpu
+    }
+
+    fn runtime_identity_v1(&self) -> SessionIdentityV1 {
+        SessionIdentityV1 {
+            memory_instance_id: self.memory.id.clone(),
+            session_id: self.id.clone(),
+        }
+    }
+
+    fn runtime_state_v1(&self) -> SessionStateV1 {
+        self.execution_state
+    }
+
+    fn runtime_capabilities_v1(&self) -> SessionCapabilitiesV1 {
+        SessionCapabilitiesV1 {
+            schema_version: SESSION_CONTRACT_SCHEMA_VERSION,
+            persistent_session: CapabilitySupportV1::Supported,
+            reconfigure_without_reload: CapabilitySupportV1::Supported,
+            step: CapabilitySupportV1::Supported,
+            run_to_quiescence: CapabilitySupportV1::Supported,
+            snapshot: CapabilitySupportV1::Supported,
+            profile: CapabilitySupportV1::Supported,
+            trace: CapabilitySupportV1::Supported,
+            explicit_close: CapabilitySupportV1::Unsupported,
+        }
+    }
+
+    fn runtime_base_link_count_v1(&self) -> u32 {
+        self.base_link_count as u32
+    }
+
+    fn runtime_current_link_count_v1(&self) -> u32 {
+        self.memory.store.link_count() as u32
+    }
+
+    fn runtime_scope_width_v1(&self) -> u32 {
+        self.engine.current().len() as u32
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cpu_session_exposes_distinct_neutral_identity_and_capabilities() {
+        let mut memory = CpuMemoryInstance::new();
+        memory.store.ensure_pair(1, 1).unwrap();
+        let base_link_count = memory.store.link_count();
+        let session = CpuRuntimeSession::new(
+            memory,
+            OptimizedStructuralEngine::new(8),
+            base_link_count,
+        );
+        let snapshot = session.runtime_snapshot_v1();
+
+        assert_eq!(snapshot.backend, RuntimeBackendV1::OptimizedCpu);
+        assert_ne!(
+            snapshot.identity.memory_instance_id,
+            snapshot.identity.session_id,
+        );
+        assert_eq!(snapshot.state, SessionStateV1::Open);
+        assert_eq!(snapshot.base_link_count, base_link_count as u32);
+        assert_eq!(snapshot.current_link_count, base_link_count as u32);
+        assert_eq!(
+            snapshot.capabilities.step,
+            CapabilitySupportV1::Supported,
+        );
+        assert_eq!(
+            snapshot.capabilities.reconfigure_without_reload,
+            CapabilitySupportV1::Supported,
+        );
+        assert_eq!(
+            snapshot.capabilities.explicit_close,
+            CapabilitySupportV1::Unsupported,
+        );
+    }
 
     #[test]
     fn budget_resource_reasons_are_distinct_and_deterministic() {
@@ -822,7 +894,7 @@ mod tests {
         assert_eq!(
             CpuRunStopReasonV1::from_step_error(
                 CpuSessionStepError::InvalidState(
-                    CpuSessionState::Quiescent,
+                    SessionStateV1::Quiescent,
                 ),
             ),
             CpuRunStopReasonV1::InvalidState,
