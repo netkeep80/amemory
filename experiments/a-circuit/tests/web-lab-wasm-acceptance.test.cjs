@@ -40,9 +40,25 @@ const c4InputEnd = gpuCarrierSource.indexOf(
 );
 const c4InputSource = gpuCarrierSource.slice(c4InputStart, c4InputEnd);
 const c4RunStart = gpuCarrierSource.indexOf(
-  "export async function runGpuCarrierReaction"
+  "async function runGpuCarrierReactionOnResidentBase"
 );
-const c4RunSource = gpuCarrierSource.slice(c4RunStart);
+const c4RunEnd = gpuCarrierSource.indexOf(
+  "export async function runGpuCarrierReaction",
+  c4RunStart
+);
+const c4RunSource = gpuCarrierSource.slice(c4RunStart, c4RunEnd);
+const c4WrapperSource = gpuCarrierSource.slice(c4RunEnd);
+for (const required of [
+  "openGpuCarrierResidentSession",
+  "resident.reaction(input",
+  "resident.close()",
+]) {
+  if (!c4WrapperSource.includes(required)) {
+    throw new Error(
+      "C4c3 one-shot wrapper bypassed resident Session: " + required
+    );
+  }
+}
 const c4DiscoveryReadback = c4RunSource.indexOf(
   "const d = await readLookupWords"
 );
