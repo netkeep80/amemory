@@ -1284,6 +1284,7 @@ function carrierReactionCommonShader(args) {
     "@compute @workgroup_size(1)",
     "fn discover(@builtin(global_invocation_id) id: vec3<u32>) {",
     "  if (id.x != 0u) { return; } var z = 0u; loop { if (z >= 42u) { break; } discovery[z] = 0u; z = z + 1u; }",
+    "  discovery[0] = 10u;",
     "  if (!valid_base(CURRENT) || !valid_base(INTERPRETER)) { discovery[0] = 2u; return; }",
     "  let grammar_theory = e(INTERPRETER); if (!valid_base(grammar_theory)) { discovery[0] = 3u; return; }",
     "  let theory = e(grammar_theory); let endpoint = e(CURRENT); if (!valid_base(theory) || !valid_base(endpoint)) { discovery[0] = 4u; return; }",
@@ -1474,26 +1475,48 @@ export async function runGpuCarrierReaction(
       ],
     });
 
-    const encoder = device.createCommandEncoder();
-    const discoverPass = encoder.beginComputePass();
+    const discoverEncoder = device.createCommandEncoder();
+    const discoverPass = discoverEncoder.beginComputePass();
     discoverPass.setPipeline(discoverPipeline);
     discoverPass.setBindGroup(0, discoverGroup);
     discoverPass.dispatchWorkgroups(1);
     discoverPass.end();
 
-    const publishPass = encoder.beginComputePass();
+    device.queue.submit([discoverEncoder.finish()]);
+    await device.queue.onSubmittedWorkDone();
+
+    // Diagnostic readback only. PUBLISH still consumes the same GPU-resident
+    // discovery storage buffer and is never seeded from this host copy.
+    const d = await readLookupWords(device, discovery, 42);
+    if ((d[0] >>> 0) !== 1) {
+      throw new Error(
+        "WebGPU DISCOVER failed closed with status " + (d[0] >>> 0) +
+        " current=" + (d[2] >>> 0) +
+        " interpreter=" + (d[3] >>> 0) +
+        " theory=" + (d[4] >>> 0) +
+        " trigger=" + (d[5] >>> 0) +
+        " rule=" + (d[6] >>> 0) +
+        " admission=" + (d[7] >>> 0) +
+        " roles=" + (d[8] >>> 0) +
+        " outputTemplate=" + (d[9] >>> 0),
+      );
+    }
+
+    const publishEncoder = device.createCommandEncoder();
+    const publishPass = publishEncoder.beginComputePass();
     publishPass.setPipeline(publishPipeline);
     publishPass.setBindGroup(0, publishGroup);
     publishPass.dispatchWorkgroups(1);
     publishPass.end();
 
-    device.queue.submit([encoder.finish()]);
+    device.queue.submit([publishEncoder.finish()]);
     await device.queue.onSubmittedWorkDone();
 
-    const [d, o] = await Promise.all([
-      readLookupWords(device, discovery, 42),
-      readLookupWords(device, overlay, 4 + maxAppend * 2),
-    ]);
+    const o = await readLookupWords(
+      device,
+      overlay,
+      4 + maxAppend * 2,
+    );
     const appendCount = o[0] >>> 0;
     const appendStarts = [];
     const appendEnds = [];
