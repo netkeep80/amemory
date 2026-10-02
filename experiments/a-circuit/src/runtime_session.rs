@@ -5,11 +5,13 @@ use amemory_optimized_cpu_probe::{
     Handle, OptimizedLinkStore,
 };
 use super::session_contract::{
-    CapabilitySupportV1, RuntimeBackendV1, RuntimeSessionV1,
+    BackendResourceAccountingV1, CapabilitySupportV1,
+    RunBudgetAccountingV1, RunBudgetV1, RunStopReasonV1,
+    RunWorkUsageV1, RuntimeBackendV1, RuntimeSessionV1,
+    RUN_BUDGET_SCHEMA_VERSION,
     SessionCapabilitiesV1, SessionIdentityV1, SessionStateV1,
-    SESSION_CONTRACT_SCHEMA_VERSION,
+    RUN_BUDGET_ACCOUNTING_SCHEMA_VERSION, SESSION_CONTRACT_SCHEMA_VERSION,
 };
-use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 static NEXT_CPU_MEMORY_ID: AtomicU32 = AtomicU32::new(1);
@@ -70,110 +72,36 @@ pub(crate) struct CpuSessionStepOutcomeV1 {
     pub(crate) structural_trace: Option<StructuralRunTrace>,
 }
 
-pub(crate) const CPU_RUN_BUDGET_SCHEMA_VERSION: u32 = 2;
-pub(crate) const DEFAULT_MAX_APPENDED_LINKS_PER_RUN: u32 = 1_000_000;
-pub(crate) const DEFAULT_MAX_TOTAL_LINKS: u32 = 2_000_000;
-pub(crate) const DEFAULT_MAX_SCOPE_WIDTH: u32 = 65_536;
-pub(crate) const DEFAULT_MAX_MATCH_CANDIDATES: u64 = 1_000_000_000;
-pub(crate) const DEFAULT_MAX_UNIFICATION_NODES: u64 = 1_000_000_000;
-pub(crate) const DEFAULT_MAX_INSTANTIATION_NODES: u64 = 1_000_000_000;
-pub(crate) const DEFAULT_MAX_DENSE_CARRIER_BYTES: u64 = 256 * 1024 * 1024;
+pub(crate) const DEFAULT_MAX_DENSE_CARRIER_BYTES: u64 =
+    256 * 1024 * 1024;
 
-fn default_max_dense_carrier_bytes() -> u64 {
-    DEFAULT_MAX_DENSE_CARRIER_BYTES
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct CpuRunBudgetV1 {
-    pub(crate) schema_version: u32,
-    pub(crate) max_reactions: u32,
-    pub(crate) max_appended_links: u32,
-    pub(crate) max_total_links: u32,
-    pub(crate) max_scope_width: u32,
-    pub(crate) max_match_candidates: u64,
-    pub(crate) max_unification_nodes: u64,
-    pub(crate) max_instantiation_nodes: u64,
-    #[serde(default = "default_max_dense_carrier_bytes")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CpuRunResourceBudgetV1 {
     pub(crate) max_dense_carrier_bytes: u64,
 }
 
-impl CpuRunBudgetV1 {
-    pub(crate) fn scenario_default(max_reactions: u32) -> Self {
+impl Default for CpuRunResourceBudgetV1 {
+    fn default() -> Self {
         Self {
-            schema_version: CPU_RUN_BUDGET_SCHEMA_VERSION,
-            max_reactions,
-            max_appended_links: DEFAULT_MAX_APPENDED_LINKS_PER_RUN,
-            max_total_links: DEFAULT_MAX_TOTAL_LINKS,
-            max_scope_width: DEFAULT_MAX_SCOPE_WIDTH,
-            max_match_candidates: DEFAULT_MAX_MATCH_CANDIDATES,
-            max_unification_nodes: DEFAULT_MAX_UNIFICATION_NODES,
-            max_instantiation_nodes: DEFAULT_MAX_INSTANTIATION_NODES,
             max_dense_carrier_bytes: DEFAULT_MAX_DENSE_CARRIER_BYTES,
         }
     }
+}
 
-    fn resource_stop_reason(
-        self,
-        links_before_run: u32,
-        links_now: u32,
-        scope_width: u32,
-    ) -> Option<CpuRunStopReasonV1> {
-        if links_now > self.max_total_links {
-            return Some(CpuRunStopReasonV1::TotalLinksBudgetExceeded);
-        }
-        if links_now.saturating_sub(links_before_run)
-            > self.max_appended_links
-        {
-            return Some(
-                CpuRunStopReasonV1::AppendedLinksBudgetExceeded,
-            );
-        }
-        if scope_width > self.max_scope_width {
-            return Some(CpuRunStopReasonV1::ScopeWidthBudgetExceeded);
-        }
-        None
-    }
-
+impl CpuRunResourceBudgetV1 {
     fn carrier_stop_reason(
         self,
         dense_carrier_allocated_bytes: u64,
-    ) -> Option<CpuRunStopReasonV1> {
+    ) -> Option<RunStopReasonV1> {
         if dense_carrier_allocated_bytes > self.max_dense_carrier_bytes {
-            return Some(CpuRunStopReasonV1::CarrierBytesBudgetExceeded);
+            Some(RunStopReasonV1::CarrierBytesBudgetExceeded)
+        } else {
+            None
         }
-        None
-    }
-
-    fn work_stop_reason(
-        self,
-        usage: CpuRunWorkUsageV1,
-    ) -> Option<CpuRunStopReasonV1> {
-        if usage.match_candidates > self.max_match_candidates {
-            return Some(CpuRunStopReasonV1::MatchWorkBudgetExceeded);
-        }
-        if usage.unification_nodes > self.max_unification_nodes {
-            return Some(
-                CpuRunStopReasonV1::UnificationWorkBudgetExceeded,
-            );
-        }
-        if usage.instantiation_nodes > self.max_instantiation_nodes {
-            return Some(
-                CpuRunStopReasonV1::InstantiationWorkBudgetExceeded,
-            );
-        }
-        None
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct CpuRunWorkUsageV1 {
-    pub(crate) match_candidates: u64,
-    pub(crate) unification_nodes: u64,
-    pub(crate) instantiation_nodes: u64,
-}
-
-impl CpuRunWorkUsageV1 {
+impl RunWorkUsageV1 {
     fn accumulate(&mut self, profile: &StructuralRunProfile) {
         self.match_candidates = self
             .match_candidates
@@ -187,84 +115,59 @@ impl CpuRunWorkUsageV1 {
     }
 }
 
-pub(crate) const CPU_RUN_BUDGET_ACCOUNTING_SCHEMA_VERSION: u32 = 1;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct CpuRunBudgetAccountingV1 {
-    pub(crate) schema_version: u32,
-    pub(crate) reactions_consumed: u32,
-    pub(crate) max_reactions: u32,
-    pub(crate) appended_links_consumed: u32,
-    pub(crate) max_appended_links: u32,
-    pub(crate) total_links: u32,
-    pub(crate) max_total_links: u32,
-    pub(crate) scope_width: u32,
-    pub(crate) max_scope_width: u32,
-    pub(crate) match_candidates: u64,
-    pub(crate) max_match_candidates: u64,
-    pub(crate) unification_nodes: u64,
-    pub(crate) max_unification_nodes: u64,
-    pub(crate) instantiation_nodes: u64,
-    pub(crate) max_instantiation_nodes: u64,
-    pub(crate) dense_carrier_allocated_bytes: u64,
-    pub(crate) max_dense_carrier_bytes: u64,
-    pub(crate) full_resident_bytes_available: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub(crate) enum CpuRunStopReasonV1 {
-    Quiescent,
-    ReactionBudgetExceeded,
-    AppendedLinksBudgetExceeded,
-    TotalLinksBudgetExceeded,
-    ScopeWidthBudgetExceeded,
-    MatchWorkBudgetExceeded,
-    UnificationWorkBudgetExceeded,
-    InstantiationWorkBudgetExceeded,
-    CarrierBytesBudgetExceeded,
-    EngineFailure,
-    InvalidState,
-}
-
-impl CpuRunStopReasonV1 {
-    pub(crate) fn from_step_error(error: CpuSessionStepError) -> Self {
-        match error {
-            CpuSessionStepError::InvalidState(_) => Self::InvalidState,
-            CpuSessionStepError::EngineFailure => Self::EngineFailure,
-        }
+fn run_stop_reason_from_step_error(
+    error: CpuSessionStepError,
+) -> RunStopReasonV1 {
+    match error {
+        CpuSessionStepError::InvalidState(_) => RunStopReasonV1::InvalidState,
+        CpuSessionStepError::EngineFailure => RunStopReasonV1::EngineFailure,
     }
 }
 
 #[derive(Debug)]
 pub(crate) struct CpuControlledStepV1 {
     pub(crate) step: Option<CpuSessionStepOutcomeV1>,
-    pub(crate) stop_reason: Option<CpuRunStopReasonV1>,
-    pub(crate) budget_accounting: CpuRunBudgetAccountingV1,
+    pub(crate) stop_reason: Option<RunStopReasonV1>,
+    pub(crate) budget_accounting: RunBudgetAccountingV1,
 }
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct CpuRunControllerV1 {
-    budget: CpuRunBudgetV1,
+    budget: RunBudgetV1,
+    resource_budget: CpuRunResourceBudgetV1,
     run_id: u64,
     links_before_run: u32,
     steps_taken: u32,
-    work_usage: CpuRunWorkUsageV1,
+    work_usage: RunWorkUsageV1,
 }
 
 impl CpuRunControllerV1 {
     fn new(
-        budget: CpuRunBudgetV1,
+        budget: RunBudgetV1,
+        run_id: u64,
+        links_before_run: u32,
+    ) -> Self {
+        Self::new_with_resource_budget(
+            budget,
+            CpuRunResourceBudgetV1::default(),
+            run_id,
+            links_before_run,
+        )
+    }
+
+    fn new_with_resource_budget(
+        budget: RunBudgetV1,
+        resource_budget: CpuRunResourceBudgetV1,
         run_id: u64,
         links_before_run: u32,
     ) -> Self {
         Self {
             budget,
+            resource_budget,
             run_id,
             links_before_run,
             steps_taken: 0,
-            work_usage: CpuRunWorkUsageV1::default(),
+            work_usage: RunWorkUsageV1::default(),
         }
     }
 
@@ -279,10 +182,10 @@ impl CpuRunControllerV1 {
     pub(crate) fn budget_accounting(
         &self,
         session: &CpuRuntimeSession,
-    ) -> CpuRunBudgetAccountingV1 {
+    ) -> RunBudgetAccountingV1 {
         let total_links = session.memory.store.link_count() as u32;
-        CpuRunBudgetAccountingV1 {
-            schema_version: CPU_RUN_BUDGET_ACCOUNTING_SCHEMA_VERSION,
+        RunBudgetAccountingV1 {
+            schema_version: RUN_BUDGET_ACCOUNTING_SCHEMA_VERSION,
             reactions_consumed: self.steps_taken,
             max_reactions: self.budget.max_reactions,
             appended_links_consumed:
@@ -298,12 +201,17 @@ impl CpuRunControllerV1 {
             max_unification_nodes: self.budget.max_unification_nodes,
             instantiation_nodes: self.work_usage.instantiation_nodes,
             max_instantiation_nodes: self.budget.max_instantiation_nodes,
-            dense_carrier_allocated_bytes: session
-                .memory
-                .store
-                .dense_carrier_index_allocated_bytes(),
-            max_dense_carrier_bytes: self.budget.max_dense_carrier_bytes,
-            full_resident_bytes_available: false,
+            backend_resource: Some(
+                BackendResourceAccountingV1::OptimizedCpuDenseCarrier {
+                    dense_carrier_allocated_bytes: session
+                        .memory
+                        .store
+                        .dense_carrier_index_allocated_bytes(),
+                    max_dense_carrier_bytes:
+                        self.resource_budget.max_dense_carrier_bytes,
+                    full_resident_bytes_available: false,
+                },
+            ),
         }
     }
 
@@ -311,7 +219,7 @@ impl CpuRunControllerV1 {
         &self,
         session: &CpuRuntimeSession,
         step: Option<CpuSessionStepOutcomeV1>,
-        stop_reason: CpuRunStopReasonV1,
+        stop_reason: RunStopReasonV1,
     ) -> CpuControlledStepV1 {
         CpuControlledStepV1 {
             step,
@@ -325,7 +233,7 @@ impl CpuRunControllerV1 {
         session: &mut CpuRuntimeSession,
         trace_mode: CpuRuntimeTraceMode,
     ) -> CpuControlledStepV1 {
-        if let Some(reason) = self.budget.carrier_stop_reason(
+        if let Some(reason) = self.resource_budget.carrier_stop_reason(
             session.memory.store.dense_carrier_index_allocated_bytes(),
         ) {
             session.fail_active_run();
@@ -346,7 +254,7 @@ impl CpuRunControllerV1 {
             return self.stopped(
                 session,
                 None,
-                CpuRunStopReasonV1::ReactionBudgetExceeded,
+                RunStopReasonV1::ReactionBudgetExceeded,
             );
         }
 
@@ -357,7 +265,7 @@ impl CpuRunControllerV1 {
                 return self.stopped(
                     session,
                     None,
-                    CpuRunStopReasonV1::from_step_error(error),
+                    run_stop_reason_from_step_error(error),
                 );
             }
         };
@@ -373,7 +281,7 @@ impl CpuRunControllerV1 {
             return self.stopped(session, Some(step), reason);
         }
 
-        if let Some(reason) = self.budget.carrier_stop_reason(
+        if let Some(reason) = self.resource_budget.carrier_stop_reason(
             session.memory.store.dense_carrier_index_allocated_bytes(),
         ) {
             session.fail_active_run();
@@ -388,7 +296,7 @@ impl CpuRunControllerV1 {
         let stop_reason = step
             .reaction
             .quiescent
-            .then_some(CpuRunStopReasonV1::Quiescent);
+            .then_some(RunStopReasonV1::Quiescent);
         CpuControlledStepV1 {
             step: Some(step),
             stop_reason,
@@ -402,8 +310,8 @@ pub(crate) struct CpuBoundedRunV1 {
     pub(crate) run_id: u64,
     pub(crate) links_before_run: u32,
     pub(crate) steps: Vec<CpuSessionStepOutcomeV1>,
-    pub(crate) stop_reason: CpuRunStopReasonV1,
-    pub(crate) budget_accounting: CpuRunBudgetAccountingV1,
+    pub(crate) stop_reason: RunStopReasonV1,
+    pub(crate) budget_accounting: RunBudgetAccountingV1,
 }
 
 /// Long-lived optimized-CPU execution Session over one loaded A-memory.
@@ -563,11 +471,25 @@ impl CpuRuntimeSession {
     pub(crate) fn begin_budgeted_run(
         &mut self,
         initial: Handle,
-        budget: CpuRunBudgetV1,
+        budget: RunBudgetV1,
+    ) -> Result<CpuRunControllerV1, CpuSessionStepError> {
+        self.begin_budgeted_run_with_resource_budget(
+            initial,
+            budget,
+            CpuRunResourceBudgetV1::default(),
+        )
+    }
+
+    pub(crate) fn begin_budgeted_run_with_resource_budget(
+        &mut self,
+        initial: Handle,
+        budget: RunBudgetV1,
+        resource_budget: CpuRunResourceBudgetV1,
     ) -> Result<CpuRunControllerV1, CpuSessionStepError> {
         let run_id = self.begin_run(initial)?;
-        Ok(CpuRunControllerV1::new(
+        Ok(CpuRunControllerV1::new_with_resource_budget(
             budget,
+            resource_budget,
             run_id,
             self.memory.store.link_count() as u32,
         ))
@@ -576,12 +498,31 @@ impl CpuRuntimeSession {
     pub(crate) fn run_to_quiescence(
         &mut self,
         initial: Handle,
-        budget: CpuRunBudgetV1,
+        budget: RunBudgetV1,
         trace_mode: CpuRuntimeTraceMode,
-    ) -> Result<CpuBoundedRunV1, CpuRunStopReasonV1> {
+    ) -> Result<CpuBoundedRunV1, RunStopReasonV1> {
+        self.run_to_quiescence_with_resource_budget(
+            initial,
+            budget,
+            CpuRunResourceBudgetV1::default(),
+            trace_mode,
+        )
+    }
+
+    pub(crate) fn run_to_quiescence_with_resource_budget(
+        &mut self,
+        initial: Handle,
+        budget: RunBudgetV1,
+        resource_budget: CpuRunResourceBudgetV1,
+        trace_mode: CpuRuntimeTraceMode,
+    ) -> Result<CpuBoundedRunV1, RunStopReasonV1> {
         let mut controller = self
-            .begin_budgeted_run(initial, budget)
-            .map_err(CpuRunStopReasonV1::from_step_error)?;
+            .begin_budgeted_run_with_resource_budget(
+                initial,
+                budget,
+                resource_budget,
+            )
+            .map_err(run_stop_reason_from_step_error)?;
         let run_id = controller.run_id();
         let links_before_run = controller.links_before_run();
         let mut steps = Vec::new();
@@ -692,8 +633,8 @@ mod tests {
 
     #[test]
     fn budget_resource_reasons_are_distinct_and_deterministic() {
-        let budget = CpuRunBudgetV1 {
-            schema_version: CPU_RUN_BUDGET_SCHEMA_VERSION,
+        let budget = RunBudgetV1 {
+            schema_version: RUN_BUDGET_SCHEMA_VERSION,
             max_reactions: 8,
             max_appended_links: 5,
             max_total_links: 20,
@@ -701,28 +642,27 @@ mod tests {
             max_match_candidates: 100,
             max_unification_nodes: 100,
             max_instantiation_nodes: 100,
-            max_dense_carrier_bytes: 1_000,
         };
 
         assert_eq!(
             budget.resource_stop_reason(10, 21, 1),
-            Some(CpuRunStopReasonV1::TotalLinksBudgetExceeded),
+            Some(RunStopReasonV1::TotalLinksBudgetExceeded),
         );
         assert_eq!(
             budget.resource_stop_reason(10, 16, 1),
-            Some(CpuRunStopReasonV1::AppendedLinksBudgetExceeded),
+            Some(RunStopReasonV1::AppendedLinksBudgetExceeded),
         );
         assert_eq!(
             budget.resource_stop_reason(10, 15, 4),
-            Some(CpuRunStopReasonV1::ScopeWidthBudgetExceeded),
+            Some(RunStopReasonV1::ScopeWidthBudgetExceeded),
         );
         assert_eq!(budget.resource_stop_reason(10, 15, 3), None);
     }
 
     #[test]
     fn budget_work_reasons_are_distinct_and_deterministic() {
-        let budget = CpuRunBudgetV1 {
-            schema_version: CPU_RUN_BUDGET_SCHEMA_VERSION,
+        let budget = RunBudgetV1 {
+            schema_version: RUN_BUDGET_SCHEMA_VERSION,
             max_reactions: 8,
             max_appended_links: 5,
             max_total_links: 20,
@@ -730,32 +670,31 @@ mod tests {
             max_match_candidates: 10,
             max_unification_nodes: 20,
             max_instantiation_nodes: 30,
-            max_dense_carrier_bytes: 1_000,
         };
 
         assert_eq!(
-            budget.work_stop_reason(CpuRunWorkUsageV1 {
+            budget.work_stop_reason(RunWorkUsageV1 {
                 match_candidates: 11,
-                ..CpuRunWorkUsageV1::default()
+                ..RunWorkUsageV1::default()
             }),
-            Some(CpuRunStopReasonV1::MatchWorkBudgetExceeded),
+            Some(RunStopReasonV1::MatchWorkBudgetExceeded),
         );
         assert_eq!(
-            budget.work_stop_reason(CpuRunWorkUsageV1 {
+            budget.work_stop_reason(RunWorkUsageV1 {
                 unification_nodes: 21,
-                ..CpuRunWorkUsageV1::default()
+                ..RunWorkUsageV1::default()
             }),
-            Some(CpuRunStopReasonV1::UnificationWorkBudgetExceeded),
+            Some(RunStopReasonV1::UnificationWorkBudgetExceeded),
         );
         assert_eq!(
-            budget.work_stop_reason(CpuRunWorkUsageV1 {
+            budget.work_stop_reason(RunWorkUsageV1 {
                 instantiation_nodes: 31,
-                ..CpuRunWorkUsageV1::default()
+                ..RunWorkUsageV1::default()
             }),
-            Some(CpuRunStopReasonV1::InstantiationWorkBudgetExceeded),
+            Some(RunStopReasonV1::InstantiationWorkBudgetExceeded),
         );
         assert_eq!(
-            budget.work_stop_reason(CpuRunWorkUsageV1 {
+            budget.work_stop_reason(RunWorkUsageV1 {
                 match_candidates: 10,
                 unification_nodes: 20,
                 instantiation_nodes: 30,
@@ -765,18 +704,11 @@ mod tests {
     }
 
     #[test]
-    fn budget_v2_without_new_byte_field_uses_finite_default() {
-        let mut legacy =
-            serde_json::to_value(CpuRunBudgetV1::scenario_default(8)).unwrap();
-        legacy
-            .as_object_mut()
-            .unwrap()
-            .remove("maxDenseCarrierBytes");
-        let decoded: CpuRunBudgetV1 = serde_json::from_value(legacy).unwrap();
-        assert_eq!(
-            decoded.max_dense_carrier_bytes,
-            DEFAULT_MAX_DENSE_CARRIER_BYTES,
-        );
+    fn common_run_budget_schema_has_no_cpu_dense_carrier_field() {
+        let budget = RunBudgetV1::scenario_default(8);
+        let json = serde_json::to_value(budget).unwrap();
+        assert_eq!(budget.schema_version, super::RUN_BUDGET_SCHEMA_VERSION);
+        assert!(json.get("maxDenseCarrierBytes").is_none());
     }
 
     #[test]
@@ -788,7 +720,7 @@ mod tests {
             OptimizedStructuralEngine::new(8),
             1,
         );
-        let budget = CpuRunBudgetV1 {
+        let budget = RunBudgetV1 {
             max_reactions: 7,
             max_appended_links: 11,
             max_total_links: 22,
@@ -796,13 +728,19 @@ mod tests {
             max_match_candidates: 44,
             max_unification_nodes: 55,
             max_instantiation_nodes: 66,
-            max_dense_carrier_bytes: 77_777,
-            ..CpuRunBudgetV1::scenario_default(7)
+            ..RunBudgetV1::scenario_default(7)
         };
-        let controller = session.begin_budgeted_run(initial, budget).unwrap();
+        let controller = session
+            .begin_budgeted_run_with_resource_budget(
+                initial,
+                budget,
+                CpuRunResourceBudgetV1 {
+                    max_dense_carrier_bytes: 77_777,
+                },
+            )
+            .unwrap();
         let accounting = controller.budget_accounting(&session);
 
-        assert_eq!(accounting.schema_version, 1);
         assert_eq!(accounting.reactions_consumed, 0);
         assert_eq!(accounting.max_reactions, 7);
         assert_eq!(accounting.appended_links_consumed, 0);
@@ -817,20 +755,26 @@ mod tests {
         assert_eq!(accounting.max_unification_nodes, 55);
         assert_eq!(accounting.instantiation_nodes, 0);
         assert_eq!(accounting.max_instantiation_nodes, 66);
-        assert_eq!(accounting.max_dense_carrier_bytes, 77_777);
-        assert!(!accounting.full_resident_bytes_available);
+        assert_eq!(accounting.schema_version, RUN_BUDGET_ACCOUNTING_SCHEMA_VERSION);
+        assert!(matches!(
+            accounting.backend_resource,
+            Some(BackendResourceAccountingV1::OptimizedCpuDenseCarrier {
+                max_dense_carrier_bytes: 77_777,
+                full_resident_bytes_available: false,
+                ..
+            })
+        ));
     }
 
     #[test]
-    fn carrier_byte_reason_is_exact_and_resident_bytes_are_not_claimed() {
-        let budget = CpuRunBudgetV1 {
+    fn carrier_byte_reason_is_cpu_physical_and_exact() {
+        let budget = CpuRunResourceBudgetV1 {
             max_dense_carrier_bytes: 99,
-            ..CpuRunBudgetV1::scenario_default(8)
         };
         assert_eq!(budget.carrier_stop_reason(99), None);
         assert_eq!(
             budget.carrier_stop_reason(100),
-            Some(CpuRunStopReasonV1::CarrierBytesBudgetExceeded),
+            Some(RunStopReasonV1::CarrierBytesBudgetExceeded),
         );
     }
 
@@ -847,66 +791,66 @@ mod tests {
     #[test]
     fn stop_reasons_are_stable_machine_values() {
         assert_eq!(
-            serde_json::to_string(&CpuRunStopReasonV1::Quiescent).unwrap(),
+            serde_json::to_string(&RunStopReasonV1::Quiescent).unwrap(),
             "\"QUIESCENT\"",
         );
         assert_eq!(
             serde_json::to_string(
-                &CpuRunStopReasonV1::ReactionBudgetExceeded,
+                &RunStopReasonV1::ReactionBudgetExceeded,
             )
             .unwrap(),
             "\"REACTION_BUDGET_EXCEEDED\"",
         );
         assert_eq!(
             serde_json::to_string(
-                &CpuRunStopReasonV1::MatchWorkBudgetExceeded,
+                &RunStopReasonV1::MatchWorkBudgetExceeded,
             )
             .unwrap(),
             "\"MATCH_WORK_BUDGET_EXCEEDED\"",
         );
         assert_eq!(
             serde_json::to_string(
-                &CpuRunStopReasonV1::UnificationWorkBudgetExceeded,
+                &RunStopReasonV1::UnificationWorkBudgetExceeded,
             )
             .unwrap(),
             "\"UNIFICATION_WORK_BUDGET_EXCEEDED\"",
         );
         assert_eq!(
             serde_json::to_string(
-                &CpuRunStopReasonV1::InstantiationWorkBudgetExceeded,
+                &RunStopReasonV1::InstantiationWorkBudgetExceeded,
             )
             .unwrap(),
             "\"INSTANTIATION_WORK_BUDGET_EXCEEDED\"",
         );
         assert_eq!(
             serde_json::to_string(
-                &CpuRunStopReasonV1::CarrierBytesBudgetExceeded,
+                &RunStopReasonV1::CarrierBytesBudgetExceeded,
             )
             .unwrap(),
             "\"CARRIER_BYTES_BUDGET_EXCEEDED\"",
         );
         assert_eq!(
-            CpuRunStopReasonV1::from_step_error(
+            run_stop_reason_from_step_error(
                 CpuSessionStepError::EngineFailure,
             ),
-            CpuRunStopReasonV1::EngineFailure,
+            RunStopReasonV1::EngineFailure,
         );
         assert_eq!(
-            CpuRunStopReasonV1::from_step_error(
+            run_stop_reason_from_step_error(
                 CpuSessionStepError::InvalidState(
                     SessionStateV1::Quiescent,
                 ),
             ),
-            CpuRunStopReasonV1::InvalidState,
+            RunStopReasonV1::InvalidState,
         );
     }
 
     #[test]
     fn scenario_budget_policy_is_versioned_and_finite() {
-        let budget = CpuRunBudgetV1::scenario_default(64);
+        let budget = RunBudgetV1::scenario_default(64);
         assert_eq!(
             budget.schema_version,
-            CPU_RUN_BUDGET_SCHEMA_VERSION,
+            RUN_BUDGET_SCHEMA_VERSION,
         );
         assert_eq!(budget.max_reactions, 64);
         assert!(budget.max_appended_links < u32::MAX);
@@ -915,6 +859,5 @@ mod tests {
         assert!(budget.max_match_candidates < u64::MAX);
         assert!(budget.max_unification_nodes < u64::MAX);
         assert!(budget.max_instantiation_nodes < u64::MAX);
-        assert!(budget.max_dense_carrier_bytes < u64::MAX);
     }
 }
