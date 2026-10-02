@@ -106,6 +106,9 @@ for (const mode of ["single", "sections"]) {
     "role_count - role_left - 1u",
     "roles[role_left] = roles[role_right]",
     "discovery[0] = 10u",
+    "discovery[9] = 20u",
+    "discovery[9] = 27u",
+    "discovery[9] = 30u",
   ]) {
     if (!shader.includes(marker)) {
       throw new Error("C4c3 WGSL lost canonical role order: " + marker);
