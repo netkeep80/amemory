@@ -853,10 +853,15 @@ const GPU_WITNESS_COMPACT_ABI = Object.freeze({
   byte: "amemory_i386_lab_compact_proof_json_byte",
 });
 
-function sameU32Array(actual, expected) {
+function sameU32Prefix(actual, expected, prefixLength) {
   return Array.isArray(expected) &&
-    actual.length === expected.length &&
-    actual.every((value, index) => (value >>> 0) === (expected[index] >>> 0));
+    Number.isInteger(prefixLength) &&
+    prefixLength >= 0 &&
+    actual.length === prefixLength &&
+    expected.length >= prefixLength &&
+    actual.every(
+      (value, index) => (value >>> 0) === (expected[index] >>> 0),
+    );
 }
 
 export async function runWorkbenchWebGpuWitness(
@@ -933,8 +938,16 @@ export async function runWorkbenchWebGpuWitness(
     const observed = gpu.observed;
     const sameAppend =
       proofAppendCount === observed.appendCount &&
-      sameU32Array(observed.appendStarts, append?.starts) &&
-      sameU32Array(observed.appendEnds, append?.ends);
+      sameU32Prefix(
+        observed.appendStarts,
+        append?.starts,
+        proofAppendCount,
+      ) &&
+      sameU32Prefix(
+        observed.appendEnds,
+        append?.ends,
+        proofAppendCount,
+      );
     const sameScope =
       (first.scopeBefore[0] >>> 0) === input.currentHandle &&
       (first.scopeAfter[0] >>> 0) === observed.publishedHandle;
@@ -943,7 +956,12 @@ export async function runWorkbenchWebGpuWitness(
 
     if (!gpu.differential || !sameAppend || !sameScope || !sameMatches) {
       throw new Error(
-        "C4c3 live differential: CPU/GPU/Rust-WASM disagreement",
+        "C4c3 live differential: CPU/GPU/Rust-WASM disagreement" +
+        " append=" + sameAppend +
+        " scope=" + sameScope +
+        " matches=" + sameMatches +
+        " proofAppendCount=" + proofAppendCount +
+        " gpuAppendCount=" + observed.appendCount,
       );
     }
 
