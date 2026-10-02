@@ -206,14 +206,25 @@ try {
   if (witness?.status !== "verified" ||
       witness?.tripleDifferential !== true ||
       witness?.cpuGpuDifferential !== true ||
+      witness?.sequentialResidentExecution !== true ||
       witness?.residentBaseReuse !== true ||
       witness?.baseUploadCount !== 1 ||
       witness?.reactionDispatchCount !== 2 ||
       !Number.isInteger(witness?.baseUploadBytes) ||
       witness.baseUploadBytes <= 0 ||
-      witness?.publishedHandle !== witness?.rustWasmScopeAfter ||
-      !Number.isInteger(witness?.appendCount) ||
-      witness.appendCount <= 0) {
+      !Number.isInteger(witness?.residentBufferBytes) ||
+      witness.residentBufferBytes <= 0 ||
+      !Number.isInteger(witness?.residentAppendCount) ||
+      witness.residentAppendCount <= 0 ||
+      witness?.reaction0PublishedHandle !== witness?.rustWasmScope1 ||
+      witness?.reaction1CurrentHandle !== witness?.reaction0PublishedHandle ||
+      witness?.reaction1PublishedHandle !== witness?.rustWasmScope2 ||
+      !Number.isInteger(witness?.reaction0AppendCount) ||
+      witness.reaction0AppendCount <= 0 ||
+      !Number.isInteger(witness?.reaction1AppendCount) ||
+      witness.reaction1AppendCount <= 0 ||
+      witness.residentAppendCount !==
+        witness.reaction0AppendCount + witness.reaction1AppendCount) {
     throw new Error(
       "live C4c3 WebGPU witness failed: " +
       JSON.stringify(witness) + "\nChrome:\n" + stderr,
@@ -224,9 +235,11 @@ try {
     "PAGES_WEBGPU_C4C3=PASS source=" +
     expectedSha.slice(0, 12) +
     " mode=" + witness.planMode +
-    " rule=L" + witness.ruleHandle +
-    " scope=L" + witness.publishedHandle +
-    " append=" + witness.appendCount +
+    " scope1=L" + witness.reaction0PublishedHandle +
+    " scope2=L" + witness.reaction1PublishedHandle +
+    " append0=" + witness.reaction0AppendCount +
+    " append1=" + witness.reaction1AppendCount +
+    " resident=" + witness.residentAppendCount +
     " uploads=" + witness.baseUploadCount +
     " dispatches=" + witness.reactionDispatchCount,
   );
