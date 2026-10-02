@@ -12,6 +12,21 @@ import { gpuCarrierReactionShaderSource } from "../../browser-accelerator/web/gp
 
 const root = process.cwd();
 
+const gpuCarrierSource = fs.readFileSync(
+  path.join(root, "experiments/browser-accelerator/web/gpu-carrier.mjs"),
+  "utf8",
+);
+for (const required of [
+  "const discoverEncoder = device.createCommandEncoder()",
+  "const publishEncoder = device.createCommandEncoder()",
+  "Diagnostic readback only",
+  "WebGPU DISCOVER failed closed with status",
+]) {
+  if (!gpuCarrierSource.includes(required)) {
+    throw new Error("C4c3 split GPU submission contract missing: " + required);
+  }
+}
+
 const workbenchSource = fs.readFileSync(
   path.join(root, "experiments/browser-accelerator/web/workbench.mjs"),
   "utf8",
@@ -90,6 +105,7 @@ for (const mode of ["single", "sections"]) {
     "var role_left = 0u",
     "role_count - role_left - 1u",
     "roles[role_left] = roles[role_right]",
+    "discovery[0] = 10u",
   ]) {
     if (!shader.includes(marker)) {
       throw new Error("C4c3 WGSL lost canonical role order: " + marker);
