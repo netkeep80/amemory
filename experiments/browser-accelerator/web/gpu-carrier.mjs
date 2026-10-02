@@ -1657,7 +1657,8 @@ async function runGpuCarrierReactionOnResidentBase(
     await device.queue.onSubmittedWorkDone();
 
     // Diagnostic readback only. PUBLISH consumes the same GPU-resident
-    // discovery buffer; neither CPU facts nor proof data seed GPU execution.
+    // discovery buffer. These CPU facts never seed, filter or retry GPU execution.
+    // Proof data is likewise unavailable to the executor before readback.
     const d = await readLookupWords(device, discovery, 67);
     if ((d[0] >>> 0) !== 1) {
       let cpuDiscovery = null;
