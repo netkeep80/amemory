@@ -1287,7 +1287,7 @@ function carrierReactionCommonShader(args) {
     "}",
     "@compute @workgroup_size(1)",
     "fn discover(@builtin(global_invocation_id) id: vec3<u32>) {",
-    "  if (id.x != 0u) { return; } var z = 0u; loop { if (z >= 42u) { break; } discovery[z] = 0u; z = z + 1u; }",
+    "  if (id.x != 0u) { return; } var z = 0u; loop { if (z >= 67u) { break; } discovery[z] = 0u; z = z + 1u; }",
     "  discovery[0] = 10u; discovery[2] = CURRENT; discovery[3] = INTERPRETER;",
     "  if (!valid_base(CURRENT) || !valid_base(INTERPRETER)) { discovery[0] = 2u; return; }",
     "  let grammar_theory = e(INTERPRETER); if (!valid_base(grammar_theory)) { discovery[0] = 3u; return; }",
@@ -1299,9 +1299,9 @@ function carrierReactionCommonShader(args) {
     "    if (trigger != trigger_key && s(trigger) == trigger_key) {",
     "      let admission = e(trigger);",
     "      if (valid_base(admission) && s(admission) == theory && e(admission) != admission) {",
-    "        candidates = candidates + 1u; discovery[17] = candidates;",
+    "        candidates = candidates + 1u; discovery[42] = candidates;",
     "        let rule = e(admission); discovery[6] = rule; discovery[7] = admission; let record_diag = matches == 0u; let output_template = discover_rule(rule, CURRENT, record_diag);",
-    "        if (output_template == 0u && record_diag && candidates <= 12u) { let trace = 18u + (candidates - 1u) * 2u; discovery[trace] = rule; discovery[trace + 1u] = (discovery[8] << 16u) | (discovery[9] & 0xffffu); }",
+    "        if (output_template == 0u && record_diag && candidates <= 12u) { let trace = 43u + (candidates - 1u) * 2u; discovery[trace] = rule; discovery[trace + 1u] = (discovery[8] << 16u) | (discovery[9] & 0xffffu); }",
     "        if (output_template != 0u) { matches = matches + 1u; discovery[1] = matches; if (matches > 1u) { discovery[0] = 9u; return; } matched_rule = rule; matched_admission = admission; }",
     "      }",
     "    }",
@@ -1407,7 +1407,7 @@ export async function runGpuCarrierReaction(
   const inputs = [];
   const discovery = createLookupBuffer(
     device,
-    new Uint32Array(42),
+    new Uint32Array(67),
     outputUsage,
   );
   const overlay = createLookupBuffer(
@@ -1493,7 +1493,7 @@ export async function runGpuCarrierReaction(
 
     // Diagnostic readback only. PUBLISH still consumes the same GPU-resident
     // discovery storage buffer and is never seeded from this host copy.
-    const d = await readLookupWords(device, discovery, 42);
+    const d = await readLookupWords(device, discovery, 67);
     if ((d[0] >>> 0) !== 1) {
       // Diagnostic oracle only: GPU DISCOVER has already completed and been
       // read back. These CPU facts never seed, filter or retry GPU execution.
@@ -1507,9 +1507,9 @@ export async function runGpuCarrierReaction(
       let cpuRuleGpuRoles = 0;
       let cpuRuleGpuDiagnostic = 0;
       const cpuRule = cpuDiscovery?.ruleHandle ?? 0;
-      const tracedCandidates = Math.min(d[17] >>> 0, 12);
+      const tracedCandidates = Math.min(d[42] >>> 0, 12);
       for (let index = 0; index < tracedCandidates; index += 1) {
-        const trace = 18 + index * 2;
+        const trace = 43 + index * 2;
         if ((d[trace] >>> 0) === cpuRule) {
           const packed = d[trace + 1] >>> 0;
           cpuRuleGpuRoles = packed >>> 16;
@@ -1520,7 +1520,7 @@ export async function runGpuCarrierReaction(
       throw new Error(
         "WebGPU DISCOVER failed closed with status " + (d[0] >>> 0) +
         " matches=" + (d[1] >>> 0) +
-        " candidates=" + (d[17] >>> 0) +
+        " candidates=" + (d[42] >>> 0) +
         " current=" + (d[2] >>> 0) +
         " interpreter=" + (d[3] >>> 0) +
         " theory=" + (d[4] >>> 0) +
