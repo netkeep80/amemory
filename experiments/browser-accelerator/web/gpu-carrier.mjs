@@ -1216,7 +1216,7 @@ function carrierReactionCommonShader(args) {
     "    var role_index = 0xffffffffu; var r = 0u; loop { if (r >= role_count) { break; } if (roles[r] == t) { role_index = r; break; } r = r + 1u; }",
     "    if (role_index != 0xffffffffu) { if (bound_set[role_index] != 0u && bound[role_index] != c) { discovery[8] = role_count; discovery[9] = 26u; return 0u; } bound[role_index] = c; bound_set[role_index] = 1u; continue; }",
     "    let ta = s(t); let tb = e(t); let ca = s(c); let cb = e(c);",
-    "    if ((ta == t) != (ca == c) || (tb == t) != (cb == c)) { discovery[8] = role_count; discovery[9] = 27u; return 0u; }",
+    "    if ((ta == t) != (ca == c) || (tb == t) != (cb == c)) { discovery[8] = role_count; discovery[9] = 27u; discovery[10] = t; discovery[11] = c; discovery[12] = ta; discovery[13] = tb; discovery[14] = ca; discovery[15] = cb; if (role_count > 0u) { discovery[16] = roles[0]; } return 0u; }",
     "    if (tb != t) { if (sp >= MAX_STACK) { discovery[8] = role_count; discovery[9] = 28u; return 0u; } ts[sp] = tb; cs[sp] = cb; sp = sp + 1u; }",
     "    if (ta != t) { if (sp >= MAX_STACK) { discovery[8] = role_count; discovery[9] = 29u; return 0u; } ts[sp] = ta; cs[sp] = ca; sp = sp + 1u; }",
     "  }",
@@ -1500,7 +1500,14 @@ export async function runGpuCarrierReaction(
         " rule=" + (d[6] >>> 0) +
         " admission=" + (d[7] >>> 0) +
         " roles=" + (d[8] >>> 0) +
-        " diagnostic=" + (d[9] >>> 0),
+        " diagnostic=" + (d[9] >>> 0) +
+        " t=" + (d[10] >>> 0) +
+        " c=" + (d[11] >>> 0) +
+        " ta=" + (d[12] >>> 0) +
+        " tb=" + (d[13] >>> 0) +
+        " ca=" + (d[14] >>> 0) +
+        " cb=" + (d[15] >>> 0) +
+        " role0=" + (d[16] >>> 0),
       );
     }
 
