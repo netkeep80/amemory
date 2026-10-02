@@ -2184,7 +2184,7 @@ mod tests {
             stopped.stop_reason,
             Some(CpuRunStopReasonV1::TotalLinksBudgetExceeded),
         );
-        assert_eq!(session.execution_state(), SessionStateV1::Failed);
+        assert_eq!(session.runtime_state_v1(), SessionStateV1::Failed);
     }
 
     #[test]
@@ -2207,7 +2207,7 @@ mod tests {
             stopped.stop_reason,
             Some(CpuRunStopReasonV1::ScopeWidthBudgetExceeded),
         );
-        assert_eq!(session.execution_state(), SessionStateV1::Failed);
+        assert_eq!(session.runtime_state_v1(), SessionStateV1::Failed);
     }
 
     #[test]
@@ -2230,7 +2230,7 @@ mod tests {
             stopped.stop_reason,
             CpuRunStopReasonV1::AppendedLinksBudgetExceeded,
         );
-        assert_eq!(session.execution_state(), SessionStateV1::Failed);
+        assert_eq!(session.runtime_state_v1(), SessionStateV1::Failed);
     }
 
     #[test]
@@ -2310,7 +2310,7 @@ mod tests {
                 .budget_accounting
                 .full_resident_bytes_available
         );
-        assert_eq!(session.execution_state(), SessionStateV1::Failed);
+        assert_eq!(session.runtime_state_v1(), SessionStateV1::Failed);
     }
 
     #[test]
@@ -2348,7 +2348,7 @@ mod tests {
                 .trigger_incidence_candidates,
         );
         assert!(stopped.budget_accounting.match_candidates > 0);
-        assert_eq!(session.execution_state(), SessionStateV1::Failed);
+        assert_eq!(session.runtime_state_v1(), SessionStateV1::Failed);
     }
 
     #[test]
@@ -2386,7 +2386,7 @@ mod tests {
                 .unification_nodes_visited,
         );
         assert!(stopped.budget_accounting.unification_nodes > 0);
-        assert_eq!(session.execution_state(), SessionStateV1::Failed);
+        assert_eq!(session.runtime_state_v1(), SessionStateV1::Failed);
     }
 
     #[test]
@@ -2424,7 +2424,7 @@ mod tests {
                 .instantiation_nodes_visited,
         );
         assert!(stopped.budget_accounting.instantiation_nodes > 0);
-        assert_eq!(session.execution_state(), SessionStateV1::Failed);
+        assert_eq!(session.runtime_state_v1(), SessionStateV1::Failed);
     }
 
     #[test]
