@@ -1,6 +1,9 @@
 use super::runtime_session::{
-    CpuMemoryInstance, CpuRunBudgetAccountingV1, CpuRunBudgetV1,
-    CpuRunStopReasonV1, CpuRuntimeSession,
+    CpuMemoryInstance, CpuRuntimeSession,
+};
+use super::session_contract::{
+    BackendResourceAccountingV1, RunBudgetAccountingV1, RunBudgetV1,
+    RunStopReasonV1,
 };
 use super::observability::{
     ns_u64, project_cpu_session_step_v1, ObservationTimer, ObservedRunV1,
@@ -710,11 +713,11 @@ pub(crate) fn execute_session_to_quiescence(
     let run = session
         .run_to_quiescence(
             initial,
-            CpuRunBudgetV1::scenario_default(max_steps),
+            RunBudgetV1::scenario_default(max_steps),
             RunObservationLevel::Off.runtime_trace_mode(),
         )
         .ok()?;
-    if run.stop_reason != CpuRunStopReasonV1::Quiescent {
+    if run.stop_reason != RunStopReasonV1::Quiescent {
         return None;
     }
 
@@ -757,13 +760,39 @@ pub(crate) fn execute_session_to_quiescence(
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CpuObservedRunStopV1 {
-    pub(crate) stop_reason: CpuRunStopReasonV1,
-    pub(crate) budget_accounting: Option<CpuRunBudgetAccountingV1>,
+    pub(crate) stop_reason: RunStopReasonV1,
+    pub(crate) budget_accounting: Option<RunBudgetAccountingV1>,
+}
+
+fn optimized_cpu_resource_accounting(
+    accounting: &RunBudgetAccountingV1,
+) -> (u64, u64, bool) {
+    match accounting.backend_resource {
+        Some(
+            BackendResourceAccountingV1::OptimizedCpuDenseCarrier {
+                dense_carrier_allocated_bytes,
+                max_dense_carrier_bytes,
+                full_resident_bytes_available,
+            },
+        ) => (
+            dense_carrier_allocated_bytes,
+            max_dense_carrier_bytes,
+            full_resident_bytes_available,
+        ),
+        None => panic!(
+            "optimized CPU run accounting lost its physical resource extension"
+        ),
+    }
 }
 
 fn project_budget_profile(
-    accounting: CpuRunBudgetAccountingV1,
+    accounting: RunBudgetAccountingV1,
 ) -> RunBudgetProfileV1 {
+    let (
+        dense_carrier_allocated_bytes,
+        max_dense_carrier_bytes,
+        full_resident_bytes_available,
+    ) = optimized_cpu_resource_accounting(&accounting);
     RunBudgetProfileV1 {
         schema_version: accounting.schema_version,
         reactions_consumed: accounting.reactions_consumed,
@@ -780,11 +809,9 @@ fn project_budget_profile(
         max_unification_nodes: accounting.max_unification_nodes,
         instantiation_nodes: accounting.instantiation_nodes,
         max_instantiation_nodes: accounting.max_instantiation_nodes,
-        dense_carrier_allocated_bytes:
-            accounting.dense_carrier_allocated_bytes,
-        max_dense_carrier_bytes: accounting.max_dense_carrier_bytes,
-        full_resident_bytes_available:
-            accounting.full_resident_bytes_available,
+        dense_carrier_allocated_bytes,
+        max_dense_carrier_bytes,
+        full_resident_bytes_available,
     }
 }
 
@@ -799,14 +826,14 @@ pub(crate) fn execute_session_observed_to_quiescence(
     let run = session
         .run_to_quiescence(
             initial,
-            CpuRunBudgetV1::scenario_default(max_reactions),
+            RunBudgetV1::scenario_default(max_reactions),
             observation_level.runtime_trace_mode(),
         )
         .map_err(|stop_reason| CpuObservedRunStopV1 {
             stop_reason,
             budget_accounting: None,
         })?;
-    if run.stop_reason != CpuRunStopReasonV1::Quiescent {
+    if run.stop_reason != RunStopReasonV1::Quiescent {
         return Err(CpuObservedRunStopV1 {
             stop_reason: run.stop_reason,
             budget_accounting: Some(run.budget_accounting),
@@ -816,12 +843,11 @@ pub(crate) fn execute_session_observed_to_quiescence(
     let run_id = run.run_id;
     let links_before_run = run.links_before_run;
     let budget_accounting = run.budget_accounting;
-    let dense_carrier_allocated_bytes =
-        budget_accounting.dense_carrier_allocated_bytes;
-    let max_dense_carrier_bytes =
-        budget_accounting.max_dense_carrier_bytes;
-    let full_resident_bytes_available =
-        budget_accounting.full_resident_bytes_available;
+    let (
+        dense_carrier_allocated_bytes,
+        max_dense_carrier_bytes,
+        full_resident_bytes_available,
+    ) = optimized_cpu_resource_accounting(&budget_accounting);
     let scope_before = run
         .steps
         .first()
@@ -1052,13 +1078,13 @@ pub(crate) fn identical_rerun(
     );
     let bounded = session.run_to_quiescence(
         initial,
-        CpuRunBudgetV1::scenario_default(max_reactions),
+        RunBudgetV1::scenario_default(max_reactions),
         RunObservationLevel::Off.runtime_trace_mode(),
     );
 
     let result = match bounded {
         Ok(run)
-            if run.stop_reason == CpuRunStopReasonV1::Quiescent
+            if run.stop_reason == RunStopReasonV1::Quiescent
                 && session.engine.current().len() == 1 =>
         {
             let repeat_result = session

@@ -12,12 +12,12 @@ use super::{
         WebProofPrepareStage,
     },
     runtime_session::{
-        CpuRunBudgetAccountingV1, CpuRunBudgetV1, CpuRunControllerV1,
-        CpuRunStopReasonV1, CpuRuntimeSession,
+        CpuRunControllerV1, CpuRunResourceBudgetV1, CpuRuntimeSession,
     },
     session_contract::{
-        CapabilitySupportV1, RuntimeSessionV1, SessionCapabilitiesV1,
-        SessionStateV1,
+        BackendResourceAccountingV1, CapabilitySupportV1,
+        RunBudgetAccountingV1, RunBudgetV1, RunStopReasonV1,
+        RuntimeSessionV1, SessionCapabilitiesV1, SessionStateV1,
     },
     scenario::{
         validate_manifest_v1, ScenarioAssertionV1, ScenarioBackendV1,
@@ -217,9 +217,9 @@ pub(crate) enum ScenarioRunnerErrorV1 {
     ExecuteFailed {
         run_id: String,
         max_reactions: u32,
-        stop_reason: CpuRunStopReasonV1,
+        stop_reason: RunStopReasonV1,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        budget_accounting: Option<CpuRunBudgetAccountingV1>,
+        budget_accounting: Option<RunBudgetAccountingV1>,
     },
     ProjectResultFailed {
         run_id: String,
@@ -680,7 +680,7 @@ pub(crate) fn begin_cpu_scenario_step_run_v1(
         .session
         .begin_budgeted_run(
             configured.initial,
-            CpuRunBudgetV1::scenario_default(run.max_reactions),
+            RunBudgetV1::scenario_default(run.max_reactions),
         )
         .map_err(|error| ScenarioRunnerErrorV1::StepControlFailed {
             run_id: run.run_id.clone(),
@@ -723,7 +723,7 @@ pub(crate) fn step_cpu_scenario_session_v1(
         );
 
     if let Some(stop_reason) = controlled.stop_reason {
-        if stop_reason != CpuRunStopReasonV1::Quiescent {
+        if stop_reason != RunStopReasonV1::Quiescent {
             return Err(ScenarioRunnerErrorV1::ExecuteFailed {
                 run_id: active.run.run_id,
                 max_reactions: active.run.max_reactions,
@@ -750,7 +750,7 @@ pub(crate) fn step_cpu_scenario_session_v1(
     }
 
     let completed =
-        controlled.stop_reason == Some(CpuRunStopReasonV1::Quiescent);
+        controlled.stop_reason == Some(RunStopReasonV1::Quiescent);
     let evidence = projected.evidence;
     if !completed {
         let report = ScenarioStepReportV1 {
@@ -1247,14 +1247,14 @@ mod tests {
             .session
             .run_to_quiescence(
                 configured.initial,
-                CpuRunBudgetV1::scenario_default(run.max_reactions),
+                RunBudgetV1::scenario_default(run.max_reactions),
                 observation_level.runtime_trace_mode(),
             )
             .unwrap();
         assert_eq!(bounded.run_id, 1);
         assert_eq!(
             bounded.stop_reason,
-            CpuRunStopReasonV1::Quiescent,
+            RunStopReasonV1::Quiescent,
         );
         assert_eq!(
             live.session.runtime_state_v1(),
@@ -1396,7 +1396,7 @@ mod tests {
         assert_eq!(
             profile.max_dense_carrier_bytes,
             Some(
-                CpuRunBudgetV1::scenario_default(run.max_reactions)
+                RunBudgetV1::scenario_default(run.max_reactions)
                     .max_dense_carrier_bytes,
             ),
         );
@@ -1406,7 +1406,7 @@ mod tests {
             .budget_accounting
             .as_ref()
             .expect("PROFILE must project authoritative runtime budget accounting");
-        let budget = CpuRunBudgetV1::scenario_default(run.max_reactions);
+        let budget = RunBudgetV1::scenario_default(run.max_reactions);
         assert_eq!(accounting.max_reactions, budget.max_reactions);
         assert_eq!(
             accounting.max_appended_links,
@@ -2168,9 +2168,9 @@ mod tests {
         let (mut session, _load, initial) =
             configured_mux1_for_budget_test();
         let current_links = session.memory.store.link_count() as u32;
-        let budget = CpuRunBudgetV1 {
+        let budget = RunBudgetV1 {
             max_total_links: current_links.saturating_sub(1),
-            ..CpuRunBudgetV1::scenario_default(64)
+            ..RunBudgetV1::scenario_default(64)
         };
         let mut controller =
             session.begin_budgeted_run(initial, budget).unwrap();
@@ -2182,7 +2182,7 @@ mod tests {
         assert!(stopped.step.is_none());
         assert_eq!(
             stopped.stop_reason,
-            Some(CpuRunStopReasonV1::TotalLinksBudgetExceeded),
+            Some(RunStopReasonV1::TotalLinksBudgetExceeded),
         );
         assert_eq!(session.runtime_state_v1(), SessionStateV1::Failed);
     }
@@ -2191,9 +2191,9 @@ mod tests {
     fn scope_width_budget_stops_before_semantic_step() {
         let (mut session, _load, initial) =
             configured_mux1_for_budget_test();
-        let budget = CpuRunBudgetV1 {
+        let budget = RunBudgetV1 {
             max_scope_width: 0,
-            ..CpuRunBudgetV1::scenario_default(64)
+            ..RunBudgetV1::scenario_default(64)
         };
         let mut controller =
             session.begin_budgeted_run(initial, budget).unwrap();
@@ -2205,7 +2205,7 @@ mod tests {
         assert!(stopped.step.is_none());
         assert_eq!(
             stopped.stop_reason,
-            Some(CpuRunStopReasonV1::ScopeWidthBudgetExceeded),
+            Some(RunStopReasonV1::ScopeWidthBudgetExceeded),
         );
         assert_eq!(session.runtime_state_v1(), SessionStateV1::Failed);
     }
@@ -2214,9 +2214,9 @@ mod tests {
     fn appended_links_budget_stops_after_bounded_semantic_step() {
         let (mut session, _load, initial) =
             configured_mux1_for_budget_test();
-        let budget = CpuRunBudgetV1 {
+        let budget = RunBudgetV1 {
             max_appended_links: 0,
-            ..CpuRunBudgetV1::scenario_default(64)
+            ..RunBudgetV1::scenario_default(64)
         };
         let stopped = session
             .run_to_quiescence(
@@ -2228,7 +2228,7 @@ mod tests {
         assert!(!stopped.steps.is_empty());
         assert_eq!(
             stopped.stop_reason,
-            CpuRunStopReasonV1::AppendedLinksBudgetExceeded,
+            RunStopReasonV1::AppendedLinksBudgetExceeded,
         );
         assert_eq!(session.runtime_state_v1(), SessionStateV1::Failed);
     }
@@ -2278,14 +2278,14 @@ mod tests {
             .memory
             .store
             .dense_carrier_index_allocated_bytes();
-        let budget = CpuRunBudgetV1 {
-            max_dense_carrier_bytes: before,
-            ..CpuRunBudgetV1::scenario_default(64)
-        };
+        let budget = RunBudgetV1::scenario_default(64);
         let stopped = session
-            .run_to_quiescence(
+            .run_to_quiescence_with_resource_budget(
                 initial,
                 budget,
+                CpuRunResourceBudgetV1 {
+                    max_dense_carrier_bytes: before,
+                },
                 RunObservationLevel::Off.runtime_trace_mode(),
             )
             .unwrap();
@@ -2293,23 +2293,24 @@ mod tests {
         assert!(!stopped.steps.is_empty());
         assert_eq!(
             stopped.stop_reason,
-            CpuRunStopReasonV1::CarrierBytesBudgetExceeded,
+            RunStopReasonV1::CarrierBytesBudgetExceeded,
         );
-        assert!(
-            stopped
-                .budget_accounting
-                .dense_carrier_allocated_bytes
-                > before
-        );
-        assert_eq!(
-            stopped.budget_accounting.max_dense_carrier_bytes,
-            before,
-        );
-        assert!(
-            !stopped
-                .budget_accounting
-                .full_resident_bytes_available
-        );
+        match stopped.budget_accounting.backend_resource {
+            Some(
+                BackendResourceAccountingV1::OptimizedCpuDenseCarrier {
+                    dense_carrier_allocated_bytes,
+                    max_dense_carrier_bytes,
+                    full_resident_bytes_available,
+                },
+            ) => {
+                assert!(dense_carrier_allocated_bytes > before);
+                assert_eq!(max_dense_carrier_bytes, before);
+                assert!(!full_resident_bytes_available);
+            }
+            None => panic!(
+                "optimized CPU run lost dense-carrier resource accounting"
+            ),
+        }
         assert_eq!(session.runtime_state_v1(), SessionStateV1::Failed);
     }
 
@@ -2317,9 +2318,9 @@ mod tests {
     fn match_work_budget_stops_after_atomic_reaction_with_observation_off() {
         let (mut session, _load, initial) =
             configured_mux1_for_budget_test();
-        let budget = CpuRunBudgetV1 {
+        let budget = RunBudgetV1 {
             max_match_candidates: 0,
-            ..CpuRunBudgetV1::scenario_default(64)
+            ..RunBudgetV1::scenario_default(64)
         };
         let stopped = session
             .run_to_quiescence(
@@ -2338,7 +2339,7 @@ mod tests {
         );
         assert_eq!(
             stopped.stop_reason,
-            CpuRunStopReasonV1::MatchWorkBudgetExceeded,
+            RunStopReasonV1::MatchWorkBudgetExceeded,
         );
         assert_eq!(stopped.budget_accounting.max_match_candidates, 0);
         assert_eq!(
@@ -2355,9 +2356,9 @@ mod tests {
     fn unification_work_budget_stops_from_authoritative_profile() {
         let (mut session, _load, initial) =
             configured_mux1_for_budget_test();
-        let budget = CpuRunBudgetV1 {
+        let budget = RunBudgetV1 {
             max_unification_nodes: 0,
-            ..CpuRunBudgetV1::scenario_default(64)
+            ..RunBudgetV1::scenario_default(64)
         };
         let stopped = session
             .run_to_quiescence(
@@ -2376,7 +2377,7 @@ mod tests {
         );
         assert_eq!(
             stopped.stop_reason,
-            CpuRunStopReasonV1::UnificationWorkBudgetExceeded,
+            RunStopReasonV1::UnificationWorkBudgetExceeded,
         );
         assert_eq!(stopped.budget_accounting.max_unification_nodes, 0);
         assert_eq!(
@@ -2393,9 +2394,9 @@ mod tests {
     fn instantiation_work_budget_stops_from_authoritative_profile() {
         let (mut session, _load, initial) =
             configured_mux1_for_budget_test();
-        let budget = CpuRunBudgetV1 {
+        let budget = RunBudgetV1 {
             max_instantiation_nodes: 0,
-            ..CpuRunBudgetV1::scenario_default(64)
+            ..RunBudgetV1::scenario_default(64)
         };
         let stopped = session
             .run_to_quiescence(
@@ -2414,7 +2415,7 @@ mod tests {
         );
         assert_eq!(
             stopped.stop_reason,
-            CpuRunStopReasonV1::InstantiationWorkBudgetExceeded,
+            RunStopReasonV1::InstantiationWorkBudgetExceeded,
         );
         assert_eq!(stopped.budget_accounting.max_instantiation_nodes, 0);
         assert_eq!(
@@ -2451,7 +2452,7 @@ mod tests {
                 assert_eq!(max_reactions, 1);
                 assert_eq!(
                     stop_reason,
-                    CpuRunStopReasonV1::ReactionBudgetExceeded,
+                    RunStopReasonV1::ReactionBudgetExceeded,
                 );
                 assert_eq!(accounting.reactions_consumed, 1);
                 assert_eq!(accounting.max_reactions, 1);
