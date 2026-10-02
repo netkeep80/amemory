@@ -122,6 +122,12 @@ if (pagesWebGpuSmokeSource.includes(
   throw new Error("C4c3 smoke regained immediate profile removal race");
 }
 
+const savedGpuBufferUsage = globalThis.GPUBufferUsage;
+globalThis.GPUBufferUsage = {
+  STORAGE: 1,
+  COPY_DST: 2,
+  COPY_SRC: 4,
+};
 const fakeResidentBuffers = [];
 let fakeResidentWrites = 0;
 const fakeResidentDevice = {
@@ -186,6 +192,11 @@ try {
 }
 if (!closedResidentRejected) {
   throw new Error("closed resident GPU Session did not fail closed");
+}
+if (savedGpuBufferUsage === undefined) {
+  delete globalThis.GPUBufferUsage;
+} else {
+  globalThis.GPUBufferUsage = savedGpuBufferUsage;
 }
 
 for (const mode of ["single", "sections"]) {
