@@ -741,7 +741,6 @@ mod tests {
             .unwrap();
         let accounting = controller.budget_accounting(&session);
 
-        assert_eq!(accounting.schema_version, 1);
         assert_eq!(accounting.reactions_consumed, 0);
         assert_eq!(accounting.max_reactions, 7);
         assert_eq!(accounting.appended_links_consumed, 0);

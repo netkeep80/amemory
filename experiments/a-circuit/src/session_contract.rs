@@ -88,8 +88,11 @@ pub(crate) struct RunWorkUsageV1 {
 #[serde(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE")]
 pub(crate) enum BackendResourceAccountingV1 {
     OptimizedCpuDenseCarrier {
+        #[serde(rename = "denseCarrierAllocatedBytes")]
         dense_carrier_allocated_bytes: u64,
+        #[serde(rename = "maxDenseCarrierBytes")]
         max_dense_carrier_bytes: u64,
+        #[serde(rename = "fullResidentBytesAvailable")]
         full_resident_bytes_available: bool,
     },
 }
@@ -265,6 +268,12 @@ mod tests {
             json["backendResource"]["kind"],
             "OPTIMIZED_CPU_DENSE_CARRIER",
         );
+        assert_eq!(json["backendResource"]["denseCarrierAllocatedBytes"], 64);
+        assert_eq!(json["backendResource"]["maxDenseCarrierBytes"], 128);
+        assert_eq!(json["backendResource"]["fullResidentBytesAvailable"], false);
+        assert!(json["backendResource"]
+            .get("dense_carrier_allocated_bytes")
+            .is_none());
     }
 
     #[test]
