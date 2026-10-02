@@ -660,10 +660,11 @@ mod tests {
     fn cpu_session_exposes_distinct_neutral_identity_and_capabilities() {
         let mut memory = CpuMemoryInstance::new();
         memory.store.ensure_pair(1, 1).unwrap();
+        let base_link_count = memory.store.link_count();
         let session = CpuRuntimeSession::new(
             memory,
             OptimizedStructuralEngine::new(8),
-            1,
+            base_link_count,
         );
         let snapshot = session.runtime_snapshot_v1();
 
@@ -673,8 +674,8 @@ mod tests {
             snapshot.identity.session_id,
         );
         assert_eq!(snapshot.state, SessionStateV1::Open);
-        assert_eq!(snapshot.base_link_count, 1);
-        assert_eq!(snapshot.current_link_count, 1);
+        assert_eq!(snapshot.base_link_count, base_link_count as u32);
+        assert_eq!(snapshot.current_link_count, base_link_count as u32);
         assert_eq!(
             snapshot.capabilities.step,
             CapabilitySupportV1::Supported,

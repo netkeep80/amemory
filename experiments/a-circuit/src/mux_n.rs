@@ -1968,7 +1968,7 @@ fn web_mux1_pipeline_profile_separates_session_open_from_run_stages() {
     let ((mut session, load), load_ns) =
         time_stage(|| load_runtime_session(&prepare, 32).unwrap());
     let open_profile = session_open_profile_v1(
-        session.memory.id.clone(),
+        session.id.clone(),
         prepare_ns,
         load_ns,
         prepared_links,
