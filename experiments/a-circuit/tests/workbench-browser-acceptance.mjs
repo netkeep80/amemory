@@ -108,6 +108,9 @@ for (const mode of ["single", "sections"]) {
     "discovery[0] = 10u",
     "discovery[9] = 20u",
     "discovery[9] = 27u",
+    "discovery[10] = t",
+    "discovery[11] = c",
+    "discovery[16] = roles[0]",
     "discovery[9] = 30u",
   ]) {
     if (!shader.includes(marker)) {
