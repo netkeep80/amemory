@@ -8,7 +8,10 @@ import {
   proofPipelineHtml,
   recursiveStructureHtml,
 } from "../../browser-accelerator/web/proof-view.mjs";
-import { gpuCarrierReactionShaderSource } from "../../browser-accelerator/web/gpu-carrier.mjs";
+import {
+  gpuCarrierReactionShaderSource,
+  openGpuCarrierResidentSession,
+} from "../../browser-accelerator/web/gpu-carrier.mjs";
 
 const root = process.cwd();
 
@@ -30,6 +33,11 @@ for (const required of [
   "These CPU facts never seed, filter or retry GPU execution",
   "cpuRuleGpuDiagnostic",
   "cpuRuleGpuRoles",
+  "openGpuCarrierResidentSession",
+  "baseUploadCount: 1",
+  "reactionDispatchCount",
+  "resident.close()",
+  "runGpuCarrierReactionOnResidentBase",
 ]) {
   if (!gpuCarrierSource.includes(required)) {
     throw new Error("C4c3 split GPU submission contract missing: " + required);
@@ -50,6 +58,12 @@ for (const required of [
   "expected.length >= prefixLength",
   "proofAppendCount === observed.appendCount",
   "gpuAppendCount=",
+  "openGpuCarrierResidentSession",
+  "resident.reaction(input)",
+  "resident.telemetry()",
+  "baseUploadCount",
+  "reactionDispatchCount",
+  "Append пока не закрепляется",
 ]) {
   if (!workbenchSource.includes(required)) {
     throw new Error("live WebGPU Workbench witness missing: " + required);
@@ -72,6 +86,9 @@ const pagesWebGpuSmokeSource = fs.readFileSync(
 for (const required of [
   "--enable-unsafe-webgpu",
   "--use-webgpu-adapter=swiftshader",
+  "residentBaseReuse",
+  "baseUploadCount",
+  "reactionDispatchCount",
 ]) {
   if (!pagesWebGpuSmokeSource.includes(required)) {
     throw new Error("compute-only WebGPU launch flag missing: " + required);
@@ -103,6 +120,72 @@ if (pagesWebGpuSmokeSource.includes(
   "fs.rmSync(profile, { recursive: true, force: true });",
 )) {
   throw new Error("C4c3 smoke regained immediate profile removal race");
+}
+
+const fakeResidentBuffers = [];
+let fakeResidentWrites = 0;
+const fakeResidentDevice = {
+  limits: {
+    maxBufferSize: 1 << 20,
+    maxStorageBufferBindingSize: 1 << 20,
+    maxStorageBuffersPerShaderStage: 8,
+  },
+  queue: {
+    writeBuffer() { fakeResidentWrites += 1; },
+  },
+  createBuffer(descriptor) {
+    const buffer = {
+      descriptor,
+      destroyCount: 0,
+      destroy() { this.destroyCount += 1; },
+    };
+    fakeResidentBuffers.push(buffer);
+    return buffer;
+  },
+};
+const fakeResidentParsed = {
+  layout: {
+    linkCount: 1,
+    rootHandle: 1,
+    totalWords: 1,
+    totalBytes: 4,
+  },
+  words: new Uint32Array([1]),
+  sections: {},
+};
+const fakeResident = await openGpuCarrierResidentSession(
+  fakeResidentDevice,
+  fakeResidentParsed,
+);
+const fakeResidentOpen = fakeResident.telemetry();
+if (fakeResidentOpen.baseUploadCount !== 1 ||
+    fakeResidentOpen.baseUploadBytes !== 4 ||
+    fakeResidentOpen.baseBufferCount !== 1 ||
+    fakeResidentOpen.reactionDispatchCount !== 0 ||
+    fakeResidentOpen.closed !== false ||
+    fakeResidentWrites !== 1) {
+  throw new Error(
+    "resident GPU base ownership telemetry mismatch: " +
+    JSON.stringify(fakeResidentOpen),
+  );
+}
+if (fakeResident.close() !== true || fakeResident.close() !== false ||
+    fakeResidentBuffers[0]?.destroyCount !== 1 ||
+    fakeResident.telemetry().closed !== true) {
+  throw new Error("resident GPU base close is not bounded/idempotent");
+}
+let closedResidentRejected = false;
+try {
+  await fakeResident.reaction({
+    currentHandle: 1,
+    interpreterHandle: 1,
+  });
+} catch (error) {
+  closedResidentRejected =
+    String(error?.message || error).includes("Session is closed");
+}
+if (!closedResidentRejected) {
+  throw new Error("closed resident GPU Session did not fail closed");
 }
 
 for (const mode of ["single", "sections"]) {

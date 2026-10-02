@@ -1370,26 +1370,19 @@ export function gpuCarrierReactionShaderSource(
 
 // Truth boundary: this executor accepts only carrier + current/interpreter handles.
 // Proof traces and expected successors are deliberately unavailable until readback.
-export async function runGpuCarrierReaction(
+export async function openGpuCarrierResidentSession(
   device,
   parsed,
-  input,
-  { maxDiagnosticLinks = 16_384, maxAppend = 64 } = {},
+  { maxDiagnosticLinks = 16_384 } = {},
 ) {
   if (!device?.createBuffer || !device?.queue) {
     throw new TypeError("WebGPU device is required");
   }
   checkedInteger(maxDiagnosticLinks, "maxDiagnosticLinks", { min: 1 });
-  checkedInteger(maxAppend, "maxAppend", { min: 1 });
-  if (maxAppend !== 64) {
-    throw new Error("C4c3 shader currently fixes maxAppend at 64");
-  }
   if (parsed.layout.linkCount > maxDiagnosticLinks) {
     throw new RangeError("bounded GPU reaction carrier too large");
   }
 
-  requireLookupHandle(parsed, input?.currentHandle, "current handle");
-  requireLookupHandle(parsed, input?.interpreterHandle, "interpreter handle");
   const plan = planGpuCarrierUpload(parsed.layout, device.limits);
   if (plan.mode === "unsupported") {
     throw new Error("WebGPU carrier upload unsupported: " + plan.reason);
@@ -1403,24 +1396,13 @@ export async function runGpuCarrierReaction(
 
   const usage = gpuLookupUsage();
   const inputUsage = usage.STORAGE | usage.COPY_DST;
-  const outputUsage = usage.STORAGE | usage.COPY_SRC | usage.COPY_DST;
-  const inputs = [];
-  const discovery = createLookupBuffer(
-    device,
-    new Uint32Array(67),
-    outputUsage,
-  );
-  const overlay = createLookupBuffer(
-    device,
-    new Uint32Array(4 + maxAppend * 2),
-    outputUsage,
-  );
+  const baseBuffers = [];
+  let baseEntries = null;
   device.pushErrorScope?.("validation");
   try {
-    let baseEntries;
     if (plan.mode === "single") {
       const carrier = createLookupBuffer(device, parsed.words, inputUsage);
-      inputs.push(carrier);
+      baseBuffers.push(carrier);
       baseEntries = [{ binding: 0, resource: { buffer: carrier } }];
     } else {
       baseEntries = plan.buffers.map((part) => {
@@ -1429,10 +1411,111 @@ export async function runGpuCarrierReaction(
           parsed.sections[part.name],
           inputUsage,
         );
-        inputs.push(buffer);
+        baseBuffers.push(buffer);
         return { binding: part.binding, resource: { buffer } };
       });
     }
+  } catch (error) {
+    for (const buffer of baseBuffers) buffer.destroy();
+    if (typeof device.popErrorScope === "function") {
+      await device.popErrorScope();
+    }
+    throw error;
+  }
+
+  if (typeof device.popErrorScope === "function") {
+    const validationError = await device.popErrorScope();
+    if (validationError) {
+      for (const buffer of baseBuffers) buffer.destroy();
+      throw new Error(
+        "WebGPU resident carrier upload validation failed: " +
+        validationError.message,
+      );
+    }
+  }
+
+  const state = {
+    plan,
+    baseEntries,
+    baseBuffers,
+    closed: false,
+    reactionDispatchCount: 0,
+  };
+  const telemetry = () => Object.freeze({
+    baseUploadCount: 1,
+    baseUploadBytes: plan.logicalBytes,
+    baseBufferCount: baseBuffers.length,
+    reactionDispatchCount: state.reactionDispatchCount,
+    closed: state.closed,
+  });
+  const close = () => {
+    if (state.closed) return false;
+    state.closed = true;
+    for (const buffer of baseBuffers) buffer.destroy();
+    return true;
+  };
+  const reaction = async (input, { maxAppend = 64 } = {}) => {
+    if (state.closed) {
+      throw new Error("WebGPU resident carrier Session is closed");
+    }
+    const result = await runGpuCarrierReactionOnResidentBase(
+      device,
+      parsed,
+      input,
+      state,
+      { maxAppend },
+    );
+    state.reactionDispatchCount += 1;
+    return Object.freeze({
+      ...result,
+      residency: telemetry(),
+    });
+  };
+
+  return Object.freeze({
+    plan,
+    logicalFingerprint: gpuCarrierLogicalFingerprint(parsed),
+    telemetry,
+    reaction,
+    close,
+  });
+}
+
+async function runGpuCarrierReactionOnResidentBase(
+  device,
+  parsed,
+  input,
+  resident,
+  { maxAppend = 64 } = {},
+) {
+  if (resident.closed) {
+    throw new Error("WebGPU resident carrier Session is closed");
+  }
+  checkedInteger(maxAppend, "maxAppend", { min: 1 });
+  if (maxAppend !== 64) {
+    throw new Error("C4c3 shader currently fixes maxAppend at 64");
+  }
+  requireLookupHandle(parsed, input?.currentHandle, "current handle");
+  requireLookupHandle(parsed, input?.interpreterHandle, "interpreter handle");
+
+  const plan = resident.plan;
+  const baseEntries = resident.baseEntries;
+  const usage = gpuLookupUsage();
+  const outputUsage = usage.STORAGE | usage.COPY_SRC | usage.COPY_DST;
+  let discovery = null;
+  let overlay = null;
+  device.pushErrorScope?.("validation");
+  try {
+    discovery = createLookupBuffer(
+      device,
+      new Uint32Array(67),
+      outputUsage,
+    );
+    overlay = createLookupBuffer(
+      device,
+      new Uint32Array(4 + maxAppend * 2),
+      outputUsage,
+    );
     const discoveryBinding = plan.mode === "single" ? 1 : 6;
     const overlayBinding = plan.mode === "single" ? 2 : 7;
 
@@ -1640,9 +1723,8 @@ export async function runGpuCarrierReaction(
     }
     return Object.freeze({ plan, expected, observed, differential: true });
   } finally {
-    for (const buffer of inputs) buffer.destroy();
-    discovery.destroy();
-    overlay.destroy();
+    discovery?.destroy();
+    overlay?.destroy();
     if (typeof device.popErrorScope === "function") {
       const validationError = await device.popErrorScope();
       if (validationError) {
@@ -1652,5 +1734,23 @@ export async function runGpuCarrierReaction(
         );
       }
     }
+  }
+}
+
+export async function runGpuCarrierReaction(
+  device,
+  parsed,
+  input,
+  { maxDiagnosticLinks = 16_384, maxAppend = 64 } = {},
+) {
+  const resident = await openGpuCarrierResidentSession(
+    device,
+    parsed,
+    { maxDiagnosticLinks },
+  );
+  try {
+    return await resident.reaction(input, { maxAppend });
+  } finally {
+    resident.close();
   }
 }
