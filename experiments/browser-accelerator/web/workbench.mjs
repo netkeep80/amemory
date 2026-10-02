@@ -936,104 +936,124 @@ export async function runWorkbenchWebGpuWitness(
       device,
       carrier,
     );
-
-    const gpu0 = await resident.reaction(input0);
-    const input1 = Object.freeze({
-      currentHandle: gpu0.observed.publishedHandle,
-      interpreterHandle: input0.interpreterHandle,
-    });
-    const gpu1 = await resident.reaction(input1);
-    const residency = resident.telemetry();
-
-    const first = compact.execute?.reactions?.[0];
-    const second = compact.execute?.reactions?.[1];
+    const run = await resident.runToQuiescence(
+      input0,
+      { maxReactions: 4096 },
+    );
+    const proofReactions = compact.execute?.reactions;
     const append = compact.topology?.append;
-    if (!first || !second ||
-        first.quiescent === true ||
-        second.quiescent === true ||
-        !Array.isArray(first.scopeBefore) ||
-        !Array.isArray(first.scopeAfter) ||
-        !Array.isArray(second.scopeBefore) ||
-        !Array.isArray(second.scopeAfter) ||
-        first.scopeBefore.length !== 1 ||
-        first.scopeAfter.length !== 1 ||
-        second.scopeBefore.length !== 1 ||
-        second.scopeAfter.length !== 1) {
-      throw new Error("Rust/WASM first two reaction evidence is incomplete");
+    if (!Array.isArray(proofReactions) ||
+        proofReactions.length === 0 ||
+        compact.execute?.finalQuiescent !== true ||
+        !Number.isInteger(compact.execute?.activeReactionCount)) {
+      throw new Error("Rust/WASM complete reaction evidence is incomplete");
+    }
+    if (run.stopReason !== "QUIESCENT" ||
+        run.quiescent !== true ||
+        run.steps.length !== proofReactions.length) {
+      throw new Error(
+        "WebGPU full run did not reach the accepted quiescent boundary" +
+        " stop=" + run.stopReason +
+        " gpuSteps=" + run.steps.length +
+        " proofSteps=" + proofReactions.length,
+      );
     }
 
-    const loadLinks = compact.load.linksAfterLoad >>> 0;
-    const proofAppend0 =
-      (first.linksAfter >>> 0) - loadLinks;
-    const proofAppend1 =
-      (second.linksAfter >>> 0) - (first.linksAfter >>> 0);
-    const observed0 = gpu0.observed;
-    const observed1 = gpu1.observed;
+    let previousLinks = compact.load.linksAfterLoad >>> 0;
+    let appendOffset = 0;
+    let activeProofReactions = 0;
+    for (let index = 0; index < proofReactions.length; index += 1) {
+      const proof = proofReactions[index];
+      const gpu = run.steps[index];
+      const observed = gpu.observed;
+      if (!Array.isArray(proof.scopeBefore) ||
+          !Array.isArray(proof.scopeAfter) ||
+          proof.scopeBefore.length !== 1 ||
+          proof.scopeAfter.length !== 1) {
+        throw new Error(
+          "Rust/WASM reaction " + index + " has invalid Scope evidence",
+        );
+      }
 
-    const sameAppend0 =
-      proofAppend0 === observed0.appendCount &&
-      sameU32Segment(
-        observed0.appendStarts,
-        append?.starts,
-        0,
-        proofAppend0,
-      ) &&
-      sameU32Segment(
-        observed0.appendEnds,
-        append?.ends,
-        0,
-        proofAppend0,
-      );
-    const sameAppend1 =
-      proofAppend1 === observed1.appendCount &&
-      sameU32Segment(
-        observed1.appendStarts,
-        append?.starts,
-        proofAppend0,
-        proofAppend1,
-      ) &&
-      sameU32Segment(
-        observed1.appendEnds,
-        append?.ends,
-        proofAppend0,
-        proofAppend1,
-      );
-    const sameScopeChain =
-      (first.scopeBefore[0] >>> 0) === input0.currentHandle &&
-      (first.scopeAfter[0] >>> 0) === observed0.publishedHandle &&
-      (second.scopeBefore[0] >>> 0) === observed0.publishedHandle &&
-      observed1.currentHandle === observed0.publishedHandle &&
-      input1.currentHandle === observed0.publishedHandle &&
-      (second.scopeAfter[0] >>> 0) === observed1.publishedHandle;
-    const sameMatches =
-      (first.rawRuleMatches >>> 0) === observed0.rawRuleMatches &&
-      (second.rawRuleMatches >>> 0) === observed1.rawRuleMatches;
-    const sameResidency =
+      const proofQuiescent = proof.quiescent === true;
+      const proofBefore = proof.scopeBefore[0] >>> 0;
+      const proofAfter = proof.scopeAfter[0] >>> 0;
+      const proofLinksAfter = proof.linksAfter >>> 0;
+      const proofAppend = proofLinksAfter - previousLinks;
+      const gpuAfter = observed.quiescent
+        ? observed.currentHandle
+        : observed.publishedHandle;
+      const sameAppend =
+        observed.appendCount === proofAppend &&
+        sameU32Segment(
+          observed.appendStarts,
+          append?.starts,
+          appendOffset,
+          proofAppend,
+        ) &&
+        sameU32Segment(
+          observed.appendEnds,
+          append?.ends,
+          appendOffset,
+          proofAppend,
+        );
+      const sameStep =
+        gpu.differential === true &&
+        observed.currentHandle === proofBefore &&
+        gpuAfter === proofAfter &&
+        observed.rawRuleMatches === (proof.rawRuleMatches >>> 0) &&
+        observed.quiescent === proofQuiescent &&
+        sameAppend;
+
+      if (!sameStep) {
+        throw new Error(
+          "C4c3 full resident differential disagreement at reaction " +
+          index +
+          " proofBefore=L" + proofBefore +
+          " gpuBefore=L" + observed.currentHandle +
+          " proofAfter=L" + proofAfter +
+          " gpuAfter=L" + gpuAfter +
+          " proofMatches=" + (proof.rawRuleMatches >>> 0) +
+          " gpuMatches=" + observed.rawRuleMatches +
+          " proofQuiescent=" + proofQuiescent +
+          " gpuQuiescent=" + observed.quiescent +
+          " proofAppend=" + proofAppend +
+          " gpuAppend=" + observed.appendCount,
+        );
+      }
+
+      if (!proofQuiescent) activeProofReactions += 1;
+      appendOffset += proofAppend;
+      previousLinks = proofLinksAfter;
+    }
+
+    const lastProof = proofReactions[proofReactions.length - 1];
+    const proofFinalScope = lastProof.scopeAfter[0] >>> 0;
+    const residency = resident.telemetry();
+    const sameRun =
+      run.activeReactionCount === activeProofReactions &&
+      activeProofReactions === (compact.execute.activeReactionCount >>> 0) &&
+      run.finalCurrentHandle === proofFinalScope &&
+      run.accounting.appendedLinksConsumed === appendOffset &&
+      run.accounting.totalLinks ===
+        carrier.layout.linkCount + appendOffset &&
       residency.baseUploadCount === 1 &&
       residency.baseUploadBytes === carrier.layout.totalBytes &&
-      residency.reactionDispatchCount === 2 &&
-      residency.residentAppendCount === proofAppend0 + proofAppend1 &&
-      residency.residentCapacity >= residency.residentAppendCount &&
-      residency.residentBufferBytes > 0 &&
+      residency.residentAppendCount === appendOffset &&
+      residency.reactionDispatchCount === proofReactions.length &&
       residency.closed === false;
 
-    if (!gpu0.differential || !gpu1.differential ||
-        !sameResidency || !sameAppend0 || !sameAppend1 ||
-        !sameScopeChain || !sameMatches) {
+    if (!sameRun) {
       throw new Error(
-        "C4c3 sequential resident differential disagreement" +
-        " append0=" + sameAppend0 +
-        " append1=" + sameAppend1 +
-        " scopeChain=" + sameScopeChain +
-        " matches=" + sameMatches +
-        " residency=" + sameResidency +
+        "C4c3 full resident run accounting disagreement" +
+        " gpuActive=" + run.activeReactionCount +
+        " proofActive=" + activeProofReactions +
+        " gpuFinal=L" + run.finalCurrentHandle +
+        " proofFinal=L" + proofFinalScope +
+        " gpuAppend=" + residency.residentAppendCount +
+        " proofAppend=" + appendOffset +
         " uploads=" + residency.baseUploadCount +
-        " dispatches=" + residency.reactionDispatchCount +
-        " residentAppend=" + residency.residentAppendCount +
-        " proofAppend0=" + proofAppend0 +
-        " gpuAppend0=" + observed0.appendCount +
-        " proofAppend1=" + proofAppend1 +
-        " gpuAppend1=" + observed1.appendCount,
+        " dispatches=" + residency.reactionDispatchCount,
       );
     }
 
@@ -1041,24 +1061,19 @@ export async function runWorkbenchWebGpuWitness(
       status: "verified",
       tripleDifferential: true,
       sequentialResidentExecution: true,
+      fullResidentRun: true,
       sourceSha: /^[0-9a-f]{40}$/.test(sourceSha || "")
         ? sourceSha
         : null,
-      planMode: gpu0.plan.mode,
+      planMode: resident.plan.mode,
       linkCount: carrier.layout.linkCount,
-      reaction0RawRuleMatches: observed0.rawRuleMatches,
-      reaction1RawRuleMatches: observed1.rawRuleMatches,
-      reaction0RuleHandle: observed0.ruleHandle,
-      reaction1RuleHandle: observed1.ruleHandle,
-      reaction0AppendCount: observed0.appendCount,
-      reaction1AppendCount: observed1.appendCount,
-      reaction0PublishedHandle: observed0.publishedHandle,
-      reaction1CurrentHandle: observed1.currentHandle,
-      reaction1PublishedHandle: observed1.publishedHandle,
-      rustWasmScope1: first.scopeAfter[0] >>> 0,
-      rustWasmScope2: second.scopeAfter[0] >>> 0,
+      stopReason: run.stopReason,
+      activeReactionCount: run.activeReactionCount,
+      stepCount: run.steps.length,
+      finalScopeHandle: run.finalCurrentHandle,
+      rustWasmFinalScope: proofFinalScope,
       cpuGpuDifferential:
-        gpu0.differential === true && gpu1.differential === true,
+        run.steps.every((step) => step.differential === true),
       residentBaseReuse: true,
       residentAppendCount: residency.residentAppendCount,
       residentCapacity: residency.residentCapacity,
@@ -1103,15 +1118,15 @@ function gpuWitnessHtml(state) {
   };
   const detail = status === "verified"
     ? '<strong>CPU = WebGPU = Rust/WASM</strong>' +
-      '<small>reaction₀ → reaction₁ · ' +
+      '<small>reaction₀ → … → QUIESCENT · ' +
       esc(witness.planMode) + ' · Links ' +
-      esc(witness.linkCount) + ' · append ' +
-      esc(witness.reaction0AppendCount) + '+' +
-      esc(witness.reaction1AppendCount) + ' · base upload ×' +
-      esc(witness.baseUploadCount) + ' · dispatch ×' +
-      esc(witness.reactionDispatchCount) + '</small>' +
-      '<code>Scope L' + esc(witness.reaction0PublishedHandle) +
-      ' → Scope L' + esc(witness.reaction1PublishedHandle) + '</code>'
+      esc(witness.linkCount) + ' · active ' +
+      esc(witness.activeReactionCount) + ' · steps ' +
+      esc(witness.stepCount) + ' · append ' +
+      esc(witness.residentAppendCount) + ' · base upload ×' +
+      esc(witness.baseUploadCount) + '</small>' +
+      '<code>Final Scope L' + esc(witness.finalScopeHandle) +
+      ' · ' + esc(witness.stopReason) + '</code>'
     : status === "running"
       ? '<small>Реальный браузер компилирует WGSL, выполняет DISCOVER и отдельный PUBLISH и читает результат обратно.</small>'
       : '<small>' + esc(
@@ -1127,7 +1142,7 @@ function gpuWitnessHtml(state) {
     '<button id="wb-gpu-witness"' +
     (status === "running" ? " disabled" : "") +
     '>Проверить WebGPU C4c3</button>' +
-    '<div class="wb-help">Packed base загружается один раз. PUBLISH reaction₀ закрепляет append в GPU-resident состоянии, а reaction₁ читает полученный Scope и Links без пересборки или повторной загрузки carrier. CPU fallback здесь запрещён.</div></div>';
+    '<div class="wb-help">Packed base загружается один раз. WebGPU выполняет весь bounded generalized-MP цикл в одной resident Session: каждый следующий Scope берётся из предыдущей GPU-публикации, а zero-match завершает run как QUIESCENT. CPU fallback здесь запрещён.</div></div>';
 }
 
 function presetInputs(state) {
