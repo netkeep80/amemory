@@ -1290,12 +1290,13 @@ function carrierReactionCommonShader(args) {
     "  let grammar_theory = e(INTERPRETER); if (!valid_base(grammar_theory)) { discovery[0] = 3u; return; }",
     "  let theory = e(grammar_theory); discovery[4] = theory; let endpoint = e(CURRENT); if (!valid_base(theory) || !valid_base(endpoint)) { discovery[0] = 4u; return; }",
     "  let trigger_key = s(endpoint); discovery[5] = trigger_key; if (!valid_base(trigger_key)) { discovery[0] = 5u; return; }",
-    "  var trigger = start_head(trigger_key); var guard = 0u; var matches = 0u; var matched_rule = 0u; var matched_admission = 0u;",
+    "  var trigger = start_head(trigger_key); var guard = 0u; var matches = 0u; var candidates = 0u; var matched_rule = 0u; var matched_admission = 0u;",
     "  loop {",
     "    if (trigger == 0u) { break; } if (!valid_base(trigger) || guard >= LINK_COUNT) { discovery[0] = 6u; return; }",
     "    if (trigger != trigger_key && s(trigger) == trigger_key) {",
     "      let admission = e(trigger);",
     "      if (valid_base(admission) && s(admission) == theory && e(admission) != admission) {",
+    "        candidates = candidates + 1u; discovery[17] = candidates;",
     "        let rule = e(admission); discovery[6] = rule; discovery[7] = admission; let output_template = discover_rule(rule, CURRENT);",
     "        if (output_template != 0u) { matches = matches + 1u; discovery[1] = matches; if (matches > 1u) { discovery[0] = 9u; return; } matched_rule = rule; matched_admission = admission; }",
     "      }",
@@ -1490,9 +1491,19 @@ export async function runGpuCarrierReaction(
     // discovery storage buffer and is never seeded from this host copy.
     const d = await readLookupWords(device, discovery, 42);
     if ((d[0] >>> 0) !== 1) {
+      // Diagnostic oracle only: GPU DISCOVER has already completed and been
+      // read back. These CPU facts never seed, filter or retry GPU execution.
+      let cpuDiscovery = null;
+      let cpuDiscoveryError = null;
+      try {
+        cpuDiscovery = discoverCarrierReaction(parsed, input);
+      } catch (error) {
+        cpuDiscoveryError = error?.message || String(error);
+      }
       throw new Error(
         "WebGPU DISCOVER failed closed with status " + (d[0] >>> 0) +
         " matches=" + (d[1] >>> 0) +
+        " candidates=" + (d[17] >>> 0) +
         " current=" + (d[2] >>> 0) +
         " interpreter=" + (d[3] >>> 0) +
         " theory=" + (d[4] >>> 0) +
@@ -1507,7 +1518,11 @@ export async function runGpuCarrierReaction(
         " tb=" + (d[13] >>> 0) +
         " ca=" + (d[14] >>> 0) +
         " cb=" + (d[15] >>> 0) +
-        " role0=" + (d[16] >>> 0),
+        " role0=" + (d[16] >>> 0) +
+        " cpuRule=" + (cpuDiscovery?.ruleHandle ?? 0) +
+        " cpuAdmission=" + (cpuDiscovery?.admissionHandle ?? 0) +
+        " cpuRoles=" + (cpuDiscovery?.roleBindings?.length ?? 0) +
+        (cpuDiscoveryError ? " cpuError=" + cpuDiscoveryError : ""),
       );
     }
 
