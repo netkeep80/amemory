@@ -1057,11 +1057,76 @@ export async function runWorkbenchWebGpuWitness(
       );
     }
 
+    // Negative controls execute in fresh resident Sessions so they cannot
+    // contaminate the accepted full-run carrier. They prove bounded stops are
+    // not misreported as semantic quiescence.
+    let reactionBudgetProbe = null;
+    let reactionBudgetRun = null;
+    try {
+      reactionBudgetProbe = await gpuModule.openGpuCarrierResidentSession(
+        device,
+        carrier,
+      );
+      reactionBudgetRun = await reactionBudgetProbe.runToQuiescence(
+        input0,
+        { maxReactions: 1 },
+      );
+    } finally {
+      reactionBudgetProbe?.close();
+    }
+    const reactionBudgetFalsifier =
+      reactionBudgetRun?.stopReason === "REACTION_BUDGET_EXCEEDED" &&
+      reactionBudgetRun?.quiescent === false &&
+      reactionBudgetRun?.activeReactionCount === 1 &&
+      reactionBudgetRun?.stepsConsumed === 1 &&
+      reactionBudgetRun?.accounting?.reactionsConsumed === 1 &&
+      reactionBudgetRun?.residency?.baseUploadCount === 1;
+    if (!reactionBudgetFalsifier) {
+      throw new Error(
+        "C4c3 reaction-budget falsifier failed: " +
+        JSON.stringify(reactionBudgetRun),
+      );
+    }
+
+    let capacityProbe = null;
+    let capacityRun = null;
+    try {
+      capacityProbe = await gpuModule.openGpuCarrierResidentSession(
+        device,
+        carrier,
+        { maxResidentAppend: 1 },
+      );
+      capacityRun = await capacityProbe.runToQuiescence(
+        input0,
+        { maxReactions: 4096 },
+      );
+    } finally {
+      capacityProbe?.close();
+    }
+    const capacityFalsifier =
+      capacityRun?.stopReason === "APPENDED_LINKS_BUDGET_EXCEEDED" &&
+      capacityRun?.backendStopReason ===
+        "RESIDENT_APPEND_CAPACITY_EXCEEDED" &&
+      capacityRun?.quiescent === false &&
+      capacityRun?.stepsConsumed === 0 &&
+      capacityRun?.activeReactionCount === 0 &&
+      capacityRun?.accounting?.appendedLinksConsumed === 0 &&
+      capacityRun?.residency?.residentAppendCount === 0 &&
+      capacityRun?.residency?.baseUploadCount === 1;
+    if (!capacityFalsifier) {
+      throw new Error(
+        "C4c3 resident-capacity falsifier failed: " +
+        JSON.stringify(capacityRun),
+      );
+    }
+
     return {
       status: "verified",
       tripleDifferential: true,
       sequentialResidentExecution: true,
       fullResidentRun: true,
+      reactionBudgetFalsifier,
+      capacityFalsifier,
       sourceSha: /^[0-9a-f]{40}$/.test(sourceSha || "")
         ? sourceSha
         : null,

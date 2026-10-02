@@ -208,6 +208,8 @@ try {
       witness?.cpuGpuDifferential !== true ||
       witness?.sequentialResidentExecution !== true ||
       witness?.fullResidentRun !== true ||
+      witness?.reactionBudgetFalsifier !== true ||
+      witness?.capacityFalsifier !== true ||
       witness?.residentBaseReuse !== true ||
       witness?.baseUploadCount !== 1 ||
       witness?.stopReason !== "QUIESCENT" ||
@@ -241,7 +243,8 @@ try {
     " resident=" + witness.residentAppendCount +
     " uploads=" + witness.baseUploadCount +
     " dispatches=" + witness.reactionDispatchCount +
-    " stop=" + witness.stopReason,
+    " stop=" + witness.stopReason +
+    " falsifiers=budget,capacity",
   );
 } finally {
   cdp?.close();
