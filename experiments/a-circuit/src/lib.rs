@@ -21,6 +21,7 @@ mod rotate32_n;
 mod rotate_carry32_n;
 mod mux_n;
 mod observability;
+mod session_contract;
 mod runtime_session;
 mod proof_n;
 mod scenario;
