@@ -2925,6 +2925,8 @@ Promise.all([
       "resident_can_append",
       "RESIDENT_CAPACITY",
       "value_end(CURRENT)",
+      "if (matches == 0u)",
+      "discovery[0] = 11u",
     ]) {
       if (!shader.includes(marker)) {
         throw new Error("C4c3 " + mode + " shader missing " + marker);

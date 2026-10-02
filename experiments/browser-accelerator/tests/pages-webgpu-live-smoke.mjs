@@ -207,24 +207,26 @@ try {
       witness?.tripleDifferential !== true ||
       witness?.cpuGpuDifferential !== true ||
       witness?.sequentialResidentExecution !== true ||
+      witness?.fullResidentRun !== true ||
+      witness?.reactionBudgetFalsifier !== true ||
+      witness?.capacityFalsifier !== true ||
       witness?.residentBaseReuse !== true ||
       witness?.baseUploadCount !== 1 ||
-      witness?.reactionDispatchCount !== 2 ||
+      witness?.stopReason !== "QUIESCENT" ||
+      !Number.isInteger(witness?.activeReactionCount) ||
+      witness.activeReactionCount <= 0 ||
+      !Number.isInteger(witness?.stepCount) ||
+      witness.stepCount !== witness.activeReactionCount + 1 ||
+      witness?.reactionDispatchCount !== witness.stepCount ||
       !Number.isInteger(witness?.baseUploadBytes) ||
       witness.baseUploadBytes <= 0 ||
       !Number.isInteger(witness?.residentBufferBytes) ||
       witness.residentBufferBytes <= 0 ||
       !Number.isInteger(witness?.residentAppendCount) ||
       witness.residentAppendCount <= 0 ||
-      witness?.reaction0PublishedHandle !== witness?.rustWasmScope1 ||
-      witness?.reaction1CurrentHandle !== witness?.reaction0PublishedHandle ||
-      witness?.reaction1PublishedHandle !== witness?.rustWasmScope2 ||
-      !Number.isInteger(witness?.reaction0AppendCount) ||
-      witness.reaction0AppendCount <= 0 ||
-      !Number.isInteger(witness?.reaction1AppendCount) ||
-      witness.reaction1AppendCount <= 0 ||
-      witness.residentAppendCount !==
-        witness.reaction0AppendCount + witness.reaction1AppendCount) {
+      !Number.isInteger(witness?.residentCapacity) ||
+      witness.residentCapacity < witness.residentAppendCount ||
+      witness?.finalScopeHandle !== witness?.rustWasmFinalScope) {
     throw new Error(
       "live C4c3 WebGPU witness failed: " +
       JSON.stringify(witness) + "\nChrome:\n" + stderr,
@@ -235,13 +237,14 @@ try {
     "PAGES_WEBGPU_C4C3=PASS source=" +
     expectedSha.slice(0, 12) +
     " mode=" + witness.planMode +
-    " scope1=L" + witness.reaction0PublishedHandle +
-    " scope2=L" + witness.reaction1PublishedHandle +
-    " append0=" + witness.reaction0AppendCount +
-    " append1=" + witness.reaction1AppendCount +
+    " active=" + witness.activeReactionCount +
+    " steps=" + witness.stepCount +
+    " final=L" + witness.finalScopeHandle +
     " resident=" + witness.residentAppendCount +
     " uploads=" + witness.baseUploadCount +
-    " dispatches=" + witness.reactionDispatchCount,
+    " dispatches=" + witness.reactionDispatchCount +
+    " stop=" + witness.stopReason +
+    " falsifiers=budget,capacity",
   );
 } finally {
   cdp?.close();
