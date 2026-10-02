@@ -859,7 +859,7 @@ function semanticRootHandle(roots, role) {
   return root.carrierRef >>> 0;
 }
 
-function discoverCarrierReaction(
+function discoverCarrierReactionMatches(
   parsed,
   { currentHandle, interpreterHandle } = {},
 ) {
@@ -895,18 +895,29 @@ function discoverCarrierReaction(
     }));
   }
 
-  if (matches.length !== 1) {
-    throw new Error(
-      "bounded C4c3 discovery requires exactly one Rule image; got " +
-      matches.length,
-    );
-  }
-  const match = matches[0];
   return Object.freeze({
     currentHandle,
     interpreterHandle,
     theoryHandle,
     triggerKey,
+    matches: Object.freeze(matches),
+  });
+}
+
+function discoverCarrierReaction(parsed, input = {}) {
+  const classified = discoverCarrierReactionMatches(parsed, input);
+  if (classified.matches.length !== 1) {
+    throw new Error(
+      "bounded C4c3 discovery requires exactly one Rule image; got " +
+      classified.matches.length,
+    );
+  }
+  const match = classified.matches[0];
+  return Object.freeze({
+    currentHandle: classified.currentHandle,
+    interpreterHandle: classified.interpreterHandle,
+    theoryHandle: classified.theoryHandle,
+    triggerKey: classified.triggerKey,
     admissionHandle: match.admission,
     ruleHandle: match.rule,
     rawRuleMatches: 1,
@@ -1362,6 +1373,7 @@ function carrierReactionCommonShader(args) {
     "    }",
     "    trigger = next_start(trigger); guard = guard + 1u;",
     "  }",
+    "  if (matches == 0u) { discovery[0] = 11u; discovery[1] = 0u; return; }",
     "  if (matches != 1u) { discovery[0] = 8u; return; }",
     "  discovery[1] = matches; discovery[2] = CURRENT; discovery[3] = INTERPRETER; discovery[4] = theory; discovery[5] = trigger_key; discovery[6] = matched_rule; discovery[7] = matched_admission; discovery[0] = 1u;",
     "}",
@@ -1548,11 +1560,113 @@ export async function openGpuCarrierResidentSession(
     });
   };
 
+  const runToQuiescence = async (
+    input,
+    { maxReactions = 4096, maxAppend = 64 } = {},
+  ) => {
+    if (state.closed) {
+      throw new Error("WebGPU resident carrier Session is closed");
+    }
+    checkedInteger(maxReactions, "maxReactions", { min: 1 });
+    checkedInteger(input?.currentHandle, "current handle", { min: 1 });
+    requireLookupHandle(parsed, input?.interpreterHandle, "interpreter handle");
+
+    const steps = [];
+    let currentHandle = input.currentHandle;
+    let activeReactionCount = 0;
+
+    for (let stepIndex = 0; stepIndex < maxReactions; stepIndex += 1) {
+      let step;
+      try {
+        step = await reaction(
+          { currentHandle, interpreterHandle: input.interpreterHandle },
+          { maxAppend },
+        );
+      } catch (error) {
+        if (error?.code === "RESIDENT_APPEND_CAPACITY_EXCEEDED") {
+          const residency = telemetry();
+          return Object.freeze({
+            stopReason: "APPENDED_LINKS_BUDGET_EXCEEDED",
+            backendStopReason: error.code,
+            quiescent: false,
+            activeReactionCount,
+            stepsConsumed: steps.length,
+            maxReactions,
+            finalCurrentHandle: currentHandle,
+            steps: Object.freeze([...steps]),
+            accounting: Object.freeze({
+              reactionsConsumed: steps.length,
+              maxReactions,
+              appendedLinksConsumed: residency.residentAppendCount,
+              maxAppendedLinks: residency.residentCapacity,
+              baseLinks: parsed.layout.linkCount,
+              totalLinks:
+                parsed.layout.linkCount + residency.residentAppendCount,
+            }),
+            residency,
+          });
+        }
+        throw error;
+      }
+
+      steps.push(step);
+      if (step.quiescent === true) {
+        const residency = telemetry();
+        return Object.freeze({
+          stopReason: "QUIESCENT",
+          backendStopReason: null,
+          quiescent: true,
+          activeReactionCount,
+          stepsConsumed: steps.length,
+          maxReactions,
+          finalCurrentHandle: currentHandle,
+          steps: Object.freeze([...steps]),
+          accounting: Object.freeze({
+            reactionsConsumed: steps.length,
+            maxReactions,
+            appendedLinksConsumed: residency.residentAppendCount,
+            maxAppendedLinks: residency.residentCapacity,
+            baseLinks: parsed.layout.linkCount,
+            totalLinks:
+              parsed.layout.linkCount + residency.residentAppendCount,
+          }),
+          residency,
+        });
+      }
+
+      activeReactionCount += 1;
+      currentHandle = step.observed.publishedHandle;
+    }
+
+    const residency = telemetry();
+    return Object.freeze({
+      stopReason: "REACTION_BUDGET_EXCEEDED",
+      backendStopReason: null,
+      quiescent: false,
+      activeReactionCount,
+      stepsConsumed: steps.length,
+      maxReactions,
+      finalCurrentHandle: currentHandle,
+      steps: Object.freeze([...steps]),
+      accounting: Object.freeze({
+        reactionsConsumed: steps.length,
+        maxReactions,
+        appendedLinksConsumed: residency.residentAppendCount,
+        maxAppendedLinks: residency.residentCapacity,
+        baseLinks: parsed.layout.linkCount,
+        totalLinks:
+          parsed.layout.linkCount + residency.residentAppendCount,
+      }),
+      residency,
+    });
+  };
+
   return Object.freeze({
     plan,
     logicalFingerprint: gpuCarrierLogicalFingerprint(parsed),
     telemetry,
     reaction,
+    runToQuiescence,
     close,
   });
 }
@@ -1660,7 +1774,80 @@ async function runGpuCarrierReactionOnResidentBase(
     // discovery buffer. These CPU facts never seed, filter or retry GPU execution.
     // Proof data is likewise unavailable to the executor before readback.
     const d = await readLookupWords(device, discovery, 67);
-    if ((d[0] >>> 0) !== 1) {
+    const discoveryStatus = d[0] >>> 0;
+    if (discoveryStatus === 11) {
+      const residentWordLength = 8 + resident.residentCapacity * 2;
+      const o = await readLookupWords(
+        device,
+        resident.residentBuffer,
+        residentWordLength,
+      );
+      const committedCount = o[0] >>> 0;
+      const capacity = o[5] >>> 0;
+      if (capacity !== resident.residentCapacity ||
+          committedCount > resident.residentCapacity) {
+        throw new Error("WebGPU resident append metadata is invalid");
+      }
+      resident.residentAppendCount = committedCount;
+
+      const committedStarts = [];
+      const committedEnds = [];
+      for (let i = 0; i < committedCount; i += 1) {
+        committedStarts.push(o[8 + i * 2] >>> 0);
+        committedEnds.push(o[9 + i * 2] >>> 0);
+      }
+
+      // Independent comparison is post-readback only and cannot seed
+      // the GPU zero-match decision or the next Scope.
+      const oracleParsed = oracleParsedWithCommittedAppend(
+        parsed,
+        committedStarts,
+        committedEnds,
+      );
+      const classified = discoverCarrierReactionMatches(
+        oracleParsed,
+        input,
+      );
+      if (classified.matches.length !== 0) {
+        throw new Error(
+          "WebGPU quiescence diverged from post-readback CPU oracle: matches=" +
+          classified.matches.length,
+        );
+      }
+
+      const observed = Object.freeze({
+        discoveryStatus,
+        rawRuleMatches: 0,
+        currentHandle: d[2] >>> 0,
+        interpreterHandle: d[3] >>> 0,
+        theoryHandle: d[4] >>> 0,
+        triggerKey: d[5] >>> 0,
+        ruleHandle: 0,
+        admissionHandle: 0,
+        roleCount: 0,
+        roleBindings: Object.freeze([]),
+        outputBundleTemplate: 0,
+        appendCount: 0,
+        appendStarts: Object.freeze([]),
+        appendEnds: Object.freeze([]),
+        residentAppendCount: committedCount,
+        residentReactionStartCount: committedCount,
+        publishedHandle: input.currentHandle,
+        publishStatus: 0,
+        groundedBundle: 0,
+        quiescent: true,
+        stopReason: "QUIESCENT",
+      });
+      return Object.freeze({
+        plan,
+        expected: null,
+        observed,
+        differential: true,
+        quiescent: true,
+        stopReason: "QUIESCENT",
+      });
+    }
+    if (discoveryStatus !== 1) {
       let cpuDiscovery = null;
       let cpuDiscoveryError = null;
       if (input.currentHandle <= parsed.layout.linkCount) {
@@ -1683,8 +1870,8 @@ async function runGpuCarrierReactionOnResidentBase(
           break;
         }
       }
-      throw new Error(
-        "WebGPU DISCOVER failed closed with status " + (d[0] >>> 0) +
+      const error = new Error(
+        "WebGPU DISCOVER failed closed with status " + discoveryStatus +
         " matches=" + (d[1] >>> 0) +
         " candidates=" + (d[42] >>> 0) +
         " current=" + (d[2] >>> 0) +
@@ -1709,6 +1896,12 @@ async function runGpuCarrierReactionOnResidentBase(
         " cpuRuleGpuDiagnostic=" + cpuRuleGpuDiagnostic +
         (cpuDiscoveryError ? " cpuError=" + cpuDiscoveryError : ""),
       );
+      error.code = discoveryStatus === 9
+        ? "AMBIGUOUS_RULE_MATCH"
+        : "DISCOVERY_FAILED";
+      error.discoveryStatus = discoveryStatus;
+      error.rawRuleMatches = d[1] >>> 0;
+      throw error;
     }
 
     const publishEncoder = device.createCommandEncoder();
@@ -1796,6 +1989,8 @@ async function runGpuCarrierReactionOnResidentBase(
       publishedHandle,
       publishStatus,
       groundedBundle,
+      quiescent: false,
+      stopReason: null,
     });
 
     // Oracle is materialized only after GPU DISCOVER + PUBLISH + readback.
@@ -1846,7 +2041,14 @@ async function runGpuCarrierReactionOnResidentBase(
         mismatches.join(", "),
       );
     }
-    return Object.freeze({ plan, expected, observed, differential: true });
+    return Object.freeze({
+      plan,
+      expected,
+      observed,
+      differential: true,
+      quiescent: false,
+      stopReason: null,
+    });
   } finally {
     discovery?.destroy();
     if (typeof device.popErrorScope === "function") {
