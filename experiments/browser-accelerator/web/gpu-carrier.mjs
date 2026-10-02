@@ -1166,6 +1166,7 @@ function carrierReactionCommonShader(args) {
     "const ROOT_HANDLE: u32 = " + args.rootHandle + "u;",
     "const MAX_ROLES: u32 = 16u;",
     "const MAX_STACK: u32 = 128u;",
+    "const MAX_VISITS: u32 = 256u;",
     "const MAX_APPEND: u32 = 64u;",
     "fn valid_base(h: u32) -> bool { return h > 0u && h <= LINK_COUNT; }",
     "fn find_pair_base(a: u32, b: u32) -> u32 {",
@@ -1186,20 +1187,20 @@ function carrierReactionCommonShader(args) {
     "  loop { if (h == 0u) { break; } if (!valid_base(h) || n >= LINK_COUNT) { return 0u; } if (s(h) == child && e(h) == h) { return h; } h = next_start(h); n = n + 1u; }",
     "  return 0u;",
     "}",
-    "fn discover_rule(rule: u32, active_handle: u32) -> u32 {",
-    "  discovery[9] = 20u;",
+    "fn discover_rule(rule: u32, active_handle: u32, record_diag: bool) -> u32 {",
+    "  if (record_diag) { discovery[9] = 20u; }",
     "  if (!valid_base(rule) || !valid_base(active_handle)) { return 0u; }",
     "  let dictionary = s(rule); let body = e(rule);",
-    "  if (!valid_base(dictionary) || !valid_base(body) || s(dictionary) != dictionary || e(dictionary) == dictionary) { discovery[9] = 21u; return 0u; }",
+    "  if (!valid_base(dictionary) || !valid_base(body) || s(dictionary) != dictionary || e(dictionary) == dictionary) { if (record_diag) { discovery[9] = 21u; } return 0u; }",
     "  var roles: array<u32, 16>; var bound: array<u32, 16>; var bound_set: array<u32, 16>;",
     "  var role_count = 0u; var seq = e(dictionary); var seq_guard = 0u;",
     "  loop {",
     "    if (seq == ROOT_HANDLE) { break; }",
-    "    if (!valid_base(seq) || seq_guard >= 64u || s(seq) != seq || e(seq) == seq || role_count >= MAX_ROLES) { discovery[8] = role_count; discovery[9] = 22u; return 0u; }",
-    "    let cell = e(seq); if (!valid_base(cell)) { discovery[8] = role_count; discovery[9] = 23u; return 0u; }",
+    "    if (!valid_base(seq) || seq_guard >= 64u || s(seq) != seq || e(seq) == seq || role_count >= MAX_ROLES) { if (record_diag) { discovery[8] = role_count; discovery[9] = 22u; } return 0u; }",
+    "    let cell = e(seq); if (!valid_base(cell)) { if (record_diag) { discovery[8] = role_count; discovery[9] = 23u; } return 0u; }",
     "    let role = e(cell); var duplicate = false; var ri = 0u;",
     "    loop { if (ri >= role_count) { break; } if (roles[ri] == role) { duplicate = true; break; } ri = ri + 1u; }",
-    "    if (duplicate) { discovery[8] = role_count; discovery[9] = 24u; return 0u; } roles[role_count] = role; role_count = role_count + 1u; seq = s(cell); seq_guard = seq_guard + 1u;",
+    "    if (duplicate) { if (record_diag) { discovery[8] = role_count; discovery[9] = 24u; } return 0u; } roles[role_count] = role; role_count = role_count + 1u; seq = s(cell); seq_guard = seq_guard + 1u;",
     "  }",
     "  var role_left = 0u;",
     "  loop {",
@@ -1209,19 +1210,21 @@ function carrierReactionCommonShader(args) {
     "    role_left = role_left + 1u;",
     "  }",
     "  let before = s(body); let bundle = e(body);",
-    "  var ts: array<u32, 128>; var cs: array<u32, 128>; var sp = 1u; var visited = 0u; ts[0] = before; cs[0] = active_handle;",
+    "  var ts: array<u32, 128>; var cs: array<u32, 128>; var seen_t: array<u32, 256>; var seen_c: array<u32, 256>; var sp = 1u; var visited = 0u; var seen_count = 0u; ts[0] = before; cs[0] = active_handle;",
     "  loop {",
-    "    if (sp == 0u) { break; } if (visited >= MAX_STACK) { return 0u; }",
-    "    sp = sp - 1u; let t = ts[sp]; let c = cs[sp]; visited = visited + 1u; if (!valid_base(t) || !valid_base(c)) { discovery[8] = role_count; discovery[9] = 25u; return 0u; }",
+    "    if (sp == 0u) { break; } if (visited >= MAX_VISITS) { if (record_diag) { discovery[8] = role_count; discovery[9] = 32u; } return 0u; }",
+    "    sp = sp - 1u; let t = ts[sp]; let c = cs[sp]; visited = visited + 1u; if (!valid_base(t) || !valid_base(c)) { if (record_diag) { discovery[8] = role_count; discovery[9] = 25u; } return 0u; }",
     "    var role_index = 0xffffffffu; var r = 0u; loop { if (r >= role_count) { break; } if (roles[r] == t) { role_index = r; break; } r = r + 1u; }",
-    "    if (role_index != 0xffffffffu) { if (bound_set[role_index] != 0u && bound[role_index] != c) { discovery[8] = role_count; discovery[9] = 26u; return 0u; } bound[role_index] = c; bound_set[role_index] = 1u; continue; }",
+    "    if (role_index != 0xffffffffu) { if (bound_set[role_index] != 0u && bound[role_index] != c) { if (record_diag) { discovery[8] = role_count; discovery[9] = 26u; } return 0u; } bound[role_index] = c; bound_set[role_index] = 1u; continue; }",
+    "    var already_seen = false; var si = 0u; loop { if (si >= seen_count) { break; } if (seen_t[si] == t && seen_c[si] == c) { already_seen = true; break; } si = si + 1u; }",
+    "    if (already_seen) { continue; } if (seen_count >= MAX_VISITS) { if (record_diag) { discovery[8] = role_count; discovery[9] = 32u; } return 0u; } seen_t[seen_count] = t; seen_c[seen_count] = c; seen_count = seen_count + 1u;",
     "    let ta = s(t); let tb = e(t); let ca = s(c); let cb = e(c);",
-    "    if ((ta == t) != (ca == c) || (tb == t) != (cb == c)) { discovery[8] = role_count; discovery[9] = 27u; discovery[10] = t; discovery[11] = c; discovery[12] = ta; discovery[13] = tb; discovery[14] = ca; discovery[15] = cb; if (role_count > 0u) { discovery[16] = roles[0]; } return 0u; }",
-    "    if (tb != t) { if (sp >= MAX_STACK) { discovery[8] = role_count; discovery[9] = 28u; return 0u; } ts[sp] = tb; cs[sp] = cb; sp = sp + 1u; }",
-    "    if (ta != t) { if (sp >= MAX_STACK) { discovery[8] = role_count; discovery[9] = 29u; return 0u; } ts[sp] = ta; cs[sp] = ca; sp = sp + 1u; }",
+    "    if ((ta == t) != (ca == c) || (tb == t) != (cb == c)) { if (record_diag) { discovery[8] = role_count; discovery[9] = 27u; discovery[10] = t; discovery[11] = c; discovery[12] = ta; discovery[13] = tb; discovery[14] = ca; discovery[15] = cb; if (role_count > 0u) { discovery[16] = roles[0]; } } return 0u; }",
+    "    if (tb != t) { if (sp >= MAX_STACK) { if (record_diag) { discovery[8] = role_count; discovery[9] = 28u; } return 0u; } ts[sp] = tb; cs[sp] = cb; sp = sp + 1u; }",
+    "    if (ta != t) { if (sp >= MAX_STACK) { if (record_diag) { discovery[8] = role_count; discovery[9] = 29u; } return 0u; } ts[sp] = ta; cs[sp] = ca; sp = sp + 1u; }",
     "  }",
-    "  var rr = 0u; loop { if (rr >= role_count) { break; } if (bound_set[rr] == 0u) { discovery[8] = role_count; discovery[9] = 30u; return 0u; } rr = rr + 1u; }",
-    "  if (!valid_base(bundle)) { discovery[8] = role_count; discovery[9] = 31u; return 0u; }",
+    "  var rr = 0u; loop { if (rr >= role_count) { break; } if (bound_set[rr] == 0u) { if (record_diag) { discovery[8] = role_count; discovery[9] = 30u; } return 0u; } rr = rr + 1u; }",
+    "  if (!valid_base(bundle)) { if (record_diag) { discovery[8] = role_count; discovery[9] = 31u; } return 0u; }",
     "  discovery[8] = role_count; discovery[9] = bundle;",
     "  var wi = 0u; loop { if (wi >= role_count) { break; } discovery[10u + wi * 2u] = roles[wi]; discovery[11u + wi * 2u] = bound[wi]; wi = wi + 1u; }",
     "  return bundle;",
@@ -1297,7 +1300,8 @@ function carrierReactionCommonShader(args) {
     "      let admission = e(trigger);",
     "      if (valid_base(admission) && s(admission) == theory && e(admission) != admission) {",
     "        candidates = candidates + 1u; discovery[17] = candidates;",
-    "        let rule = e(admission); discovery[6] = rule; discovery[7] = admission; let output_template = discover_rule(rule, CURRENT);",
+    "        let rule = e(admission); discovery[6] = rule; discovery[7] = admission; let record_diag = matches == 0u; let output_template = discover_rule(rule, CURRENT, record_diag);",
+    "        if (output_template == 0u && record_diag && candidates <= 12u) { let trace = 18u + (candidates - 1u) * 2u; discovery[trace] = rule; discovery[trace + 1u] = (discovery[8] << 16u) | (discovery[9] & 0xffffu); }",
     "        if (output_template != 0u) { matches = matches + 1u; discovery[1] = matches; if (matches > 1u) { discovery[0] = 9u; return; } matched_rule = rule; matched_admission = admission; }",
     "      }",
     "    }",
@@ -1500,6 +1504,19 @@ export async function runGpuCarrierReaction(
       } catch (error) {
         cpuDiscoveryError = error?.message || String(error);
       }
+      let cpuRuleGpuRoles = 0;
+      let cpuRuleGpuDiagnostic = 0;
+      const cpuRule = cpuDiscovery?.ruleHandle ?? 0;
+      const tracedCandidates = Math.min(d[17] >>> 0, 12);
+      for (let index = 0; index < tracedCandidates; index += 1) {
+        const trace = 18 + index * 2;
+        if ((d[trace] >>> 0) === cpuRule) {
+          const packed = d[trace + 1] >>> 0;
+          cpuRuleGpuRoles = packed >>> 16;
+          cpuRuleGpuDiagnostic = packed & 0xffff;
+          break;
+        }
+      }
       throw new Error(
         "WebGPU DISCOVER failed closed with status " + (d[0] >>> 0) +
         " matches=" + (d[1] >>> 0) +
@@ -1519,9 +1536,11 @@ export async function runGpuCarrierReaction(
         " ca=" + (d[14] >>> 0) +
         " cb=" + (d[15] >>> 0) +
         " role0=" + (d[16] >>> 0) +
-        " cpuRule=" + (cpuDiscovery?.ruleHandle ?? 0) +
+        " cpuRule=" + cpuRule +
         " cpuAdmission=" + (cpuDiscovery?.admissionHandle ?? 0) +
         " cpuRoles=" + (cpuDiscovery?.roleBindings?.length ?? 0) +
+        " cpuRuleGpuRoles=" + cpuRuleGpuRoles +
+        " cpuRuleGpuDiagnostic=" + cpuRuleGpuDiagnostic +
         (cpuDiscoveryError ? " cpuError=" + cpuDiscoveryError : ""),
       );
     }

@@ -24,6 +24,8 @@ for (const required of [
   "candidates = candidates + 1u",
   "cpuDiscovery = discoverCarrierReaction(parsed, input)",
   "These CPU facts never seed, filter or retry GPU execution",
+  "cpuRuleGpuDiagnostic",
+  "cpuRuleGpuRoles",
 ]) {
   if (!gpuCarrierSource.includes(required)) {
     throw new Error("C4c3 split GPU submission contract missing: " + required);
@@ -114,6 +116,16 @@ for (const mode of ["single", "sections"]) {
     "discovery[10] = t",
     "discovery[11] = c",
     "discovery[16] = roles[0]",
+    "fn discover_rule(rule: u32, active_handle: u32, record_diag: bool)",
+    "const MAX_VISITS: u32 = 256u",
+    "var seen_t: array<u32, 256>",
+    "var seen_c: array<u32, 256>",
+    "seen_t[si] == t && seen_c[si] == c",
+    "if (already_seen) { continue; }",
+    "discovery[9] = 32u",
+    "let record_diag = matches == 0u",
+    "candidates <= 12u",
+    "(discovery[8] << 16u) | (discovery[9] & 0xffffu)",
     "discovery[9] = 30u",
   ]) {
     if (!shader.includes(marker)) {
