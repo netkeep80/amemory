@@ -2458,7 +2458,15 @@ mod tests {
                 assert_eq!(accounting.max_reactions, 1);
                 assert!(accounting.total_links > 0);
                 assert!(accounting.max_total_links >= accounting.total_links);
-                assert!(!accounting.full_resident_bytes_available);
+                assert!(matches!(
+                    accounting.backend_resource,
+                    Some(
+                        BackendResourceAccountingV1::OptimizedCpuDenseCarrier {
+                            full_resident_bytes_available: false,
+                            ..
+                        },
+                    )
+                ));
             }
             other => panic!("unexpected error: {other:?}"),
         }
