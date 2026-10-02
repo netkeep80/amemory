@@ -634,7 +634,7 @@ mod tests {
     #[test]
     fn budget_resource_reasons_are_distinct_and_deterministic() {
         let budget = RunBudgetV1 {
-            schema_version: CPU_RUN_BUDGET_SCHEMA_VERSION,
+            schema_version: RUN_BUDGET_SCHEMA_VERSION,
             max_reactions: 8,
             max_appended_links: 5,
             max_total_links: 20,
@@ -642,7 +642,6 @@ mod tests {
             max_match_candidates: 100,
             max_unification_nodes: 100,
             max_instantiation_nodes: 100,
-            max_dense_carrier_bytes: 1_000,
         };
 
         assert_eq!(
@@ -663,7 +662,7 @@ mod tests {
     #[test]
     fn budget_work_reasons_are_distinct_and_deterministic() {
         let budget = RunBudgetV1 {
-            schema_version: CPU_RUN_BUDGET_SCHEMA_VERSION,
+            schema_version: RUN_BUDGET_SCHEMA_VERSION,
             max_reactions: 8,
             max_appended_links: 5,
             max_total_links: 20,
@@ -671,7 +670,6 @@ mod tests {
             max_match_candidates: 10,
             max_unification_nodes: 20,
             max_instantiation_nodes: 30,
-            max_dense_carrier_bytes: 1_000,
         };
 
         assert_eq!(
@@ -853,7 +851,7 @@ mod tests {
         let budget = RunBudgetV1::scenario_default(64);
         assert_eq!(
             budget.schema_version,
-            CPU_RUN_BUDGET_SCHEMA_VERSION,
+            RUN_BUDGET_SCHEMA_VERSION,
         );
         assert_eq!(budget.max_reactions, 64);
         assert!(budget.max_appended_links < u32::MAX);

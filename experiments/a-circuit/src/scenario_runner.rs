@@ -1396,7 +1396,7 @@ mod tests {
         assert_eq!(
             profile.max_dense_carrier_bytes,
             Some(
-                RunBudgetV1::scenario_default(run.max_reactions)
+                CpuRunResourceBudgetV1::default()
                     .max_dense_carrier_bytes,
             ),
         );
@@ -1428,7 +1428,7 @@ mod tests {
         );
         assert_eq!(
             accounting.max_dense_carrier_bytes,
-            budget.max_dense_carrier_bytes,
+            CpuRunResourceBudgetV1::default().max_dense_carrier_bytes,
         );
         assert_eq!(accounting.total_links, profile.links_after_run);
         assert_eq!(
