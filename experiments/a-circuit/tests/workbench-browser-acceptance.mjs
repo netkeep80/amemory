@@ -54,16 +54,18 @@ for (const required of [
   "CPU = WebGPU = Rust/WASM",
   "webgpuWitness",
   "amemory_i386_lab_gpu_carrier_prepare",
-  "sameU32Prefix",
-  "expected.length >= prefixLength",
-  "proofAppendCount === observed.appendCount",
-  "gpuAppendCount=",
+  "sameU32Segment",
+  "expected.length >= offset + length",
+  "const gpu0 = await resident.reaction(input0)",
+  "const gpu1 = await resident.reaction(input1)",
+  "sequentialResidentExecution: true",
+  "reaction1CurrentHandle",
+  "residentAppendCount",
   "openGpuCarrierResidentSession",
-  "resident.reaction(input)",
   "resident.telemetry()",
   "baseUploadCount",
   "reactionDispatchCount",
-  "Append пока не закрепляется",
+  "reaction₁ читает полученный Scope",
 ]) {
   if (!workbenchSource.includes(required)) {
     throw new Error("live WebGPU Workbench witness missing: " + required);
@@ -87,6 +89,9 @@ for (const required of [
   "--enable-unsafe-webgpu",
   "--use-webgpu-adapter=swiftshader",
   "residentBaseReuse",
+  "sequentialResidentExecution",
+  "residentAppendCount",
+  "reaction1CurrentHandle",
   "baseUploadCount",
   "reactionDispatchCount",
 ]) {
@@ -167,16 +172,22 @@ const fakeResidentOpen = fakeResident.telemetry();
 if (fakeResidentOpen.baseUploadCount !== 1 ||
     fakeResidentOpen.baseUploadBytes !== 4 ||
     fakeResidentOpen.baseBufferCount !== 1 ||
+    fakeResidentOpen.residentAppendCount !== 0 ||
+    fakeResidentOpen.residentCapacity !== 256 ||
+    !Number.isInteger(fakeResidentOpen.residentBufferBytes) ||
+    fakeResidentOpen.residentBufferBytes <= 0 ||
     fakeResidentOpen.reactionDispatchCount !== 0 ||
     fakeResidentOpen.closed !== false ||
-    fakeResidentWrites !== 1) {
+    fakeResidentWrites !== 2) {
   throw new Error(
     "resident GPU base ownership telemetry mismatch: " +
     JSON.stringify(fakeResidentOpen),
   );
 }
 if (fakeResident.close() !== true || fakeResident.close() !== false ||
+    fakeResidentBuffers.length !== 2 ||
     fakeResidentBuffers[0]?.destroyCount !== 1 ||
+    fakeResidentBuffers[1]?.destroyCount !== 1 ||
     fakeResident.telemetry().closed !== true) {
   throw new Error("resident GPU base close is not bounded/idempotent");
 }
@@ -235,9 +246,23 @@ for (const mode of ["single", "sections"]) {
     "let trace = 43u + (candidates - 1u) * 2u",
     "(discovery[8] << 16u) | (discovery[9] & 0xffffu)",
     "discovery[9] = 30u",
+    "const RESIDENT_CAPACITY: u32 = 256u",
+    "fn resident_can_append() -> bool",
+    "fn ensure_pair_resident(a: u32, b: u32) -> u32",
+    "let endpoint = value_end(CURRENT)",
   ]) {
     if (!shader.includes(marker)) {
-      throw new Error("C4c3 WGSL lost canonical role order: " + marker);
+      throw new Error("C4c3 WGSL lost resident/canonical contract: " + marker);
+    }
+  }
+  for (const forbidden of [
+    "ensure_pair_overlay",
+    "ensure_start_self_overlay",
+    "ensure_end_self_overlay",
+    "var<storage, read_write> overlay",
+  ]) {
+    if (shader.includes(forbidden)) {
+      throw new Error("C4c3 WGSL retained transient overlay path: " + forbidden);
     }
   }
 }
