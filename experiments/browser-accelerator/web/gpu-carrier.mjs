@@ -1380,7 +1380,7 @@ function singleReactionShader(args) {
   return [
     "@group(0) @binding(0) var<storage, read> carrier: array<u32>;",
     "@group(0) @binding(1) var<storage, read_write> discovery: array<u32>;",
-    "@group(0) @binding(2) var<storage, read_write> resident: array<u32>;"
+    "@group(0) @binding(2) var<storage, read_write> resident: array<u32>;",
     "fn s(h: u32) -> u32 { return carrier[carrier[6] + h - 1u]; }",
     "fn e(h: u32) -> u32 { return carrier[carrier[7] + h - 1u]; }",
     "fn start_head(h: u32) -> u32 { return carrier[carrier[8] + h]; }",
@@ -1399,7 +1399,7 @@ function sectionReactionShader(args) {
     "@group(0) @binding(4) var<storage, read> next_starts: array<u32>;",
     "@group(0) @binding(5) var<storage, read> next_ends: array<u32>;",
     "@group(0) @binding(6) var<storage, read_write> discovery: array<u32>;",
-    "@group(0) @binding(7) var<storage, read_write> resident: array<u32>;"
+    "@group(0) @binding(7) var<storage, read_write> resident: array<u32>;",
     "fn s(h: u32) -> u32 { return starts[h - 1u]; }",
     "fn e(h: u32) -> u32 { return ends[h - 1u]; }",
     "fn start_head(h: u32) -> u32 { return start_heads[h]; }",
