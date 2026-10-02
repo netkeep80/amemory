@@ -21,6 +21,9 @@ for (const required of [
   "const publishEncoder = device.createCommandEncoder()",
   "Diagnostic readback only",
   "WebGPU DISCOVER failed closed with status",
+  "candidates = candidates + 1u",
+  "cpuDiscovery = discoverCarrierReaction(parsed, input)",
+  "These CPU facts never seed, filter or retry GPU execution",
 ]) {
   if (!gpuCarrierSource.includes(required)) {
     throw new Error("C4c3 split GPU submission contract missing: " + required);
