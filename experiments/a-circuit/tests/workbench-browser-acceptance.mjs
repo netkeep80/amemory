@@ -46,6 +46,10 @@ for (const required of [
   "CPU = WebGPU = Rust/WASM",
   "webgpuWitness",
   "amemory_i386_lab_gpu_carrier_prepare",
+  "sameU32Prefix",
+  "expected.length >= prefixLength",
+  "proofAppendCount === observed.appendCount",
+  "gpuAppendCount=",
 ]) {
   if (!workbenchSource.includes(required)) {
     throw new Error("live WebGPU Workbench witness missing: " + required);
@@ -54,6 +58,7 @@ for (const required of [
 for (const forbidden of [
   "scopeAfter: expected.",
   "publishedHandle: expected.",
+  "sameU32Array",
 ]) {
   if (workbenchSource.includes(forbidden)) {
     throw new Error("Workbench WebGPU witness seeded expected result: " + forbidden);
