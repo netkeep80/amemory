@@ -916,12 +916,15 @@ export async function runWorkbenchWebGpuWitness(
   }
 
   const device = await adapter.requestDevice();
+  let resident = null;
   try {
-    const gpu = await gpuModule.runGpuCarrierReaction(
+    resident = await gpuModule.openGpuCarrierResidentSession(
       device,
       carrier,
-      input,
     );
+    const gpu = await resident.reaction(input);
+    const reuseProbe = await resident.reaction(input);
+    const residency = resident.telemetry();
     const first = compact.execute?.reactions?.[0];
     const append = compact.topology?.append;
     if (!first ||
@@ -936,6 +939,23 @@ export async function runWorkbenchWebGpuWitness(
     const proofAppendCount =
       (first.linksAfter >>> 0) - (compact.load.linksAfterLoad >>> 0);
     const observed = gpu.observed;
+    const reused = reuseProbe.observed;
+    const sameResidentReuse =
+      reuseProbe.differential === true &&
+      reused.ruleHandle === observed.ruleHandle &&
+      reused.rawRuleMatches === observed.rawRuleMatches &&
+      reused.publishedHandle === observed.publishedHandle &&
+      reused.appendCount === observed.appendCount &&
+      sameU32Prefix(
+        reused.appendStarts,
+        observed.appendStarts,
+        observed.appendCount,
+      ) &&
+      sameU32Prefix(
+        reused.appendEnds,
+        observed.appendEnds,
+        observed.appendCount,
+      );
     const sameAppend =
       proofAppendCount === observed.appendCount &&
       sameU32Prefix(
@@ -954,12 +974,22 @@ export async function runWorkbenchWebGpuWitness(
     const sameMatches =
       (first.rawRuleMatches >>> 0) === observed.rawRuleMatches;
 
-    if (!gpu.differential || !sameAppend || !sameScope || !sameMatches) {
+    const sameResidency =
+      residency.baseUploadCount === 1 &&
+      residency.baseUploadBytes === carrier.layout.totalBytes &&
+      residency.reactionDispatchCount === 2 &&
+      residency.closed === false;
+    if (!gpu.differential || !sameResidentReuse || !sameResidency ||
+        !sameAppend || !sameScope || !sameMatches) {
       throw new Error(
-        "C4c3 live differential: CPU/GPU/Rust-WASM disagreement" +
+        "C4c3 live differential/residency disagreement" +
         " append=" + sameAppend +
         " scope=" + sameScope +
         " matches=" + sameMatches +
+        " reuse=" + sameResidentReuse +
+        " residency=" + sameResidency +
+        " uploads=" + residency.baseUploadCount +
+        " dispatches=" + residency.reactionDispatchCount +
         " proofAppendCount=" + proofAppendCount +
         " gpuAppendCount=" + observed.appendCount,
       );
@@ -980,8 +1010,13 @@ export async function runWorkbenchWebGpuWitness(
       publishedHandle: observed.publishedHandle,
       rustWasmScopeAfter: first.scopeAfter[0] >>> 0,
       cpuGpuDifferential: gpu.differential === true,
+      residentBaseReuse: sameResidentReuse,
+      baseUploadCount: residency.baseUploadCount,
+      baseUploadBytes: residency.baseUploadBytes,
+      reactionDispatchCount: residency.reactionDispatchCount,
     };
   } finally {
+    resident?.close();
     device.destroy?.();
   }
 }
@@ -1019,7 +1054,9 @@ function gpuWitnessHtml(state) {
       '<small>DISCOVER → PUBLISH · ' +
       esc(witness.planMode) + ' · Links ' +
       esc(witness.linkCount) + ' · append ' +
-      esc(witness.appendCount) + '</small>' +
+      esc(witness.appendCount) + ' · base upload ×' +
+      esc(witness.baseUploadCount) + ' · dispatch ×' +
+      esc(witness.reactionDispatchCount) + '</small>' +
       '<code>Rule L' + esc(witness.ruleHandle) +
       ' → Scope L' + esc(witness.publishedHandle) + '</code>'
     : status === "running"
@@ -1037,7 +1074,7 @@ function gpuWitnessHtml(state) {
     '<button id="wb-gpu-witness"' +
     (status === "running" ? " disabled" : "") +
     '>Проверить WebGPU C4c3</button>' +
-    '<div class="wb-help">Это одна настоящая структурная реакция на packed carrier, а не persistent WebGPU Session. Полная Session отслеживается в #279; CPU fallback здесь запрещён.</div></div>';
+    '<div class="wb-help">Packed base уже удерживается одной WebGPU Session и повторно используется без второй загрузки. Append пока не закрепляется в resident carrier между реакциями; следующий шаг #279 делает именно это. CPU fallback здесь запрещён.</div></div>';
 }
 
 function presetInputs(state) {

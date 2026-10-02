@@ -206,6 +206,11 @@ try {
   if (witness?.status !== "verified" ||
       witness?.tripleDifferential !== true ||
       witness?.cpuGpuDifferential !== true ||
+      witness?.residentBaseReuse !== true ||
+      witness?.baseUploadCount !== 1 ||
+      witness?.reactionDispatchCount !== 2 ||
+      !Number.isInteger(witness?.baseUploadBytes) ||
+      witness.baseUploadBytes <= 0 ||
       witness?.publishedHandle !== witness?.rustWasmScopeAfter ||
       !Number.isInteger(witness?.appendCount) ||
       witness.appendCount <= 0) {
@@ -221,7 +226,9 @@ try {
     " mode=" + witness.planMode +
     " rule=L" + witness.ruleHandle +
     " scope=L" + witness.publishedHandle +
-    " append=" + witness.appendCount,
+    " append=" + witness.appendCount +
+    " uploads=" + witness.baseUploadCount +
+    " dispatches=" + witness.reactionDispatchCount,
   );
 } finally {
   cdp?.close();
