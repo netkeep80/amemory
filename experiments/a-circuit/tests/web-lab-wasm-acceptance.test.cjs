@@ -43,12 +43,23 @@ const c4RunStart = gpuCarrierSource.indexOf(
   "export async function runGpuCarrierReaction"
 );
 const c4RunSource = gpuCarrierSource.slice(c4RunStart);
-const c4GpuReadback = c4RunSource.indexOf("const [d, o] = await Promise.all");
+const c4DiscoveryReadback = c4RunSource.indexOf(
+  "const d = await readLookupWords"
+);
+const c4PublishReadback = c4RunSource.indexOf(
+  "const o = await readLookupWords"
+);
 const c4CpuOracle = c4RunSource.indexOf(
   "const expected = expectedGpuCarrierReaction"
 );
-if (c4GpuReadback < 0 || c4CpuOracle < 0 || c4CpuOracle <= c4GpuReadback) {
-  throw new Error("C4c3 CPU oracle must be computed only after GPU readback");
+if (c4DiscoveryReadback < 0 ||
+    c4PublishReadback < 0 ||
+    c4CpuOracle < 0 ||
+    c4PublishReadback <= c4DiscoveryReadback ||
+    c4CpuOracle <= c4PublishReadback) {
+  throw new Error(
+    "C4c3 CPU oracle must be computed only after DISCOVER/PUBLISH readback"
+  );
 }
 for (const forbiddenSeed of [
   "currentHandle: expected.currentHandle",
