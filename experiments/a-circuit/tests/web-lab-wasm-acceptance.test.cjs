@@ -2917,14 +2917,29 @@ Promise.all([
       "fn publish",
       "start_head",
       "next_start",
-      "ensure_pair_overlay",
-      "ensure_start_self_overlay",
-      "ensure_end_self_overlay",
+      "ensure_pair_resident",
+      "ensure_start_self_resident",
+      "ensure_end_self_resident",
       "read_single_output_bundle",
       "grounded_bundle",
+      "resident_can_append",
+      "RESIDENT_CAPACITY",
+      "value_end(CURRENT)",
     ]) {
       if (!shader.includes(marker)) {
         throw new Error("C4c3 " + mode + " shader missing " + marker);
+      }
+    }
+    for (const forbidden of [
+      "ensure_pair_overlay",
+      "ensure_start_self_overlay",
+      "ensure_end_self_overlay",
+      "var<storage, read_write> overlay",
+    ]) {
+      if (shader.includes(forbidden)) {
+        throw new Error(
+          "C4c3 " + mode + " shader retained transient overlay: " + forbidden
+        );
       }
     }
   }
