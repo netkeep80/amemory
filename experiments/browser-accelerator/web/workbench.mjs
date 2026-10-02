@@ -864,6 +864,20 @@ function sameU32Prefix(actual, expected, prefixLength) {
     );
 }
 
+function sameU32Segment(actual, expected, offset, length) {
+  return Array.isArray(expected) &&
+    Number.isInteger(offset) &&
+    Number.isInteger(length) &&
+    offset >= 0 &&
+    length >= 0 &&
+    actual.length === length &&
+    expected.length >= offset + length &&
+    actual.every(
+      (value, index) =>
+        (value >>> 0) === (expected[offset + index] >>> 0),
+    );
+}
+
 export async function runWorkbenchWebGpuWitness(
   catalogWasm,
   sourceSha = null,
@@ -903,7 +917,7 @@ export async function runWorkbenchWebGpuWitness(
     throw new Error("C4c3 carrier/proof provenance mismatch");
   }
 
-  const input = gpuModule.deriveGpuCarrierReactionInput(
+  const input0 = gpuModule.deriveGpuCarrierReactionInput(
     carrier,
     compact.roots,
   );
@@ -922,95 +936,133 @@ export async function runWorkbenchWebGpuWitness(
       device,
       carrier,
     );
-    const gpu = await resident.reaction(input);
-    const reuseProbe = await resident.reaction(input);
+
+    const gpu0 = await resident.reaction(input0);
+    const input1 = Object.freeze({
+      currentHandle: gpu0.observed.publishedHandle,
+      interpreterHandle: input0.interpreterHandle,
+    });
+    const gpu1 = await resident.reaction(input1);
     const residency = resident.telemetry();
+
     const first = compact.execute?.reactions?.[0];
+    const second = compact.execute?.reactions?.[1];
     const append = compact.topology?.append;
-    if (!first ||
+    if (!first || !second ||
         first.quiescent === true ||
+        second.quiescent === true ||
         !Array.isArray(first.scopeBefore) ||
-        first.scopeBefore.length !== 1 ||
         !Array.isArray(first.scopeAfter) ||
-        first.scopeAfter.length !== 1) {
-      throw new Error("Rust/WASM reaction-0 evidence is incomplete");
+        !Array.isArray(second.scopeBefore) ||
+        !Array.isArray(second.scopeAfter) ||
+        first.scopeBefore.length !== 1 ||
+        first.scopeAfter.length !== 1 ||
+        second.scopeBefore.length !== 1 ||
+        second.scopeAfter.length !== 1) {
+      throw new Error("Rust/WASM first two reaction evidence is incomplete");
     }
 
-    const proofAppendCount =
-      (first.linksAfter >>> 0) - (compact.load.linksAfterLoad >>> 0);
-    const observed = gpu.observed;
-    const reused = reuseProbe.observed;
-    const sameResidentReuse =
-      reuseProbe.differential === true &&
-      reused.ruleHandle === observed.ruleHandle &&
-      reused.rawRuleMatches === observed.rawRuleMatches &&
-      reused.publishedHandle === observed.publishedHandle &&
-      reused.appendCount === observed.appendCount &&
-      sameU32Prefix(
-        reused.appendStarts,
-        observed.appendStarts,
-        observed.appendCount,
-      ) &&
-      sameU32Prefix(
-        reused.appendEnds,
-        observed.appendEnds,
-        observed.appendCount,
-      );
-    const sameAppend =
-      proofAppendCount === observed.appendCount &&
-      sameU32Prefix(
-        observed.appendStarts,
-        append?.starts,
-        proofAppendCount,
-      ) &&
-      sameU32Prefix(
-        observed.appendEnds,
-        append?.ends,
-        proofAppendCount,
-      );
-    const sameScope =
-      (first.scopeBefore[0] >>> 0) === input.currentHandle &&
-      (first.scopeAfter[0] >>> 0) === observed.publishedHandle;
-    const sameMatches =
-      (first.rawRuleMatches >>> 0) === observed.rawRuleMatches;
+    const loadLinks = compact.load.linksAfterLoad >>> 0;
+    const proofAppend0 =
+      (first.linksAfter >>> 0) - loadLinks;
+    const proofAppend1 =
+      (second.linksAfter >>> 0) - (first.linksAfter >>> 0);
+    const observed0 = gpu0.observed;
+    const observed1 = gpu1.observed;
 
+    const sameAppend0 =
+      proofAppend0 === observed0.appendCount &&
+      sameU32Segment(
+        observed0.appendStarts,
+        append?.starts,
+        0,
+        proofAppend0,
+      ) &&
+      sameU32Segment(
+        observed0.appendEnds,
+        append?.ends,
+        0,
+        proofAppend0,
+      );
+    const sameAppend1 =
+      proofAppend1 === observed1.appendCount &&
+      sameU32Segment(
+        observed1.appendStarts,
+        append?.starts,
+        proofAppend0,
+        proofAppend1,
+      ) &&
+      sameU32Segment(
+        observed1.appendEnds,
+        append?.ends,
+        proofAppend0,
+        proofAppend1,
+      );
+    const sameScopeChain =
+      (first.scopeBefore[0] >>> 0) === input0.currentHandle &&
+      (first.scopeAfter[0] >>> 0) === observed0.publishedHandle &&
+      (second.scopeBefore[0] >>> 0) === observed0.publishedHandle &&
+      observed1.currentHandle === observed0.publishedHandle &&
+      input1.currentHandle === observed0.publishedHandle &&
+      (second.scopeAfter[0] >>> 0) === observed1.publishedHandle;
+    const sameMatches =
+      (first.rawRuleMatches >>> 0) === observed0.rawRuleMatches &&
+      (second.rawRuleMatches >>> 0) === observed1.rawRuleMatches;
     const sameResidency =
       residency.baseUploadCount === 1 &&
       residency.baseUploadBytes === carrier.layout.totalBytes &&
       residency.reactionDispatchCount === 2 &&
+      residency.residentAppendCount === proofAppend0 + proofAppend1 &&
+      residency.residentCapacity >= residency.residentAppendCount &&
+      residency.residentBufferBytes > 0 &&
       residency.closed === false;
-    if (!gpu.differential || !sameResidentReuse || !sameResidency ||
-        !sameAppend || !sameScope || !sameMatches) {
+
+    if (!gpu0.differential || !gpu1.differential ||
+        !sameResidency || !sameAppend0 || !sameAppend1 ||
+        !sameScopeChain || !sameMatches) {
       throw new Error(
-        "C4c3 live differential/residency disagreement" +
-        " append=" + sameAppend +
-        " scope=" + sameScope +
+        "C4c3 sequential resident differential disagreement" +
+        " append0=" + sameAppend0 +
+        " append1=" + sameAppend1 +
+        " scopeChain=" + sameScopeChain +
         " matches=" + sameMatches +
-        " reuse=" + sameResidentReuse +
         " residency=" + sameResidency +
         " uploads=" + residency.baseUploadCount +
         " dispatches=" + residency.reactionDispatchCount +
-        " proofAppendCount=" + proofAppendCount +
-        " gpuAppendCount=" + observed.appendCount,
+        " residentAppend=" + residency.residentAppendCount +
+        " proofAppend0=" + proofAppend0 +
+        " gpuAppend0=" + observed0.appendCount +
+        " proofAppend1=" + proofAppend1 +
+        " gpuAppend1=" + observed1.appendCount,
       );
     }
 
     return {
       status: "verified",
       tripleDifferential: true,
+      sequentialResidentExecution: true,
       sourceSha: /^[0-9a-f]{40}$/.test(sourceSha || "")
         ? sourceSha
         : null,
-      planMode: gpu.plan.mode,
+      planMode: gpu0.plan.mode,
       linkCount: carrier.layout.linkCount,
-      rawRuleMatches: observed.rawRuleMatches,
-      ruleHandle: observed.ruleHandle,
-      roleBindings: observed.roleBindings,
-      appendCount: observed.appendCount,
-      publishedHandle: observed.publishedHandle,
-      rustWasmScopeAfter: first.scopeAfter[0] >>> 0,
-      cpuGpuDifferential: gpu.differential === true,
-      residentBaseReuse: sameResidentReuse,
+      reaction0RawRuleMatches: observed0.rawRuleMatches,
+      reaction1RawRuleMatches: observed1.rawRuleMatches,
+      reaction0RuleHandle: observed0.ruleHandle,
+      reaction1RuleHandle: observed1.ruleHandle,
+      reaction0AppendCount: observed0.appendCount,
+      reaction1AppendCount: observed1.appendCount,
+      reaction0PublishedHandle: observed0.publishedHandle,
+      reaction1CurrentHandle: observed1.currentHandle,
+      reaction1PublishedHandle: observed1.publishedHandle,
+      rustWasmScope1: first.scopeAfter[0] >>> 0,
+      rustWasmScope2: second.scopeAfter[0] >>> 0,
+      cpuGpuDifferential:
+        gpu0.differential === true && gpu1.differential === true,
+      residentBaseReuse: true,
+      residentAppendCount: residency.residentAppendCount,
+      residentCapacity: residency.residentCapacity,
+      residentBufferBytes: residency.residentBufferBytes,
       baseUploadCount: residency.baseUploadCount,
       baseUploadBytes: residency.baseUploadBytes,
       reactionDispatchCount: residency.reactionDispatchCount,
@@ -1051,14 +1103,15 @@ function gpuWitnessHtml(state) {
   };
   const detail = status === "verified"
     ? '<strong>CPU = WebGPU = Rust/WASM</strong>' +
-      '<small>DISCOVER → PUBLISH · ' +
+      '<small>reaction₀ → reaction₁ · ' +
       esc(witness.planMode) + ' · Links ' +
       esc(witness.linkCount) + ' · append ' +
-      esc(witness.appendCount) + ' · base upload ×' +
+      esc(witness.reaction0AppendCount) + '+' +
+      esc(witness.reaction1AppendCount) + ' · base upload ×' +
       esc(witness.baseUploadCount) + ' · dispatch ×' +
       esc(witness.reactionDispatchCount) + '</small>' +
-      '<code>Rule L' + esc(witness.ruleHandle) +
-      ' → Scope L' + esc(witness.publishedHandle) + '</code>'
+      '<code>Scope L' + esc(witness.reaction0PublishedHandle) +
+      ' → Scope L' + esc(witness.reaction1PublishedHandle) + '</code>'
     : status === "running"
       ? '<small>Реальный браузер компилирует WGSL, выполняет DISCOVER и отдельный PUBLISH и читает результат обратно.</small>'
       : '<small>' + esc(
@@ -1074,7 +1127,7 @@ function gpuWitnessHtml(state) {
     '<button id="wb-gpu-witness"' +
     (status === "running" ? " disabled" : "") +
     '>Проверить WebGPU C4c3</button>' +
-    '<div class="wb-help">Packed base уже удерживается одной WebGPU Session и повторно используется без второй загрузки. Append пока не закрепляется в resident carrier между реакциями; следующий шаг #279 делает именно это. CPU fallback здесь запрещён.</div></div>';
+    '<div class="wb-help">Packed base загружается один раз. PUBLISH reaction₀ закрепляет append в GPU-resident состоянии, а reaction₁ читает полученный Scope и Links без пересборки или повторной загрузки carrier. CPU fallback здесь запрещён.</div></div>';
 }
 
 function presetInputs(state) {
