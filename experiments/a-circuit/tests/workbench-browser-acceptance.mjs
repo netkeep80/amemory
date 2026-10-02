@@ -22,6 +22,10 @@ for (const required of [
   "Diagnostic readback only",
   "WebGPU DISCOVER failed closed with status",
   "candidates = candidates + 1u",
+  "discovery[42] = candidates",
+  "let trace = 43u + (candidates - 1u) * 2u",
+  "new Uint32Array(67)",
+  "readLookupWords(device, discovery, 67)",
   "cpuDiscovery = discoverCarrierReaction(parsed, input)",
   "These CPU facts never seed, filter or retry GPU execution",
   "cpuRuleGpuDiagnostic",
@@ -106,6 +110,9 @@ for (const mode of ["single", "sections"]) {
   if (/\bactive\b/.test(shader) || !shader.includes("active_handle")) {
     throw new Error("C4c3 generated WGSL uses reserved identifier active");
   }
+  if (shader.includes("discovery[17] = candidates") || shader.includes("let trace = 18u +")) {
+    throw new Error("C4c3 discovery diagnostics alias authoritative role bindings");
+  }
   for (const marker of [
     "var role_left = 0u",
     "role_count - role_left - 1u",
@@ -125,6 +132,8 @@ for (const mode of ["single", "sections"]) {
     "discovery[9] = 32u",
     "let record_diag = matches == 0u",
     "candidates <= 12u",
+    "discovery[42] = candidates",
+    "let trace = 43u + (candidates - 1u) * 2u",
     "(discovery[8] << 16u) | (discovery[9] & 0xffffu)",
     "discovery[9] = 30u",
   ]) {
