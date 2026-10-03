@@ -244,7 +244,7 @@ struct StructuralContextFrame {
     outputs: Vec<Handle>,
 }
 
-trait StructuralRead {
+pub trait StructuralReadV1 {
     fn is_valid(&self, handle: Handle) -> bool;
     fn poles(&self, handle: Handle) -> Result<(Handle, Handle), StoreError>;
     fn start_incidence_handles(
@@ -253,7 +253,45 @@ trait StructuralRead {
     ) -> Result<Vec<Handle>, StoreError>;
 }
 
-impl StructuralRead for OptimizedLinkStore {
+pub trait StructuralStoreV1: StructuralReadV1 {
+    fn instance_id(&self) -> u64;
+    fn link_count(&self) -> usize;
+    fn ensure_pair(
+        &mut self,
+        start: Handle,
+        end: Handle,
+    ) -> Result<Handle, StoreError>;
+    fn ensure_start_self_closed(
+        &mut self,
+        child: Handle,
+    ) -> Result<Handle, StoreError>;
+    fn ensure_end_self_closed(
+        &mut self,
+        child: Handle,
+    ) -> Result<Handle, StoreError>;
+    fn append_checkpoint(&self) -> usize;
+    /// Restores the exact physical state at `checkpoint`.
+    ///
+    /// Backends whose rollback can fail must report that failure. The semantic
+    /// engine treats a rollback failure as the primary error because physical
+    /// state can no longer be claimed to equal the last committed Scope.
+    fn rollback_append(
+        &mut self,
+        checkpoint: usize,
+    ) -> Result<(), StoreError>;
+
+    /// Exposes a read-only physical topology view for discovery.
+    ///
+    /// The semantic engine never needs canonicalization maps during discovery.
+    /// Optimized CPU keeps its current zero-copy packed read view; other
+    /// physical backends may provide any equivalent StructuralReadV1 view.
+    fn with_read_view<T>(
+        &self,
+        f: impl FnOnce(&dyn StructuralReadV1) -> T,
+    ) -> T;
+}
+
+impl StructuralReadV1 for OptimizedLinkStore {
     fn is_valid(&self, handle: Handle) -> bool {
         OptimizedLinkStore::is_valid(self, handle)
     }
@@ -270,7 +308,64 @@ impl StructuralRead for OptimizedLinkStore {
     }
 }
 
-impl StructuralRead for PackedExecutionView {
+impl StructuralStoreV1 for OptimizedLinkStore {
+    fn instance_id(&self) -> u64 {
+        u64::from(OptimizedLinkStore::instance_id(self))
+    }
+
+    fn link_count(&self) -> usize {
+        OptimizedLinkStore::link_count(self)
+    }
+
+    fn ensure_pair(
+        &mut self,
+        start: Handle,
+        end: Handle,
+    ) -> Result<Handle, StoreError> {
+        OptimizedLinkStore::ensure_pair(self, start, end)
+    }
+
+    fn ensure_start_self_closed(
+        &mut self,
+        child: Handle,
+    ) -> Result<Handle, StoreError> {
+        OptimizedLinkStore::ensure_start_self_closed(self, child)
+    }
+
+    fn ensure_end_self_closed(
+        &mut self,
+        child: Handle,
+    ) -> Result<Handle, StoreError> {
+        OptimizedLinkStore::ensure_end_self_closed(self, child)
+    }
+
+    fn append_checkpoint(&self) -> usize {
+        OptimizedLinkStore::append_checkpoint(self).link_count
+    }
+
+    fn rollback_append(
+        &mut self,
+        checkpoint: usize,
+    ) -> Result<(), StoreError> {
+        OptimizedLinkStore::rollback_append(
+            self,
+            crate::StoreAppendCheckpoint {
+                link_count: checkpoint,
+            },
+        );
+        Ok(())
+    }
+
+    fn with_read_view<T>(
+        &self,
+        f: impl FnOnce(&dyn StructuralReadV1) -> T,
+    ) -> T {
+        let view = OptimizedLinkStore::packed_execution_ref(self);
+        f(&view)
+    }
+}
+
+impl StructuralReadV1 for PackedExecutionView {
     fn is_valid(&self, handle: Handle) -> bool {
         PackedExecutionView::is_valid(self, handle)
     }
@@ -287,7 +382,7 @@ impl StructuralRead for PackedExecutionView {
     }
 }
 
-impl StructuralRead for PackedExecutionRef<'_> {
+impl StructuralReadV1 for PackedExecutionRef<'_> {
     fn is_valid(&self, handle: Handle) -> bool {
         PackedExecutionRef::is_valid(self, handle)
     }
@@ -319,7 +414,7 @@ pub fn materialize_exact_sequence(
     Ok(current)
 }
 
-fn read_exact_sequence_from<R: StructuralRead + ?Sized>(
+fn read_exact_sequence_from<R: StructuralReadV1 + ?Sized>(
     store: &R,
     final_link: Handle,
 ) -> Result<Vec<Handle>, StructuralError> {
@@ -378,7 +473,7 @@ pub fn define_structural_role_dictionary(
     Ok(store.ensure_start_self_closed(sequence)?)
 }
 
-fn read_structural_role_dictionary_from<R: StructuralRead + ?Sized>(
+fn read_structural_role_dictionary_from<R: StructuralReadV1 + ?Sized>(
     store: &R,
     dictionary: Handle,
 ) -> Result<Vec<Handle>, StructuralError> {
@@ -438,7 +533,7 @@ pub fn define_structural_interpreter(
     Ok(store.ensure_pair(dictionary, grammar_theory)?)
 }
 
-fn read_structural_interpreter_from<R: StructuralRead + ?Sized>(
+fn read_structural_interpreter_from<R: StructuralReadV1 + ?Sized>(
     store: &R,
     interpreter: Handle,
 ) -> Result<StructuralInterpreter, StructuralError> {
@@ -465,7 +560,7 @@ pub fn read_structural_interpreter(
 
 const MAX_COMPILED_GROUNDED_CHECKS: usize = 32;
 
-fn compile_grounded_path_checks<R: StructuralRead + ?Sized>(
+fn compile_grounded_path_checks<R: StructuralReadV1 + ?Sized>(
     store: &R,
     template: Handle,
     roles: &[Handle],
@@ -550,7 +645,7 @@ fn compile_grounded_path_checks<R: StructuralRead + ?Sized>(
     Ok(checks)
 }
 
-fn compiled_grounded_paths_match<R: StructuralRead + ?Sized>(
+fn compiled_grounded_paths_match<R: StructuralReadV1 + ?Sized>(
     store: &R,
     claimed: Handle,
     checks: &[GroundedPathCheck],
@@ -580,7 +675,7 @@ fn compiled_grounded_paths_match<R: StructuralRead + ?Sized>(
 
 const STRUCTURAL_DISCRIMINATION_BUDGET: usize = 128;
 
-fn structural_discriminator_matches<R: StructuralRead + ?Sized>(
+fn structural_discriminator_matches<R: StructuralReadV1 + ?Sized>(
     store: &R,
     template: Handle,
     claimed: Handle,
@@ -637,7 +732,7 @@ fn structural_discriminator_matches<R: StructuralRead + ?Sized>(
     Ok(true)
 }
 
-fn unify_node<R: StructuralRead + ?Sized>(
+fn unify_node<R: StructuralReadV1 + ?Sized>(
     store: &R,
     template: Handle,
     claimed: Handle,
@@ -692,7 +787,7 @@ fn unify_node<R: StructuralRead + ?Sized>(
     Ok(())
 }
 
-fn unify_structural_rule_template_internal<R: StructuralRead + ?Sized>(
+fn unify_structural_rule_template_internal<R: StructuralReadV1 + ?Sized>(
     store: &R,
     template: Handle,
     claimed: Handle,
@@ -744,8 +839,8 @@ pub fn unify_structural_rule_template(
     unify_structural_rule_template_internal(store, template, claimed, roles, &mut profile)
 }
 
-fn instantiate_node(
-    store: &mut OptimizedLinkStore,
+fn instantiate_node<S: StructuralStoreV1 + ?Sized>(
+    store: &mut S,
     source: Handle,
     bindings: &HashMap<Handle, Handle>,
     visiting: &mut HashSet<Handle>,
@@ -873,8 +968,8 @@ fn instantiate_node(
     resolved(source, bindings, memo)
 }
 
-fn instantiate_structural_template_internal(
-    store: &mut OptimizedLinkStore,
+fn instantiate_structural_template_internal<S: StructuralStoreV1 + ?Sized>(
+    store: &mut S,
     template: Handle,
     bindings: &[StructuralRoleBinding],
     profile: &mut Option<&mut StructuralRunProfile>,
@@ -907,7 +1002,7 @@ pub fn instantiate_structural_template(
     instantiate_structural_template_internal(store, template, bindings, &mut profile)
 }
 
-fn discover_triggered_rule_images_internal<R: StructuralRead + ?Sized>(
+fn discover_triggered_rule_images_internal<R: StructuralReadV1 + ?Sized>(
     store: &R,
     theory: Handle,
     active: Handle,
@@ -1122,7 +1217,7 @@ pub struct OptimizedStructuralEngine {
     transitioned_members: u32,
     handoff_count: u32,
     quiescent: bool,
-    metadata_store_instance: Option<u32>,
+    metadata_store_instance: Option<u64>,
     rule_metadata_cache: HashMap<Handle, CompiledRuleMetadata>,
     scope_context_parents: [HashMap<Handle, Vec<u32>>; 2],
     next_context_id: u32,
@@ -1149,19 +1244,19 @@ impl OptimizedStructuralEngine {
         }
     }
 
-    pub fn set_interpreter(
+    pub fn set_interpreter<R: StructuralReadV1 + ?Sized>(
         &mut self,
-        store: &OptimizedLinkStore,
+        store: &R,
         interpreter: Handle,
     ) -> Result<(), StructuralError> {
-        read_structural_interpreter(store, interpreter)?;
+        read_structural_interpreter_from(store, interpreter)?;
         self.interpreter = Some(interpreter);
         Ok(())
     }
 
-    pub fn set_current(
+    pub fn set_current<R: StructuralReadV1 + ?Sized>(
         &mut self,
-        store: &OptimizedLinkStore,
+        store: &R,
         members: &[Handle],
     ) -> Result<(), StructuralError> {
         if members.len() > self.cap {
@@ -1189,18 +1284,18 @@ impl OptimizedStructuralEngine {
         Ok(())
     }
 
-    pub fn run(
+    pub fn run<S: StructuralStoreV1 + ?Sized>(
         &mut self,
-        store: &mut OptimizedLinkStore,
+        store: &mut S,
     ) -> Result<StructuralReactionResult, StructuralError> {
         let mut profile = None;
         let mut trace = None;
         self.run_internal(store, &mut profile, &mut trace)
     }
 
-    pub fn run_profiled(
+    pub fn run_profiled<S: StructuralStoreV1 + ?Sized>(
         &mut self,
-        store: &mut OptimizedLinkStore,
+        store: &mut S,
     ) -> Result<(StructuralReactionResult, StructuralRunProfile), StructuralError> {
         let started = ProfileTimer::start();
         let mut owned = StructuralRunProfile::default();
@@ -1213,9 +1308,9 @@ impl OptimizedStructuralEngine {
         Ok((result, owned))
     }
 
-    pub fn run_traced(
+    pub fn run_traced<S: StructuralStoreV1 + ?Sized>(
         &mut self,
-        store: &mut OptimizedLinkStore,
+        store: &mut S,
     ) -> Result<
         (
             StructuralReactionResult,
@@ -1238,9 +1333,9 @@ impl OptimizedStructuralEngine {
         Ok((result, owned_profile, owned_trace))
     }
 
-    fn run_internal(
+    fn run_internal<S: StructuralStoreV1 + ?Sized>(
         &mut self,
-        store: &mut OptimizedLinkStore,
+        store: &mut S,
         profile: &mut Option<&mut StructuralRunProfile>,
         trace: &mut Option<&mut StructuralRunTrace>,
     ) -> Result<StructuralReactionResult, StructuralError> {
@@ -1275,17 +1370,16 @@ impl OptimizedStructuralEngine {
         // share one group id; failed reactions do not consume committed ids.
         let mut next_context_id = self.next_context_id;
         let context_group_id = self.next_context_group_id;
-        let discovered = (|| -> Result<
+        let discovered = store.with_read_view(|execution_view| -> Result<
             Vec<(Handle, Vec<StructuralContextFrame>)>,
             StructuralError,
         > {
-            let execution_view = store.packed_execution_ref();
             let authority =
-                read_structural_interpreter_from(&execution_view, interpreter)?;
+                read_structural_interpreter_from(execution_view, interpreter)?;
             let mut discovered = Vec::with_capacity(old_members.len());
             for active in old_members.iter().copied() {
                 let images = discover_triggered_rule_images_internal(
-                    &execution_view,
+                    execution_view,
                     authority.theory,
                     active,
                     &mut self.rule_metadata_cache,
@@ -1346,7 +1440,7 @@ impl OptimizedStructuralEngine {
                 discovered.push((active, contexts));
             }
             Ok(discovered)
-        })();
+        });
         let discovered = match discovered {
             Ok(discovered) => discovered,
             Err(error) => {
@@ -1492,7 +1586,8 @@ impl OptimizedStructuralEngine {
 
                     let publication_started =
                         profile.as_ref().map(|_| ProfileTimer::start());
-                    context.outputs = read_exact_sequence(store, grounded_bundle)?;
+                    context.outputs =
+                        read_exact_sequence_from(store, grounded_bundle)?;
                     if let Some(profile) = profile.as_deref_mut() {
                         profile.publication_outputs += context.outputs.len() as u64;
                     }
@@ -1543,11 +1638,14 @@ impl OptimizedStructuralEngine {
         ) = match publication {
                 Ok(committed) => committed,
                 Err(error) => {
-                    store.rollback_append(checkpoint);
+                    let rollback = store.rollback_append(checkpoint);
                     self.metadata_store_instance =
                         metadata_store_instance_before;
                     self.rule_metadata_cache =
                         rule_metadata_cache_before;
+                    if let Err(rollback_error) = rollback {
+                        return Err(StructuralError::Store(rollback_error));
+                    }
                     return Err(error);
                 }
             };
@@ -1558,11 +1656,14 @@ impl OptimizedStructuralEngine {
             let next_context_group_id = match context_group_id.checked_add(1) {
                 Some(next) => next,
                 None => {
-                    store.rollback_append(checkpoint);
+                    let rollback = store.rollback_append(checkpoint);
                     self.metadata_store_instance =
                         metadata_store_instance_before;
                     self.rule_metadata_cache =
                         rule_metadata_cache_before;
+                    if let Err(rollback_error) = rollback {
+                        return Err(StructuralError::Store(rollback_error));
+                    }
                     return Err(StructuralError::Store(
                         StoreError::CapacityExceeded,
                     ));
@@ -1703,6 +1804,31 @@ mod tests {
             next_by_end: store.next_by_end.clone(),
             max_links: store.max_links,
         }
+    }
+
+    #[test]
+    fn structural_store_port_preserves_cpu_append_rollback() {
+        let mut store = OptimizedLinkStore::new();
+        let checkpoint =
+            StructuralStoreV1::append_checkpoint(&store);
+        let pair = StructuralStoreV1::ensure_pair(
+            &mut store,
+            ROOT_HANDLE,
+            ROOT_HANDLE,
+        )
+        .unwrap();
+
+        assert_eq!(pair, 2);
+        assert_eq!(StructuralStoreV1::link_count(&store), 2);
+
+        StructuralStoreV1::rollback_append(&mut store, checkpoint).unwrap();
+
+        assert_eq!(StructuralStoreV1::link_count(&store), 1);
+        assert_eq!(
+            store.ensure_pair(ROOT_HANDLE, ROOT_HANDLE).unwrap(),
+            2,
+            "rollback through the port must restore canonical identity",
+        );
     }
 
     #[test]
@@ -1902,7 +2028,7 @@ mod tests {
         );
 
         let mut engine = OptimizedStructuralEngine::new(4);
-        engine.metadata_store_instance = Some(original.instance_id());
+        engine.metadata_store_instance = Some(u64::from(original.instance_id()));
         engine.rule_metadata_cache.insert(
             ROOT_HANDLE,
             CompiledRuleMetadata {
@@ -1935,7 +2061,7 @@ mod tests {
         // Merely seeing another store instance is sufficient to invalidate all
         // local-handle metadata before any semantic discovery can use it.
         let clone_id = cloned.instance_id();
-        assert_ne!(clone_id, engine.metadata_store_instance.unwrap());
+        assert_ne!(u64::from(clone_id), engine.metadata_store_instance.unwrap());
     }
 
     #[test]
