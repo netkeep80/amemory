@@ -1379,10 +1379,10 @@ mod tests {
 
         assert!(linksdb.close());
         assert_eq!(linksdb.runtime_state_v1(), SessionStateV1::Closed);
-        assert_eq!(
+        assert!(matches!(
             linksdb.step(CpuRuntimeTraceMode::Profile),
             Err(LinksDbSessionErrorV1::Closed),
-        );
+        ));
     }
 
 }
