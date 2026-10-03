@@ -206,6 +206,8 @@ try {
   const active = witness?.activeReactionCounts;
   const steps = witness?.stepCounts;
   const config = witness?.configurationAppendCounts;
+  const normalizedGpu = witness?.normalizedGpuRuns;
+  const normalizedCpu = witness?.normalizedCpuRuns;
   if (witness?.status !== "verified" ||
       witness?.scenarioManifestDriven !== true ||
       witness?.staticPreparedCarrier !== true ||
@@ -239,6 +241,11 @@ try {
       witness?.configurationDispatchCount !== 3 ||
       witness?.reactionDispatchCount !==
         steps.reduce((sum, value) => sum + value, 0) ||
+      witness?.normalizedObservationSchemaVersion !== 2 ||
+      !Array.isArray(normalizedGpu) ||
+      normalizedGpu.length !== witness.runCount ||
+      !Array.isArray(normalizedCpu) ||
+      normalizedCpu.length !== witness.runCount ||
       !Number.isInteger(witness?.baseUploadBytes) ||
       witness.baseUploadBytes <= 0 ||
       !Number.isInteger(witness?.residentBufferBytes) ||
@@ -251,6 +258,46 @@ try {
       "live WebGPU Scenario witness failed: " +
       JSON.stringify(witness) + "\nChrome:\n" + stderr,
     );
+  }
+
+  for (let index = 0; index < witness.runCount; index += 1) {
+    const gpu = normalizedGpu[index];
+    const cpu = normalizedCpu[index];
+    if (gpu?.schemaVersion !== 2 ||
+        gpu?.profile?.schemaVersion !== 2 ||
+        gpu?.profile?.backendId !== "webgpu" ||
+        gpu?.profile?.stopReason !== "QUIESCENT" ||
+        gpu?.profile?.finalQuiescent !== true ||
+        gpu?.profile?.activeReactionCount?.availability !== "MEASURED" ||
+        gpu.profile.activeReactionCount.value !== active[index] ||
+        gpu?.profile?.resource?.baseUploadCount?.availability !== "MEASURED" ||
+        gpu.profile.resource.baseUploadCount.value !== 1 ||
+        gpu?.profile?.resource?.configurationUploadBytes?.availability !==
+          "MEASURED" ||
+        (index === 3 &&
+          gpu.profile.resource.configurationUploadBytes.value !== 0) ||
+        gpu?.profile?.resource?.readbackBytes?.availability !== "UNAVAILABLE" ||
+        gpu.profile.resource.readbackBytes.value !== null ||
+        gpu?.events?.length !== steps[index] + 1 ||
+        gpu.events.at(-1)?.kind !== "QUIESCENCE" ||
+        cpu?.schemaVersion !== 2 ||
+        cpu?.profile?.schemaVersion !== 2 ||
+        cpu?.profile?.backendId !== "optimized-cpu" ||
+        cpu?.profile?.stopReason !== "QUIESCENT" ||
+        cpu?.profile?.finalQuiescent !== true ||
+        cpu?.profile?.activeReactionCount?.availability !== "MEASURED" ||
+        cpu.profile.activeReactionCount.value !== active[index] ||
+        cpu?.profile?.timings?.executeNs?.availability !== "UNAVAILABLE" ||
+        cpu.profile.timings.executeNs.value !== null ||
+        cpu?.profile?.resource?.baseUploadCount?.availability !==
+          "UNSUPPORTED" ||
+        cpu.profile.resource.baseUploadCount.value !== null) {
+      throw new Error(
+        "normalized CPU/WebGPU observation mismatch at run " + index +
+        ": gpu=" + JSON.stringify(gpu) +
+        " cpu=" + JSON.stringify(cpu),
+      );
+    }
   }
 
   console.log(
