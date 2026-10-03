@@ -483,13 +483,14 @@ impl DoubletsPhysicalStoreV1 {
             return Err(error.into());
         }
 
-        let handle = self.publish_portable_record_v1(
+        let handle = self.next_portable_handle()?;
+        let published = self.publish_portable_record_v1(
             PortableLinkKindV1::StartSelfClosed,
-            self.next_portable_handle()?,
+            handle,
             child,
             physical_index,
         )?;
-        debug_assert_eq!(handle, self.portable_record(handle)?.link.start);
+        debug_assert_eq!(published, handle);
 
         let previous = self.canonical_start_forms.insert(child, handle);
         debug_assert!(previous.is_none());
