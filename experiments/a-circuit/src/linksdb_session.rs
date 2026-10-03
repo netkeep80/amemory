@@ -6,8 +6,15 @@ use super::session_contract::{
 use std::sync::atomic::{AtomicU64, Ordering};
 
 #[cfg(not(target_family = "wasm"))]
+use super::runtime_session::{
+    CpuRuntimeTraceMode, CpuSessionStepError, CpuSessionStepOutcomeV1,
+    StructuralRuntimeStateV1,
+};
+#[cfg(not(target_family = "wasm"))]
 use amemory_optimized_cpu_probe::{
-    structural::{StructuralReadV1, StructuralStoreV1},
+    structural::{
+        OptimizedStructuralEngine, StructuralReadV1, StructuralStoreV1,
+    },
     Handle, PackedCarrierImage, StoreError, ROOT_HANDLE,
 };
 #[cfg(not(target_family = "wasm"))]
@@ -33,9 +40,6 @@ pub(crate) trait LinksDbPhysicalStoreV1 {
 pub(crate) enum LinksDbCapabilityV1 {
     Configure,
     Step,
-    RunToQuiescence,
-    Profile,
-    Trace,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -44,18 +48,37 @@ pub(crate) enum LinksDbSessionErrorV1 {
         capability: LinksDbCapabilityV1,
     },
     Closed,
+    EngineFailure,
+    InvalidState(SessionStateV1),
 }
 
-/// First real #272 consumer for the LinksDB physical backend.
+#[cfg(not(target_family = "wasm"))]
+impl From<CpuSessionStepError> for LinksDbSessionErrorV1 {
+    fn from(value: CpuSessionStepError) -> Self {
+        match value {
+            CpuSessionStepError::InvalidState(state) => {
+                Self::InvalidState(state)
+            }
+            CpuSessionStepError::EngineFailure => Self::EngineFailure,
+        }
+    }
+}
+
+/// One retained LinksDB A-memory Session.
 ///
-/// This Session is deliberately storage/lifecycle-only. It proves identity,
-/// state, snapshot and fail-closed capability reporting before semantic
-/// execution is connected to the physical adapter.
+/// The same type covers a truthful physical-only session and, when opened with
+/// a structural interpreter, a real executable Session. Execution does not
+/// belong to LinksDB: lifecycle is owned by StructuralRuntimeStateV1 and
+/// semantics by the single OptimizedStructuralEngine.
 pub(crate) struct LinksDbSessionV1<S: LinksDbPhysicalStoreV1> {
     store: S,
     identity: SessionIdentityV1,
-    state: SessionStateV1,
+    closed: bool,
     base_link_count: u32,
+    #[cfg(not(target_family = "wasm"))]
+    runtime: Option<StructuralRuntimeStateV1>,
+    #[cfg(not(target_family = "wasm"))]
+    engine: Option<OptimizedStructuralEngine>,
 }
 
 impl<S: LinksDbPhysicalStoreV1> LinksDbSessionV1<S> {
@@ -73,52 +96,108 @@ impl<S: LinksDbPhysicalStoreV1> LinksDbSessionV1<S> {
                     NEXT_LINKSDB_SESSION_ID.fetch_add(1, Ordering::Relaxed),
                 ),
             },
-            state: SessionStateV1::Open,
+            closed: false,
             base_link_count,
+            #[cfg(not(target_family = "wasm"))]
+            runtime: None,
+            #[cfg(not(target_family = "wasm"))]
+            engine: None,
         }
     }
 
-    fn reject(
-        &self,
-        capability: LinksDbCapabilityV1,
-    ) -> Result<(), LinksDbSessionErrorV1> {
-        if self.state == SessionStateV1::Closed {
-            Err(LinksDbSessionErrorV1::Closed)
-        } else {
-            Err(LinksDbSessionErrorV1::UnsupportedCapability { capability })
+    fn execution_enabled(&self) -> bool {
+        #[cfg(not(target_family = "wasm"))]
+        {
+            self.runtime.is_some() && self.engine.is_some()
         }
-    }
-
-    pub(crate) fn configure(
-        &mut self,
-    ) -> Result<(), LinksDbSessionErrorV1> {
-        self.reject(LinksDbCapabilityV1::Configure)
-    }
-
-    pub(crate) fn step(&mut self) -> Result<(), LinksDbSessionErrorV1> {
-        self.reject(LinksDbCapabilityV1::Step)
-    }
-
-    pub(crate) fn run_to_quiescence(
-        &mut self,
-    ) -> Result<(), LinksDbSessionErrorV1> {
-        self.reject(LinksDbCapabilityV1::RunToQuiescence)
-    }
-
-    pub(crate) fn profile(&self) -> Result<(), LinksDbSessionErrorV1> {
-        self.reject(LinksDbCapabilityV1::Profile)
-    }
-
-    pub(crate) fn trace(&self) -> Result<(), LinksDbSessionErrorV1> {
-        self.reject(LinksDbCapabilityV1::Trace)
+        #[cfg(target_family = "wasm")]
+        {
+            false
+        }
     }
 
     pub(crate) fn close(&mut self) -> bool {
-        if self.state == SessionStateV1::Closed {
+        if self.closed {
             return false;
         }
-        self.state = SessionStateV1::Closed;
+        self.closed = true;
         true
+    }
+}
+
+#[cfg(not(target_family = "wasm"))]
+impl<S> LinksDbSessionV1<S>
+where
+    S: LinksDbPhysicalStoreV1 + StructuralStoreV1,
+{
+    pub(crate) fn open_structural(
+        store: S,
+        interpreter: Handle,
+        scope_capacity: usize,
+    ) -> Result<Self, LinksDbSessionErrorV1> {
+        let mut session = Self::open(store);
+        let mut engine = OptimizedStructuralEngine::new(scope_capacity);
+        engine
+            .set_interpreter(&session.store, interpreter)
+            .map_err(|_| LinksDbSessionErrorV1::EngineFailure)?;
+        session.runtime = Some(StructuralRuntimeStateV1::new());
+        session.engine = Some(engine);
+        Ok(session)
+    }
+
+    pub(crate) fn begin_run(
+        &mut self,
+        initial: Handle,
+    ) -> Result<u64, LinksDbSessionErrorV1> {
+        if self.closed {
+            return Err(LinksDbSessionErrorV1::Closed);
+        }
+        let runtime = self
+            .runtime
+            .as_mut()
+            .ok_or(LinksDbSessionErrorV1::UnsupportedCapability {
+                capability: LinksDbCapabilityV1::Configure,
+            })?;
+        let engine = self
+            .engine
+            .as_mut()
+            .ok_or(LinksDbSessionErrorV1::UnsupportedCapability {
+                capability: LinksDbCapabilityV1::Configure,
+            })?;
+        runtime
+            .begin_run(&self.store, engine, initial)
+            .map_err(Into::into)
+    }
+
+    pub(crate) fn step(
+        &mut self,
+        trace_mode: CpuRuntimeTraceMode,
+    ) -> Result<CpuSessionStepOutcomeV1, LinksDbSessionErrorV1> {
+        if self.closed {
+            return Err(LinksDbSessionErrorV1::Closed);
+        }
+
+        let session_id = self.identity.session_id.clone();
+        let Self {
+            store,
+            runtime,
+            engine,
+            ..
+        } = self;
+        let runtime = runtime
+            .as_mut()
+            .ok_or(LinksDbSessionErrorV1::UnsupportedCapability {
+                capability: LinksDbCapabilityV1::Step,
+            })?;
+        let engine = engine
+            .as_mut()
+            .ok_or(LinksDbSessionErrorV1::UnsupportedCapability {
+                capability: LinksDbCapabilityV1::Step,
+            })?;
+
+        runtime
+            .step(&session_id, store, engine, trace_mode)
+            .map_err(Into::into)
     }
 }
 
@@ -132,19 +211,35 @@ impl<S: LinksDbPhysicalStoreV1> RuntimeSessionV1 for LinksDbSessionV1<S> {
     }
 
     fn runtime_state_v1(&self) -> SessionStateV1 {
-        self.state
+        if self.closed {
+            return SessionStateV1::Closed;
+        }
+        #[cfg(not(target_family = "wasm"))]
+        if let Some(runtime) = self.runtime.as_ref() {
+            return runtime.state();
+        }
+        SessionStateV1::Open
     }
 
     fn runtime_capabilities_v1(&self) -> SessionCapabilitiesV1 {
+        let execution = if self.execution_enabled() {
+            CapabilitySupportV1::Supported
+        } else {
+            CapabilitySupportV1::Unsupported
+        };
         SessionCapabilitiesV1 {
             schema_version: SESSION_CONTRACT_SCHEMA_VERSION,
             persistent_session: CapabilitySupportV1::Supported,
+            // Scenario-level input reconfiguration is not claimed until the
+            // configuration adapter is wired in L3c-c.
             reconfigure_without_reload: CapabilitySupportV1::Unsupported,
-            step: CapabilitySupportV1::Unsupported,
+            step: execution,
+            // The common bounded controller/resource accounting is the next
+            // slice; do not claim run-to-quiescence early.
             run_to_quiescence: CapabilitySupportV1::Unsupported,
             snapshot: CapabilitySupportV1::Supported,
-            profile: CapabilitySupportV1::Unsupported,
-            trace: CapabilitySupportV1::Unsupported,
+            profile: execution,
+            trace: execution,
             explicit_close: CapabilitySupportV1::Supported,
         }
     }
@@ -158,6 +253,10 @@ impl<S: LinksDbPhysicalStoreV1> RuntimeSessionV1 for LinksDbSessionV1<S> {
     }
 
     fn runtime_scope_width_v1(&self) -> u32 {
+        #[cfg(not(target_family = "wasm"))]
+        if let Some(engine) = self.engine.as_ref() {
+            return engine.current().len() as u32;
+        }
         0
     }
 }
@@ -850,51 +949,12 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_linksdb_execution_fails_closed_without_state_change() {
-        let mut session = LinksDbSessionV1::open(ProbeStore { links: 3 });
-
-        assert_eq!(
-            session.configure(),
-            Err(LinksDbSessionErrorV1::UnsupportedCapability {
-                capability: LinksDbCapabilityV1::Configure,
-            }),
-        );
-        assert_eq!(
-            session.step(),
-            Err(LinksDbSessionErrorV1::UnsupportedCapability {
-                capability: LinksDbCapabilityV1::Step,
-            }),
-        );
-        assert_eq!(
-            session.run_to_quiescence(),
-            Err(LinksDbSessionErrorV1::UnsupportedCapability {
-                capability: LinksDbCapabilityV1::RunToQuiescence,
-            }),
-        );
-        assert_eq!(
-            session.profile(),
-            Err(LinksDbSessionErrorV1::UnsupportedCapability {
-                capability: LinksDbCapabilityV1::Profile,
-            }),
-        );
-        assert_eq!(
-            session.trace(),
-            Err(LinksDbSessionErrorV1::UnsupportedCapability {
-                capability: LinksDbCapabilityV1::Trace,
-            }),
-        );
-        assert_eq!(session.runtime_state_v1(), SessionStateV1::Open);
-        assert_eq!(session.runtime_current_link_count_v1(), 3);
-    }
-
-    #[test]
-    fn explicit_close_is_idempotent_and_blocks_further_operations() {
+    fn explicit_close_is_idempotent_for_physical_only_session() {
         let mut session = LinksDbSessionV1::open(ProbeStore { links: 5 });
 
         assert!(session.close());
         assert!(!session.close());
         assert_eq!(session.runtime_state_v1(), SessionStateV1::Closed);
-        assert_eq!(session.step(), Err(LinksDbSessionErrorV1::Closed));
     }
 
     #[cfg(not(target_family = "wasm"))]
@@ -1035,49 +1095,6 @@ mod tests {
 
     #[cfg(not(target_family = "wasm"))]
     #[test]
-    fn linksdb_doublets_prepare_session_retains_one_loaded_store() {
-        use amemory_optimized_cpu_probe::OptimizedLinkStore;
-
-        let mut source = OptimizedLinkStore::new();
-        let start = source.ensure_start_self_closed(ROOT_HANDLE).unwrap();
-        let end = source.ensure_end_self_closed(ROOT_HANDLE).unwrap();
-        source.ensure_pair(start, end).unwrap();
-
-        let image = source.export_packed_carrier_image();
-        let store = DoubletsPhysicalStoreV1::from_packed_carrier_v1(&image).unwrap();
-        let mut session = LinksDbSessionV1::open(store);
-
-        let first_identity = session.runtime_identity_v1();
-        let first = session.runtime_snapshot_v1();
-
-        // L2 retains the prepared physical store but still makes no execution
-        // support claim. Repeated execution attempts fail closed and must not
-        // reload, mutate or replace the Session.
-        assert_eq!(
-            session.run_to_quiescence(),
-            Err(LinksDbSessionErrorV1::UnsupportedCapability {
-                capability: LinksDbCapabilityV1::RunToQuiescence,
-            }),
-        );
-        assert_eq!(
-            session.run_to_quiescence(),
-            Err(LinksDbSessionErrorV1::UnsupportedCapability {
-                capability: LinksDbCapabilityV1::RunToQuiescence,
-            }),
-        );
-
-        let second_identity = session.runtime_identity_v1();
-        let second = session.runtime_snapshot_v1();
-        assert_eq!(first_identity, second_identity);
-        assert_eq!(first.base_link_count, image.link_count() as u32);
-        assert_eq!(first.current_link_count, image.link_count() as u32);
-        assert_eq!(second.base_link_count, first.base_link_count);
-        assert_eq!(second.current_link_count, first.current_link_count);
-        assert_eq!(second.state, SessionStateV1::Open);
-    }
-
-    #[cfg(not(target_family = "wasm"))]
-    #[test]
     fn linksdb_doublets_structural_store_rollback_is_exact_and_reusable() {
         use amemory_optimized_cpu_probe::OptimizedLinkStore;
 
@@ -1124,7 +1141,7 @@ mod tests {
 
     #[cfg(not(target_family = "wasm"))]
     #[test]
-    fn linksdb_doublets_runs_the_same_structural_engine_as_optimized_cpu() {
+    fn linksdb_doublets_session_uses_shared_runtime_persistently() {
         use amemory_optimized_cpu_probe::{
             structural::{
                 admit_structural_rule, define_structural_interpreter,
@@ -1153,6 +1170,49 @@ mod tests {
                 result.push(seed);
             }
             result
+        }
+
+        fn assert_same_reaction(
+            cpu: &CpuSessionStepOutcomeV1,
+            linksdb: &CpuSessionStepOutcomeV1,
+        ) {
+            assert_eq!(linksdb.reaction.run_id, cpu.reaction.run_id);
+            assert_eq!(
+                linksdb.reaction.reaction_index,
+                cpu.reaction.reaction_index,
+            );
+            assert_eq!(
+                linksdb.reaction.scope_before,
+                cpu.reaction.scope_before,
+            );
+            assert_eq!(
+                linksdb.reaction.scope_after,
+                cpu.reaction.scope_after,
+            );
+            assert_eq!(
+                linksdb.reaction.links_before,
+                cpu.reaction.links_before,
+            );
+            assert_eq!(
+                linksdb.reaction.links_after,
+                cpu.reaction.links_after,
+            );
+            assert_eq!(
+                linksdb.reaction.raw_rule_matches,
+                cpu.reaction.raw_rule_matches,
+            );
+            assert_eq!(
+                linksdb.reaction.transitioned_members,
+                cpu.reaction.transitioned_members,
+            );
+            assert_eq!(
+                linksdb.reaction.handoff_count,
+                cpu.reaction.handoff_count,
+            );
+            assert_eq!(
+                linksdb.reaction.quiescent,
+                cpu.reaction.quiescent,
+            );
         }
 
         let mut prepared = OptimizedLinkStore::new();
@@ -1191,8 +1251,7 @@ mod tests {
         let admission =
             admit_structural_rule(&mut prepared, theory, rule).unwrap();
 
-        let endpoint = input;
-        let (trigger_key, _) = prepared.poles(endpoint).unwrap();
+        let (trigger_key, _) = prepared.poles(input).unwrap();
         index_structural_rule_trigger(
             &mut prepared,
             trigger_key,
@@ -1203,52 +1262,127 @@ mod tests {
         let active = prepared.ensure_pair(caller, input).unwrap();
         let image = prepared.export_packed_carrier_image();
 
+        // CPU and LinksDB start from one identical prepared A-memory image.
         let mut cpu_store = prepared.clone();
-        let mut linksdb_store =
-            DoubletsPhysicalStoreV1::from_packed_carrier_v1(&image).unwrap();
-
         let mut cpu_engine = OptimizedStructuralEngine::new(8);
         cpu_engine
             .set_interpreter(&cpu_store, interpreter)
             .unwrap();
-        cpu_engine.set_current(&cpu_store, &[active]).unwrap();
+        let mut cpu_runtime = StructuralRuntimeStateV1::new();
 
-        let mut linksdb_engine = OptimizedStructuralEngine::new(8);
-        linksdb_engine
-            .set_interpreter(&linksdb_store, interpreter)
-            .unwrap();
-        linksdb_engine
-            .set_current(&linksdb_store, &[active])
-            .unwrap();
+        let linksdb_store =
+            DoubletsPhysicalStoreV1::from_packed_carrier_v1(&image).unwrap();
+        let mut linksdb = LinksDbSessionV1::open_structural(
+            linksdb_store,
+            interpreter,
+            8,
+        )
+        .unwrap();
 
-        let cpu_result = cpu_engine.run(&mut cpu_store).unwrap();
-        let linksdb_result =
-            linksdb_engine.run(&mut linksdb_store).unwrap();
-
+        let identity = linksdb.runtime_identity_v1();
+        let opened = linksdb.runtime_snapshot_v1();
+        assert_eq!(opened.state, SessionStateV1::Open);
         assert_eq!(
-            linksdb_result, cpu_result,
-            "physical backend changed structural reaction semantics",
+            opened.capabilities.step,
+            CapabilitySupportV1::Supported,
         );
-        assert_eq!(linksdb_engine.current(), cpu_engine.current());
         assert_eq!(
-            StructuralStoreV1::link_count(&linksdb_store),
-            cpu_store.link_count(),
+            opened.capabilities.profile,
+            CapabilitySupportV1::Supported,
+        );
+        assert_eq!(
+            opened.capabilities.trace,
+            CapabilitySupportV1::Supported,
+        );
+        assert_eq!(
+            opened.capabilities.run_to_quiescence,
+            CapabilitySupportV1::Unsupported,
+            "bounded common controller is not wired yet",
         );
 
-        for raw_handle in 1..=cpu_store.link_count() {
-            let handle = raw_handle as Handle;
-            assert_eq!(
-                StructuralReadV1::poles(&linksdb_store, handle).unwrap(),
-                cpu_store.poles(handle).unwrap(),
-                "portable topology diverged at Link {handle}",
-            );
-        }
-
-        let published = linksdb_engine.current()[0];
         assert_eq!(
-            StructuralReadV1::poles(&linksdb_store, published).unwrap(),
+            cpu_runtime
+                .begin_run(&cpu_store, &mut cpu_engine, active)
+                .unwrap(),
+            1,
+        );
+        assert_eq!(linksdb.begin_run(active).unwrap(), 1);
+
+        let cpu_first = cpu_runtime
+            .step(
+                "cpu-reference-session",
+                &mut cpu_store,
+                &mut cpu_engine,
+                CpuRuntimeTraceMode::Profile,
+            )
+            .unwrap();
+        let linksdb_first =
+            linksdb.step(CpuRuntimeTraceMode::Profile).unwrap();
+        assert_same_reaction(&cpu_first, &linksdb_first);
+        assert!(!linksdb_first.reaction.quiescent);
+        assert_eq!(
+            linksdb.runtime_state_v1(),
+            SessionStateV1::Running,
+        );
+
+        let cpu_second = cpu_runtime
+            .step(
+                "cpu-reference-session",
+                &mut cpu_store,
+                &mut cpu_engine,
+                CpuRuntimeTraceMode::Profile,
+            )
+            .unwrap();
+        let linksdb_second =
+            linksdb.step(CpuRuntimeTraceMode::Profile).unwrap();
+        assert_same_reaction(&cpu_second, &linksdb_second);
+        assert!(linksdb_second.reaction.quiescent);
+        assert_eq!(
+            linksdb.runtime_state_v1(),
+            SessionStateV1::Quiescent,
+        );
+
+        let links_after_first_run =
+            linksdb.runtime_current_link_count_v1();
+        assert_eq!(
+            links_after_first_run,
+            cpu_store.link_count() as u32,
+        );
+
+        // Reconfigure only the runtime Scope and execute again in the same
+        // retained Session. Canonical links must be reused; no reload, no new
+        // Session identity and no carrier growth are allowed.
+        assert_eq!(linksdb.begin_run(active).unwrap(), 2);
+        let repeat_first =
+            linksdb.step(CpuRuntimeTraceMode::Trace).unwrap();
+        assert!(!repeat_first.reaction.quiescent);
+        let repeat_second =
+            linksdb.step(CpuRuntimeTraceMode::Trace).unwrap();
+        assert!(repeat_second.reaction.quiescent);
+
+        assert_eq!(linksdb.runtime_identity_v1(), identity);
+        assert_eq!(
+            linksdb.runtime_current_link_count_v1(),
+            links_after_first_run,
+            "retained rerun must reuse canonical Links",
+        );
+        assert_eq!(
+            linksdb.runtime_state_v1(),
+            SessionStateV1::Quiescent,
+        );
+
+        let published = repeat_first.reaction.scope_after[0];
+        assert_eq!(
+            StructuralReadV1::poles(&linksdb.store, published).unwrap(),
             (caller, output),
         );
+
+        assert!(linksdb.close());
+        assert_eq!(linksdb.runtime_state_v1(), SessionStateV1::Closed);
+        assert!(matches!(
+            linksdb.step(CpuRuntimeTraceMode::Profile),
+            Err(LinksDbSessionErrorV1::Closed),
+        ));
     }
 
 }
