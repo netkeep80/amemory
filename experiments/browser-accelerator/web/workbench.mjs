@@ -16,8 +16,6 @@ const BACKENDS = [
   ["linksdb", "LinksDB"],
 ];
 
-let webGpuWitnessSessionSerial = 0;
-
 const STAGE_LABELS = Object.freeze({
   PREPARE: "Подготовка",
   LOAD: "Загрузка",
@@ -1140,8 +1138,6 @@ export async function runWorkbenchWebGpuWitness(
   }
 
   const device = await adapter.requestDevice();
-  const gpuSessionId =
-    "webgpu-resident#" + (++webGpuWitnessSessionSerial);
   let resident = null;
   try {
     resident = await gpuModule.openGpuCarrierResidentSession(
@@ -1260,7 +1256,7 @@ export async function runWorkbenchWebGpuWitness(
 
       const afterExecution = resident.telemetry();
       const normalizedObservation = normalizeWebGpuResidentRunV2({
-        sessionId: gpuSessionId,
+        sessionId: resident.sessionId,
         runId: index + 1,
         manifestRunId: scenarioRun.runId,
         configurationReused: configured.appendCount === 0,
