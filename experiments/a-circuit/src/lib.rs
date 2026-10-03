@@ -23,6 +23,7 @@ mod mux_n;
 mod observability;
 mod session_contract;
 mod runtime_session;
+mod linksdb_session;
 mod proof_n;
 mod scenario;
 mod scenario_registry;
