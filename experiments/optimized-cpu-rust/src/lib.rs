@@ -1750,10 +1750,7 @@ impl OptimizedLinkStore {
         &self,
         handle: Handle,
     ) -> Result<String, StoreError> {
-        let mut visiting = HashSet::new();
-        let mut output = String::new();
-        self.write_node(handle, &mut visiting, &mut output)?;
-        Ok(output)
+        structural::export_direct_recursive_wire_from(self, handle)
     }
 
     /// Historical direct-gauge compatibility name.
