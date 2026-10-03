@@ -226,7 +226,9 @@ chrome.stderr.on("data", (chunk) => {
   }
 });
 
-async function waitForDevToolsPort(attempts = 150) {
+// Browser bootstrap is infrastructure, not semantic execution. Give cold CI
+// Chrome a bounded 30 s window; the semantic E2E itself is never retried.
+async function waitForDevToolsPort(attempts = 300) {
   const marker = path.join(profile, "DevToolsActivePort");
   for (let index = 0; index < attempts; index += 1) {
     if (fs.existsSync(marker)) {
