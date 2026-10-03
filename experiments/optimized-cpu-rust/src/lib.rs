@@ -100,6 +100,11 @@ pub enum StoreError {
         actual: usize,
     },
     InvalidPackedGpuCarrierLayout,
+    /// A physical storage backend failed without a truthful portable
+    /// StoreError classification. Backend-local detail remains at the adapter
+    /// boundary; the semantic engine must not mislabel it as capacity,
+    /// topology or quiescence.
+    PhysicalBackendFailure,
     InvalidPackedCarrierRoot {
         expected: Handle,
         actual: Handle,
