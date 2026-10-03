@@ -1,14 +1,15 @@
 use super::session_contract::{
-    CapabilitySupportV1, RuntimeBackendV1, RuntimeSessionV1,
-    SessionCapabilitiesV1, SessionIdentityV1, SessionStateV1,
-    SESSION_CONTRACT_SCHEMA_VERSION,
+    CapabilitySupportV1, RunBudgetV1, RunStopReasonV1,
+    RuntimeBackendV1, RuntimeSessionV1, SessionCapabilitiesV1,
+    SessionIdentityV1, SessionStateV1, SESSION_CONTRACT_SCHEMA_VERSION,
 };
 use std::sync::atomic::{AtomicU64, Ordering};
 
 #[cfg(not(target_family = "wasm"))]
 use super::runtime_session::{
-    CpuRuntimeTraceMode, CpuSessionStepError, CpuSessionStepOutcomeV1,
-    StructuralRuntimeStateV1,
+    run_stop_reason_from_step_error, BoundedRunV1,
+    BoundedRuntimeSessionV1, CpuRuntimeTraceMode, CpuSessionStepError,
+    CpuSessionStepOutcomeV1, RunControllerV1, StructuralRuntimeStateV1,
 };
 #[cfg(not(target_family = "wasm"))]
 use amemory_optimized_cpu_probe::{
@@ -199,6 +200,114 @@ where
             .step(&session_id, store, engine, trace_mode)
             .map_err(Into::into)
     }
+
+    pub(crate) fn run_to_quiescence(
+        &mut self,
+        initial: Handle,
+        budget: RunBudgetV1,
+        trace_mode: CpuRuntimeTraceMode,
+    ) -> Result<BoundedRunV1, RunStopReasonV1> {
+        let run_id = self
+            .begin_run(initial)
+            .map_err(linksdb_stop_reason_v1)?;
+        let links_before_run = self.runtime_current_link_count_v1();
+        let mut controller = RunControllerV1::new_without_backend_resource(
+            budget,
+            run_id,
+            links_before_run,
+        );
+        let mut steps = Vec::new();
+
+        loop {
+            let controlled = controller.next(self, trace_mode);
+            let budget_accounting = controlled.budget_accounting;
+            if let Some(step) = controlled.step {
+                steps.push(step);
+            }
+            if let Some(stop_reason) = controlled.stop_reason {
+                return Ok(BoundedRunV1 {
+                    run_id,
+                    links_before_run,
+                    steps,
+                    stop_reason,
+                    budget_accounting,
+                });
+            }
+        }
+    }
+
+    fn fail_active_run_v1(&mut self) {
+        if let Some(runtime) = self.runtime.as_mut() {
+            runtime.fail_active_run();
+        }
+    }
+}
+
+#[cfg(not(target_family = "wasm"))]
+fn linksdb_step_error_v1(
+    error: LinksDbSessionErrorV1,
+) -> CpuSessionStepError {
+    match error {
+        LinksDbSessionErrorV1::InvalidState(state) => {
+            CpuSessionStepError::InvalidState(state)
+        }
+        LinksDbSessionErrorV1::Closed => {
+            CpuSessionStepError::InvalidState(SessionStateV1::Closed)
+        }
+        LinksDbSessionErrorV1::EngineFailure
+        | LinksDbSessionErrorV1::UnsupportedCapability { .. } => {
+            CpuSessionStepError::EngineFailure
+        }
+    }
+}
+
+#[cfg(not(target_family = "wasm"))]
+fn linksdb_stop_reason_v1(
+    error: LinksDbSessionErrorV1,
+) -> RunStopReasonV1 {
+    run_stop_reason_from_step_error(linksdb_step_error_v1(error))
+}
+
+#[cfg(not(target_family = "wasm"))]
+impl<S> BoundedRuntimeSessionV1 for LinksDbSessionV1<S>
+where
+    S: LinksDbPhysicalStoreV1 + StructuralStoreV1,
+{
+    fn bounded_step_v1(
+        &mut self,
+        trace_mode: CpuRuntimeTraceMode,
+    ) -> Result<CpuSessionStepOutcomeV1, CpuSessionStepError> {
+        self.step(trace_mode).map_err(linksdb_step_error_v1)
+    }
+
+    fn bounded_fail_active_run_v1(&mut self) {
+        self.fail_active_run_v1();
+    }
+
+    fn bounded_total_links_v1(&self) -> u32 {
+        self.runtime_current_link_count_v1()
+    }
+
+    fn bounded_scope_width_v1(&self) -> u32 {
+        self.runtime_scope_width_v1()
+    }
+
+    fn bounded_backend_stop_reason_v1(
+        &self,
+        resource_budget: super::runtime_session::BackendRunResourceBudgetV1,
+    ) -> Option<RunStopReasonV1> {
+        match resource_budget {
+            super::runtime_session::BackendRunResourceBudgetV1::None => None,
+            _ => Some(RunStopReasonV1::EngineFailure),
+        }
+    }
+
+    fn bounded_backend_accounting_v1(
+        &self,
+        _resource_budget: super::runtime_session::BackendRunResourceBudgetV1,
+    ) -> Option<super::session_contract::BackendResourceAccountingV1> {
+        None
+    }
 }
 
 impl<S: LinksDbPhysicalStoreV1> RuntimeSessionV1 for LinksDbSessionV1<S> {
@@ -234,9 +343,7 @@ impl<S: LinksDbPhysicalStoreV1> RuntimeSessionV1 for LinksDbSessionV1<S> {
             // configuration adapter is wired in L3c-c.
             reconfigure_without_reload: CapabilitySupportV1::Unsupported,
             step: execution,
-            // The common bounded controller/resource accounting is the next
-            // slice; do not claim run-to-quiescence early.
-            run_to_quiescence: CapabilitySupportV1::Unsupported,
+            run_to_quiescence: execution,
             snapshot: CapabilitySupportV1::Supported,
             profile: execution,
             trace: execution,
