@@ -1,14 +1,15 @@
 use super::{
     observability::{
         project_cpu_session_step_v1, run_pipeline_profile_v1,
-        session_open_profile_v1, time_stage, CpuSessionReactionEvidenceV1,
+        session_open_profile_for_backend_v1, session_open_profile_v1,
+        time_stage, CpuSessionReactionEvidenceV1, ObservationTimer,
         ObservedRunV1, RunObservationLevel, RunPipelineProfileV1,
-        SessionOpenProfileV1,
+        SessionOpenProfileV1, LINKSDB_BACKEND_ID,
     },
     proof_n::{
         execute_session_observed_to_quiescence,
-        load_runtime_session,
-        WebProofLoadStage,
+        load_runtime_session, project_bounded_run_observation_v1,
+        project_load_stage_from_structural_store_v1, WebProofLoadStage,
         WebProofPrepareStage,
     },
     runtime_session::{
@@ -25,16 +26,26 @@ use super::{
         ScenarioProgramProfileV1, ScenarioRunV1, ScenarioValidationErrorV1,
     },
     scenario_cpu_adapter::{
+        configure_mux1_store_from_inputs, project_mux1_store_result,
         resolve_cpu_scenario_adapter, CpuScenarioAdapter,
         CpuScenarioAdapterResolutionErrorV1, ScenarioNormalizedResultV1,
     },
+    mux_n::prepare_mux1_session_program,
 };
 #[cfg(test)]
 use super::{
     logic_effect_n::prepare_logic32_session_program,
-    mux_n::{configure_mux1_session, prepare_mux1_session_program},
+    mux_n::configure_mux1_session,
+};
+#[cfg(not(target_family = "wasm"))]
+use super::linksdb_session::{
+    DoubletsPhysicalStoreV1, LinksDbSessionV1,
 };
 use amemory_optimized_cpu_probe::Handle;
+#[cfg(not(target_family = "wasm"))]
+use amemory_optimized_cpu_probe::{
+    structural::StructuralReadV1, PackedCarrierImage,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
