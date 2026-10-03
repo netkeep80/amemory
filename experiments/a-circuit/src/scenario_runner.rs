@@ -30,12 +30,11 @@ use super::{
         resolve_cpu_scenario_adapter, CpuScenarioAdapter,
         CpuScenarioAdapterResolutionErrorV1, ScenarioNormalizedResultV1,
     },
-    mux_n::prepare_mux1_session_program,
 };
 #[cfg(test)]
 use super::{
     logic_effect_n::prepare_logic32_session_program,
-    mux_n::configure_mux1_session,
+    mux_n::{configure_mux1_session, prepare_mux1_session_program},
 };
 #[cfg(not(target_family = "wasm"))]
 use super::linksdb_session::{
