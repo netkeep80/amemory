@@ -6,7 +6,10 @@ use super::session_contract::{
 use std::sync::atomic::{AtomicU64, Ordering};
 
 #[cfg(not(target_family = "wasm"))]
-use amemory_optimized_cpu_probe::{PackedCarrierImage, StoreError, ROOT_HANDLE};
+use amemory_optimized_cpu_probe::{
+    structural::{StructuralReadV1, StructuralStoreV1},
+    Handle, PackedCarrierImage, StoreError, ROOT_HANDLE,
+};
 #[cfg(not(target_family = "wasm"))]
 use doublets::{Doublets, Links};
 #[cfg(not(target_family = "wasm"))]
@@ -14,6 +17,8 @@ use std::collections::HashMap;
 
 static NEXT_LINKSDB_MEMORY_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_LINKSDB_SESSION_ID: AtomicU64 = AtomicU64::new(1);
+#[cfg(not(target_family = "wasm"))]
+static NEXT_DOUBLETS_STORE_INSTANCE_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Minimal physical-store boundary for the LinksDB adapter.
 ///
@@ -197,6 +202,10 @@ pub(crate) enum DoubletsPhysicalStoreErrorV1 {
     MissingPhysicalLink(usize),
     UnmappedPhysicalEndpoint(usize),
     PortableHandleExhausted,
+    InvalidAppendCheckpoint {
+        checkpoint: usize,
+        current: usize,
+    },
     PackedHandleMismatch {
         expected: u32,
         observed: u32,
@@ -224,6 +233,30 @@ impl From<StoreError> for DoubletsPhysicalStoreErrorV1 {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
+fn structural_store_error_v1(
+    error: DoubletsPhysicalStoreErrorV1,
+) -> StoreError {
+    match error {
+        DoubletsPhysicalStoreErrorV1::Carrier(error) => error,
+        DoubletsPhysicalStoreErrorV1::UnknownPortableHandle(handle) => {
+            StoreError::UnknownHandle(handle)
+        }
+        DoubletsPhysicalStoreErrorV1::PortableHandleExhausted => {
+            StoreError::CapacityExceeded
+        }
+        DoubletsPhysicalStoreErrorV1::Upstream(_)
+        | DoubletsPhysicalStoreErrorV1::MissingPhysicalLink(_)
+        | DoubletsPhysicalStoreErrorV1::UnmappedPhysicalEndpoint(_)
+        | DoubletsPhysicalStoreErrorV1::InvalidAppendCheckpoint { .. }
+        | DoubletsPhysicalStoreErrorV1::PackedHandleMismatch { .. }
+        | DoubletsPhysicalStoreErrorV1::PortableIndexMismatch { .. }
+        | DoubletsPhysicalStoreErrorV1::PortableRecordMismatch(_) => {
+            StoreError::PhysicalBackendFailure
+        }
+    }
+}
+
 /// Native-only #280/L1 adapter over the exact-pinned Doublets unit store.
 ///
 /// The portable A-memory identity table is intentionally separate from
@@ -236,6 +269,7 @@ impl From<StoreError> for DoubletsPhysicalStoreErrorV1 {
 #[cfg(not(target_family = "wasm"))]
 pub(crate) struct DoubletsPhysicalStoreV1 {
     store: NativeDoubletsUnitStoreV1,
+    runtime_instance_id: u64,
     physical_metadata_marker: usize,
     portable_records: Vec<PortablePhysicalRecordV1>,
     physical_to_portable: HashMap<usize, u32>,
@@ -272,6 +306,8 @@ impl DoubletsPhysicalStoreV1 {
 
         Ok(Self {
             store,
+            runtime_instance_id: NEXT_DOUBLETS_STORE_INSTANCE_ID
+                .fetch_add(1, Ordering::Relaxed),
             physical_metadata_marker,
             portable_records: vec![root],
             physical_to_portable,
@@ -360,6 +396,39 @@ impl DoubletsPhysicalStoreV1 {
         }
 
         Ok(staging)
+    }
+
+    fn rollback_to_portable_count_v1(
+        &mut self,
+        checkpoint: usize,
+    ) -> Result<(), DoubletsPhysicalStoreErrorV1> {
+        let current = self.portable_records.len();
+        if checkpoint == 0 || checkpoint > current {
+            return Err(
+                DoubletsPhysicalStoreErrorV1::InvalidAppendCheckpoint {
+                    checkpoint,
+                    current,
+                },
+            );
+        }
+        if checkpoint == current {
+            return Ok(());
+        }
+
+        let duplets = self.portable_records[..checkpoint]
+            .iter()
+            .map(|record| (record.link.start, record.link.end))
+            .collect::<Vec<_>>();
+        let image = PackedCarrierImage::from_duplets(&duplets)?;
+        let instance_id = self.runtime_instance_id;
+
+        // Build replacement state off to the side. The live store is replaced
+        // only after full reconstruction succeeds, so rollback itself has an
+        // atomic publication boundary.
+        let mut rebuilt = Self::from_packed_carrier_v1(&image)?;
+        rebuilt.runtime_instance_id = instance_id;
+        *self = rebuilt;
+        Ok(())
     }
 
     pub(crate) fn physical_index_v1(
@@ -648,6 +717,85 @@ impl LinksDbPhysicalStoreV1 for DoubletsPhysicalStoreV1 {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
+impl StructuralReadV1 for DoubletsPhysicalStoreV1 {
+    fn is_valid(&self, handle: Handle) -> bool {
+        handle > 0 && (handle as usize) <= self.portable_records.len()
+    }
+
+    fn poles(
+        &self,
+        handle: Handle,
+    ) -> Result<(Handle, Handle), StoreError> {
+        self.read_v1(handle)
+            .map(|link| (link.start, link.end))
+            .map_err(structural_store_error_v1)
+    }
+
+    fn start_incidence_handles(
+        &self,
+        start: Handle,
+    ) -> Result<Vec<Handle>, StoreError> {
+        self.start_incidence_v1(start)
+            .map_err(structural_store_error_v1)
+    }
+}
+
+#[cfg(not(target_family = "wasm"))]
+impl StructuralStoreV1 for DoubletsPhysicalStoreV1 {
+    fn instance_id(&self) -> u64 {
+        self.runtime_instance_id
+    }
+
+    fn link_count(&self) -> usize {
+        self.portable_records.len()
+    }
+
+    fn ensure_pair(
+        &mut self,
+        start: Handle,
+        end: Handle,
+    ) -> Result<Handle, StoreError> {
+        self.ensure_pair_v1(start, end)
+            .map_err(structural_store_error_v1)
+    }
+
+    fn ensure_start_self_closed(
+        &mut self,
+        child: Handle,
+    ) -> Result<Handle, StoreError> {
+        self.ensure_start_form_v1(child)
+            .map_err(structural_store_error_v1)
+    }
+
+    fn ensure_end_self_closed(
+        &mut self,
+        child: Handle,
+    ) -> Result<Handle, StoreError> {
+        self.ensure_end_form_v1(child)
+            .map_err(structural_store_error_v1)
+    }
+
+    fn append_checkpoint(&self) -> usize {
+        self.portable_records.len()
+    }
+
+    fn rollback_append(
+        &mut self,
+        checkpoint: usize,
+    ) -> Result<(), StoreError> {
+        self.rollback_to_portable_count_v1(checkpoint)
+            .map_err(structural_store_error_v1)
+    }
+
+    fn with_read_view<T>(
+        &self,
+        f: impl FnOnce(&dyn StructuralReadV1) -> T,
+    ) -> T {
+        f(self)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -926,6 +1074,181 @@ mod tests {
         assert_eq!(second.base_link_count, first.base_link_count);
         assert_eq!(second.current_link_count, first.current_link_count);
         assert_eq!(second.state, SessionStateV1::Open);
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    #[test]
+    fn linksdb_doublets_structural_store_rollback_is_exact_and_reusable() {
+        use amemory_optimized_cpu_probe::OptimizedLinkStore;
+
+        let mut source = OptimizedLinkStore::new();
+        let start = source.ensure_start_self_closed(ROOT_HANDLE).unwrap();
+        let end = source.ensure_end_self_closed(ROOT_HANDLE).unwrap();
+        let image = source.export_packed_carrier_image();
+
+        let mut store =
+            DoubletsPhysicalStoreV1::from_packed_carrier_v1(&image).unwrap();
+        let instance_id = StructuralStoreV1::instance_id(&store);
+        let checkpoint = StructuralStoreV1::append_checkpoint(&store);
+        assert_eq!(checkpoint, 3);
+
+        let pair =
+            StructuralStoreV1::ensure_pair(&mut store, start, end).unwrap();
+        let wrapper =
+            StructuralStoreV1::ensure_start_self_closed(&mut store, pair)
+                .unwrap();
+        assert_eq!(pair, 4);
+        assert_eq!(wrapper, 5);
+        assert_eq!(StructuralStoreV1::link_count(&store), 5);
+
+        StructuralStoreV1::rollback_append(&mut store, checkpoint).unwrap();
+
+        assert_eq!(StructuralStoreV1::instance_id(&store), instance_id);
+        assert_eq!(StructuralStoreV1::link_count(&store), checkpoint);
+        assert!(!StructuralReadV1::is_valid(&store, pair));
+        assert!(!StructuralReadV1::is_valid(&store, wrapper));
+        for handle in 1..=checkpoint as u32 {
+            assert_eq!(
+                StructuralReadV1::poles(&store, handle).unwrap(),
+                image.duplet(handle).unwrap(),
+            );
+        }
+
+        let reused =
+            StructuralStoreV1::ensure_pair(&mut store, start, end).unwrap();
+        assert_eq!(
+            reused, pair,
+            "rollback must restore canonical portable handle reuse",
+        );
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    #[test]
+    fn linksdb_doublets_runs_the_same_structural_engine_as_optimized_cpu() {
+        use amemory_optimized_cpu_probe::{
+            structural::{
+                admit_structural_rule, define_structural_interpreter,
+                define_structural_role_dictionary,
+                index_structural_rule_trigger, materialize_exact_sequence,
+                OptimizedStructuralEngine,
+            },
+            OptimizedLinkStore,
+        };
+
+        fn fresh(
+            store: &mut OptimizedLinkStore,
+            count: usize,
+        ) -> Vec<Handle> {
+            let o = store.ensure_start_self_closed(ROOT_HANDLE).unwrap();
+            let c = store.ensure_end_self_closed(ROOT_HANDLE).unwrap();
+            let mut seed = store.ensure_pair(c, o).unwrap();
+            let mut result = Vec::new();
+            for index in 0..count {
+                seed = store
+                    .ensure_pair(
+                        seed,
+                        if index % 2 == 0 { o } else { c },
+                    )
+                    .unwrap();
+                result.push(seed);
+            }
+            result
+        }
+
+        let mut prepared = OptimizedLinkStore::new();
+        let anchors = fresh(&mut prepared, 20);
+        let theory = anchors[0];
+        let grammar = anchors[1];
+        let caller = anchors[3];
+        let input = anchors[4];
+        let output = anchors[5];
+        let role = anchors[10];
+
+        let authority_dictionary =
+            define_structural_role_dictionary(&mut prepared, &[]).unwrap();
+        let interpreter = define_structural_interpreter(
+            &mut prepared,
+            authority_dictionary,
+            grammar,
+            theory,
+        )
+        .unwrap();
+
+        let role_dictionary =
+            define_structural_role_dictionary(&mut prepared, &[role]).unwrap();
+        let before = prepared.ensure_pair(role, input).unwrap();
+        let after = prepared.ensure_pair(role, output).unwrap();
+        let bundle =
+            materialize_exact_sequence(&mut prepared, &[after]).unwrap();
+        let body = prepared.ensure_pair(before, bundle).unwrap();
+        let rule =
+            amemory_optimized_cpu_probe::structural::define_structural_rule(
+                &mut prepared,
+                role_dictionary,
+                body,
+            )
+            .unwrap();
+        let admission =
+            admit_structural_rule(&mut prepared, theory, rule).unwrap();
+
+        let endpoint = input;
+        let (trigger_key, _) = prepared.poles(endpoint).unwrap();
+        index_structural_rule_trigger(
+            &mut prepared,
+            trigger_key,
+            admission,
+        )
+        .unwrap();
+
+        let active = prepared.ensure_pair(caller, input).unwrap();
+        let image = prepared.export_packed_carrier_image();
+
+        let mut cpu_store = prepared.clone();
+        let mut linksdb_store =
+            DoubletsPhysicalStoreV1::from_packed_carrier_v1(&image).unwrap();
+
+        let mut cpu_engine = OptimizedStructuralEngine::new(8);
+        cpu_engine
+            .set_interpreter(&cpu_store, interpreter)
+            .unwrap();
+        cpu_engine.set_current(&cpu_store, &[active]).unwrap();
+
+        let mut linksdb_engine = OptimizedStructuralEngine::new(8);
+        linksdb_engine
+            .set_interpreter(&linksdb_store, interpreter)
+            .unwrap();
+        linksdb_engine
+            .set_current(&linksdb_store, &[active])
+            .unwrap();
+
+        let cpu_result = cpu_engine.run(&mut cpu_store).unwrap();
+        let linksdb_result =
+            linksdb_engine.run(&mut linksdb_store).unwrap();
+
+        assert_eq!(
+            linksdb_result, cpu_result,
+            "physical backend changed structural reaction semantics",
+        );
+        assert_eq!(linksdb_engine.current(), cpu_engine.current());
+        assert_eq!(
+            StructuralStoreV1::link_count(&linksdb_store),
+            cpu_store.link_count(),
+        );
+
+        for raw_handle in 1..=cpu_store.link_count() {
+            let handle = raw_handle as Handle;
+            assert_eq!(
+                StructuralReadV1::poles(&linksdb_store, handle).unwrap(),
+                cpu_store.poles(handle).unwrap(),
+                "portable topology diverged at Link {handle}",
+            );
+        }
+
+        let published = linksdb_engine.current()[0];
+        assert_eq!(
+            StructuralReadV1::poles(&linksdb_store, published).unwrap(),
+            (caller, output),
+        );
     }
 
 }
