@@ -1545,4 +1545,141 @@ mod tests {
         ));
     }
 
+    #[cfg(not(target_family = "wasm"))]
+    #[test]
+    fn linksdb_mux1_four_run_lifecycle_uses_common_config_and_result_decode() {
+        use crate::{
+            mux_n::{
+                configure_mux1_store, decode_mux1_store_result,
+                prepare_mux1_session_program,
+            },
+            proof_n::{load_runtime, loaded_handle},
+        };
+
+        let prepare = prepare_mux1_session_program().unwrap();
+        let (memory, load) = load_runtime(&prepare).unwrap();
+        let image = memory.store.export_packed_carrier_image();
+        let interpreter =
+            loaded_handle(&load, "execution.interpreter").unwrap();
+
+        let store =
+            DoubletsPhysicalStoreV1::from_packed_carrier_v1(&image).unwrap();
+        let mut session = LinksDbSessionV1::open_structural(
+            store,
+            interpreter,
+            32,
+        )
+        .unwrap();
+
+        let identity = session.runtime_identity_v1();
+        let base_links = session.runtime_base_link_count_v1();
+        assert_eq!(base_links as usize, image.link_count());
+
+        let vectors = [
+            (0usize, 0usize, 1usize, 0u32),
+            (1usize, 0usize, 1usize, 1u32),
+            (0usize, 1usize, 0usize, 1u32),
+            (0usize, 0usize, 1usize, 0u32),
+        ];
+        let mut first_initial = None;
+        let mut first_result = None;
+
+        for (run_index, &(select, a, b, expected)) in
+            vectors.iter().enumerate()
+        {
+            assert_eq!(session.runtime_identity_v1(), identity);
+
+            let (initial, before_configure, after_configure) =
+                configure_mux1_store(
+                    &mut session.store,
+                    &load,
+                    select,
+                    a,
+                    b,
+                )
+                .unwrap();
+
+            if run_index < 3 {
+                assert!(
+                    after_configure > before_configure,
+                    "new MUX1 input must publish canonical runtime Links",
+                );
+            } else {
+                assert_eq!(
+                    Some(initial),
+                    first_initial,
+                    "return to first MUX1 input must reuse its initial Link",
+                );
+                assert_eq!(
+                    after_configure,
+                    before_configure,
+                    "return to first MUX1 input must not grow carrier",
+                );
+            }
+            if run_index == 0 {
+                first_initial = Some(initial);
+            }
+
+            let bounded = session
+                .run_to_quiescence(
+                    initial,
+                    RunBudgetV1::scenario_default(64),
+                    CpuRuntimeTraceMode::Profile,
+                )
+                .unwrap();
+
+            assert_eq!(
+                bounded.stop_reason,
+                RunStopReasonV1::Quiescent,
+            );
+            assert_eq!(
+                bounded.steps.iter().filter(|step| {
+                    !step.reaction.quiescent
+                }).count(),
+                7,
+                "run {run_index} changed proven MUX1 reaction count",
+            );
+            assert_eq!(
+                session.runtime_state_v1(),
+                SessionStateV1::Quiescent,
+            );
+            assert_eq!(
+                bounded.budget_accounting.backend_resource,
+                None,
+                "LinksDB physical bytes remain unavailable, never zero",
+            );
+
+            let current = session
+                .engine
+                .as_ref()
+                .expect("structural LinksDB Session owns one engine")
+                .current();
+            let (value, final_link) = decode_mux1_store_result(
+                &session.store,
+                current,
+                &load,
+            )
+            .unwrap();
+            assert_eq!(value, expected);
+
+            if run_index == 0 {
+                first_result = Some(final_link);
+            } else if run_index == 3 {
+                assert_eq!(
+                    Some(final_link),
+                    first_result,
+                    "return to first configuration changed canonical result Link",
+                );
+            }
+
+            assert_eq!(session.runtime_identity_v1(), identity);
+        }
+
+        assert_eq!(
+            session.runtime_base_link_count_v1(),
+            base_links,
+            "reconfiguration must not redefine the one-time LOAD boundary",
+        );
+    }
+
 }
