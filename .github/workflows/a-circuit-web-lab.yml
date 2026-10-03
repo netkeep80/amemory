@@ -8,6 +8,7 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - "experiments/a-circuit/**"
+      - "experiments/optimized-cpu-rust/**"
       - "experiments/browser-accelerator/web/**"
       - ".github/workflows/a-circuit-web-lab.yml"
       - ".github/workflows/browser-accelerator-pages.yml"
