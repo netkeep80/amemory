@@ -1403,8 +1403,7 @@ mod tests {
         );
         assert_eq!(
             opened.capabilities.run_to_quiescence,
-            CapabilitySupportV1::Unsupported,
-            "bounded common controller is not wired yet",
+            CapabilitySupportV1::Supported,
         );
 
         assert_eq!(
@@ -1476,6 +1475,60 @@ mod tests {
         assert_eq!(
             linksdb.runtime_state_v1(),
             SessionStateV1::Quiescent,
+        );
+
+        let bounded = linksdb
+            .run_to_quiescence(
+                active,
+                RunBudgetV1::scenario_default(64),
+                CpuRuntimeTraceMode::Profile,
+            )
+            .unwrap();
+        assert_eq!(bounded.run_id, 3);
+        assert_eq!(bounded.stop_reason, RunStopReasonV1::Quiescent);
+        assert_eq!(bounded.steps.len(), 2);
+        assert_eq!(
+            bounded.budget_accounting.reactions_consumed,
+            2,
+        );
+        assert_eq!(
+            bounded.budget_accounting.backend_resource,
+            None,
+            "unmeasured LinksDB physical bytes must stay unavailable, never zero",
+        );
+        assert_eq!(
+            linksdb.runtime_current_link_count_v1(),
+            links_after_first_run,
+            "bounded retained rerun must reuse canonical Links",
+        );
+
+        let budget_stopped = linksdb
+            .run_to_quiescence(
+                active,
+                RunBudgetV1 {
+                    max_reactions: 1,
+                    ..RunBudgetV1::scenario_default(64)
+                },
+                CpuRuntimeTraceMode::Profile,
+            )
+            .unwrap();
+        assert_eq!(budget_stopped.run_id, 4);
+        assert_eq!(
+            budget_stopped.stop_reason,
+            RunStopReasonV1::ReactionBudgetExceeded,
+        );
+        assert_eq!(
+            budget_stopped.budget_accounting.reactions_consumed,
+            1,
+        );
+        assert_eq!(
+            budget_stopped.budget_accounting.backend_resource,
+            None,
+        );
+        assert_eq!(
+            linksdb.runtime_state_v1(),
+            SessionStateV1::Failed,
+            "resource stop must never masquerade as QUIESCENT",
         );
 
         let published = repeat_first.reaction.scope_after[0];
