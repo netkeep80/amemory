@@ -464,7 +464,7 @@ impl StructuralRuntimeStateV1 {
     }
 
     pub(crate) fn fail_active_run(&mut self) {
-        self.runtime.fail_active_run();
+        self.execution_state = SessionStateV1::Failed;
     }
 }
 
@@ -600,7 +600,7 @@ impl CpuRuntimeSession {
     }
 
     pub(crate) fn fail_active_run(&mut self) {
-        self.execution_state = SessionStateV1::Failed;
+        self.runtime.fail_active_run();
     }
 }
 
@@ -650,6 +650,41 @@ impl RuntimeSessionV1 for CpuRuntimeSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn backend_neutral_runtime_state_machine_is_not_owned_by_cpu_wrapper() {
+        let mut store = OptimizedLinkStore::new();
+        let initial = store.ensure_pair(ROOT_HANDLE, ROOT_HANDLE).unwrap();
+        let mut engine = OptimizedStructuralEngine::new(8);
+        let mut runtime = StructuralRuntimeStateV1::new();
+
+        assert_eq!(runtime.state(), SessionStateV1::Open);
+        assert_eq!(
+            runtime.begin_run(&store, &mut engine, initial).unwrap(),
+            1,
+        );
+        assert_eq!(runtime.state(), SessionStateV1::Configured);
+        assert_eq!(
+            runtime.begin_run(&store, &mut engine, initial),
+            Err(CpuSessionStepError::InvalidState(
+                SessionStateV1::Configured,
+            )),
+            "a second configuration cannot overwrite an active run",
+        );
+
+        // No interpreter was configured: the semantic engine fails and the
+        // common runtime must publish FAILED, never QUIESCENT or a fake step.
+        assert_eq!(
+            runtime.step(
+                "neutral-session#test",
+                &mut store,
+                &mut engine,
+                CpuRuntimeTraceMode::Profile,
+            ),
+            Err(CpuSessionStepError::EngineFailure),
+        );
+        assert_eq!(runtime.state(), SessionStateV1::Failed);
+    }
 
     #[test]
     fn cpu_session_exposes_distinct_neutral_identity_and_capabilities() {
