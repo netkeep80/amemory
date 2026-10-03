@@ -8,6 +8,7 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - "experiments/a-circuit/**"
+      # Shared semantic core: exact-head WASM must cover structural runtime changes.
       - "experiments/optimized-cpu-rust/**"
       - "experiments/browser-accelerator/web/**"
       - ".github/workflows/a-circuit-web-lab.yml"
