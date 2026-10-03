@@ -203,21 +203,42 @@ try {
     );
   }
   const witness = result?.witness;
+  const active = witness?.activeReactionCounts;
+  const steps = witness?.stepCounts;
+  const config = witness?.configurationAppendCounts;
   if (witness?.status !== "verified" ||
-      witness?.tripleDifferential !== true ||
-      witness?.cpuGpuDifferential !== true ||
+      witness?.scenarioManifestDriven !== true ||
+      witness?.staticPreparedCarrier !== true ||
+      witness?.noExecutionSeed !== true ||
+      witness?.postReadbackCpuDifferential !== true ||
+      witness?.cpuReferenceSharesRustCore !== true ||
       witness?.sequentialResidentExecution !== true ||
-      witness?.fullResidentRun !== true ||
-      witness?.reactionBudgetFalsifier !== true ||
-      witness?.capacityFalsifier !== true ||
       witness?.residentBaseReuse !== true ||
+      witness?.returnToFirstReuse !== true ||
+      witness?.allQuiescent !== true ||
+      witness?.manifestAssertionsPassed !== true ||
+      witness?.scenarioId !== "mux1-lifecycle" ||
+      witness?.scenarioVersion !== "1.0.0" ||
+      witness?.runCount !== 4 ||
+      !Array.isArray(witness?.values) ||
+      witness.values.length !== witness.runCount ||
+      !Array.isArray(active) ||
+      active.length !== witness.runCount ||
+      !active.every((value) => Number.isInteger(value) && value > 0) ||
+      !Array.isArray(steps) ||
+      steps.length !== witness.runCount ||
+      !steps.every((value, index) => value === active[index] + 1) ||
+      !Array.isArray(config) ||
+      config.length !== witness.runCount ||
+      !config.slice(0, 3).every((value) =>
+        Number.isInteger(value) && value > 0
+      ) ||
+      config[3] !== 0 ||
       witness?.baseUploadCount !== 1 ||
-      witness?.stopReason !== "QUIESCENT" ||
-      !Number.isInteger(witness?.activeReactionCount) ||
-      witness.activeReactionCount <= 0 ||
-      !Number.isInteger(witness?.stepCount) ||
-      witness.stepCount !== witness.activeReactionCount + 1 ||
-      witness?.reactionDispatchCount !== witness.stepCount ||
+      witness?.configurationCommitCount !== witness.runCount ||
+      witness?.configurationDispatchCount !== 3 ||
+      witness?.reactionDispatchCount !==
+        steps.reduce((sum, value) => sum + value, 0) ||
       !Number.isInteger(witness?.baseUploadBytes) ||
       witness.baseUploadBytes <= 0 ||
       !Number.isInteger(witness?.residentBufferBytes) ||
@@ -225,27 +246,25 @@ try {
       !Number.isInteger(witness?.residentAppendCount) ||
       witness.residentAppendCount <= 0 ||
       !Number.isInteger(witness?.residentCapacity) ||
-      witness.residentCapacity < witness.residentAppendCount ||
-      witness?.finalScopeHandle !== witness?.rustWasmFinalScope) {
+      witness.residentCapacity < witness.residentAppendCount) {
     throw new Error(
-      "live C4c3 WebGPU witness failed: " +
+      "live WebGPU Scenario witness failed: " +
       JSON.stringify(witness) + "\nChrome:\n" + stderr,
     );
   }
 
   console.log(
-    "PAGES_WEBGPU_C4C3=PASS source=" +
+    "PAGES_WEBGPU_SCENARIO=PASS source=" +
     expectedSha.slice(0, 12) +
-    " mode=" + witness.planMode +
-    " active=" + witness.activeReactionCount +
-    " steps=" + witness.stepCount +
-    " final=L" + witness.finalScopeHandle +
-    " resident=" + witness.residentAppendCount +
-    " uploads=" + witness.baseUploadCount +
-    " dispatches=" + witness.reactionDispatchCount +
-    " stop=" + witness.stopReason +
-    " falsifiers=budget,capacity",
+    " scenario=" + witness.scenarioId + "@" + witness.scenarioVersion +
+    " runs=" + witness.runCount +
+    " values=" + witness.values.join(",") +
+    " active=" + active.join(",") +
+    " config=" + config.join(",") +
+    " reuse=" + witness.returnToFirstReuse +
+    " uploads=" + witness.baseUploadCount,
   );
+
 } finally {
   cdp?.close();
   try {

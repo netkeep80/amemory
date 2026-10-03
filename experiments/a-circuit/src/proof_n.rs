@@ -521,16 +521,15 @@ pub(crate) fn export_packed_carrier(
         .collect()
 }
 
-pub(crate) fn packed_gpu_carrier_words(
-    proof: &WebStructuralProof,
+pub(crate) fn packed_gpu_carrier_words_from_prepare(
+    prepare: &WebProofPrepareStage,
 ) -> Option<Vec<u32>> {
-    let duplets = proof
-        .prepare
+    let duplets = prepare
         .carrier_duplets
         .iter()
         .map(|duplet| (duplet.start, duplet.end))
         .collect::<Vec<_>>();
-    if duplets.len() != proof.prepare.compiled_links as usize {
+    if duplets.len() != prepare.compiled_links as usize {
         return None;
     }
 

@@ -281,9 +281,7 @@ Promise.all([
   { verifyCompactExecutionProof },
   { recursiveStructureHtml },
   {
-    deriveGpuCarrierReactionInput,
     expectedGpuCarrierLookup,
-    expectedGpuCarrierReaction,
     gpuCarrierLookupShaderSource,
     gpuCarrierReactionShaderSource,
     readGpuCarrierWordsAbi,
@@ -2775,7 +2773,11 @@ Promise.all([
     }
     return result;
   };
-  const readCurrentWitnessPayload = (label, expectedKind) => {
+  const readCurrentWitnessPayload = (
+    label,
+    expectedKind,
+    expectedCompactProofAvailable = true
+  ) => {
     if (w.amemory_i386_lab_result_available() !== 1) {
       throw new Error(label + " structured witness JSON missing");
     }
@@ -2792,7 +2794,7 @@ Promise.all([
         result.representationVersion !== "0.1.0" ||
         result.instanceId !== 0 ||
         result.witnessKind !== expectedKind ||
-        result.compactProofAvailable !== true ||
+        result.compactProofAvailable !== expectedCompactProofAvailable ||
         !result.payload ||
         typeof result.payload !== "object") {
       throw new Error(label + " structured witness envelope mismatch");
@@ -2800,46 +2802,76 @@ Promise.all([
     return result.payload;
   };
   if (w.amemory_i386_lab_gpu_carrier_prepare() !== 1) {
-    throw new Error("C4c1 real-WASM GPU carrier producer rejected");
+    throw new Error("C4c1 real-WASM static GPU carrier producer rejected");
   }
   const gpuCarrier = readGpuCarrierWordsAbi(
     w,
     undefined,
-    "C4c1 real-WASM carrier"
+    "C4c1 real-WASM static carrier"
   );
   if (!gpuCarrier) {
-    throw new Error("C4c1 real-WASM GPU carrier missing");
+    throw new Error("C4c1 real-WASM static GPU carrier missing");
   }
-  const gpuCarrierProof = readCurrentCompactProof("C4c1 GPU carrier");
-  const gpuCarrierPayload =
-    readCurrentWitnessPayload("C4c1 GPU carrier", "gpu-carrier");
-  const gpuBase = gpuCarrierProof.topology?.base;
-  if (!gpuBase ||
-      !Array.isArray(gpuBase.starts) ||
-      !Array.isArray(gpuBase.ends) ||
-      gpuBase.starts.length !== gpuBase.ends.length) {
-    throw new Error("C4c1 compact base topology missing");
+  if (w.amemory_i386_lab_compact_proof_available() !== 0) {
+    throw new Error(
+      "C4c1 static GPU PREPARE illegally retained an execution compact proof"
+    );
   }
-  if ((gpuCarrier.layout.linkCount >>> 0) !==
-        (gpuCarrierProof.prepare.compiledLinks >>> 0) ||
+  const gpuCarrierPayload = readCurrentWitnessPayload(
+    "C4c1 static GPU carrier",
+    "gpu-carrier",
+    false
+  );
+  if (gpuCarrierPayload.staticProgram !== true ||
+      gpuCarrierPayload.block !== "MUX1_STATIC_PROGRAM" ||
       (gpuCarrier.layout.linkCount >>> 0) !==
         (gpuCarrierPayload.linkCount >>> 0) ||
       (gpuCarrier.words.length >>> 0) !==
         (gpuCarrierPayload.wordLength >>> 0) ||
-      gpuCarrier.layout.rootHandle !== 1) {
-    throw new Error("C4c1 carrier/proof metadata identity mismatch");
+      gpuCarrier.layout.rootHandle !== 1 ||
+      !Array.isArray(gpuCarrierPayload.semanticRoots) ||
+      !Array.isArray(gpuCarrierPayload.theoryAdmissions)) {
+    throw new Error("C4c1 static carrier metadata identity mismatch");
   }
-  if (gpuCarrier.sections.starts.length !== gpuBase.starts.length ||
-      gpuCarrier.sections.ends.length !== gpuBase.ends.length) {
-    throw new Error("C4c1 carrier/proof topology length mismatch");
+
+  const staticRoots = new Map();
+  for (const root of gpuCarrierPayload.semanticRoots) {
+    if (typeof root?.role !== "string" ||
+        !Number.isInteger(root?.carrierRef) ||
+        root.carrierRef < 1 ||
+        root.carrierRef > gpuCarrier.layout.linkCount ||
+        typeof root?.source !== "string" ||
+        root.source.length === 0 ||
+        staticRoots.has(root.role)) {
+      throw new Error("C4c1 static carrier has invalid semantic roots");
+    }
+    staticRoots.set(root.role, root.carrierRef >>> 0);
   }
-  for (let index = 0; index < gpuBase.starts.length; index += 1) {
-    if ((gpuCarrier.sections.starts[index] >>> 0) !==
-          (gpuBase.starts[index] >>> 0) ||
-        (gpuCarrier.sections.ends[index] >>> 0) !==
-          (gpuBase.ends[index] >>> 0)) {
+  for (const role of [
+    "function.mux1",
+    "data.zero",
+    "data.one",
+    "execution.interpreter",
+    "execution.theory",
+    "execution.apply",
+    "context.caller",
+    "result.tag",
+  ]) {
+    if (!staticRoots.has(role)) {
+      throw new Error("C4c1 static carrier misses semantic root " + role);
+    }
+  }
+  for (const runtimeRole of [
+    "data.select",
+    "data.a",
+    "data.b",
+    "invocation.args",
+    "invocation.call",
+    "scope.initial",
+  ]) {
+    if (staticRoots.has(runtimeRole)) {
       throw new Error(
-        "C4c1 carrier/proof topology mismatch at Link " + (index + 1)
+        "C4c1 static carrier illegally contains runtime root " + runtimeRole
       );
     }
   }
@@ -2853,61 +2885,26 @@ Promise.all([
     throw new Error("C4c2 CPU lookup oracle has invalid ROOT incidence");
   }
   for (const mode of ["single", "sections"]) {
-    const shader = gpuCarrierLookupShaderSource(mode, {
+    const lookupShader = gpuCarrierLookupShaderSource(mode, {
       handle: c4LookupOracle.handle,
       pole: c4LookupOracle.pole,
       linkCount: gpuCarrier.layout.linkCount,
     });
-    if (!shader.includes("next_by_start") &&
-        !shader.includes("next_by_start_offset")) {
+    if (!lookupShader.includes("next_by_start") &&
+        !lookupShader.includes("next_by_start_offset")) {
       throw new Error("C4c2 " + mode + " shader lost incidence traversal");
     }
-    if (!shader.includes("@compute @workgroup_size(1)")) {
-      throw new Error("C4c2 " + mode + " shader is not a bounded compute witness");
+    if (!lookupShader.includes("@compute @workgroup_size(1)")) {
+      throw new Error(
+        "C4c2 " + mode + " shader is not a bounded compute witness"
+      );
     }
-  }
 
-  const c4ReactionInput =
-    deriveGpuCarrierReactionInput(gpuCarrier, gpuCarrierProof.roots);
-  const c4ReactionOracle = expectedGpuCarrierReaction(
-    gpuCarrier,
-    c4ReactionInput
-  );
-
-  // Only after independent carrier execution do we inspect the proof trace.
-  const c4FirstReaction = gpuCarrierProof.execute?.reactions?.[0];
-  const c4ProofAppend = gpuCarrierProof.topology?.append;
-  const c4ProofAppendCount = c4FirstReaction
-    ? (c4FirstReaction.linksAfter >>> 0) -
-      (gpuCarrierProof.load.linksAfterLoad >>> 0)
-    : -1;
-  const c4SameAppend =
-    c4ProofAppendCount === c4ReactionOracle.appendCount &&
-    Array.isArray(c4ProofAppend?.starts) &&
-    Array.isArray(c4ProofAppend?.ends) &&
-    c4ReactionOracle.appendStarts.every(
-      (value, index) => value === (c4ProofAppend.starts[index] >>> 0)
-    ) &&
-    c4ReactionOracle.appendEnds.every(
-      (value, index) => value === (c4ProofAppend.ends[index] >>> 0)
-    );
-  if (!c4FirstReaction ||
-      c4FirstReaction.quiescent ||
-      c4FirstReaction.scopeBefore?.length !== 1 ||
-      c4FirstReaction.scopeAfter?.length !== 1 ||
-      (c4FirstReaction.scopeBefore[0] >>> 0) !==
-        c4ReactionInput.currentHandle ||
-      c4ReactionOracle.candidateHandle !==
-        (c4FirstReaction.scopeAfter[0] >>> 0) ||
-      c4ReactionOracle.rawRuleMatches !==
-        (c4FirstReaction.rawRuleMatches >>> 0) ||
-      !c4SameAppend) {
-    throw new Error("C4c3 independent publish/append disagrees with MUX1 proof");
-  }
-  for (const mode of ["single", "sections"]) {
-    const shader = gpuCarrierReactionShaderSource(mode, {
-      currentHandle: c4ReactionInput.currentHandle,
-      interpreterHandle: c4ReactionInput.interpreterHandle,
+    // Shader generation remains generic. This checks the structural kernel
+    // contract only; no fixed MUX1 invocation/current Scope is part of PREPARE.
+    const reactionShader = gpuCarrierReactionShaderSource(mode, {
+      currentHandle: staticRoots.get("function.mux1"),
+      interpreterHandle: staticRoots.get("execution.interpreter"),
       linkCount: gpuCarrier.layout.linkCount,
       rootHandle: gpuCarrier.layout.rootHandle,
     });
@@ -2928,7 +2925,7 @@ Promise.all([
       "if (matches == 0u)",
       "discovery[0] = 11u",
     ]) {
-      if (!shader.includes(marker)) {
+      if (!reactionShader.includes(marker)) {
         throw new Error("C4c3 " + mode + " shader missing " + marker);
       }
     }
@@ -2938,7 +2935,7 @@ Promise.all([
       "ensure_end_self_overlay",
       "var<storage, read_write> overlay",
     ]) {
-      if (shader.includes(forbidden)) {
+      if (reactionShader.includes(forbidden)) {
         throw new Error(
           "C4c3 " + mode + " shader retained transient overlay: " + forbidden
         );

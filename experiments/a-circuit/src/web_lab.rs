@@ -13,12 +13,12 @@ use crate::{
     stack_n::web_prove_stack_roundtrip,
     mul32_n::web_prove_mul32,
     mul_effect_n::web_prove_mul_effect,
-    mux_n::{web_prove_mux1, web_prove_mux32},
+    mux_n::{prepare_mux1_session_program, web_prove_mux1, web_prove_mux32},
     rotate32_n::{web_prove_rotate32, web_run_rotate32},
     rotate_carry32_n::{web_prove_rotate_carry32, web_run_rotate_carry32},
     shift32_n::{web_prove_shift32, web_run_shift32},
     unary_arith_n::{web_prove_unary32, web_run_unary32},
-    proof_n::{packed_gpu_carrier_words, WebStructuralProof},
+    proof_n::{packed_gpu_carrier_words_from_prepare, WebStructuralProof},
 };
 use serde::Serialize;
 use std::sync::Mutex;
@@ -975,27 +975,25 @@ pub extern "C" fn amemory_i386_lab_instance_gpu_carrier_prepare(
     clear_result_for_instance(instance_id);
     clear_compact_proof_for_instance(instance_id);
 
-    let Some(proof) = web_prove_mux1(1, 0, 1) else {
+    // #461 truth boundary: PREPARE contains only the static MUX1 program/Theory.
+    // Concrete S/A/B, invocation and initial Scope are published later through
+    // the resident WebGPU CONFIGURE delta.
+    let Some(prepare) = prepare_mux1_session_program() else {
         return 0;
     };
-    let Some(words) = packed_gpu_carrier_words(&proof) else {
+    let Some(words) = packed_gpu_carrier_words_from_prepare(&prepare) else {
         return 0;
     };
     let Ok(word_len) = u32::try_from(words.len()) else {
         return 0;
     };
-    let link_count = proof.prepare.compiled_links;
-    let block = proof.block.clone();
+    let link_count = prepare.compiled_links;
 
-    if set_compact_proof_for_instance(instance_id, &proof).is_none() {
-        return 0;
-    }
     if with_lab_instance_mut(instance_id, |state| {
         state.gpu_carrier_words = words;
     })
     .is_none()
     {
-        clear_compact_proof_for_instance(instance_id);
         return 0;
     }
 
@@ -1003,15 +1001,17 @@ pub extern "C" fn amemory_i386_lab_instance_gpu_carrier_prepare(
         instance_id,
         "gpu-carrier",
         serde_json::json!({
-            "block": block,
+            "block": "MUX1_STATIC_PROGRAM",
+            "staticProgram": true,
             "linkCount": link_count,
             "wordLength": word_len,
-            "rootHandle": 1
+            "rootHandle": 1,
+            "semanticRoots": prepare.semantic_roots,
+            "theoryAdmissions": prepare.theory_admissions
         }),
     )
     .is_none()
     {
-        clear_compact_proof_for_instance(instance_id);
         return 0;
     }
 
