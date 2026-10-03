@@ -1,5 +1,5 @@
 use super::runtime_session::{
-    CpuMemoryInstance, CpuRuntimeSession,
+    BoundedRunV1, CpuMemoryInstance, CpuRuntimeSession,
 };
 use super::session_contract::{
     BackendResourceAccountingV1, RunBudgetAccountingV1, RunBudgetV1,
@@ -763,9 +763,9 @@ pub(crate) struct CpuObservedRunStopV1 {
     pub(crate) budget_accounting: Option<RunBudgetAccountingV1>,
 }
 
-fn optimized_cpu_resource_accounting(
+fn backend_resource_profile_v1(
     accounting: &RunBudgetAccountingV1,
-) -> (u64, u64, bool) {
+) -> (Option<u64>, Option<u64>, bool) {
     match accounting.backend_resource {
         Some(
             BackendResourceAccountingV1::OptimizedCpuDenseCarrier {
@@ -774,13 +774,11 @@ fn optimized_cpu_resource_accounting(
                 full_resident_bytes_available,
             },
         ) => (
-            dense_carrier_allocated_bytes,
-            max_dense_carrier_bytes,
+            Some(dense_carrier_allocated_bytes),
+            Some(max_dense_carrier_bytes),
             full_resident_bytes_available,
         ),
-        None => panic!(
-            "optimized CPU run accounting lost its physical resource extension"
-        ),
+        None => (None, None, false),
     }
 }
 
@@ -791,7 +789,7 @@ fn project_budget_profile(
         dense_carrier_allocated_bytes,
         max_dense_carrier_bytes,
         full_resident_bytes_available,
-    ) = optimized_cpu_resource_accounting(&accounting);
+    ) = backend_resource_profile_v1(&accounting);
     RunBudgetProfileV1 {
         schema_version: accounting.schema_version,
         reactions_consumed: accounting.reactions_consumed,
@@ -814,39 +812,31 @@ fn project_budget_profile(
     }
 }
 
-pub(crate) fn execute_session_observed_to_quiescence(
-    session: &mut CpuRuntimeSession,
-    initial: Handle,
-    max_reactions: u32,
+/// Passive backend-neutral projection of one already executed bounded run.
+///
+/// Execution and projection remain separate: this function never calls the
+/// semantic engine. Backend-specific resource facts come only from the
+/// authoritative RunBudgetAccountingV1 extension. Missing physical metrics
+/// remain absent rather than being synthesized as zero.
+pub(crate) fn project_bounded_run_observation_v1(
+    session_id: String,
+    backend_id: &str,
+    base_links: u32,
+    final_scope: Vec<Handle>,
     observation_level: RunObservationLevel,
-) -> Result<ObservedRunV1, CpuObservedRunStopV1> {
-    let session_id = session.id.clone();
-    let run_started = ObservationTimer::start();
-    let run = session
-        .run_to_quiescence(
-            initial,
-            RunBudgetV1::scenario_default(max_reactions),
-            observation_level.runtime_trace_mode(),
-        )
-        .map_err(|stop_reason| CpuObservedRunStopV1 {
-            stop_reason,
-            budget_accounting: None,
-        })?;
-    if run.stop_reason != RunStopReasonV1::Quiescent {
-        return Err(CpuObservedRunStopV1 {
-            stop_reason: run.stop_reason,
-            budget_accounting: Some(run.budget_accounting),
-        });
-    }
-
+    run_started: &ObservationTimer,
+    run: BoundedRunV1,
+) -> ObservedRunV1 {
     let run_id = run.run_id;
     let links_before_run = run.links_before_run;
     let budget_accounting = run.budget_accounting;
+    let links_after_run = budget_accounting.total_links;
+    let final_quiescent = run.stop_reason == RunStopReasonV1::Quiescent;
     let (
         dense_carrier_allocated_bytes,
         max_dense_carrier_bytes,
         full_resident_bytes_available,
-    ) = optimized_cpu_resource_accounting(&budget_accounting);
+    ) = backend_resource_profile_v1(&budget_accounting);
     let scope_before = run
         .steps
         .first()
@@ -866,7 +856,7 @@ pub(crate) fn execute_session_observed_to_quiescence(
             schema_version: RUN_OBSERVABILITY_SCHEMA_VERSION,
             session_id: session_id.clone(),
             run_id,
-            backend_id: OPTIMIZED_CPU_BACKEND_ID.to_owned(),
+            backend_id: backend_id.to_owned(),
             sequence,
             elapsed_ns: ns_u64(run_started.elapsed_ns()),
             stage: RunStage::Execute,
@@ -907,7 +897,7 @@ pub(crate) fn execute_session_observed_to_quiescence(
                 schema_version: RUN_OBSERVABILITY_SCHEMA_VERSION,
                 session_id: session_id.clone(),
                 run_id,
-                backend_id: OPTIMIZED_CPU_BACKEND_ID.to_owned(),
+                backend_id: backend_id.to_owned(),
                 sequence,
                 elapsed_ns: ns_u64(run_started.elapsed_ns()),
                 stage: RunStage::Execute,
@@ -931,7 +921,7 @@ pub(crate) fn execute_session_observed_to_quiescence(
                     schema_version: RUN_OBSERVABILITY_SCHEMA_VERSION,
                     session_id: session_id.clone(),
                     run_id,
-                    backend_id: OPTIMIZED_CPU_BACKEND_ID.to_owned(),
+                    backend_id: backend_id.to_owned(),
                     sequence,
                     elapsed_ns: ns_u64(run_started.elapsed_ns()),
                     stage: RunStage::Execute,
@@ -956,16 +946,13 @@ pub(crate) fn execute_session_observed_to_quiescence(
         }
     }
 
-    let final_scope = session.engine.current().to_vec();
-    let links_after_run = session.memory.store.link_count() as u32;
-
     if observation_level.traces() {
         let projection_started = ObservationTimer::start();
         events.push(RunEventV1 {
             schema_version: RUN_OBSERVABILITY_SCHEMA_VERSION,
             session_id: session_id.clone(),
             run_id,
-            backend_id: OPTIMIZED_CPU_BACKEND_ID.to_owned(),
+            backend_id: backend_id.to_owned(),
             sequence,
             elapsed_ns: ns_u64(run_started.elapsed_ns()),
             stage: RunStage::Execute,
@@ -977,7 +964,7 @@ pub(crate) fn execute_session_observed_to_quiescence(
             raw_rule_matches: None,
             transitioned_members: None,
             handoff_count: None,
-            quiescent: Some(true),
+            quiescent: Some(final_quiescent),
             structural_facts: None,
         });
         trace_projection_ns = trace_projection_ns
@@ -989,8 +976,8 @@ pub(crate) fn execute_session_observed_to_quiescence(
         timing_available: OBSERVABILITY_TIMING_AVAILABLE,
         session_id: session_id.clone(),
         run_id,
-        backend_id: OPTIMIZED_CPU_BACKEND_ID.to_owned(),
-        base_links: session.base_link_count as u32,
+        backend_id: backend_id.to_owned(),
+        base_links,
         links_before_run,
         links_after_run,
         execution_link_delta: links_after_run.saturating_sub(links_before_run),
@@ -1000,25 +987,62 @@ pub(crate) fn execute_session_observed_to_quiescence(
         execute_ns: ns_u64(structural_profile.total_ns),
         trace_projection_ns: ns_u64(trace_projection_ns),
         budget_accounting: Some(project_budget_profile(budget_accounting)),
-        dense_carrier_allocated_bytes: Some(dense_carrier_allocated_bytes),
-        max_dense_carrier_bytes: Some(max_dense_carrier_bytes),
+        dense_carrier_allocated_bytes,
+        max_dense_carrier_bytes,
         full_resident_bytes_available,
         structural: StructuralProfileV1::from(&structural_profile),
     });
 
-    Ok(ObservedRunV1 {
+    ObservedRunV1 {
         schema_version: RUN_OBSERVABILITY_SCHEMA_VERSION,
         timing_available: OBSERVABILITY_TIMING_AVAILABLE,
         session_id,
         run_id,
-        backend_id: OPTIMIZED_CPU_BACKEND_ID.to_owned(),
+        backend_id: backend_id.to_owned(),
         observation_level,
         final_scope,
         active_reaction_count,
-        final_quiescent: true,
+        final_quiescent,
         events,
         profile,
-    })
+    }
+}
+
+pub(crate) fn execute_session_observed_to_quiescence(
+    session: &mut CpuRuntimeSession,
+    initial: Handle,
+    max_reactions: u32,
+    observation_level: RunObservationLevel,
+) -> Result<ObservedRunV1, CpuObservedRunStopV1> {
+    let session_id = session.id.clone();
+    let run_started = ObservationTimer::start();
+    let run = session
+        .run_to_quiescence(
+            initial,
+            RunBudgetV1::scenario_default(max_reactions),
+            observation_level.runtime_trace_mode(),
+        )
+        .map_err(|stop_reason| CpuObservedRunStopV1 {
+            stop_reason,
+            budget_accounting: None,
+        })?;
+    if run.stop_reason != RunStopReasonV1::Quiescent {
+        return Err(CpuObservedRunStopV1 {
+            stop_reason: run.stop_reason,
+            budget_accounting: Some(run.budget_accounting),
+        });
+    }
+
+    let final_scope = session.engine.current().to_vec();
+    Ok(project_bounded_run_observation_v1(
+        session_id,
+        OPTIMIZED_CPU_BACKEND_ID,
+        session.base_link_count as u32,
+        final_scope,
+        observation_level,
+        &run_started,
+        run,
+    ))
 }
 
 pub(crate) fn execute_to_quiescence(
