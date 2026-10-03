@@ -1910,7 +1910,7 @@ function tab(state) {
             availability.scenarioSupported ? "другой host" : "не поддерживается") +
           '</td></tr>';
       }).join("") + '</tbody></table>' +
-      '<div class="wb-help">LinksDB исполняется native Rust host; браузерный Workbench не подменяет его CPU. Дифференциальное сравнение — #281.</div>';
+      '<div class="wb-help">WebGPU исполняется отдельным resident witness, LinksDB — native Rust host. Обычный Workbench Session не подменяет их CPU. Дифференциальное сравнение — #281.</div>';
   }
   const recursive = workbenchRecursiveStructure(run);
   return '<div class="wb-help">Уровни ниже независимы: отсутствие данных не считается успешной проверкой.</div>' +
