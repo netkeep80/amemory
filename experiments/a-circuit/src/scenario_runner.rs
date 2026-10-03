@@ -3044,9 +3044,8 @@ mod tests {
 
     #[test]
     fn unsupported_backend_fails_without_cpu_fallback() {
-        let mut manifest =
+        let manifest =
             parse_and_validate_manifest_v1(MUX1_LIFECYCLE).unwrap();
-        manifest.supported_backends.push(ScenarioBackendV1::Webgpu);
 
         let error = run_scenario_manifest_v1(
             &manifest,
