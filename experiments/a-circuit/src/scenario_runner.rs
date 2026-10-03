@@ -1459,6 +1459,122 @@ mod tests {
     const RADIX_MEMORY8_LIFECYCLE: &str =
         include_str!("../scenarios/radix-memory8-lifecycle-v1.json");
 
+    #[cfg(not(target_family = "wasm"))]
+    #[test]
+    fn canonical_mux1_manifest_runs_end_to_end_on_linksdb_only_where_proven() {
+        let manifest =
+            parse_and_validate_manifest_v1(MUX1_LIFECYCLE).unwrap();
+        assert!(
+            manifest.supported_backends.contains(
+                &ScenarioBackendV1::OptimizedCpu,
+            )
+        );
+        assert!(
+            manifest.supported_backends.contains(
+                &ScenarioBackendV1::Webgpu,
+            )
+        );
+        assert!(
+            manifest.supported_backends.contains(
+                &ScenarioBackendV1::Linksdb,
+            )
+        );
+
+        let report =
+            run_scenario_manifest_v1(
+                &manifest,
+                ScenarioBackendV1::Linksdb,
+            )
+            .unwrap();
+
+        assert_eq!(report.backend, ScenarioBackendV1::Linksdb);
+        assert!(report.overall_pass);
+        assert_eq!(report.runs.len(), 4);
+        assert_eq!(
+            report.session_open_profile.backend_id,
+            LINKSDB_BACKEND_ID,
+        );
+        assert!(report.provenance.program_fingerprint.is_some());
+
+        let values = report
+            .runs
+            .iter()
+            .map(|run| {
+                run.result.fields["value"]
+                    .as_u64()
+                    .expect("MUX1 value")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(values, vec![0, 1, 1, 0]);
+
+        let run_ids = report
+            .runs
+            .iter()
+            .map(|run| run.session_run_id)
+            .collect::<Vec<_>>();
+        assert_eq!(run_ids, vec![1, 2, 3, 4]);
+        assert_eq!(
+            report
+                .runs
+                .iter()
+                .map(|run| run.configuration_reused)
+                .collect::<Vec<_>>(),
+            vec![false, false, false, true],
+        );
+
+        for run in &report.runs {
+            assert_eq!(run.observed.session_id, report.session_id);
+            assert_eq!(run.observed.backend_id, LINKSDB_BACKEND_ID);
+            assert_eq!(run.observed.active_reaction_count, 7);
+            assert!(run.observed.final_quiescent);
+            assert_eq!(run.fresh_instance_matches, Some(true));
+            assert_eq!(run.oracle_matches, Some(true));
+            assert!(run.scalar_oracle_matches);
+            assert!(run
+                .assertion_results
+                .iter()
+                .all(|assertion| assertion.passed));
+
+            let profile = run
+                .observed
+                .profile
+                .as_ref()
+                .expect("TRACE includes profile");
+            assert_eq!(profile.dense_carrier_allocated_bytes, None);
+            assert_eq!(profile.max_dense_carrier_bytes, None);
+            assert!(!profile.full_resident_bytes_available);
+            let accounting = profile
+                .budget_accounting
+                .as_ref()
+                .expect("bounded accounting");
+            assert_eq!(accounting.dense_carrier_allocated_bytes, None);
+            assert_eq!(accounting.max_dense_carrier_bytes, None);
+            assert!(run.pipeline_profile.is_some());
+            assert!(run.result.result_recursive_wire.is_some());
+        }
+
+        assert_eq!(
+            report.runs[0].result.result_recursive_wire,
+            report.runs[3].result.result_recursive_wire,
+            "return-to-first must reproduce the same portable result wire",
+        );
+
+        let mut unsupported =
+            parse_and_validate_manifest_v1(XOR32_LIFECYCLE).unwrap();
+        unsupported
+            .supported_backends
+            .push(ScenarioBackendV1::Linksdb);
+        assert!(matches!(
+            run_scenario_manifest_v1(
+                &unsupported,
+                ScenarioBackendV1::Linksdb,
+            ),
+            Err(
+                ScenarioRunnerErrorV1::UnsupportedProgramProfile { .. }
+            ),
+        ));
+    }
+
     #[test]
     fn prepared_aset_fingerprint_is_stable_and_program_specific() {
         let mux_a = prepare_mux1_session_program().unwrap();
