@@ -1204,37 +1204,15 @@ pub(crate) fn step_cpu_scenario_session_v1(
     }
 }
 
-pub(crate) fn run_scenario_manifest_v1(
+fn build_scenario_execution_report_v1(
     manifest: &ScenarioManifestV1,
     backend: ScenarioBackendV1,
-) -> Result<ScenarioExecutionReportV1, ScenarioRunnerErrorV1> {
-    let validation = validate_manifest_v1(manifest);
-    if !validation.is_empty() {
-        return Err(ScenarioRunnerErrorV1::Validation {
-            errors: validation,
-        });
-    }
-
-    if !manifest.supported_backends.contains(&backend)
-        || backend != ScenarioBackendV1::OptimizedCpu
-    {
-        return Err(ScenarioRunnerErrorV1::UnsupportedBackend { backend });
-    }
-
-    let mut live = open_cpu_scenario_session_v1(manifest)?;
-    let session_id = live.session.runtime_identity_v1().session_id;
-    let session_open_profile = live.session_open_profile.clone();
-    let program_fingerprint = live.program_fingerprint.clone();
-    let program_profile = live.program_profile.clone();
-    let mut reports = Vec::with_capacity(manifest.run_sequence.len());
-
-    for run in &manifest.run_sequence {
-        reports.push(run_cpu_scenario_session_once_v1(
-            &mut live,
-            run,
-        )?);
-    }
-
+    session_id: String,
+    session_open_profile: SessionOpenProfileV1,
+    program_profile: ScenarioProgramProfileV1,
+    program_fingerprint: String,
+    reports: Vec<ScenarioRunReportV1>,
+) -> ScenarioExecutionReportV1 {
     let overall_pass = reports.iter().all(|run| {
         run.assertion_results
             .iter()
@@ -1243,7 +1221,7 @@ pub(crate) fn run_scenario_manifest_v1(
             && run.scalar_oracle_matches
     });
 
-    Ok(ScenarioExecutionReportV1 {
+    ScenarioExecutionReportV1 {
         schema_version: SCENARIO_REPORT_SCHEMA_VERSION,
         scenario_id: manifest.scenario_id.clone(),
         scenario_version: manifest.scenario_version.clone(),
@@ -1267,7 +1245,101 @@ pub(crate) fn run_scenario_manifest_v1(
             program_profile,
             program_fingerprint: Some(program_fingerprint),
         },
-    })
+    }
+}
+
+fn run_cpu_scenario_manifest_v1(
+    manifest: &ScenarioManifestV1,
+) -> Result<ScenarioExecutionReportV1, ScenarioRunnerErrorV1> {
+    let mut live = open_cpu_scenario_session_v1(manifest)?;
+    let session_id = live.session.runtime_identity_v1().session_id;
+    let session_open_profile = live.session_open_profile.clone();
+    let program_fingerprint = live.program_fingerprint.clone();
+    let program_profile = live.program_profile.clone();
+    let mut reports = Vec::with_capacity(manifest.run_sequence.len());
+
+    for run in &manifest.run_sequence {
+        reports.push(run_cpu_scenario_session_once_v1(
+            &mut live,
+            run,
+        )?);
+    }
+
+    Ok(build_scenario_execution_report_v1(
+        manifest,
+        ScenarioBackendV1::OptimizedCpu,
+        session_id,
+        session_open_profile,
+        program_profile,
+        program_fingerprint,
+        reports,
+    ))
+}
+
+#[cfg(not(target_family = "wasm"))]
+fn run_linksdb_scenario_manifest_v1(
+    manifest: &ScenarioManifestV1,
+) -> Result<ScenarioExecutionReportV1, ScenarioRunnerErrorV1> {
+    let mut live = open_linksdb_scenario_session_v1(manifest)?;
+    let session_id = live.session.runtime_identity_v1().session_id;
+    let session_open_profile = live.session_open_profile.clone();
+    let program_fingerprint = live.program_fingerprint.clone();
+    let program_profile = live.program_profile.clone();
+    let mut reports = Vec::with_capacity(manifest.run_sequence.len());
+
+    for run in &manifest.run_sequence {
+        reports.push(run_linksdb_scenario_session_once_v1(
+            &mut live,
+            run,
+        )?);
+    }
+
+    Ok(build_scenario_execution_report_v1(
+        manifest,
+        ScenarioBackendV1::Linksdb,
+        session_id,
+        session_open_profile,
+        program_profile,
+        program_fingerprint,
+        reports,
+    ))
+}
+
+pub(crate) fn run_scenario_manifest_v1(
+    manifest: &ScenarioManifestV1,
+    backend: ScenarioBackendV1,
+) -> Result<ScenarioExecutionReportV1, ScenarioRunnerErrorV1> {
+    let validation = validate_manifest_v1(manifest);
+    if !validation.is_empty() {
+        return Err(ScenarioRunnerErrorV1::Validation {
+            errors: validation,
+        });
+    }
+
+    if !manifest.supported_backends.contains(&backend) {
+        return Err(ScenarioRunnerErrorV1::UnsupportedBackend { backend });
+    }
+
+    match backend {
+        ScenarioBackendV1::OptimizedCpu => {
+            run_cpu_scenario_manifest_v1(manifest)
+        }
+        ScenarioBackendV1::Linksdb => {
+            #[cfg(not(target_family = "wasm"))]
+            {
+                run_linksdb_scenario_manifest_v1(manifest)
+            }
+            #[cfg(target_family = "wasm")]
+            {
+                Err(ScenarioRunnerErrorV1::UnsupportedBackend { backend })
+            }
+        }
+        ScenarioBackendV1::Webgpu => {
+            // WebGPU is a real persistent browser adapter, but not a native
+            // Rust Scenario host. Never silently substitute CPU.
+            Err(ScenarioRunnerErrorV1::UnsupportedBackend { backend })
+        }
+    }
 }
 
 fn evaluate_assertions(
