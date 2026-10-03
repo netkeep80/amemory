@@ -1,6 +1,7 @@
 use amemory_optimized_cpu_probe::{
     structural::{
-        OptimizedStructuralEngine, StructuralRunProfile, StructuralRunTrace,
+        OptimizedStructuralEngine, StructuralReadV1, StructuralRunProfile,
+        StructuralRunTrace, StructuralStoreV1,
     },
     Handle, OptimizedLinkStore,
 };
@@ -314,36 +315,23 @@ pub(crate) struct CpuBoundedRunV1 {
     pub(crate) budget_accounting: RunBudgetAccountingV1,
 }
 
-/// Long-lived optimized-CPU execution Session over one loaded A-memory.
+/// Backend-neutral persistent semantic runtime state machine.
 ///
-/// `begin_run` publishes an initial Scope into the already loaded engine.
-/// `step` is the one authoritative semantic reaction operation. Higher-level
-/// run-to-quiescence APIs are bounded loops over this primitive.
-#[derive(Debug)]
-pub(crate) struct CpuRuntimeSession {
-    pub(crate) id: String,
-    pub(crate) memory: CpuMemoryInstance,
-    pub(crate) engine: OptimizedStructuralEngine,
-    pub(crate) base_link_count: usize,
+/// Physical storage is supplied through `StructuralReadV1/StructuralStoreV1`;
+/// semantic execution remains owned by the single `OptimizedStructuralEngine`.
+/// This object owns only lifecycle/run identity. It deliberately does not own
+/// backend resource accounting or Scenario/result projection.
+#[derive(Clone, Debug)]
+pub(crate) struct StructuralRuntimeStateV1 {
     next_run_id: u64,
     execution_state: SessionStateV1,
     active_run_id: Option<u64>,
     next_reaction_index: u32,
 }
 
-impl CpuRuntimeSession {
-    pub(crate) fn new(
-        memory: CpuMemoryInstance,
-        engine: OptimizedStructuralEngine,
-        base_link_count: usize,
-    ) -> Self {
-        let session_number =
-            NEXT_CPU_SESSION_ID.fetch_add(1, Ordering::SeqCst);
+impl StructuralRuntimeStateV1 {
+    pub(crate) fn new() -> Self {
         Self {
-            id: format!("A-session#{}", session_number),
-            memory,
-            engine,
-            base_link_count,
             next_run_id: 1,
             execution_state: SessionStateV1::Open,
             active_run_id: None,
@@ -351,8 +339,14 @@ impl CpuRuntimeSession {
         }
     }
 
-    pub(crate) fn begin_run(
+    pub(crate) fn state(&self) -> SessionStateV1 {
+        self.execution_state
+    }
+
+    pub(crate) fn begin_run<S: StructuralReadV1 + ?Sized>(
         &mut self,
+        store: &S,
+        engine: &mut OptimizedStructuralEngine,
         initial: Handle,
     ) -> Result<u64, CpuSessionStepError> {
         if !matches!(
@@ -364,11 +358,7 @@ impl CpuRuntimeSession {
             ));
         }
 
-        if self
-            .engine
-            .set_current(&self.memory.store, &[initial])
-            .is_err()
-        {
+        if engine.set_current(store, &[initial]).is_err() {
             self.execution_state = SessionStateV1::Failed;
             return Err(CpuSessionStepError::EngineFailure);
         }
@@ -381,8 +371,11 @@ impl CpuRuntimeSession {
         Ok(run_id)
     }
 
-    pub(crate) fn step(
+    pub(crate) fn step<S: StructuralStoreV1 + ?Sized>(
         &mut self,
+        session_id: &str,
+        store: &mut S,
+        engine: &mut OptimizedStructuralEngine,
         trace_mode: CpuRuntimeTraceMode,
     ) -> Result<CpuSessionStepOutcomeV1, CpuSessionStepError> {
         if !matches!(
@@ -402,43 +395,45 @@ impl CpuRuntimeSession {
             }
         };
         let reaction_index = self.next_reaction_index;
-        let links_before = self.memory.store.link_count() as u32;
-        let scope_before = self.engine.current().to_vec();
+        let links_before = store.link_count() as u32;
+        let scope_before = engine.current().to_vec();
 
-        // Runtime safety metering is always active. TRACE only requests the
-        // native structural trace; portable evidence projection belongs above
-        // the Session and cannot influence execution.
+        // Safety/profile metering is always active. TRACE only requests the
+        // structural trace; portable evidence projection belongs above this
+        // state machine and cannot influence execution.
         let (reaction, structural_profile, structural_trace) =
             match trace_mode {
                 CpuRuntimeTraceMode::Trace => {
-                    let (reaction, profile, trace) = match self
-                        .engine
-                        .run_traced(&mut self.memory.store)
-                    {
-                        Ok(value) => value,
-                        Err(_) => {
-                            self.execution_state = SessionStateV1::Failed;
-                            return Err(CpuSessionStepError::EngineFailure);
-                        }
-                    };
+                    let (reaction, profile, trace) =
+                        match engine.run_traced(store) {
+                            Ok(value) => value,
+                            Err(_) => {
+                                self.execution_state =
+                                    SessionStateV1::Failed;
+                                return Err(
+                                    CpuSessionStepError::EngineFailure,
+                                );
+                            }
+                        };
                     (reaction, profile, Some(trace))
                 }
                 CpuRuntimeTraceMode::Profile => {
-                    let (reaction, profile) = match self
-                        .engine
-                        .run_profiled(&mut self.memory.store)
-                    {
-                        Ok(value) => value,
-                        Err(_) => {
-                            self.execution_state = SessionStateV1::Failed;
-                            return Err(CpuSessionStepError::EngineFailure);
-                        }
-                    };
+                    let (reaction, profile) =
+                        match engine.run_profiled(store) {
+                            Ok(value) => value,
+                            Err(_) => {
+                                self.execution_state =
+                                    SessionStateV1::Failed;
+                                return Err(
+                                    CpuSessionStepError::EngineFailure,
+                                );
+                            }
+                        };
                     (reaction, profile, None)
                 }
             };
 
-        let scope_after = self.engine.current().to_vec();
+        let scope_after = engine.current().to_vec();
         let quiescent = reaction.quiescent;
 
         self.next_reaction_index =
@@ -451,13 +446,13 @@ impl CpuRuntimeSession {
 
         Ok(CpuSessionStepOutcomeV1 {
             reaction: CpuSessionReactionV1 {
-                session_id: self.id.clone(),
+                session_id: session_id.to_owned(),
                 run_id,
                 reaction_index,
                 scope_before,
                 scope_after,
                 links_before,
-                links_after: self.memory.store.link_count() as u32,
+                links_after: store.link_count() as u32,
                 raw_rule_matches: reaction.raw_rule_matches,
                 transitioned_members: reaction.transitioned_members,
                 handoff_count: reaction.handoff_count,
@@ -466,6 +461,65 @@ impl CpuRuntimeSession {
             structural_profile,
             structural_trace,
         })
+    }
+
+    pub(crate) fn fail_active_run(&mut self) {
+        self.execution_state = SessionStateV1::Failed;
+    }
+}
+
+/// Long-lived optimized-CPU execution Session over one loaded A-memory.
+///
+/// `begin_run` publishes an initial Scope into the already loaded engine.
+/// `step` is the one authoritative semantic reaction operation. Higher-level
+/// run-to-quiescence APIs are bounded loops over this primitive.
+#[derive(Debug)]
+pub(crate) struct CpuRuntimeSession {
+    pub(crate) id: String,
+    pub(crate) memory: CpuMemoryInstance,
+    pub(crate) engine: OptimizedStructuralEngine,
+    pub(crate) base_link_count: usize,
+    runtime: StructuralRuntimeStateV1,
+}
+
+impl CpuRuntimeSession {
+    pub(crate) fn new(
+        memory: CpuMemoryInstance,
+        engine: OptimizedStructuralEngine,
+        base_link_count: usize,
+    ) -> Self {
+        let session_number =
+            NEXT_CPU_SESSION_ID.fetch_add(1, Ordering::SeqCst);
+        Self {
+            id: format!("A-session#{}", session_number),
+            memory,
+            engine,
+            base_link_count,
+            runtime: StructuralRuntimeStateV1::new(),
+        }
+    }
+
+    pub(crate) fn begin_run(
+        &mut self,
+        initial: Handle,
+    ) -> Result<u64, CpuSessionStepError> {
+        self.runtime.begin_run(
+            &self.memory.store,
+            &mut self.engine,
+            initial,
+        )
+    }
+
+    pub(crate) fn step(
+        &mut self,
+        trace_mode: CpuRuntimeTraceMode,
+    ) -> Result<CpuSessionStepOutcomeV1, CpuSessionStepError> {
+        self.runtime.step(
+            &self.id,
+            &mut self.memory.store,
+            &mut self.engine,
+            trace_mode,
+        )
     }
 
     pub(crate) fn begin_budgeted_run(
@@ -546,7 +600,7 @@ impl CpuRuntimeSession {
     }
 
     pub(crate) fn fail_active_run(&mut self) {
-        self.execution_state = SessionStateV1::Failed;
+        self.runtime.fail_active_run();
     }
 }
 
@@ -563,7 +617,7 @@ impl RuntimeSessionV1 for CpuRuntimeSession {
     }
 
     fn runtime_state_v1(&self) -> SessionStateV1 {
-        self.execution_state
+        self.runtime.state()
     }
 
     fn runtime_capabilities_v1(&self) -> SessionCapabilitiesV1 {
@@ -596,6 +650,41 @@ impl RuntimeSessionV1 for CpuRuntimeSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn backend_neutral_runtime_state_machine_is_not_owned_by_cpu_wrapper() {
+        let mut store = OptimizedLinkStore::new();
+        let initial = store.ensure_pair(1, 1).unwrap();
+        let mut engine = OptimizedStructuralEngine::new(8);
+        let mut runtime = StructuralRuntimeStateV1::new();
+
+        assert_eq!(runtime.state(), SessionStateV1::Open);
+        assert_eq!(
+            runtime.begin_run(&store, &mut engine, initial).unwrap(),
+            1,
+        );
+        assert_eq!(runtime.state(), SessionStateV1::Configured);
+        assert_eq!(
+            runtime.begin_run(&store, &mut engine, initial),
+            Err(CpuSessionStepError::InvalidState(
+                SessionStateV1::Configured,
+            )),
+            "a second configuration cannot overwrite an active run",
+        );
+
+        // No interpreter was configured: the semantic engine fails and the
+        // common runtime must publish FAILED, never QUIESCENT or a fake step.
+        let error = runtime
+            .step(
+                "neutral-session#test",
+                &mut store,
+                &mut engine,
+                CpuRuntimeTraceMode::Profile,
+            )
+            .unwrap_err();
+        assert_eq!(error, CpuSessionStepError::EngineFailure);
+        assert_eq!(runtime.state(), SessionStateV1::Failed);
+    }
 
     #[test]
     fn cpu_session_exposes_distinct_neutral_identity_and_capabilities() {
