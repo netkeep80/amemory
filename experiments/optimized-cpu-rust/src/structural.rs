@@ -206,14 +206,14 @@ pub struct StructuralRunTrace {
     pub collection_ns: u128,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct GroundedPathCheck {
     // false = START, true = END
     path: Vec<bool>,
     expected: Handle,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct CompiledRuleMetadata {
     role_dictionary: Handle,
     body: Handle,
@@ -1244,12 +1244,6 @@ impl OptimizedStructuralEngine {
         profile: &mut Option<&mut StructuralRunProfile>,
         trace: &mut Option<&mut StructuralRunTrace>,
     ) -> Result<StructuralReactionResult, StructuralError> {
-        let store_instance = store.instance_id();
-        if self.metadata_store_instance != Some(store_instance) {
-            self.rule_metadata_cache.clear();
-            self.metadata_store_instance = Some(store_instance);
-        }
-
         let interpreter = self.interpreter.ok_or(StructuralError::MissingInterpreter)?;
         let old_members = self.scope_banks[self.current_bank].clone();
         let old_context_parents =
@@ -1262,6 +1256,17 @@ impl OptimizedStructuralEngine {
             });
         }
 
+        // Discovery metadata is a physical cache, not semantic state. A failed
+        // reaction must restore it exactly just like Store/Scope/index state;
+        // successful reactions may retain the warmed cache.
+        let metadata_store_instance_before = self.metadata_store_instance;
+        let rule_metadata_cache_before = self.rule_metadata_cache.clone();
+        let store_instance = store.instance_id();
+        if self.metadata_store_instance != Some(store_instance) {
+            self.rule_metadata_cache.clear();
+            self.metadata_store_instance = Some(store_instance);
+        }
+
         // Phase 1 is strictly read-only. Borrow only dense carrier/index
         // slices, not canonical HashMaps, and discover every old Scope member
         // before publication can append a Link.
@@ -1270,7 +1275,10 @@ impl OptimizedStructuralEngine {
         // share one group id; failed reactions do not consume committed ids.
         let mut next_context_id = self.next_context_id;
         let context_group_id = self.next_context_group_id;
-        let discovered = {
+        let discovered = (|| -> Result<
+            Vec<(Handle, Vec<StructuralContextFrame>)>,
+            StructuralError,
+        > {
             let execution_view = store.packed_execution_ref();
             let authority =
                 read_structural_interpreter_from(&execution_view, interpreter)?;
@@ -1337,7 +1345,15 @@ impl OptimizedStructuralEngine {
                 }
                 discovered.push((active, contexts));
             }
-            discovered
+            Ok(discovered)
+        })();
+        let discovered = match discovered {
+            Ok(discovered) => discovered,
+            Err(error) => {
+                self.metadata_store_instance = metadata_store_instance_before;
+                self.rule_metadata_cache = rule_metadata_cache_before;
+                return Err(error);
+            }
         };
 
         // Phase 2 is one physical Store transaction. OptimizedLinkStore is
@@ -1528,6 +1544,10 @@ impl OptimizedStructuralEngine {
                 Ok(committed) => committed,
                 Err(error) => {
                     store.rollback_append(checkpoint);
+                    self.metadata_store_instance =
+                        metadata_store_instance_before;
+                    self.rule_metadata_cache =
+                        rule_metadata_cache_before;
                     return Err(error);
                 }
             };
@@ -1539,6 +1559,10 @@ impl OptimizedStructuralEngine {
                 Some(next) => next,
                 None => {
                     store.rollback_append(checkpoint);
+                    self.metadata_store_instance =
+                        metadata_store_instance_before;
+                    self.rule_metadata_cache =
+                        rule_metadata_cache_before;
                     return Err(StructuralError::Store(
                         StoreError::CapacityExceeded,
                     ));
@@ -2615,6 +2639,8 @@ mod tests {
         let scope_context_before = too_small.scope_context_parents.clone();
         let next_context_id_before = too_small.next_context_id;
         let next_context_group_before = too_small.next_context_group_id;
+        let metadata_store_before = too_small.metadata_store_instance;
+        let metadata_cache_before = too_small.rule_metadata_cache.clone();
 
         let error = too_small.run(&mut store).unwrap_err();
         assert_eq!(
@@ -2638,6 +2664,11 @@ mod tests {
             too_small.next_context_group_id,
             next_context_group_before
         );
+        assert_eq!(
+            too_small.metadata_store_instance,
+            metadata_store_before
+        );
+        assert_eq!(too_small.rule_metadata_cache, metadata_cache_before);
         assert_eq!(too_small.current(), &[active]);
         assert_eq!(too_small.raw_rule_matches(), 0);
         assert_eq!(too_small.transitioned_members(), 0);
@@ -2726,6 +2757,8 @@ mod tests {
         let mut engine = OptimizedStructuralEngine::new(8);
         engine.set_interpreter(&store, interpreter).unwrap();
         engine.set_current(&store, &[active]).unwrap();
+        let metadata_store_before = engine.metadata_store_instance;
+        let metadata_cache_before = engine.rule_metadata_cache.clone();
 
         let error = engine.run(&mut store).unwrap_err();
         assert!(matches!(error, StructuralError::InvalidExactSequence(_)));
@@ -2740,6 +2773,8 @@ mod tests {
         assert!(!engine.quiescent());
         assert_eq!(engine.next_context_id, 1);
         assert_eq!(engine.next_context_group_id, 1);
+        assert_eq!(engine.metadata_store_instance, metadata_store_before);
+        assert_eq!(engine.rule_metadata_cache, metadata_cache_before);
 
         // The valid first image did create this successor transiently. It must
         // not survive in canonical state after the later image rejects. The
