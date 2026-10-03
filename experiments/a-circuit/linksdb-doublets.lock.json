@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "repository": "https://github.com/linksplatform/doublets-rs",
+  "tag": "v0.5.0",
+  "tagObjectSha": "98bcaad1490beed1a6c583bc58ba864bebf009f3",
+  "commit": "1d54fd692960258b9b72380e67e2c4f6369372bf",
+  "crate": "doublets",
+  "crateVersion": "0.5.0",
+  "rustVersion": "1.85",
+  "amemoryRustToolchain": "1.98.1",
+  "note": "Upstream release source is pinned by commit. amemory owns its Cargo.lock because the upstream release repository lock records an older local package version."
+}
