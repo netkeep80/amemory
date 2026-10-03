@@ -9,6 +9,9 @@ amemory-optimized-cpu-probe = { path = "../optimized-cpu-rust" }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+doublets = { git = "https://github.com/linksplatform/doublets-rs", rev = "1d54fd692960258b9b72380e67e2c4f6369372bf", version = "=0.5.0" }
+
 [dev-dependencies]
 amemory-browser-probe = { path = "../browser-accelerator/rust" }
 
