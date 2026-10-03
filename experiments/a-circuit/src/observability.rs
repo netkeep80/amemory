@@ -40,6 +40,7 @@ pub(crate) const OBSERVABILITY_TIMING_AVAILABLE: bool =
 
 pub(crate) const RUN_OBSERVABILITY_SCHEMA_VERSION: u32 = 1;
 pub(crate) const OPTIMIZED_CPU_BACKEND_ID: &str = "optimized-cpu";
+pub(crate) const LINKSDB_BACKEND_ID: &str = "linksdb";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -597,8 +598,11 @@ pub(crate) struct RunBudgetProfileV1 {
     pub(crate) max_unification_nodes: u64,
     pub(crate) instantiation_nodes: u64,
     pub(crate) max_instantiation_nodes: u64,
-    pub(crate) dense_carrier_allocated_bytes: u64,
-    pub(crate) max_dense_carrier_bytes: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) dense_carrier_allocated_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) max_dense_carrier_bytes: Option<u64>,
+    #[serde(default)]
     pub(crate) full_resident_bytes_available: bool,
 }
 
@@ -682,8 +686,9 @@ pub(crate) fn time_stage<T>(work: impl FnOnce() -> T) -> (T, u64) {
     (value, ns_u64(started.elapsed_ns()))
 }
 
-pub(crate) fn session_open_profile_v1(
+pub(crate) fn session_open_profile_for_backend_v1(
     session_id: String,
+    backend_id: &str,
     prepare_ns: u64,
     load_ns: u64,
     prepared_links: u32,
@@ -692,7 +697,7 @@ pub(crate) fn session_open_profile_v1(
     SessionOpenProfileV1 {
         schema_version: RUN_OBSERVABILITY_SCHEMA_VERSION,
         session_id,
-        backend_id: OPTIMIZED_CPU_BACKEND_ID.to_owned(),
+        backend_id: backend_id.to_owned(),
         stages: SessionStageTimingsV1 {
             timing_available: OBSERVABILITY_TIMING_AVAILABLE,
             prepare_ns,
@@ -701,6 +706,23 @@ pub(crate) fn session_open_profile_v1(
         prepared_links,
         base_links,
     }
+}
+
+pub(crate) fn session_open_profile_v1(
+    session_id: String,
+    prepare_ns: u64,
+    load_ns: u64,
+    prepared_links: u32,
+    base_links: u32,
+) -> SessionOpenProfileV1 {
+    session_open_profile_for_backend_v1(
+        session_id,
+        OPTIMIZED_CPU_BACKEND_ID,
+        prepare_ns,
+        load_ns,
+        prepared_links,
+        base_links,
+    )
 }
 
 pub(crate) fn run_pipeline_profile_v1(
@@ -840,8 +862,8 @@ mod tests {
                 max_unification_nodes: 2_000,
                 instantiation_nodes: 90,
                 max_instantiation_nodes: 3_000,
-                dense_carrier_allocated_bytes: 4096,
-                max_dense_carrier_bytes: 8192,
+                dense_carrier_allocated_bytes: Some(4096),
+                max_dense_carrier_bytes: Some(8192),
                 full_resident_bytes_available: false,
             }),
             dense_carrier_allocated_bytes: Some(4096),
@@ -904,8 +926,8 @@ mod tests {
         assert_eq!(budget.max_reactions, 8);
         assert_eq!(budget.match_candidates, 70);
         assert_eq!(budget.max_match_candidates, 1_000);
-        assert_eq!(budget.dense_carrier_allocated_bytes, 4096);
-        assert_eq!(budget.max_dense_carrier_bytes, 8192);
+        assert_eq!(budget.dense_carrier_allocated_bytes, Some(4096));
+        assert_eq!(budget.max_dense_carrier_bytes, Some(8192));
 
         let json = serde_json::to_string(&(open.clone(), run.clone())).unwrap();
         let decoded: (SessionOpenProfileV1, RunPipelineProfileV1) =
@@ -923,6 +945,37 @@ mod tests {
         assert_eq!(legacy.dense_carrier_allocated_bytes, None);
         assert_eq!(legacy.max_dense_carrier_bytes, None);
         assert!(!legacy.full_resident_bytes_available);
+    }
+
+    #[test]
+    fn backend_specific_budget_metrics_can_be_absent_without_zero_surrogate() {
+        let profile = RunBudgetProfileV1 {
+            schema_version: 2,
+            reactions_consumed: 1,
+            max_reactions: 8,
+            appended_links_consumed: 0,
+            max_appended_links: 10,
+            total_links: 20,
+            max_total_links: 100,
+            scope_width: 1,
+            max_scope_width: 4,
+            match_candidates: 3,
+            max_match_candidates: 10,
+            unification_nodes: 4,
+            max_unification_nodes: 20,
+            instantiation_nodes: 5,
+            max_instantiation_nodes: 30,
+            dense_carrier_allocated_bytes: None,
+            max_dense_carrier_bytes: None,
+            full_resident_bytes_available: false,
+        };
+        let json = serde_json::to_value(&profile).unwrap();
+        assert!(json.get("denseCarrierAllocatedBytes").is_none());
+        assert!(json.get("maxDenseCarrierBytes").is_none());
+        let decoded: RunBudgetProfileV1 =
+            serde_json::from_value(json).unwrap();
+        assert_eq!(decoded.dense_carrier_allocated_bytes, None);
+        assert_eq!(decoded.max_dense_carrier_bytes, None);
     }
 
     #[test]

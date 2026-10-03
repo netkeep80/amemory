@@ -1682,4 +1682,133 @@ mod tests {
         );
     }
 
+    #[cfg(not(target_family = "wasm"))]
+    #[test]
+    fn linksdb_trace_profile_uses_common_projection_without_cpu_surrogates() {
+        use crate::{
+            mux_n::{
+                configure_mux1_store,
+                prepare_mux1_session_program,
+            },
+            observability::{
+                LINKSDB_BACKEND_ID, ObservationTimer,
+                RunEventKind, RunObservationLevel,
+            },
+            proof_n::{
+                load_runtime, loaded_handle,
+                project_bounded_run_observation_v1,
+            },
+        };
+
+        let prepare = prepare_mux1_session_program().unwrap();
+        let (memory, load) = load_runtime(&prepare).unwrap();
+        let image = memory.store.export_packed_carrier_image();
+        let interpreter =
+            loaded_handle(&load, "execution.interpreter").unwrap();
+
+        let store =
+            DoubletsPhysicalStoreV1::from_packed_carrier_v1(&image).unwrap();
+        let mut session = LinksDbSessionV1::open_structural(
+            store,
+            interpreter,
+            32,
+        )
+        .unwrap();
+
+        let (initial, _, _) = configure_mux1_store(
+            &mut session.store,
+            &load,
+            0,
+            0,
+            1,
+        )
+        .unwrap();
+
+        let identity = session.runtime_identity_v1();
+        let base_links = session.runtime_base_link_count_v1();
+        let run_started = ObservationTimer::start();
+        let bounded = session
+            .run_to_quiescence(
+                initial,
+                RunBudgetV1::scenario_default(64),
+                RunObservationLevel::Trace.runtime_trace_mode(),
+            )
+            .unwrap();
+        assert_eq!(bounded.stop_reason, RunStopReasonV1::Quiescent);
+
+        let final_scope = session
+            .engine
+            .as_ref()
+            .expect("structural LinksDB Session owns one engine")
+            .current()
+            .to_vec();
+        let observed = project_bounded_run_observation_v1(
+            identity.session_id.clone(),
+            LINKSDB_BACKEND_ID,
+            base_links,
+            final_scope.clone(),
+            RunObservationLevel::Trace,
+            &run_started,
+            bounded,
+        );
+
+        assert_eq!(observed.session_id, identity.session_id);
+        assert_eq!(observed.backend_id, LINKSDB_BACKEND_ID);
+        assert_eq!(observed.final_scope, final_scope);
+        assert_eq!(observed.active_reaction_count, 7);
+        assert!(observed.final_quiescent);
+
+        assert_eq!(
+            observed
+                .events
+                .iter()
+                .filter(|event| {
+                    event.kind == RunEventKind::ReactionEnd
+                })
+                .count(),
+            8,
+            "7 active reactions plus one terminal quiescent reaction",
+        );
+        assert!(observed.events.iter().any(|event| {
+            event
+                .structural_facts
+                .as_ref()
+                .is_some_and(|facts| !facts.is_empty())
+        }));
+
+        let profile = observed
+            .profile
+            .as_ref()
+            .expect("TRACE must include PROFILE evidence");
+        assert_eq!(profile.backend_id, LINKSDB_BACKEND_ID);
+        assert_eq!(profile.dense_carrier_allocated_bytes, None);
+        assert_eq!(profile.max_dense_carrier_bytes, None);
+        assert!(!profile.full_resident_bytes_available);
+
+        let accounting = profile
+            .budget_accounting
+            .as_ref()
+            .expect("bounded runtime accounting must be projected");
+        assert_eq!(accounting.reactions_consumed, 8);
+        assert_eq!(accounting.dense_carrier_allocated_bytes, None);
+        assert_eq!(accounting.max_dense_carrier_bytes, None);
+        assert!(!accounting.full_resident_bytes_available);
+
+        let json = serde_json::to_value(&observed).unwrap();
+        assert!(
+            json["profile"].get("denseCarrierAllocatedBytes").is_none(),
+            "missing LinksDB physical byte measurement must not serialize zero",
+        );
+        assert!(
+            json["profile"]["budgetAccounting"]
+                .get("denseCarrierAllocatedBytes")
+                .is_none(),
+        );
+        assert!(
+            json["profile"]["budgetAccounting"]
+                .get("maxDenseCarrierBytes")
+                .is_none(),
+        );
+    }
+
 }
