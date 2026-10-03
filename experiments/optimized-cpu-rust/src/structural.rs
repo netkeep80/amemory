@@ -1652,13 +1652,33 @@ mod tests {
         result
     }
 
-    fn physical_snapshot(
-        store: &OptimizedLinkStore,
-    ) -> (crate::PackedCarrierImage, crate::PackedIncidenceIndexImage) {
-        (
-            store.export_packed_carrier_image(),
-            store.export_packed_incidence_index_image(),
-        )
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct PhysicalStoreSnapshot {
+        carrier: crate::PackedCarrierImage,
+        incidence: crate::PackedIncidenceIndexImage,
+        canonical_by_pair: HashMap<crate::Pair, Handle>,
+        start_forms: HashMap<Handle, Handle>,
+        end_forms: HashMap<Handle, Handle>,
+        start_head: Vec<Handle>,
+        end_head: Vec<Handle>,
+        next_by_start: Vec<Handle>,
+        next_by_end: Vec<Handle>,
+        max_links: Option<usize>,
+    }
+
+    fn physical_snapshot(store: &OptimizedLinkStore) -> PhysicalStoreSnapshot {
+        PhysicalStoreSnapshot {
+            carrier: store.export_packed_carrier_image(),
+            incidence: store.export_packed_incidence_index_image(),
+            canonical_by_pair: store.canonical_by_pair.clone(),
+            start_forms: store.start_forms.clone(),
+            end_forms: store.end_forms.clone(),
+            start_head: store.start_head.clone(),
+            end_head: store.end_head.clone(),
+            next_by_start: store.next_by_start.clone(),
+            next_by_end: store.next_by_end.clone(),
+            max_links: store.max_links,
+        }
     }
 
     #[test]
@@ -2584,12 +2604,17 @@ mod tests {
         let active = store.ensure_pair(caller, input).unwrap();
         let snapshot_before = physical_snapshot(&store);
         let links_before = store.link_count();
+        let store_instance = store.instance_id();
         let mut clean_control = store.clone();
 
         let mut too_small = OptimizedStructuralEngine::new(1);
         too_small.set_interpreter(&store, interpreter).unwrap();
         too_small.set_current(&store, &[active]).unwrap();
         let bank = too_small.current_bank();
+        let scope_banks_before = too_small.scope_banks.clone();
+        let scope_context_before = too_small.scope_context_parents.clone();
+        let next_context_id_before = too_small.next_context_id;
+        let next_context_group_before = too_small.next_context_group_id;
 
         let error = too_small.run(&mut store).unwrap_err();
         assert_eq!(
@@ -2600,10 +2625,24 @@ mod tests {
             }
         );
         assert_eq!(store.link_count(), links_before);
+        assert_eq!(store.instance_id(), store_instance);
         assert_eq!(physical_snapshot(&store), snapshot_before);
         assert_eq!(too_small.current_bank(), bank);
+        assert_eq!(too_small.scope_banks, scope_banks_before);
+        assert_eq!(
+            too_small.scope_context_parents,
+            scope_context_before
+        );
+        assert_eq!(too_small.next_context_id, next_context_id_before);
+        assert_eq!(
+            too_small.next_context_group_id,
+            next_context_group_before
+        );
         assert_eq!(too_small.current(), &[active]);
+        assert_eq!(too_small.raw_rule_matches(), 0);
+        assert_eq!(too_small.transitioned_members(), 0);
         assert_eq!(too_small.handoff_count(), 0);
+        assert!(!too_small.quiescent());
 
         // A larger engine can immediately execute on the rolled-back Store.
         // Compare with an untouched clone from before the rejected reaction.
@@ -2680,7 +2719,9 @@ mod tests {
 
         let active = store.ensure_pair(caller, input).unwrap();
         let links_before = store.link_count();
+        let store_instance = store.instance_id();
         let snapshot_before = physical_snapshot(&store);
+        let mut clean_control = store.clone();
 
         let mut engine = OptimizedStructuralEngine::new(8);
         engine.set_interpreter(&store, interpreter).unwrap();
@@ -2689,14 +2730,28 @@ mod tests {
         let error = engine.run(&mut store).unwrap_err();
         assert!(matches!(error, StructuralError::InvalidExactSequence(_)));
         assert_eq!(store.link_count(), links_before);
+        assert_eq!(store.instance_id(), store_instance);
         assert_eq!(physical_snapshot(&store), snapshot_before);
         assert_eq!(engine.current(), &[active]);
+        assert_eq!(engine.current_bank(), 0);
+        assert_eq!(engine.raw_rule_matches(), 0);
+        assert_eq!(engine.transitioned_members(), 0);
         assert_eq!(engine.handoff_count(), 0);
+        assert!(!engine.quiescent());
+        assert_eq!(engine.next_context_id, 1);
+        assert_eq!(engine.next_context_group_id, 1);
 
         // The valid first image did create this successor transiently. It must
-        // not survive in canonical state after the later image rejects.
+        // not survive in canonical state after the later image rejects. The
+        // same future successful append must match an untouched clean control.
         let recreated = store.ensure_pair(caller, good_output).unwrap();
+        let control_recreated =
+            clean_control.ensure_pair(caller, good_output).unwrap();
         assert_eq!(recreated as usize, links_before + 1);
+        assert_eq!(recreated, control_recreated);
+        assert_eq!(physical_snapshot(&store), physical_snapshot(&clean_control));
+        assert_eq!(store.export_anum(recreated).unwrap(),
+                   clean_control.export_anum(control_recreated).unwrap());
     }
 
     #[test]
