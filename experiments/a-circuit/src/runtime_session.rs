@@ -654,7 +654,7 @@ mod tests {
     #[test]
     fn backend_neutral_runtime_state_machine_is_not_owned_by_cpu_wrapper() {
         let mut store = OptimizedLinkStore::new();
-        let initial = store.ensure_pair(ROOT_HANDLE, ROOT_HANDLE).unwrap();
+        let initial = store.ensure_pair(1, 1).unwrap();
         let mut engine = OptimizedStructuralEngine::new(8);
         let mut runtime = StructuralRuntimeStateV1::new();
 
@@ -674,15 +674,15 @@ mod tests {
 
         // No interpreter was configured: the semantic engine fails and the
         // common runtime must publish FAILED, never QUIESCENT or a fake step.
-        assert_eq!(
-            runtime.step(
+        let error = runtime
+            .step(
                 "neutral-session#test",
                 &mut store,
                 &mut engine,
                 CpuRuntimeTraceMode::Profile,
-            ),
-            Err(CpuSessionStepError::EngineFailure),
-        );
+            )
+            .unwrap_err();
+        assert_eq!(error, CpuSessionStepError::EngineFailure);
         assert_eq!(runtime.state(), SessionStateV1::Failed);
     }
 
