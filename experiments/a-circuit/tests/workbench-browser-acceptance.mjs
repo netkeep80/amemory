@@ -59,8 +59,22 @@ const workbenchSource = fs.readFileSync(
   path.join(root, "experiments/browser-accelerator/web/workbench.mjs"),
   "utf8",
 );
+
+if (!gpuCarrierSource.includes("let slot = expected + i;") ||
+    gpuCarrierSource.includes("let target = expected + i;")) {
+  throw new Error(
+    "resident configuration WGSL uses a reserved/unstable local identifier",
+  );
+}
+if (!workbenchSource.includes("supportedBackends") ||
+    workbenchSource.includes("supportedИсполнительs")) {
+  throw new Error(
+    "Workbench backend selector is not bound to canonical supportedBackends",
+  );
+}
 for (const required of [
   "runWorkbenchWebGpuWitness",
+  "supportedBackends",
   "Проверить WebGPU Scenario ×4",
   "WebGPU ↔ Rust/WASM после readback",
   "amemory_i386_lab_gpu_carrier_prepare",
