@@ -1454,14 +1454,15 @@ impl OptimizedLinkStore {
             let end = self.ends[hi];
 
             if start == handle {
-                debug_assert_eq!(self.start_forms.remove(&end), Some(handle));
+                let removed = self.start_forms.remove(&end);
+                debug_assert_eq!(removed, Some(handle));
             } else if end == handle {
-                debug_assert_eq!(self.end_forms.remove(&start), Some(handle));
+                let removed = self.end_forms.remove(&start);
+                debug_assert_eq!(removed, Some(handle));
             } else {
-                debug_assert_eq!(
-                    self.canonical_by_pair.remove(&Pair { start, end }),
-                    Some(handle)
-                );
+                let removed =
+                    self.canonical_by_pair.remove(&Pair { start, end });
+                debug_assert_eq!(removed, Some(handle));
             }
 
             // Later appended records have already been unwound, therefore the
@@ -2372,6 +2373,37 @@ mod tests {
         (store, map)
     }
 
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct ExactStoreSnapshot {
+        instance_id: u32,
+        starts: Vec<Handle>,
+        ends: Vec<Handle>,
+        canonical_by_pair: StdHashMap<Pair, Handle>,
+        start_forms: StdHashMap<Handle, Handle>,
+        end_forms: StdHashMap<Handle, Handle>,
+        start_head: Vec<Handle>,
+        end_head: Vec<Handle>,
+        next_by_start: Vec<Handle>,
+        next_by_end: Vec<Handle>,
+        max_links: Option<usize>,
+    }
+
+    fn exact_store_snapshot(store: &OptimizedLinkStore) -> ExactStoreSnapshot {
+        ExactStoreSnapshot {
+            instance_id: store.instance_id,
+            starts: store.starts.clone(),
+            ends: store.ends.clone(),
+            canonical_by_pair: store.canonical_by_pair.clone(),
+            start_forms: store.start_forms.clone(),
+            end_forms: store.end_forms.clone(),
+            start_head: store.start_head.clone(),
+            end_head: store.end_head.clone(),
+            next_by_start: store.next_by_start.clone(),
+            next_by_end: store.next_by_end.clone(),
+            max_links: store.max_links,
+        }
+    }
+
     fn reference_set_current(
         memory: &mut ReferenceMemoryInstance,
         map: &StdHashMap<&str, u32>,
@@ -3152,6 +3184,83 @@ mod tests {
         outgoing.sort();
         assert!(outgoing.contains(&"19868".to_owned()));
         assert!(outgoing.contains(&"19816898".to_owned()));
+    }
+
+    #[test]
+    fn rollback_restores_start_end_pair_canonical_maps_and_reused_handles() {
+        // START: reject after allocating START(ROOT), then reuse that physical
+        // handle for END(ROOT). A stale start_forms entry must never alias it.
+        let mut start_store = OptimizedLinkStore::new();
+        let start_before = exact_store_snapshot(&start_store);
+        assert_eq!(
+            start_store.import_anum("98x"),
+            Err(StoreError::TrailingInput(2))
+        );
+        assert_eq!(exact_store_snapshot(&start_store), start_before);
+        let reused_as_end = start_store.import_anum("68").unwrap();
+        let start = start_store.import_anum("98").unwrap();
+        assert_ne!(start, reused_as_end);
+        assert_eq!(
+            start_store.poles(reused_as_end).unwrap(),
+            (ROOT_HANDLE, reused_as_end)
+        );
+        assert_eq!(
+            start_store.poles(start).unwrap(),
+            (start, ROOT_HANDLE)
+        );
+        assert_eq!(start_store.export_anum(reused_as_end).unwrap(), "68");
+        assert_eq!(start_store.export_anum(start).unwrap(), "98");
+
+        // END: symmetric reused-handle falsifier.
+        let mut end_store = OptimizedLinkStore::new();
+        let end_before = exact_store_snapshot(&end_store);
+        assert_eq!(
+            end_store.import_anum("68x"),
+            Err(StoreError::TrailingInput(2))
+        );
+        assert_eq!(exact_store_snapshot(&end_store), end_before);
+        let reused_as_start = end_store.import_anum("98").unwrap();
+        let end = end_store.import_anum("68").unwrap();
+        assert_ne!(end, reused_as_start);
+        assert_eq!(
+            end_store.poles(reused_as_start).unwrap(),
+            (reused_as_start, ROOT_HANDLE)
+        );
+        assert_eq!(
+            end_store.poles(end).unwrap(),
+            (ROOT_HANDLE, end)
+        );
+        assert_eq!(end_store.export_anum(reused_as_start).unwrap(), "98");
+        assert_eq!(end_store.export_anum(end).unwrap(), "68");
+
+        // Ordinary PAIR: pre-create both poles so the rejected transaction
+        // appends only the PAIR. Reuse its handle for an unrelated START form,
+        // then prove the pair canonical map does not return that reused handle.
+        let mut pair_store = OptimizedLinkStore::new();
+        let k = pair_store.import_anum("98").unwrap();
+        let a = pair_store.import_anum("68").unwrap();
+        let pair_before = exact_store_snapshot(&pair_store);
+        assert_eq!(
+            pair_store.import_anum("19868x"),
+            Err(StoreError::TrailingInput(5))
+        );
+        assert_eq!(exact_store_snapshot(&pair_store), pair_before);
+
+        let reused = pair_store.import_anum("998").unwrap();
+        let reused_poles = pair_store.poles(reused).unwrap();
+        let pair = pair_store.import_anum("19868").unwrap();
+        assert_ne!(pair, reused);
+        assert_eq!(pair_store.poles(reused).unwrap(), reused_poles);
+        assert_eq!(pair_store.export_anum(reused).unwrap(), "998");
+        assert_eq!(pair_store.poles(pair).unwrap(), (k, a));
+        assert_eq!(pair_store.export_anum(pair).unwrap(), "19868");
+    }
+
+    #[cfg(not(debug_assertions))]
+    #[test]
+    fn rollback_release_profile_debug_assertions_are_off() {
+        assert!(!cfg!(debug_assertions));
+        println!("OPTIMIZED_ROLLBACK_RELEASE_DEBUG_ASSERTIONS=OFF");
     }
 
     #[test]

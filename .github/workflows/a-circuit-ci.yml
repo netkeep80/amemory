@@ -124,11 +124,15 @@ jobs:
             --manifest-path experiments/optimized-cpu-rust/Cargo.toml \
             -- --test-threads=1
 
-      - name: Optimized CPU release compile
+      - name: Optimized CPU release rollback/conformance witnesses
         run: |
-          cargo +1.98.1 build \
+          set -euo pipefail
+          cargo +1.98.1 test \
             --release \
-            --manifest-path experiments/optimized-cpu-rust/Cargo.toml
+            --manifest-path experiments/optimized-cpu-rust/Cargo.toml \
+            -- --nocapture --test-threads=1 2>&1 | tee /tmp/optimized-cpu-release.log
+          grep -q 'OPTIMIZED_ROLLBACK_RELEASE_DEBUG_ASSERTIONS=OFF' \
+            /tmp/optimized-cpu-release.log
 
       - name: Optimized Rust C3 Full Adder
         run: |
