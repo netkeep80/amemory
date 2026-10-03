@@ -13,9 +13,164 @@ import {
   openGpuCarrierResidentSession,
 } from "../../browser-accelerator/web/gpu-carrier.mjs";
 
+import {
+  METRIC_AVAILABILITY,
+  measured,
+  normalizeCpuScenarioRunV2,
+  normalizeWebGpuResidentRunV2,
+  unavailable,
+  unsupported,
+} from "../../browser-accelerator/web/run-observation.mjs";
+
 // Keep the generic resident configuration planner executable without changing
 // CI governance. This module is assertions-only and performs no GPU execution.
 await import("../../browser-accelerator/tests/gpu-carrier-configuration.test.mjs");
+
+const metricZero = measured(0);
+const metricUnavailable = unavailable("not measured");
+const metricUnsupported = unsupported("not supported");
+if (metricZero.availability !== METRIC_AVAILABILITY.MEASURED ||
+    metricZero.value !== 0 ||
+    metricUnavailable.availability !== METRIC_AVAILABILITY.UNAVAILABLE ||
+    metricUnavailable.value !== null ||
+    metricUnsupported.availability !== METRIC_AVAILABILITY.UNSUPPORTED ||
+    metricUnsupported.value !== null) {
+  throw new Error(
+    "normalized metric availability conflates measured zero with absence",
+  );
+}
+
+const normalizedCpuFixture = normalizeCpuScenarioRunV2({
+  manifestRunId: "cpu-fixture",
+  sessionRunId: 1,
+  configurationReused: false,
+  linksBeforeConfigure: 10,
+  linksAfterConfigure: 12,
+  result: { fields: { value: 1 } },
+  observed: {
+    sessionId: "cpu-session#fixture",
+    runId: 1,
+    backendId: "optimized-cpu",
+    timingAvailable: false,
+    finalScope: [20],
+    activeReactionCount: 1,
+    finalQuiescent: true,
+    events: [{
+      sequence: 0,
+      elapsedNs: 0,
+      stage: "EXECUTE",
+      kind: "REACTION_END",
+      reactionIndex: 0,
+      linksAfter: 20,
+      rawRuleMatches: 1,
+      transitionedMembers: 1,
+      handoffCount: 1,
+      quiescent: false,
+    }],
+    profile: {
+      timingAvailable: false,
+      baseLinks: 10,
+      linksAfterRun: 20,
+      executeNs: 0,
+      traceProjectionNs: 0,
+      denseCarrierAllocatedBytes: 64,
+      maxDenseCarrierBytes: 128,
+      structural: {
+        timingAvailable: false,
+        triggerIncidenceCandidates: 3,
+        totalNs: 0,
+      },
+    },
+  },
+  pipelineProfile: {
+    linksAfterExecute: 20,
+    stages: {
+      timingAvailable: false,
+      configureNs: 0,
+      resultNs: 0,
+    },
+  },
+});
+if (normalizedCpuFixture.profile.timings.executeNs.availability !==
+      METRIC_AVAILABILITY.UNAVAILABLE ||
+    normalizedCpuFixture.profile.timings.executeNs.value !== null ||
+    normalizedCpuFixture.events[0].elapsedNs.availability !==
+      METRIC_AVAILABILITY.UNAVAILABLE ||
+    normalizedCpuFixture.events[0].elapsedNs.value !== null ||
+    normalizedCpuFixture.profile.resource.baseUploadCount.availability !==
+      METRIC_AVAILABILITY.UNSUPPORTED ||
+    normalizedCpuFixture.profile.resource.baseUploadCount.value !== null ||
+    normalizedCpuFixture.profile.structural.triggerIncidenceCandidates
+      ?.availability !== METRIC_AVAILABILITY.MEASURED ||
+    normalizedCpuFixture.profile.structural.triggerIncidenceCandidates
+      ?.value !== 3 ||
+    normalizedCpuFixture.profile.structural.totalNs?.availability !==
+      METRIC_AVAILABILITY.UNAVAILABLE ||
+    normalizedCpuFixture.profile.structural.totalNs?.value !== null) {
+  throw new Error(
+    "CPU normalized projection serialized unavailable timing as a value",
+  );
+}
+
+const normalizedGpuFixture = normalizeWebGpuResidentRunV2({
+  sessionId: "webgpu-session#fixture",
+  runId: 1,
+  manifestRunId: "gpu-fixture",
+  configurationReused: true,
+  baseLinkCount: 10,
+  linksBeforeConfigure: 10,
+  linksAfterConfigure: 10,
+  run: {
+    stopReason: "APPENDED_LINKS_BUDGET_EXCEEDED",
+    quiescent: false,
+    activeReactionCount: 1,
+    finalCurrentHandle: 11,
+    steps: [{
+      observed: {
+        residentAppendCount: 1,
+        rawRuleMatches: 1,
+        appendCount: 1,
+        currentHandle: 10,
+        publishedHandle: 11,
+        ruleHandle: 5,
+        groundedBundle: 7,
+        quiescent: false,
+      },
+    }],
+  },
+  telemetryBeforeConfigure: {
+    configurationUploadBytes: 12,
+  },
+  telemetryAfterConfigure: {
+    configurationUploadBytes: 12,
+  },
+  telemetryBeforeExecute: {
+    reactionDispatchCount: 2,
+  },
+  telemetryAfterExecute: {
+    reactionDispatchCount: 3,
+    baseUploadCount: 1,
+    baseUploadBytes: 100,
+    residentBufferBytes: 1024,
+    residentAppendCount: 1,
+  },
+  result: { fields: { value: 1 } },
+});
+if (normalizedGpuFixture.profile.stopReason !==
+      "APPENDED_LINKS_BUDGET_EXCEEDED" ||
+    normalizedGpuFixture.profile.finalQuiescent !== false ||
+    normalizedGpuFixture.events.at(-1)?.kind !== "RUN_END" ||
+    normalizedGpuFixture.profile.resource.configurationUploadBytes
+      ?.availability !== METRIC_AVAILABILITY.MEASURED ||
+    normalizedGpuFixture.profile.resource.configurationUploadBytes
+      ?.value !== 0 ||
+    normalizedGpuFixture.profile.resource.readbackBytes?.availability !==
+      METRIC_AVAILABILITY.UNAVAILABLE ||
+    normalizedGpuFixture.profile.resource.readbackBytes?.value !== null) {
+  throw new Error(
+    "WebGPU normalized projection lost stop reason or availability semantics",
+  );
+}
 
 const root = process.cwd();
 
@@ -324,6 +479,7 @@ const syntaxTargets = [
   "experiments/browser-accelerator/web/i386-proof-transport.mjs",
   "experiments/browser-accelerator/web/i386-wasm-json.mjs",
   "experiments/browser-accelerator/web/gpu-carrier.mjs",
+  "experiments/browser-accelerator/web/run-observation.mjs",
   "experiments/browser-accelerator/web/scenario-transport.mjs",
   "experiments/browser-accelerator/web/scenario-presets.mjs",
   "experiments/browser-accelerator/web/scenario-worker.mjs",
