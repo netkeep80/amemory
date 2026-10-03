@@ -827,8 +827,8 @@ pub fn unify_structural_rule_template(
     unify_structural_rule_template_internal(store, template, claimed, roles, &mut profile)
 }
 
-fn instantiate_node(
-    store: &mut OptimizedLinkStore,
+fn instantiate_node<S: StructuralStoreV1 + ?Sized>(
+    store: &mut S,
     source: Handle,
     bindings: &HashMap<Handle, Handle>,
     visiting: &mut HashSet<Handle>,
@@ -956,8 +956,8 @@ fn instantiate_node(
     resolved(source, bindings, memo)
 }
 
-fn instantiate_structural_template_internal(
-    store: &mut OptimizedLinkStore,
+fn instantiate_structural_template_internal<S: StructuralStoreV1 + ?Sized>(
+    store: &mut S,
     template: Handle,
     bindings: &[StructuralRoleBinding],
     profile: &mut Option<&mut StructuralRunProfile>,
@@ -1205,7 +1205,7 @@ pub struct OptimizedStructuralEngine {
     transitioned_members: u32,
     handoff_count: u32,
     quiescent: bool,
-    metadata_store_instance: Option<u32>,
+    metadata_store_instance: Option<u64>,
     rule_metadata_cache: HashMap<Handle, CompiledRuleMetadata>,
     scope_context_parents: [HashMap<Handle, Vec<u32>>; 2],
     next_context_id: u32,
@@ -1232,19 +1232,19 @@ impl OptimizedStructuralEngine {
         }
     }
 
-    pub fn set_interpreter(
+    pub fn set_interpreter<R: StructuralReadV1 + ?Sized>(
         &mut self,
-        store: &OptimizedLinkStore,
+        store: &R,
         interpreter: Handle,
     ) -> Result<(), StructuralError> {
-        read_structural_interpreter(store, interpreter)?;
+        read_structural_interpreter_from(store, interpreter)?;
         self.interpreter = Some(interpreter);
         Ok(())
     }
 
-    pub fn set_current(
+    pub fn set_current<R: StructuralReadV1 + ?Sized>(
         &mut self,
-        store: &OptimizedLinkStore,
+        store: &R,
         members: &[Handle],
     ) -> Result<(), StructuralError> {
         if members.len() > self.cap {
@@ -1272,18 +1272,18 @@ impl OptimizedStructuralEngine {
         Ok(())
     }
 
-    pub fn run(
+    pub fn run<S: StructuralStoreV1 + ?Sized>(
         &mut self,
-        store: &mut OptimizedLinkStore,
+        store: &mut S,
     ) -> Result<StructuralReactionResult, StructuralError> {
         let mut profile = None;
         let mut trace = None;
         self.run_internal(store, &mut profile, &mut trace)
     }
 
-    pub fn run_profiled(
+    pub fn run_profiled<S: StructuralStoreV1 + ?Sized>(
         &mut self,
-        store: &mut OptimizedLinkStore,
+        store: &mut S,
     ) -> Result<(StructuralReactionResult, StructuralRunProfile), StructuralError> {
         let started = ProfileTimer::start();
         let mut owned = StructuralRunProfile::default();
@@ -1296,9 +1296,9 @@ impl OptimizedStructuralEngine {
         Ok((result, owned))
     }
 
-    pub fn run_traced(
+    pub fn run_traced<S: StructuralStoreV1 + ?Sized>(
         &mut self,
-        store: &mut OptimizedLinkStore,
+        store: &mut S,
     ) -> Result<
         (
             StructuralReactionResult,
@@ -1321,9 +1321,9 @@ impl OptimizedStructuralEngine {
         Ok((result, owned_profile, owned_trace))
     }
 
-    fn run_internal(
+    fn run_internal<S: StructuralStoreV1 + ?Sized>(
         &mut self,
-        store: &mut OptimizedLinkStore,
+        store: &mut S,
         profile: &mut Option<&mut StructuralRunProfile>,
         trace: &mut Option<&mut StructuralRunTrace>,
     ) -> Result<StructuralReactionResult, StructuralError> {
@@ -1358,17 +1358,16 @@ impl OptimizedStructuralEngine {
         // share one group id; failed reactions do not consume committed ids.
         let mut next_context_id = self.next_context_id;
         let context_group_id = self.next_context_group_id;
-        let discovered = (|| -> Result<
+        let discovered = store.with_read_view(|execution_view| -> Result<
             Vec<(Handle, Vec<StructuralContextFrame>)>,
             StructuralError,
         > {
-            let execution_view = store.packed_execution_ref();
             let authority =
-                read_structural_interpreter_from(&execution_view, interpreter)?;
+                read_structural_interpreter_from(execution_view, interpreter)?;
             let mut discovered = Vec::with_capacity(old_members.len());
             for active in old_members.iter().copied() {
                 let images = discover_triggered_rule_images_internal(
-                    &execution_view,
+                    execution_view,
                     authority.theory,
                     active,
                     &mut self.rule_metadata_cache,
@@ -1429,7 +1428,7 @@ impl OptimizedStructuralEngine {
                 discovered.push((active, contexts));
             }
             Ok(discovered)
-        })();
+        });
         let discovered = match discovered {
             Ok(discovered) => discovered,
             Err(error) => {
@@ -1575,7 +1574,8 @@ impl OptimizedStructuralEngine {
 
                     let publication_started =
                         profile.as_ref().map(|_| ProfileTimer::start());
-                    context.outputs = read_exact_sequence(store, grounded_bundle)?;
+                    context.outputs =
+                        read_exact_sequence_from(store, grounded_bundle)?;
                     if let Some(profile) = profile.as_deref_mut() {
                         profile.publication_outputs += context.outputs.len() as u64;
                     }
