@@ -18,17 +18,16 @@ const BACKENDS = [
 
 const WORKBENCH_HOST_BACKENDS = new Set([
   "optimized-cpu",
-  "webgpu",
 ]);
 
 export function workbenchBackendAvailability(manifest, backendId) {
   const scenarioSupported =
     (manifest?.supportedBackends || []).includes(backendId);
-  const hostSupported = WORKBENCH_HOST_BACKENDS.has(backendId);
+  const sessionHostSupported = WORKBENCH_HOST_BACKENDS.has(backendId);
   return Object.freeze({
     scenarioSupported,
-    hostSupported,
-    executable: scenarioSupported && hostSupported,
+    sessionHostSupported,
+    executable: scenarioSupported && sessionHostSupported,
   });
 }
 
@@ -1545,7 +1544,7 @@ async function open(state) {
         "Сценарий не поддерживает исполнитель " + state.backend,
       );
     }
-    if (!availability.hostSupported) {
+    if (!availability.sessionHostSupported) {
       throw new Error(
         "Исполнитель " + state.backend +
         " недоступен в браузерном хосте",
@@ -1904,7 +1903,7 @@ function tab(state) {
         return '<tr><td>' + esc(label) + '</td><td>' +
           esc(availability.scenarioSupported ? "заявлена поддержка" : "не заявлена") +
           '</td><td>' +
-          esc(availability.hostSupported ? "доступен в браузере" : "недоступен в браузере") +
+          esc(availability.sessionHostSupported ? "доступен как Workbench Session" : "недоступен как Workbench Session") +
           '</td><td>' +
           esc(id === state.backend && state.session ? "активная сессия" :
             availability.executable ? "готов к открытию" :
@@ -2011,8 +2010,8 @@ function render(state) {
         workbenchBackendAvailability(state.manifest, id);
       const suffix = !availability.scenarioSupported
         ? " — не поддерживается сценарием"
-        : !availability.hostSupported
-          ? " — недоступен в браузере"
+        : !availability.sessionHostSupported
+          ? " — недоступен как Workbench Session"
           : "";
       return '<option value="' + id + '"' + (id === state.backend ? " selected" : "") +
         (availability.executable ? "" : " disabled") + '>' +
