@@ -539,12 +539,6 @@ pub(crate) fn packed_gpu_carrier_words_from_prepare(
     Some(image.words().to_vec())
 }
 
-pub(crate) fn packed_gpu_carrier_words(
-    proof: &WebStructuralProof,
-) -> Option<Vec<u32>> {
-    packed_gpu_carrier_words_from_prepare(&proof.prepare)
-}
-
 pub(crate) fn export_scope(
     store: &OptimizedLinkStore,
     scope: &[Handle],
