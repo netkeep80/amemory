@@ -6,7 +6,7 @@ use super::session_contract::{
 use std::sync::atomic::{AtomicU64, Ordering};
 
 #[cfg(not(target_family = "wasm"))]
-use amemory_optimized_cpu_probe::ROOT_HANDLE;
+use amemory_optimized_cpu_probe::{PackedCarrierImage, StoreError, ROOT_HANDLE};
 #[cfg(not(target_family = "wasm"))]
 use doublets::{Doublets, Links};
 #[cfg(not(target_family = "wasm"))]
@@ -167,6 +167,8 @@ type NativeDoubletsUnitStoreV1 = doublets::unit::Store<
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PortableLinkKindV1 {
     Root,
+    StartSelfClosed,
+    EndSelfClosed,
     Pair,
 }
 
@@ -190,10 +192,15 @@ struct PortablePhysicalRecordV1 {
 #[derive(Debug)]
 pub(crate) enum DoubletsPhysicalStoreErrorV1 {
     Upstream(doublets::Error<usize>),
+    Carrier(StoreError),
     UnknownPortableHandle(u32),
     MissingPhysicalLink(usize),
     UnmappedPhysicalEndpoint(usize),
     PortableHandleExhausted,
+    PackedHandleMismatch {
+        expected: u32,
+        observed: u32,
+    },
     PortableIndexMismatch {
         start: u32,
         end: u32,
@@ -207,6 +214,13 @@ pub(crate) enum DoubletsPhysicalStoreErrorV1 {
 impl From<doublets::Error<usize>> for DoubletsPhysicalStoreErrorV1 {
     fn from(value: doublets::Error<usize>) -> Self {
         Self::Upstream(value)
+    }
+}
+
+#[cfg(not(target_family = "wasm"))]
+impl From<StoreError> for DoubletsPhysicalStoreErrorV1 {
+    fn from(value: StoreError) -> Self {
+        Self::Carrier(value)
     }
 }
 
@@ -225,6 +239,8 @@ pub(crate) struct DoubletsPhysicalStoreV1 {
     physical_metadata_marker: usize,
     portable_records: Vec<PortablePhysicalRecordV1>,
     physical_to_portable: HashMap<usize, u32>,
+    canonical_start_forms: HashMap<u32, u32>,
+    canonical_end_forms: HashMap<u32, u32>,
     canonical_pairs: HashMap<(u32, u32), u32>,
 }
 
@@ -259,6 +275,8 @@ impl DoubletsPhysicalStoreV1 {
             physical_metadata_marker,
             portable_records: vec![root],
             physical_to_portable,
+            canonical_start_forms: HashMap::new(),
+            canonical_end_forms: HashMap::new(),
             canonical_pairs: HashMap::new(),
         })
     }
@@ -278,6 +296,70 @@ impl DoubletsPhysicalStoreV1 {
     fn next_portable_handle(&self) -> Result<u32, DoubletsPhysicalStoreErrorV1> {
         u32::try_from(self.portable_records.len() + 1)
             .map_err(|_| DoubletsPhysicalStoreErrorV1::PortableHandleExhausted)
+    }
+
+
+    fn publish_portable_record_v1(
+        &mut self,
+        kind: PortableLinkKindV1,
+        start: u32,
+        end: u32,
+        physical_index: usize,
+    ) -> Result<u32, DoubletsPhysicalStoreErrorV1> {
+        let handle = self.next_portable_handle()?;
+        let previous_physical =
+            self.physical_to_portable.insert(physical_index, handle);
+        debug_assert!(previous_physical.is_none());
+
+        self.portable_records.push(PortablePhysicalRecordV1 {
+            link: PortablePhysicalLinkV1 {
+                handle,
+                start,
+                end,
+                physical_index,
+            },
+            kind,
+        });
+        Ok(handle)
+    }
+
+    /// Atomically materialize one validated backend-neutral packed carrier into
+    /// a fresh Doublets physical store.
+    ///
+    /// The packed carrier is constructor ordered, so every non-self pole points
+    /// to an earlier portable handle. Loading into a staging store means a
+    /// failure never mutates an already-live retained Session.
+    pub(crate) fn from_packed_carrier_v1(
+        image: &PackedCarrierImage,
+    ) -> Result<Self, DoubletsPhysicalStoreErrorV1> {
+        image.validate()?;
+        let mut staging = Self::open_empty()?;
+
+        for raw_handle in 2..=image.link_count() {
+            let expected =
+                u32::try_from(raw_handle)
+                    .map_err(|_| DoubletsPhysicalStoreErrorV1::PortableHandleExhausted)?;
+            let (start, end) = image
+                .duplet(expected)
+                .ok_or(DoubletsPhysicalStoreErrorV1::UnknownPortableHandle(expected))?;
+
+            let observed = if start == expected {
+                staging.ensure_start_form_v1(end)?
+            } else if end == expected {
+                staging.ensure_end_form_v1(start)?
+            } else {
+                staging.ensure_pair_v1(start, end)?
+            };
+
+            if observed != expected {
+                return Err(DoubletsPhysicalStoreErrorV1::PackedHandleMismatch {
+                    expected,
+                    observed,
+                });
+            }
+        }
+
+        Ok(staging)
     }
 
     pub(crate) fn physical_index_v1(
@@ -383,6 +465,70 @@ impl DoubletsPhysicalStoreV1 {
         Ok(physically_unique)
     }
 
+    pub(crate) fn ensure_start_form_v1(
+        &mut self,
+        child: u32,
+    ) -> Result<u32, DoubletsPhysicalStoreErrorV1> {
+        self.portable_record(child)?;
+        if let Some(existing) = self.canonical_start_forms.get(&child) {
+            return Ok(*existing);
+        }
+
+        let physical_child = self.physical_index_v1(child)?;
+        let physical_index = self.store.create()?;
+        if let Err(error) =
+            self.store.update(physical_index, physical_index, physical_child)
+        {
+            let _ = self.store.delete(physical_index);
+            return Err(error.into());
+        }
+
+        let handle = self.next_portable_handle()?;
+        let published = self.publish_portable_record_v1(
+            PortableLinkKindV1::StartSelfClosed,
+            handle,
+            child,
+            physical_index,
+        )?;
+        debug_assert_eq!(published, handle);
+
+        let previous = self.canonical_start_forms.insert(child, handle);
+        debug_assert!(previous.is_none());
+        Ok(handle)
+    }
+
+    pub(crate) fn ensure_end_form_v1(
+        &mut self,
+        child: u32,
+    ) -> Result<u32, DoubletsPhysicalStoreErrorV1> {
+        self.portable_record(child)?;
+        if let Some(existing) = self.canonical_end_forms.get(&child) {
+            return Ok(*existing);
+        }
+
+        let physical_child = self.physical_index_v1(child)?;
+        let physical_index = self.store.create()?;
+        if let Err(error) =
+            self.store.update(physical_index, physical_child, physical_index)
+        {
+            let _ = self.store.delete(physical_index);
+            return Err(error.into());
+        }
+
+        let handle = self.next_portable_handle()?;
+        let published = self.publish_portable_record_v1(
+            PortableLinkKindV1::EndSelfClosed,
+            child,
+            handle,
+            physical_index,
+        )?;
+        debug_assert_eq!(published, handle);
+
+        let previous = self.canonical_end_forms.insert(child, handle);
+        debug_assert!(previous.is_none());
+        Ok(handle)
+    }
+
     /// Canonical A-memory ordinary PAIR constructor over Doublets storage.
     ///
     /// Bare Doublets duplicate storage is intentional here. Applying Doublets
@@ -401,24 +547,15 @@ impl DoubletsPhysicalStoreV1 {
         let physical_end = self.physical_index_v1(end)?;
         let physical_index =
             self.store.create_link(physical_start, physical_end)?;
-        let handle = self.next_portable_handle()?;
+        let handle = self.publish_portable_record_v1(
+            PortableLinkKindV1::Pair,
+            start,
+            end,
+            physical_index,
+        )?;
 
-        let previous_physical =
-            self.physical_to_portable.insert(physical_index, handle);
-        debug_assert!(previous_physical.is_none());
         let previous_pair = self.canonical_pairs.insert((start, end), handle);
         debug_assert!(previous_pair.is_none());
-
-        self.portable_records.push(PortablePhysicalRecordV1 {
-            link: PortablePhysicalLinkV1 {
-                handle,
-                start,
-                end,
-                physical_index,
-            },
-            kind: PortableLinkKindV1::Pair,
-        });
-
         Ok(handle)
     }
 
@@ -713,4 +850,82 @@ mod tests {
             CapabilitySupportV1::Unsupported,
         );
     }
+    #[cfg(not(target_family = "wasm"))]
+    #[test]
+    fn linksdb_doublets_prepare_load_preserves_all_constructor_forms() {
+        use amemory_optimized_cpu_probe::OptimizedLinkStore;
+
+        let mut source = OptimizedLinkStore::new();
+        let start = source.ensure_start_self_closed(ROOT_HANDLE).unwrap();
+        let end = source.ensure_end_self_closed(ROOT_HANDLE).unwrap();
+        let pair = source.ensure_pair(start, end).unwrap();
+        let nested = source.ensure_pair(pair, ROOT_HANDLE).unwrap();
+        let image = source.export_packed_carrier_image();
+
+        let store = DoubletsPhysicalStoreV1::from_packed_carrier_v1(&image).unwrap();
+
+        assert_eq!(store.link_count_v1() as usize, image.link_count());
+        assert_eq!(
+            store.physical_link_count_v1(),
+            image.link_count() + 1,
+            "physical metadata marker must not enter portable Link count",
+        );
+
+        for raw_handle in 1..=image.link_count() {
+            let handle = raw_handle as u32;
+            let expected = image.duplet(handle).unwrap();
+            let actual = store.read_v1(handle).unwrap();
+            assert_eq!((actual.start, actual.end), expected);
+            assert_eq!(actual.handle, handle);
+        }
+
+        assert_eq!(start, 2);
+        assert_eq!(end, 3);
+        assert_eq!(pair, 4);
+        assert_eq!(nested, 5);
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    #[test]
+    fn linksdb_doublets_prepare_session_retains_one_loaded_store() {
+        use amemory_optimized_cpu_probe::OptimizedLinkStore;
+
+        let mut source = OptimizedLinkStore::new();
+        let start = source.ensure_start_self_closed(ROOT_HANDLE).unwrap();
+        let end = source.ensure_end_self_closed(ROOT_HANDLE).unwrap();
+        source.ensure_pair(start, end).unwrap();
+
+        let image = source.export_packed_carrier_image();
+        let store = DoubletsPhysicalStoreV1::from_packed_carrier_v1(&image).unwrap();
+        let mut session = LinksDbSessionV1::open(store);
+
+        let first_identity = session.runtime_identity_v1();
+        let first = session.runtime_snapshot_v1();
+
+        // L2 retains the prepared physical store but still makes no execution
+        // support claim. Repeated execution attempts fail closed and must not
+        // reload, mutate or replace the Session.
+        assert_eq!(
+            session.run_to_quiescence(),
+            Err(LinksDbSessionErrorV1::UnsupportedCapability {
+                capability: LinksDbCapabilityV1::RunToQuiescence,
+            }),
+        );
+        assert_eq!(
+            session.run_to_quiescence(),
+            Err(LinksDbSessionErrorV1::UnsupportedCapability {
+                capability: LinksDbCapabilityV1::RunToQuiescence,
+            }),
+        );
+
+        let second_identity = session.runtime_identity_v1();
+        let second = session.runtime_snapshot_v1();
+        assert_eq!(first_identity, second_identity);
+        assert_eq!(first.base_link_count, image.link_count() as u32);
+        assert_eq!(first.current_link_count, image.link_count() as u32);
+        assert_eq!(second.base_link_count, first.base_link_count);
+        assert_eq!(second.current_link_count, first.current_link_count);
+        assert_eq!(second.state, SessionStateV1::Open);
+    }
+
 }
