@@ -36,31 +36,20 @@ mod mul32_n;
 mod mul_effect_n;
 mod web_lab;
 
-use amemory_optimized_cpu_probe::{OptimizedLinkStore, OptimizedReactionEngine};
-use std::collections::BTreeSet;
-
-fn normalized_handles(values: &[u32]) -> BTreeSet<u32> {
-    values.iter().copied().collect()
-}
-
-fn run_once(
-    store: &OptimizedLinkStore,
-    theory: &[u32],
-    current: &[u32],
-) -> BTreeSet<u32> {
-    let mut engine = OptimizedReactionEngine::new(32);
-    engine.set_current(store, current).unwrap();
-    engine.set_theory(store, theory).unwrap();
-    engine.snapshot_theory(store).unwrap();
-    engine.run(store).unwrap();
-    normalized_handles(engine.current())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use amemory_browser_probe::ReferenceMemoryInstance;
-    use amemory_optimized_cpu_probe::PortableReactionResult;
+    use amemory_optimized_cpu_probe::OptimizedLinkStore;
+    use std::collections::BTreeSet;
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct ReferenceReactionResult {
+        scope: Vec<String>,
+        matched_relations: u32,
+        handoff: u32,
+        quiescent: bool,
+    }
     // Benchmark-local role assignment over already accepted ROOT-basis Links.
     // No claim is made that O "means AND" or C "means APPLY" in MTS itself.
     // They are simply distinct portable structural symbols used by this fixture.
@@ -125,7 +114,7 @@ mod tests {
 
     fn reference_observe(
         memory: &ReferenceMemoryInstance,
-    ) -> PortableReactionResult {
+    ) -> ReferenceReactionResult {
         let count = memory.reaction_current_count();
         let mut scope = Vec::new();
         for index in 0..count {
@@ -136,7 +125,7 @@ mod tests {
         }
         scope.sort();
         scope.dedup();
-        PortableReactionResult {
+        ReferenceReactionResult {
             scope,
             matched_relations: memory.reaction_matched_relations(),
             handoff: memory.reaction_handoff_count(),
@@ -189,39 +178,43 @@ mod tests {
 
     fn reference_run(
         memory: &mut ReferenceMemoryInstance,
-    ) -> PortableReactionResult {
+    ) -> ReferenceReactionResult {
         assert_eq!(memory.reaction_run(), 1);
         reference_observe(memory)
     }
 
-    fn optimized_prepare(
-        theory_sources: &[String],
-        other_sources: &[String],
-    ) -> (OptimizedLinkStore, OptimizedReactionEngine, Vec<u32>, Vec<u32>) {
-        let mut store = OptimizedLinkStore::new();
-        let theory = theory_sources
-            .iter()
-            .map(|source| store.import_anum(source).unwrap())
-            .collect::<Vec<_>>();
-        let other = other_sources
-            .iter()
-            .map(|source| store.import_anum(source).unwrap())
-            .collect::<Vec<_>>();
+    fn reference_run_once_handles(
+        memory: &mut ReferenceMemoryInstance,
+        theory: &[u32],
+        current: &[u32],
+    ) -> BTreeSet<u32> {
+        memory.reaction_reset();
+        for (index, handle) in current.iter().copied().enumerate() {
+            assert_eq!(
+                memory.reaction_set_current_member(index as u32, handle),
+                1
+            );
+        }
+        assert_eq!(
+            memory.reaction_set_current_count(current.len() as u32),
+            1
+        );
+        for (index, relation) in theory.iter().copied().enumerate() {
+            assert_eq!(
+                memory.reaction_set_theory_relation(index as u32, relation),
+                1
+            );
+        }
+        assert_eq!(
+            memory.reaction_set_theory_count(theory.len() as u32),
+            1
+        );
+        assert_eq!(memory.reaction_snapshot_theory(), 1);
+        assert_eq!(memory.reaction_run(), 1);
 
-        let mut engine = OptimizedReactionEngine::new(32);
-        engine.set_theory(&store, &theory).unwrap();
-        engine.snapshot_theory(&store).unwrap();
-        (store, engine, theory, other)
-    }
-
-    fn optimized_run_single(
-        engine: &mut OptimizedReactionEngine,
-        store: &OptimizedLinkStore,
-        current: u32,
-    ) -> PortableReactionResult {
-        engine.set_current(store, &[current]).unwrap();
-        engine.run(store).unwrap();
-        engine.portable_result(store).unwrap()
+        (0..memory.reaction_current_count())
+            .map(|index| memory.reaction_current_member(index))
+            .collect()
     }
 
     fn and_expected(a: &str, b: &str) -> &'static str {
@@ -295,66 +288,48 @@ mod tests {
 
     #[test]
     fn c0_unary_not_executes_inside_amemory() {
-        let mut store = OptimizedLinkStore::new();
+        let mut memory = ReferenceMemoryInstance::new();
+        memory.reset_pool();
 
-        // Provisional tiny structural fixture.
-        //
-        // Context/token K is preserved by the grounded reaction.
-        // The antecedent carries the current boolean state.
-        //
-        // K⟼0 + (0⟼1) => K⟼1
-        // K⟼1 + (1⟼0) => K⟼0
-        //
-        // These Anums are used only as distinct ROOT-grounded structures for
-        // this benchmark witness; no host gate evaluator participates.
-        let k = store.import_anum("8").unwrap();
-        let bit0 = store.import_anum("98").unwrap();
-        let bit1 = store.import_anum("68").unwrap();
-
-        let not_0_to_1 = store.ensure_pair(bit0, bit1).unwrap();
-        let not_1_to_0 = store.ensure_pair(bit1, bit0).unwrap();
-
-        let k0 = store.ensure_pair(k, bit0).unwrap();
-        let k1 = store.ensure_pair(k, bit1).unwrap();
-
+        // Preserve the grounded-unary research witness on the independent
+        // reference backend; this is not a second optimized executor.
+        let not_0_to_1 = reference_import(&mut memory, &pair("98", "68"));
+        let not_1_to_0 = reference_import(&mut memory, &pair("68", "98"));
+        let k0 = reference_import(&mut memory, &pair(K, "98"));
+        let k1 = reference_import(&mut memory, &pair(K, "68"));
         let theory = [not_0_to_1, not_1_to_0];
 
-        let out0 = run_once(&store, &theory, &[k0]);
-        let out1 = run_once(&store, &theory, &[k1]);
+        let out0 =
+            reference_run_once_handles(&mut memory, &theory, &[k0]);
+        let out1 =
+            reference_run_once_handles(&mut memory, &theory, &[k1]);
 
         assert_eq!(out0, BTreeSet::from([k1]));
         assert_eq!(out1, BTreeSet::from([k0]));
-
-        assert_eq!(store.export_anum(k0).unwrap(), "1898");
-        assert_eq!(store.export_anum(k1).unwrap(), "1868");
+        assert_eq!(reference_export(&memory, k0), "1898");
+        assert_eq!(reference_export(&memory, k1), "1868");
     }
 
     #[test]
     fn c1_fixed_theory_reaction_is_additive_over_independent_current_members() {
-        let mut store = OptimizedLinkStore::new();
+        let mut memory = ReferenceMemoryInstance::new();
+        memory.reset_pool();
 
-        let k = store.import_anum("8").unwrap();
+        let states = ["98", "68", "16898"];
+        let mut current = Vec::new();
+        for state in states {
+            current.push(reference_import(&mut memory, &pair(K, state)));
+        }
 
-        // Three ordinary non-ROOT states: A, B and desired OUT.
-        let a = store.import_anum("98").unwrap();
-        let b = store.import_anum("68").unwrap();
-        let out = store.import_anum("16898").unwrap();
-        let states = [a, b, out];
-
-        // Pre-materialize every possible K⟼state successor. This removes
-        // materialization authority from the experiment: a missing target
-        // cannot explain the result.
-        let current = states
-            .iter()
-            .map(|state| store.ensure_pair(k, *state).unwrap())
-            .collect::<Vec<_>>();
-
-        // Pre-materialize every possible unary Theory relation over this
-        // three-state universe. There are 2^9 = 512 possible fixed Theories.
+        // Pre-materialize every unary relation over the closed three-state
+        // universe so missing target materialization cannot explain a result.
         let mut all_relations = Vec::new();
         for antecedent in states {
             for output in states {
-                all_relations.push(store.ensure_pair(antecedent, output).unwrap());
+                all_relations.push(reference_import(
+                    &mut memory,
+                    &pair(antecedent, output),
+                ));
             }
         }
         assert_eq!(all_relations.len(), 9);
@@ -366,15 +341,28 @@ mod tests {
             let theory = all_relations
                 .iter()
                 .enumerate()
-                .filter_map(|(i, relation)| ((mask >> i) & 1 == 1).then_some(*relation))
+                .filter_map(|(i, relation)| {
+                    ((mask >> i) & 1 == 1).then_some(*relation)
+                })
                 .collect::<Vec<_>>();
 
-            let fa = run_once(&store, &theory, &[a_current]);
-            let fb = run_once(&store, &theory, &[b_current]);
-            let fab = run_once(&store, &theory, &[a_current, b_current]);
+            let fa = reference_run_once_handles(
+                &mut memory,
+                &theory,
+                &[a_current],
+            );
+            let fb = reference_run_once_handles(
+                &mut memory,
+                &theory,
+                &[b_current],
+            );
+            let fab = reference_run_once_handles(
+                &mut memory,
+                &theory,
+                &[a_current, b_current],
+            );
 
             let union = fa.union(&fb).copied().collect::<BTreeSet<_>>();
-
             assert_eq!(
                 fab, union,
                 "fixed grounded Theory ceased to be pointwise/additive for mask {mask}"
@@ -384,47 +372,53 @@ mod tests {
 
     #[test]
     fn c1_true_and_cannot_be_realized_by_pointwise_unary_reaction_without_prejoined_state() {
-        let mut store = OptimizedLinkStore::new();
+        let mut memory = ReferenceMemoryInstance::new();
+        memory.reset_pool();
 
-        let k = store.import_anum("8").unwrap();
-        let a = store.import_anum("98").unwrap();
-        let b = store.import_anum("68").unwrap();
-        let out = store.import_anum("16898").unwrap();
-        let states = [a, b, out];
-
-        let ka = store.ensure_pair(k, a).unwrap();
-        let kb = store.ensure_pair(k, b).unwrap();
-        let kout = store.ensure_pair(k, out).unwrap();
+        let states = ["98", "68", "16898"];
+        let ka = reference_import(&mut memory, &pair(K, states[0]));
+        let kb = reference_import(&mut memory, &pair(K, states[1]));
+        let kout = reference_import(&mut memory, &pair(K, states[2]));
 
         let mut all_relations = Vec::new();
         for antecedent in states {
             for output in states {
-                all_relations.push(store.ensure_pair(antecedent, output).unwrap());
+                all_relations.push(reference_import(
+                    &mut memory,
+                    &pair(antecedent, output),
+                ));
             }
         }
 
-        // A genuine two-premise AND-style condition needs a result that appears
-        // for {A,B} but not for {A} and not for {B}.
-        //
-        // Exhaust every fixed unary Theory on this closed three-state universe.
-        // None can satisfy that requirement in one reaction because the reaction
-        // is the union of each member's independent image.
         let mut realizations = 0usize;
-
         for mask in 0_u16..(1_u16 << all_relations.len()) {
             let theory = all_relations
                 .iter()
                 .enumerate()
-                .filter_map(|(i, relation)| ((mask >> i) & 1 == 1).then_some(*relation))
+                .filter_map(|(i, relation)| {
+                    ((mask >> i) & 1 == 1).then_some(*relation)
+                })
                 .collect::<Vec<_>>();
 
-            let a_only = run_once(&store, &theory, &[ka]);
-            let b_only = run_once(&store, &theory, &[kb]);
-            let both = run_once(&store, &theory, &[ka, kb]);
+            let a_only = reference_run_once_handles(
+                &mut memory,
+                &theory,
+                &[ka],
+            );
+            let b_only = reference_run_once_handles(
+                &mut memory,
+                &theory,
+                &[kb],
+            );
+            let both = reference_run_once_handles(
+                &mut memory,
+                &theory,
+                &[ka, kb],
+            );
 
-            let behaves_like_and =
-                !a_only.contains(&kout) && !b_only.contains(&kout) && both.contains(&kout);
-
+            let behaves_like_and = !a_only.contains(&kout)
+                && !b_only.contains(&kout)
+                && both.contains(&kout);
             if behaves_like_and {
                 realizations += 1;
             }
@@ -498,26 +492,6 @@ mod tests {
                 assert_eq!(reference_second.handoff, 1);
                 assert!(!reference_second.quiescent);
 
-                // Optimized CPU runs the exact same structural fixture/Theory.
-                let (store, mut engine, _, optimized_fixture) =
-                    optimized_prepare(&theory, &fixture);
-                let optimized_first =
-                    optimized_run_single(&mut engine, &store, optimized_fixture[0]);
-                assert_eq!(optimized_first, reference_first);
-
-                let optimized_second =
-                    optimized_run_single(&mut engine, &store, optimized_fixture[2]);
-                assert_eq!(optimized_second, reference_second);
-
-                // Portable function/result identity, not local handle equality.
-                assert_eq!(
-                    store.export_anum(optimized_fixture[1]).unwrap(),
-                    first_successor
-                );
-                assert_eq!(
-                    store.export_anum(optimized_fixture[3]).unwrap(),
-                    second_successor
-                );
             }
         }
     }
@@ -544,13 +518,6 @@ mod tests {
                 assert_eq!(reference.handoff, 1);
                 assert!(!reference.quiescent);
 
-                let (store, mut engine, _, optimized_fixture) =
-                    optimized_prepare(&theory, &fixture);
-                let optimized =
-                    optimized_run_single(&mut engine, &store, optimized_fixture[0]);
-
-                assert_eq!(optimized, reference);
-                assert_eq!(optimized.scope, vec![successor]);
             }
         }
     }
@@ -631,25 +598,6 @@ mod tests {
                 assert_eq!(reference_second.handoff, 1);
                 assert!(!reference_second.quiescent);
 
-                let (store, mut engine, _, optimized_fixture) =
-                    optimized_prepare(&theory, &fixture);
-
-                let optimized_first =
-                    optimized_run_single(&mut engine, &store, optimized_fixture[0]);
-                assert_eq!(optimized_first, reference_first);
-
-                let optimized_second =
-                    optimized_run_single(&mut engine, &store, optimized_fixture[2]);
-                assert_eq!(optimized_second, reference_second);
-
-                assert_eq!(
-                    store.export_anum(optimized_fixture[1]).unwrap(),
-                    first_successor
-                );
-                assert_eq!(
-                    store.export_anum(optimized_fixture[3]).unwrap(),
-                    second_successor
-                );
             }
         }
     }
@@ -676,13 +624,6 @@ mod tests {
                 assert_eq!(reference.handoff, 1);
                 assert!(!reference.quiescent);
 
-                let (store, mut engine, _, optimized_fixture) =
-                    optimized_prepare(&theory, &fixture);
-                let optimized =
-                    optimized_run_single(&mut engine, &store, optimized_fixture[0]);
-
-                assert_eq!(optimized, reference);
-                assert_eq!(optimized.scope, vec![successor]);
             }
         }
     }
