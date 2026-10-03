@@ -270,7 +270,15 @@ pub trait StructuralStoreV1: StructuralReadV1 {
         child: Handle,
     ) -> Result<Handle, StoreError>;
     fn append_checkpoint(&self) -> usize;
-    fn rollback_append(&mut self, checkpoint: usize);
+    /// Restores the exact physical state at `checkpoint`.
+    ///
+    /// Backends whose rollback can fail must report that failure. The semantic
+    /// engine treats a rollback failure as the primary error because physical
+    /// state can no longer be claimed to equal the last committed Scope.
+    fn rollback_append(
+        &mut self,
+        checkpoint: usize,
+    ) -> Result<(), StoreError>;
 
     /// Exposes a read-only physical topology view for discovery.
     ///
@@ -335,13 +343,17 @@ impl StructuralStoreV1 for OptimizedLinkStore {
         OptimizedLinkStore::append_checkpoint(self).link_count
     }
 
-    fn rollback_append(&mut self, checkpoint: usize) {
+    fn rollback_append(
+        &mut self,
+        checkpoint: usize,
+    ) -> Result<(), StoreError> {
         OptimizedLinkStore::rollback_append(
             self,
             crate::StoreAppendCheckpoint {
                 link_count: checkpoint,
             },
         );
+        Ok(())
     }
 
     fn with_read_view<T>(
@@ -1626,11 +1638,14 @@ impl OptimizedStructuralEngine {
         ) = match publication {
                 Ok(committed) => committed,
                 Err(error) => {
-                    store.rollback_append(checkpoint);
+                    let rollback = store.rollback_append(checkpoint);
                     self.metadata_store_instance =
                         metadata_store_instance_before;
                     self.rule_metadata_cache =
                         rule_metadata_cache_before;
+                    if let Err(rollback_error) = rollback {
+                        return Err(StructuralError::Store(rollback_error));
+                    }
                     return Err(error);
                 }
             };
@@ -1641,11 +1656,14 @@ impl OptimizedStructuralEngine {
             let next_context_group_id = match context_group_id.checked_add(1) {
                 Some(next) => next,
                 None => {
-                    store.rollback_append(checkpoint);
+                    let rollback = store.rollback_append(checkpoint);
                     self.metadata_store_instance =
                         metadata_store_instance_before;
                     self.rule_metadata_cache =
                         rule_metadata_cache_before;
+                    if let Err(rollback_error) = rollback {
+                        return Err(StructuralError::Store(rollback_error));
+                    }
                     return Err(StructuralError::Store(
                         StoreError::CapacityExceeded,
                     ));
@@ -1803,7 +1821,7 @@ mod tests {
         assert_eq!(pair, 2);
         assert_eq!(StructuralStoreV1::link_count(&store), 2);
 
-        StructuralStoreV1::rollback_append(&mut store, checkpoint);
+        StructuralStoreV1::rollback_append(&mut store, checkpoint).unwrap();
 
         assert_eq!(StructuralStoreV1::link_count(&store), 1);
         assert_eq!(
