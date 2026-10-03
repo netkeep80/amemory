@@ -27,7 +27,8 @@ use super::{
 use amemory_optimized_cpu_probe::{
     structural::{
         define_structural_interpreter, define_structural_role_dictionary,
-        materialize_exact_sequence, read_exact_sequence,
+        materialize_exact_sequence, read_exact_sequence, StructuralReadV1,
+        StructuralStoreV1,
     },
     Handle, OptimizedLinkStore, ROOT_HANDLE,
 };
@@ -1566,8 +1567,8 @@ pub(crate) fn prepare_mux1_session_program() -> Option<WebProofPrepareStage> {
     ))
 }
 
-pub(crate) fn configure_mux1_session(
-    session: &mut CpuRuntimeSession,
+pub(crate) fn configure_mux1_store<S: StructuralStoreV1 + ?Sized>(
+    store: &mut S,
     load: &WebProofLoadStage,
     select: usize,
     a: usize,
@@ -1584,29 +1585,41 @@ pub(crate) fn configure_mux1_session(
     let one = loaded_handle(load, "data.one")?;
     let bits = [zero, one];
 
-    let before = session.memory.store.link_count();
+    let before = store.link_count();
     let args = materialize_exact_sequence(
-        &mut session.memory.store,
+        store,
         &[bits[select], bits[a], bits[b]],
     )
     .ok()?;
-    let invocation =
-        call(&mut session.memory.store, apply, mux1, args);
-    let initial = session
-        .memory
-        .store
-        .ensure_pair(caller, invocation)
-        .ok()?;
-    let after = session.memory.store.link_count();
+    let invocation = call(store, apply, mux1, args);
+    let initial = store.ensure_pair(caller, invocation).ok()?;
+    let after = store.link_count();
 
     Some((initial, before, after))
 }
 
-pub(crate) fn project_mux1_session_result(
-    session: &CpuRuntimeSession,
+pub(crate) fn configure_mux1_session(
+    session: &mut CpuRuntimeSession,
     load: &WebProofLoadStage,
-) -> Option<Mux1SessionProjection> {
-    if session.engine.current().len() != 1 {
+    select: usize,
+    a: usize,
+    b: usize,
+) -> Option<(Handle, usize, usize)> {
+    configure_mux1_store(
+        &mut session.memory.store,
+        load,
+        select,
+        a,
+        b,
+    )
+}
+
+pub(crate) fn decode_mux1_store_result<R: StructuralReadV1 + ?Sized>(
+    store: &R,
+    current: &[Handle],
+    load: &WebProofLoadStage,
+) -> Option<(u32, Handle)> {
+    if current.len() != 1 {
         return None;
     }
 
@@ -1614,19 +1627,17 @@ pub(crate) fn project_mux1_session_result(
     let result_tag = loaded_handle(load, "result.tag")?;
     let zero = loaded_handle(load, "data.zero")?;
     let one = loaded_handle(load, "data.one")?;
-    let final_link = session.engine.current()[0];
+    let final_link = current[0];
 
-    let (final_caller, endpoint) =
-        session.memory.store.poles(final_link).ok()?;
+    let (final_caller, endpoint) = store.poles(final_link).ok()?;
     if final_caller != caller {
         return None;
     }
-    let (tag, payload) = session.memory.store.poles(endpoint).ok()?;
+    let (tag, payload) = store.poles(endpoint).ok()?;
     if tag != result_tag {
         return None;
     }
-    let values =
-        read_exact_sequence(&session.memory.store, payload).ok()?;
+    let values = read_exact_sequence(store, payload).ok()?;
     if values.len() != 1 {
         return None;
     }
@@ -1639,9 +1650,23 @@ pub(crate) fn project_mux1_session_result(
         return None;
     };
 
+    Some((value, final_link))
+}
+
+pub(crate) fn project_mux1_session_result(
+    session: &CpuRuntimeSession,
+    load: &WebProofLoadStage,
+) -> Option<Mux1SessionProjection> {
+    let (value, final_link) = decode_mux1_store_result(
+        &session.memory.store,
+        session.engine.current(),
+        load,
+    )?;
+
     Some(Mux1SessionProjection {
         value,
-        result_recursive_wire: session.memory.store.export_anum(final_link).ok()?,
+        result_recursive_wire:
+            session.memory.store.export_anum(final_link).ok()?,
     })
 }
 

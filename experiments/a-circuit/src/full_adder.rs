@@ -3,7 +3,7 @@ use amemory_optimized_cpu_probe::{
         admit_structural_rule, define_structural_interpreter,
         define_structural_role_dictionary, define_structural_rule,
         index_structural_rule_trigger, materialize_exact_sequence,
-        read_exact_sequence, OptimizedStructuralEngine,
+        read_exact_sequence, OptimizedStructuralEngine, StructuralStoreV1,
     },
     Handle, OptimizedLinkStore, ROOT_HANDLE,
 };
@@ -35,8 +35,8 @@ fn fresh(
     result
 }
 
-pub(crate) fn call(
-    store: &mut OptimizedLinkStore,
+pub(crate) fn call<S: StructuralStoreV1 + ?Sized>(
+    store: &mut S,
     apply: Handle,
     function: Handle,
     argument: Handle,
