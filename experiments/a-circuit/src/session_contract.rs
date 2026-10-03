@@ -198,9 +198,9 @@ pub(crate) struct SessionSnapshotV1 {
 /// Physical backends implement this lifecycle/status boundary.
 ///
 /// The trait deliberately exposes no generalized-MP operation and no storage
-/// primitive. Semantic execution remains owned by each conforming backend
-/// executor; this boundary only normalizes identity, lifecycle state and
-/// capability/status facts.
+/// primitive. Semantic execution is owned by the common runtime/engine;
+/// backend choice changes physical machinery only. This boundary normalizes
+/// identity, lifecycle state and capability/status facts.
 pub(crate) trait RuntimeSessionV1 {
     fn runtime_backend_v1(&self) -> RuntimeBackendV1;
     fn runtime_identity_v1(&self) -> SessionIdentityV1;
