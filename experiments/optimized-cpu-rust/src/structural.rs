@@ -244,7 +244,7 @@ struct StructuralContextFrame {
     outputs: Vec<Handle>,
 }
 
-trait StructuralRead {
+pub trait StructuralReadV1 {
     fn is_valid(&self, handle: Handle) -> bool;
     fn poles(&self, handle: Handle) -> Result<(Handle, Handle), StoreError>;
     fn start_incidence_handles(
@@ -253,7 +253,37 @@ trait StructuralRead {
     ) -> Result<Vec<Handle>, StoreError>;
 }
 
-impl StructuralRead for OptimizedLinkStore {
+pub trait StructuralStoreV1: StructuralReadV1 {
+    fn instance_id(&self) -> u64;
+    fn link_count(&self) -> usize;
+    fn ensure_pair(
+        &mut self,
+        start: Handle,
+        end: Handle,
+    ) -> Result<Handle, StoreError>;
+    fn ensure_start_self_closed(
+        &mut self,
+        child: Handle,
+    ) -> Result<Handle, StoreError>;
+    fn ensure_end_self_closed(
+        &mut self,
+        child: Handle,
+    ) -> Result<Handle, StoreError>;
+    fn append_checkpoint(&self) -> usize;
+    fn rollback_append(&mut self, checkpoint: usize);
+
+    /// Exposes a read-only physical topology view for discovery.
+    ///
+    /// The semantic engine never needs canonicalization maps during discovery.
+    /// Optimized CPU keeps its current zero-copy packed read view; other
+    /// physical backends may provide any equivalent StructuralReadV1 view.
+    fn with_read_view<T>(
+        &self,
+        f: impl FnOnce(&dyn StructuralReadV1) -> T,
+    ) -> T;
+}
+
+impl StructuralReadV1 for OptimizedLinkStore {
     fn is_valid(&self, handle: Handle) -> bool {
         OptimizedLinkStore::is_valid(self, handle)
     }
@@ -270,7 +300,60 @@ impl StructuralRead for OptimizedLinkStore {
     }
 }
 
-impl StructuralRead for PackedExecutionView {
+impl StructuralStoreV1 for OptimizedLinkStore {
+    fn instance_id(&self) -> u64 {
+        u64::from(OptimizedLinkStore::instance_id(self))
+    }
+
+    fn link_count(&self) -> usize {
+        OptimizedLinkStore::link_count(self)
+    }
+
+    fn ensure_pair(
+        &mut self,
+        start: Handle,
+        end: Handle,
+    ) -> Result<Handle, StoreError> {
+        OptimizedLinkStore::ensure_pair(self, start, end)
+    }
+
+    fn ensure_start_self_closed(
+        &mut self,
+        child: Handle,
+    ) -> Result<Handle, StoreError> {
+        OptimizedLinkStore::ensure_start_self_closed(self, child)
+    }
+
+    fn ensure_end_self_closed(
+        &mut self,
+        child: Handle,
+    ) -> Result<Handle, StoreError> {
+        OptimizedLinkStore::ensure_end_self_closed(self, child)
+    }
+
+    fn append_checkpoint(&self) -> usize {
+        OptimizedLinkStore::append_checkpoint(self).link_count
+    }
+
+    fn rollback_append(&mut self, checkpoint: usize) {
+        OptimizedLinkStore::rollback_append(
+            self,
+            crate::StoreAppendCheckpoint {
+                link_count: checkpoint,
+            },
+        );
+    }
+
+    fn with_read_view<T>(
+        &self,
+        f: impl FnOnce(&dyn StructuralReadV1) -> T,
+    ) -> T {
+        let view = OptimizedLinkStore::packed_execution_ref(self);
+        f(&view)
+    }
+}
+
+impl StructuralReadV1 for PackedExecutionView {
     fn is_valid(&self, handle: Handle) -> bool {
         PackedExecutionView::is_valid(self, handle)
     }
@@ -287,7 +370,7 @@ impl StructuralRead for PackedExecutionView {
     }
 }
 
-impl StructuralRead for PackedExecutionRef<'_> {
+impl StructuralReadV1 for PackedExecutionRef<'_> {
     fn is_valid(&self, handle: Handle) -> bool {
         PackedExecutionRef::is_valid(self, handle)
     }
@@ -319,7 +402,7 @@ pub fn materialize_exact_sequence(
     Ok(current)
 }
 
-fn read_exact_sequence_from<R: StructuralRead + ?Sized>(
+fn read_exact_sequence_from<R: StructuralReadV1 + ?Sized>(
     store: &R,
     final_link: Handle,
 ) -> Result<Vec<Handle>, StructuralError> {
@@ -378,7 +461,7 @@ pub fn define_structural_role_dictionary(
     Ok(store.ensure_start_self_closed(sequence)?)
 }
 
-fn read_structural_role_dictionary_from<R: StructuralRead + ?Sized>(
+fn read_structural_role_dictionary_from<R: StructuralReadV1 + ?Sized>(
     store: &R,
     dictionary: Handle,
 ) -> Result<Vec<Handle>, StructuralError> {
@@ -438,7 +521,7 @@ pub fn define_structural_interpreter(
     Ok(store.ensure_pair(dictionary, grammar_theory)?)
 }
 
-fn read_structural_interpreter_from<R: StructuralRead + ?Sized>(
+fn read_structural_interpreter_from<R: StructuralReadV1 + ?Sized>(
     store: &R,
     interpreter: Handle,
 ) -> Result<StructuralInterpreter, StructuralError> {
@@ -465,7 +548,7 @@ pub fn read_structural_interpreter(
 
 const MAX_COMPILED_GROUNDED_CHECKS: usize = 32;
 
-fn compile_grounded_path_checks<R: StructuralRead + ?Sized>(
+fn compile_grounded_path_checks<R: StructuralReadV1 + ?Sized>(
     store: &R,
     template: Handle,
     roles: &[Handle],
@@ -550,7 +633,7 @@ fn compile_grounded_path_checks<R: StructuralRead + ?Sized>(
     Ok(checks)
 }
 
-fn compiled_grounded_paths_match<R: StructuralRead + ?Sized>(
+fn compiled_grounded_paths_match<R: StructuralReadV1 + ?Sized>(
     store: &R,
     claimed: Handle,
     checks: &[GroundedPathCheck],
@@ -580,7 +663,7 @@ fn compiled_grounded_paths_match<R: StructuralRead + ?Sized>(
 
 const STRUCTURAL_DISCRIMINATION_BUDGET: usize = 128;
 
-fn structural_discriminator_matches<R: StructuralRead + ?Sized>(
+fn structural_discriminator_matches<R: StructuralReadV1 + ?Sized>(
     store: &R,
     template: Handle,
     claimed: Handle,
@@ -637,7 +720,7 @@ fn structural_discriminator_matches<R: StructuralRead + ?Sized>(
     Ok(true)
 }
 
-fn unify_node<R: StructuralRead + ?Sized>(
+fn unify_node<R: StructuralReadV1 + ?Sized>(
     store: &R,
     template: Handle,
     claimed: Handle,
@@ -692,7 +775,7 @@ fn unify_node<R: StructuralRead + ?Sized>(
     Ok(())
 }
 
-fn unify_structural_rule_template_internal<R: StructuralRead + ?Sized>(
+fn unify_structural_rule_template_internal<R: StructuralReadV1 + ?Sized>(
     store: &R,
     template: Handle,
     claimed: Handle,
@@ -907,7 +990,7 @@ pub fn instantiate_structural_template(
     instantiate_structural_template_internal(store, template, bindings, &mut profile)
 }
 
-fn discover_triggered_rule_images_internal<R: StructuralRead + ?Sized>(
+fn discover_triggered_rule_images_internal<R: StructuralReadV1 + ?Sized>(
     store: &R,
     theory: Handle,
     active: Handle,
