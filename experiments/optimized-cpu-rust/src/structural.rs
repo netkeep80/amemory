@@ -2010,7 +2010,7 @@ mod tests {
         );
 
         let mut engine = OptimizedStructuralEngine::new(4);
-        engine.metadata_store_instance = Some(original.instance_id());
+        engine.metadata_store_instance = Some(u64::from(original.instance_id()));
         engine.rule_metadata_cache.insert(
             ROOT_HANDLE,
             CompiledRuleMetadata {
@@ -2043,7 +2043,7 @@ mod tests {
         // Merely seeing another store instance is sufficient to invalidate all
         // local-handle metadata before any semantic discovery can use it.
         let clone_id = cloned.instance_id();
-        assert_ne!(clone_id, engine.metadata_store_instance.unwrap());
+        assert_ne!(u64::from(clone_id), engine.metadata_store_instance.unwrap());
     }
 
     #[test]
