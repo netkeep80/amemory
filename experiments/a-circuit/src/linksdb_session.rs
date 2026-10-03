@@ -6,8 +6,15 @@ use super::session_contract::{
 use std::sync::atomic::{AtomicU64, Ordering};
 
 #[cfg(not(target_family = "wasm"))]
+use super::runtime_session::{
+    CpuRuntimeTraceMode, CpuSessionStepError, CpuSessionStepOutcomeV1,
+    StructuralRuntimeStateV1,
+};
+#[cfg(not(target_family = "wasm"))]
 use amemory_optimized_cpu_probe::{
-    structural::{StructuralReadV1, StructuralStoreV1},
+    structural::{
+        OptimizedStructuralEngine, StructuralReadV1, StructuralStoreV1,
+    },
     Handle, PackedCarrierImage, StoreError, ROOT_HANDLE,
 };
 #[cfg(not(target_family = "wasm"))]
@@ -30,32 +37,39 @@ pub(crate) trait LinksDbPhysicalStoreV1 {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum LinksDbCapabilityV1 {
-    Configure,
-    Step,
-    RunToQuiescence,
-    Profile,
-    Trace,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum LinksDbSessionErrorV1 {
-    UnsupportedCapability {
-        capability: LinksDbCapabilityV1,
-    },
     Closed,
+    EngineFailure,
+    InvalidState(SessionStateV1),
 }
 
-/// First real #272 consumer for the LinksDB physical backend.
+#[cfg(not(target_family = "wasm"))]
+impl From<CpuSessionStepError> for LinksDbSessionErrorV1 {
+    fn from(value: CpuSessionStepError) -> Self {
+        match value {
+            CpuSessionStepError::InvalidState(state) => {
+                Self::InvalidState(state)
+            }
+            CpuSessionStepError::EngineFailure => Self::EngineFailure,
+        }
+    }
+}
+
+/// One retained LinksDB A-memory Session.
 ///
-/// This Session is deliberately storage/lifecycle-only. It proves identity,
-/// state, snapshot and fail-closed capability reporting before semantic
-/// execution is connected to the physical adapter.
+/// The same type covers a truthful physical-only session and, when opened with
+/// a structural interpreter, a real executable Session. Execution does not
+/// belong to LinksDB: lifecycle is owned by StructuralRuntimeStateV1 and
+/// semantics by the single OptimizedStructuralEngine.
 pub(crate) struct LinksDbSessionV1<S: LinksDbPhysicalStoreV1> {
     store: S,
     identity: SessionIdentityV1,
-    state: SessionStateV1,
+    closed: bool,
     base_link_count: u32,
+    #[cfg(not(target_family = "wasm"))]
+    runtime: Option<StructuralRuntimeStateV1>,
+    #[cfg(not(target_family = "wasm"))]
+    engine: Option<OptimizedStructuralEngine>,
 }
 
 impl<S: LinksDbPhysicalStoreV1> LinksDbSessionV1<S> {
@@ -73,52 +87,100 @@ impl<S: LinksDbPhysicalStoreV1> LinksDbSessionV1<S> {
                     NEXT_LINKSDB_SESSION_ID.fetch_add(1, Ordering::Relaxed),
                 ),
             },
-            state: SessionStateV1::Open,
+            closed: false,
             base_link_count,
+            #[cfg(not(target_family = "wasm"))]
+            runtime: None,
+            #[cfg(not(target_family = "wasm"))]
+            engine: None,
         }
     }
 
-    fn reject(
-        &self,
-        capability: LinksDbCapabilityV1,
-    ) -> Result<(), LinksDbSessionErrorV1> {
-        if self.state == SessionStateV1::Closed {
-            Err(LinksDbSessionErrorV1::Closed)
-        } else {
-            Err(LinksDbSessionErrorV1::UnsupportedCapability { capability })
+    fn execution_enabled(&self) -> bool {
+        #[cfg(not(target_family = "wasm"))]
+        {
+            self.runtime.is_some() && self.engine.is_some()
         }
-    }
-
-    pub(crate) fn configure(
-        &mut self,
-    ) -> Result<(), LinksDbSessionErrorV1> {
-        self.reject(LinksDbCapabilityV1::Configure)
-    }
-
-    pub(crate) fn step(&mut self) -> Result<(), LinksDbSessionErrorV1> {
-        self.reject(LinksDbCapabilityV1::Step)
-    }
-
-    pub(crate) fn run_to_quiescence(
-        &mut self,
-    ) -> Result<(), LinksDbSessionErrorV1> {
-        self.reject(LinksDbCapabilityV1::RunToQuiescence)
-    }
-
-    pub(crate) fn profile(&self) -> Result<(), LinksDbSessionErrorV1> {
-        self.reject(LinksDbCapabilityV1::Profile)
-    }
-
-    pub(crate) fn trace(&self) -> Result<(), LinksDbSessionErrorV1> {
-        self.reject(LinksDbCapabilityV1::Trace)
+        #[cfg(target_family = "wasm")]
+        {
+            false
+        }
     }
 
     pub(crate) fn close(&mut self) -> bool {
-        if self.state == SessionStateV1::Closed {
+        if self.closed {
             return false;
         }
-        self.state = SessionStateV1::Closed;
+        self.closed = true;
         true
+    }
+}
+
+#[cfg(not(target_family = "wasm"))]
+impl<S> LinksDbSessionV1<S>
+where
+    S: LinksDbPhysicalStoreV1 + StructuralStoreV1,
+{
+    pub(crate) fn open_structural(
+        store: S,
+        interpreter: Handle,
+        scope_capacity: usize,
+    ) -> Result<Self, LinksDbSessionErrorV1> {
+        let mut session = Self::open(store);
+        let mut engine = OptimizedStructuralEngine::new(scope_capacity);
+        engine
+            .set_interpreter(&session.store, interpreter)
+            .map_err(|_| LinksDbSessionErrorV1::EngineFailure)?;
+        session.runtime = Some(StructuralRuntimeStateV1::new());
+        session.engine = Some(engine);
+        Ok(session)
+    }
+
+    pub(crate) fn begin_run(
+        &mut self,
+        initial: Handle,
+    ) -> Result<u64, LinksDbSessionErrorV1> {
+        if self.closed {
+            return Err(LinksDbSessionErrorV1::Closed);
+        }
+        let runtime = self
+            .runtime
+            .as_mut()
+            .ok_or(LinksDbSessionErrorV1::EngineFailure)?;
+        let engine = self
+            .engine
+            .as_mut()
+            .ok_or(LinksDbSessionErrorV1::EngineFailure)?;
+        runtime
+            .begin_run(&self.store, engine, initial)
+            .map_err(Into::into)
+    }
+
+    pub(crate) fn step(
+        &mut self,
+        trace_mode: CpuRuntimeTraceMode,
+    ) -> Result<CpuSessionStepOutcomeV1, LinksDbSessionErrorV1> {
+        if self.closed {
+            return Err(LinksDbSessionErrorV1::Closed);
+        }
+
+        let session_id = self.identity.session_id.clone();
+        let Self {
+            store,
+            runtime,
+            engine,
+            ..
+        } = self;
+        let runtime = runtime
+            .as_mut()
+            .ok_or(LinksDbSessionErrorV1::EngineFailure)?;
+        let engine = engine
+            .as_mut()
+            .ok_or(LinksDbSessionErrorV1::EngineFailure)?;
+
+        runtime
+            .step(&session_id, store, engine, trace_mode)
+            .map_err(Into::into)
     }
 }
 
@@ -132,19 +194,35 @@ impl<S: LinksDbPhysicalStoreV1> RuntimeSessionV1 for LinksDbSessionV1<S> {
     }
 
     fn runtime_state_v1(&self) -> SessionStateV1 {
-        self.state
+        if self.closed {
+            return SessionStateV1::Closed;
+        }
+        #[cfg(not(target_family = "wasm"))]
+        if let Some(runtime) = self.runtime.as_ref() {
+            return runtime.state();
+        }
+        SessionStateV1::Open
     }
 
     fn runtime_capabilities_v1(&self) -> SessionCapabilitiesV1 {
+        let execution = if self.execution_enabled() {
+            CapabilitySupportV1::Supported
+        } else {
+            CapabilitySupportV1::Unsupported
+        };
         SessionCapabilitiesV1 {
             schema_version: SESSION_CONTRACT_SCHEMA_VERSION,
             persistent_session: CapabilitySupportV1::Supported,
+            // Scenario-level input reconfiguration is not claimed until the
+            // configuration adapter is wired in L3c-c.
             reconfigure_without_reload: CapabilitySupportV1::Unsupported,
-            step: CapabilitySupportV1::Unsupported,
+            step: execution,
+            // The common bounded controller/resource accounting is the next
+            // slice; do not claim run-to-quiescence early.
             run_to_quiescence: CapabilitySupportV1::Unsupported,
             snapshot: CapabilitySupportV1::Supported,
-            profile: CapabilitySupportV1::Unsupported,
-            trace: CapabilitySupportV1::Unsupported,
+            profile: execution,
+            trace: execution,
             explicit_close: CapabilitySupportV1::Supported,
         }
     }
@@ -158,6 +236,10 @@ impl<S: LinksDbPhysicalStoreV1> RuntimeSessionV1 for LinksDbSessionV1<S> {
     }
 
     fn runtime_scope_width_v1(&self) -> u32 {
+        #[cfg(not(target_family = "wasm"))]
+        if let Some(engine) = self.engine.as_ref() {
+            return engine.current().len() as u32;
+        }
         0
     }
 }
