@@ -321,6 +321,19 @@ fn prepared_aset_fingerprint_v1(
     format!("{PREPARED_ASET_FINGERPRINT_ID}:{hash:016x}")
 }
 
+#[cfg(not(target_family = "wasm"))]
+struct ScenarioLinksDbSessionV1 {
+    manifest: ScenarioManifestV1,
+    program_profile: ScenarioProgramProfileV1,
+    adapter: &'static CpuScenarioAdapter,
+    session: LinksDbSessionV1<DoubletsPhysicalStoreV1>,
+    load: WebProofLoadStage,
+    loaded_prefix: Vec<(Handle, Handle)>,
+    session_open_profile: SessionOpenProfileV1,
+    program_fingerprint: String,
+    completed_runs: u64,
+}
+
 pub(crate) struct ScenarioCpuSessionV1 {
     manifest: ScenarioManifestV1,
     program_profile: ScenarioProgramProfileV1,
@@ -384,6 +397,25 @@ impl ScenarioCpuSessionV1 {
     }
 }
 
+fn resolve_program_adapter_v1(
+    requested: &ScenarioProgramProfileV1,
+) -> Result<&'static CpuScenarioAdapter, ScenarioRunnerErrorV1> {
+    resolve_cpu_scenario_adapter(requested).map_err(|error| match error {
+        CpuScenarioAdapterResolutionErrorV1::UnsupportedProgramProfile {
+            profile_id,
+        } => ScenarioRunnerErrorV1::UnsupportedProgramProfile {
+            profile_id,
+        },
+        CpuScenarioAdapterResolutionErrorV1::ProgramProfileMismatch {
+            requested,
+            canonical,
+        } => ScenarioRunnerErrorV1::ProgramProfileMismatch {
+            requested,
+            canonical,
+        },
+    })
+}
+
 pub(crate) fn open_cpu_scenario_session_v1(
     manifest: &ScenarioManifestV1,
 ) -> Result<ScenarioCpuSessionV1, ScenarioRunnerErrorV1> {
@@ -406,21 +438,7 @@ pub(crate) fn open_cpu_scenario_session_v1(
     // Resolve the complete descriptor before PREPARE. The adapter registry,
     // not caller-provided provenance text, is authority for the built-in
     // program that will actually be loaded.
-    let adapter = resolve_cpu_scenario_adapter(&manifest.program_profile)
-        .map_err(|error| match error {
-            CpuScenarioAdapterResolutionErrorV1::UnsupportedProgramProfile {
-                profile_id,
-            } => ScenarioRunnerErrorV1::UnsupportedProgramProfile {
-                profile_id,
-            },
-            CpuScenarioAdapterResolutionErrorV1::ProgramProfileMismatch {
-                requested,
-                canonical,
-            } => ScenarioRunnerErrorV1::ProgramProfileMismatch {
-                requested,
-                canonical,
-            },
-        })?;
+    let adapter = resolve_program_adapter_v1(&manifest.program_profile)?;
     let program_profile = adapter.canonical_program_profile();
 
     let (prepare, prepare_ns) = time_stage(|| adapter.prepare());
