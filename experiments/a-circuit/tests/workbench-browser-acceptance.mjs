@@ -200,6 +200,7 @@ for (const required of [
   "REACTION_BUDGET_EXCEEDED",
   "APPENDED_LINKS_BUDGET_EXCEEDED",
   "AMBIGUOUS_RULE_MATCH",
+  "sessionId: state.sessionId",
   "baseUploadCount: 1",
   "reactionDispatchCount",
   "resident.close()",
@@ -384,7 +385,10 @@ const fakeResident = await openGpuCarrierResidentSession(
   fakeResidentParsed,
 );
 const fakeResidentOpen = fakeResident.telemetry();
-if (fakeResidentOpen.baseUploadCount !== 1 ||
+if (typeof fakeResident.sessionId !== "string" ||
+    fakeResident.sessionId.length === 0 ||
+    fakeResidentOpen.sessionId !== fakeResident.sessionId ||
+    fakeResidentOpen.baseUploadCount !== 1 ||
     fakeResidentOpen.baseUploadBytes !== 4 ||
     fakeResidentOpen.baseBufferCount !== 1 ||
     fakeResidentOpen.residentAppendCount !== 0 ||
