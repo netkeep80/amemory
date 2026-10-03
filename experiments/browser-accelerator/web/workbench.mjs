@@ -16,6 +16,29 @@ const BACKENDS = [
   ["linksdb", "LinksDB"],
 ];
 
+const WORKBENCH_HOST_BACKENDS = new Set([
+  "optimized-cpu",
+  "webgpu",
+]);
+
+export function workbenchBackendAvailability(manifest, backendId) {
+  const scenarioSupported =
+    (manifest?.supportedBackends || []).includes(backendId);
+  const hostSupported = WORKBENCH_HOST_BACKENDS.has(backendId);
+  return Object.freeze({
+    scenarioSupported,
+    hostSupported,
+    executable: scenarioSupported && hostSupported,
+  });
+}
+
+export function workbenchDefaultBackend(manifest) {
+  return BACKENDS
+    .map(([id]) => id)
+    .find((id) => workbenchBackendAvailability(manifest, id).executable)
+    ?? null;
+}
+
 const STAGE_LABELS = Object.freeze({
   PREPARE: "Подготовка",
   LOAD: "Загрузка",
@@ -1484,8 +1507,7 @@ async function loadManifest(state, index) {
   state.manifest = JSON.parse(source);
   state.presetIndex = 0;
   state.mode = "preset";
-  state.backend =
-    (state.manifest.supportedBackends || [])[0] || "optimized-cpu";
+  state.backend = workbenchDefaultBackend(state.manifest) || "";
   state.session = null;
   state.run = null;
   state.step = null;
@@ -1516,6 +1538,19 @@ async function open(state) {
   state.error = null;
   render(state);
   try {
+    const availability =
+      workbenchBackendAvailability(state.manifest, state.backend);
+    if (!availability.scenarioSupported) {
+      throw new Error(
+        "Сценарий не поддерживает исполнитель " + state.backend,
+      );
+    }
+    if (!availability.hostSupported) {
+      throw new Error(
+        "Исполнитель " + state.backend +
+        " недоступен в браузерном хосте",
+      );
+    }
     const opened = await state.worker.open(
       state.manifest,
       state.backend,
@@ -1861,17 +1896,22 @@ function tab(state) {
           ).join("") + '</tbody></table>');
   }
   if (state.tab === "compare") {
-    const supported = new Set(state.manifest.supportedBackends || []);
-    return '<div class="wb-help">Интерфейс не выдумывает дифференциальный результат. Сравнение станет исполняемым, когда один и тот же сценарий будут поддерживать как минимум два постоянных адаптера.</div>' +
-      '<table class="wb-table"><thead><tr><th>Исполнитель</th><th>Поддержка сценарием</th><th>Текущее состояние</th></tr></thead><tbody>' +
-      BACKENDS.map(([id, label]) =>
-        '<tr><td>' + esc(label) + '</td><td>' +
-        esc(supported.has(id) ? "заявлена поддержка" : "не заявлена") +
-        '</td><td>' + esc(id === state.backend && state.session ? "активная сессия" :
-          supported.has(id) ? "доступен после реализации адаптера" : "не поддерживается") +
-        '</td></tr>'
-      ).join("") + '</tbody></table>' +
-      '<div class="wb-help">Постоянные адаптеры WebGPU / LinksDB отслеживаются в #279 / #280; дифференциальное сравнение — в #281.</div>';
+    return '<div class="wb-help">Интерфейс не выдумывает дифференциальный результат. Поддержка сценария и доступность конкретного хоста показаны отдельно.</div>' +
+      '<table class="wb-table"><thead><tr><th>Исполнитель</th><th>Поддержка сценарием</th><th>Доступность хоста</th><th>Текущее состояние</th></tr></thead><tbody>' +
+      BACKENDS.map(([id, label]) => {
+        const availability =
+          workbenchBackendAvailability(state.manifest, id);
+        return '<tr><td>' + esc(label) + '</td><td>' +
+          esc(availability.scenarioSupported ? "заявлена поддержка" : "не заявлена") +
+          '</td><td>' +
+          esc(availability.hostSupported ? "доступен в браузере" : "недоступен в браузере") +
+          '</td><td>' +
+          esc(id === state.backend && state.session ? "активная сессия" :
+            availability.executable ? "готов к открытию" :
+            availability.scenarioSupported ? "другой host" : "не поддерживается") +
+          '</td></tr>';
+      }).join("") + '</tbody></table>' +
+      '<div class="wb-help">LinksDB исполняется native Rust host; браузерный Workbench не подменяет его CPU. Дифференциальное сравнение — #281.</div>';
   }
   const recursive = workbenchRecursiveStructure(run);
   return '<div class="wb-help">Уровни ниже независимы: отсутствие данных не считается успешной проверкой.</div>' +
@@ -1967,14 +2007,23 @@ function render(state) {
 
     '<div class="wb-field"><label>Исполнитель</label><select id="wb-backend"' + (openSession ? " disabled" : "") + '>' +
     BACKENDS.map(([id, label]) => {
-      const supported = (state.manifest.supportedBackends || []).includes(id);
+      const availability =
+        workbenchBackendAvailability(state.manifest, id);
+      const suffix = !availability.scenarioSupported
+        ? " — не поддерживается сценарием"
+        : !availability.hostSupported
+          ? " — недоступен в браузере"
+          : "";
       return '<option value="' + id + '"' + (id === state.backend ? " selected" : "") +
-        (supported ? "" : " disabled") + '>' + esc(label + (supported ? "" : " — не поддерживается")) + '</option>';
-    }).join("") + '</select><div class="wb-help">Неподдерживаемые исполнители показаны явно; скрытого переключения на другой исполнитель нет.</div></div>' +
+        (availability.executable ? "" : " disabled") + '>' +
+        esc(label + suffix) + '</option>';
+    }).join("") + '</select><div class="wb-help">Поддержка сценария и возможности текущего хоста различаются. Скрытого переключения на другой исполнитель нет.</div></div>' +
     gpuWitnessHtml(state) +
 
     '<div class="wb-actions"><button id="wb-open"' +
-      (openSession || state.loading ? " disabled" : "") +
+      (openSession || state.loading ||
+       !workbenchBackendAvailability(state.manifest, state.backend).executable
+        ? " disabled" : "") +
     '>Открыть апамять</button><button id="wb-run" class="primary"' +
       (!openSession || state.loading || state.step?.active ? " disabled" : "") +
     '>Выполнить полностью</button><button id="wb-step-start"' +
