@@ -89,16 +89,15 @@ impl Default for CpuRunResourceBudgetV1 {
     }
 }
 
-impl CpuRunResourceBudgetV1 {
-    fn carrier_stop_reason(
-        self,
-        dense_carrier_allocated_bytes: u64,
-    ) -> Option<RunStopReasonV1> {
-        if dense_carrier_allocated_bytes > self.max_dense_carrier_bytes {
-            Some(RunStopReasonV1::CarrierBytesBudgetExceeded)
-        } else {
-            None
-        }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum BackendRunResourceBudgetV1 {
+    None,
+    OptimizedCpuDenseCarrier(CpuRunResourceBudgetV1),
+}
+
+impl BackendRunResourceBudgetV1 {
+    fn optimized_cpu_default() -> Self {
+        Self::OptimizedCpuDenseCarrier(CpuRunResourceBudgetV1::default())
     }
 }
 
@@ -126,23 +125,49 @@ fn run_stop_reason_from_step_error(
 }
 
 #[derive(Debug)]
-pub(crate) struct CpuControlledStepV1 {
+pub(crate) struct ControlledStepV1 {
     pub(crate) step: Option<CpuSessionStepOutcomeV1>,
     pub(crate) stop_reason: Option<RunStopReasonV1>,
     pub(crate) budget_accounting: RunBudgetAccountingV1,
 }
 
+/// Minimal host boundary used by the one bounded run controller.
+///
+/// Common reaction/Link/Scope/work budgets live in RunControllerV1. A backend
+/// may additionally expose one explicit physical-resource budget/accounting
+/// policy. Missing physical accounting is represented by None, never zero.
+pub(crate) trait BoundedRuntimeSessionV1 {
+    fn bounded_step_v1(
+        &mut self,
+        trace_mode: CpuRuntimeTraceMode,
+    ) -> Result<CpuSessionStepOutcomeV1, CpuSessionStepError>;
+
+    fn bounded_fail_active_run_v1(&mut self);
+    fn bounded_total_links_v1(&self) -> u32;
+    fn bounded_scope_width_v1(&self) -> u32;
+
+    fn bounded_backend_stop_reason_v1(
+        &self,
+        resource_budget: BackendRunResourceBudgetV1,
+    ) -> Option<RunStopReasonV1>;
+
+    fn bounded_backend_accounting_v1(
+        &self,
+        resource_budget: BackendRunResourceBudgetV1,
+    ) -> Option<BackendResourceAccountingV1>;
+}
+
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct CpuRunControllerV1 {
+pub(crate) struct RunControllerV1 {
     budget: RunBudgetV1,
-    resource_budget: CpuRunResourceBudgetV1,
+    resource_budget: BackendRunResourceBudgetV1,
     run_id: u64,
     links_before_run: u32,
     steps_taken: u32,
     work_usage: RunWorkUsageV1,
 }
 
-impl CpuRunControllerV1 {
+impl RunControllerV1 {
     fn new(
         budget: RunBudgetV1,
         run_id: u64,
@@ -150,15 +175,15 @@ impl CpuRunControllerV1 {
     ) -> Self {
         Self::new_with_resource_budget(
             budget,
-            CpuRunResourceBudgetV1::default(),
+            BackendRunResourceBudgetV1::optimized_cpu_default(),
             run_id,
             links_before_run,
         )
     }
 
-    fn new_with_resource_budget(
+    pub(crate) fn new_with_resource_budget(
         budget: RunBudgetV1,
-        resource_budget: CpuRunResourceBudgetV1,
+        resource_budget: BackendRunResourceBudgetV1,
         run_id: u64,
         links_before_run: u32,
     ) -> Self {
@@ -172,6 +197,19 @@ impl CpuRunControllerV1 {
         }
     }
 
+    pub(crate) fn new_without_backend_resource(
+        budget: RunBudgetV1,
+        run_id: u64,
+        links_before_run: u32,
+    ) -> Self {
+        Self::new_with_resource_budget(
+            budget,
+            BackendRunResourceBudgetV1::None,
+            run_id,
+            links_before_run,
+        )
+    }
+
     pub(crate) fn run_id(&self) -> u64 {
         self.run_id
     }
@@ -180,11 +218,11 @@ impl CpuRunControllerV1 {
         self.links_before_run
     }
 
-    pub(crate) fn budget_accounting(
+    pub(crate) fn budget_accounting<S: BoundedRuntimeSessionV1>(
         &self,
-        session: &CpuRuntimeSession,
+        session: &S,
     ) -> RunBudgetAccountingV1 {
-        let total_links = session.memory.store.link_count() as u32;
+        let total_links = session.bounded_total_links_v1();
         RunBudgetAccountingV1 {
             schema_version: RUN_BUDGET_ACCOUNTING_SCHEMA_VERSION,
             reactions_consumed: self.steps_taken,
@@ -194,7 +232,7 @@ impl CpuRunControllerV1 {
             max_appended_links: self.budget.max_appended_links,
             total_links,
             max_total_links: self.budget.max_total_links,
-            scope_width: session.engine.current().len() as u32,
+            scope_width: session.bounded_scope_width_v1(),
             max_scope_width: self.budget.max_scope_width,
             match_candidates: self.work_usage.match_candidates,
             max_match_candidates: self.budget.max_match_candidates,
@@ -202,56 +240,47 @@ impl CpuRunControllerV1 {
             max_unification_nodes: self.budget.max_unification_nodes,
             instantiation_nodes: self.work_usage.instantiation_nodes,
             max_instantiation_nodes: self.budget.max_instantiation_nodes,
-            backend_resource: Some(
-                BackendResourceAccountingV1::OptimizedCpuDenseCarrier {
-                    dense_carrier_allocated_bytes: session
-                        .memory
-                        .store
-                        .dense_carrier_index_allocated_bytes(),
-                    max_dense_carrier_bytes:
-                        self.resource_budget.max_dense_carrier_bytes,
-                    full_resident_bytes_available: false,
-                },
-            ),
+            backend_resource: session
+                .bounded_backend_accounting_v1(self.resource_budget),
         }
     }
 
-    fn stopped(
+    fn stopped<S: BoundedRuntimeSessionV1>(
         &self,
-        session: &CpuRuntimeSession,
+        session: &S,
         step: Option<CpuSessionStepOutcomeV1>,
         stop_reason: RunStopReasonV1,
-    ) -> CpuControlledStepV1 {
-        CpuControlledStepV1 {
+    ) -> ControlledStepV1 {
+        ControlledStepV1 {
             step,
             stop_reason: Some(stop_reason),
             budget_accounting: self.budget_accounting(session),
         }
     }
 
-    pub(crate) fn next(
+    pub(crate) fn next<S: BoundedRuntimeSessionV1>(
         &mut self,
-        session: &mut CpuRuntimeSession,
+        session: &mut S,
         trace_mode: CpuRuntimeTraceMode,
-    ) -> CpuControlledStepV1 {
-        if let Some(reason) = self.resource_budget.carrier_stop_reason(
-            session.memory.store.dense_carrier_index_allocated_bytes(),
-        ) {
-            session.fail_active_run();
+    ) -> ControlledStepV1 {
+        if let Some(reason) =
+            session.bounded_backend_stop_reason_v1(self.resource_budget)
+        {
+            session.bounded_fail_active_run_v1();
             return self.stopped(session, None, reason);
         }
 
         if let Some(reason) = self.budget.resource_stop_reason(
             self.links_before_run,
-            session.memory.store.link_count() as u32,
-            session.engine.current().len() as u32,
+            session.bounded_total_links_v1(),
+            session.bounded_scope_width_v1(),
         ) {
-            session.fail_active_run();
+            session.bounded_fail_active_run_v1();
             return self.stopped(session, None, reason);
         }
 
         if self.steps_taken >= self.budget.max_reactions {
-            session.fail_active_run();
+            session.bounded_fail_active_run_v1();
             return self.stopped(
                 session,
                 None,
@@ -259,10 +288,10 @@ impl CpuRunControllerV1 {
             );
         }
 
-        let step = match session.step(trace_mode) {
+        let step = match session.bounded_step_v1(trace_mode) {
             Ok(step) => step,
             Err(error) => {
-                session.fail_active_run();
+                session.bounded_fail_active_run_v1();
                 return self.stopped(
                     session,
                     None,
@@ -275,22 +304,22 @@ impl CpuRunControllerV1 {
 
         if let Some(reason) = self.budget.resource_stop_reason(
             self.links_before_run,
-            session.memory.store.link_count() as u32,
-            session.engine.current().len() as u32,
+            session.bounded_total_links_v1(),
+            session.bounded_scope_width_v1(),
         ) {
-            session.fail_active_run();
+            session.bounded_fail_active_run_v1();
             return self.stopped(session, Some(step), reason);
         }
 
-        if let Some(reason) = self.resource_budget.carrier_stop_reason(
-            session.memory.store.dense_carrier_index_allocated_bytes(),
-        ) {
-            session.fail_active_run();
+        if let Some(reason) =
+            session.bounded_backend_stop_reason_v1(self.resource_budget)
+        {
+            session.bounded_fail_active_run_v1();
             return self.stopped(session, Some(step), reason);
         }
 
         if let Some(reason) = self.budget.work_stop_reason(self.work_usage) {
-            session.fail_active_run();
+            session.bounded_fail_active_run_v1();
             return self.stopped(session, Some(step), reason);
         }
 
@@ -298,7 +327,7 @@ impl CpuRunControllerV1 {
             .reaction
             .quiescent
             .then_some(RunStopReasonV1::Quiescent);
-        CpuControlledStepV1 {
+        ControlledStepV1 {
             step: Some(step),
             stop_reason,
             budget_accounting: self.budget_accounting(session),
@@ -307,7 +336,7 @@ impl CpuRunControllerV1 {
 }
 
 #[derive(Debug)]
-pub(crate) struct CpuBoundedRunV1 {
+pub(crate) struct BoundedRunV1 {
     pub(crate) run_id: u64,
     pub(crate) links_before_run: u32,
     pub(crate) steps: Vec<CpuSessionStepOutcomeV1>,
@@ -526,7 +555,7 @@ impl CpuRuntimeSession {
         &mut self,
         initial: Handle,
         budget: RunBudgetV1,
-    ) -> Result<CpuRunControllerV1, CpuSessionStepError> {
+    ) -> Result<RunControllerV1, CpuSessionStepError> {
         self.begin_budgeted_run_with_resource_budget(
             initial,
             budget,
@@ -539,11 +568,13 @@ impl CpuRuntimeSession {
         initial: Handle,
         budget: RunBudgetV1,
         resource_budget: CpuRunResourceBudgetV1,
-    ) -> Result<CpuRunControllerV1, CpuSessionStepError> {
+    ) -> Result<RunControllerV1, CpuSessionStepError> {
         let run_id = self.begin_run(initial)?;
-        Ok(CpuRunControllerV1::new_with_resource_budget(
+        Ok(RunControllerV1::new_with_resource_budget(
             budget,
-            resource_budget,
+            BackendRunResourceBudgetV1::OptimizedCpuDenseCarrier(
+                resource_budget,
+            ),
             run_id,
             self.memory.store.link_count() as u32,
         ))
@@ -554,7 +585,7 @@ impl CpuRuntimeSession {
         initial: Handle,
         budget: RunBudgetV1,
         trace_mode: CpuRuntimeTraceMode,
-    ) -> Result<CpuBoundedRunV1, RunStopReasonV1> {
+    ) -> Result<BoundedRunV1, RunStopReasonV1> {
         self.run_to_quiescence_with_resource_budget(
             initial,
             budget,
@@ -569,7 +600,7 @@ impl CpuRuntimeSession {
         budget: RunBudgetV1,
         resource_budget: CpuRunResourceBudgetV1,
         trace_mode: CpuRuntimeTraceMode,
-    ) -> Result<CpuBoundedRunV1, RunStopReasonV1> {
+    ) -> Result<BoundedRunV1, RunStopReasonV1> {
         let mut controller = self
             .begin_budgeted_run_with_resource_budget(
                 initial,
@@ -588,7 +619,7 @@ impl CpuRuntimeSession {
                 steps.push(step);
             }
             if let Some(stop_reason) = controlled.stop_reason {
-                return Ok(CpuBoundedRunV1 {
+                return Ok(BoundedRunV1 {
                     run_id,
                     links_before_run,
                     steps,
@@ -601,6 +632,64 @@ impl CpuRuntimeSession {
 
     pub(crate) fn fail_active_run(&mut self) {
         self.runtime.fail_active_run();
+    }
+}
+
+impl BoundedRuntimeSessionV1 for CpuRuntimeSession {
+    fn bounded_step_v1(
+        &mut self,
+        trace_mode: CpuRuntimeTraceMode,
+    ) -> Result<CpuSessionStepOutcomeV1, CpuSessionStepError> {
+        self.step(trace_mode)
+    }
+
+    fn bounded_fail_active_run_v1(&mut self) {
+        self.fail_active_run();
+    }
+
+    fn bounded_total_links_v1(&self) -> u32 {
+        self.memory.store.link_count() as u32
+    }
+
+    fn bounded_scope_width_v1(&self) -> u32 {
+        self.engine.current().len() as u32
+    }
+
+    fn bounded_backend_stop_reason_v1(
+        &self,
+        resource_budget: BackendRunResourceBudgetV1,
+    ) -> Option<RunStopReasonV1> {
+        match resource_budget {
+            BackendRunResourceBudgetV1::None => None,
+            BackendRunResourceBudgetV1::OptimizedCpuDenseCarrier(budget) => {
+                let bytes =
+                    self.memory.store.dense_carrier_index_allocated_bytes();
+                (bytes > budget.max_dense_carrier_bytes)
+                    .then_some(RunStopReasonV1::CarrierBytesBudgetExceeded)
+            }
+        }
+    }
+
+    fn bounded_backend_accounting_v1(
+        &self,
+        resource_budget: BackendRunResourceBudgetV1,
+    ) -> Option<BackendResourceAccountingV1> {
+        match resource_budget {
+            BackendRunResourceBudgetV1::None => None,
+            BackendRunResourceBudgetV1::OptimizedCpuDenseCarrier(budget) => {
+                Some(
+                    BackendResourceAccountingV1::OptimizedCpuDenseCarrier {
+                        dense_carrier_allocated_bytes: self
+                            .memory
+                            .store
+                            .dense_carrier_index_allocated_bytes(),
+                        max_dense_carrier_bytes:
+                            budget.max_dense_carrier_bytes,
+                        full_resident_bytes_available: false,
+                    },
+                )
+            }
+        }
     }
 }
 
