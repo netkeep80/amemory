@@ -846,36 +846,222 @@ async function buildInfo() {
 }
 
 
-const GPU_WITNESS_COMPACT_ABI = Object.freeze({
-  available: "amemory_i386_lab_compact_proof_available",
-  length: "amemory_i386_lab_compact_proof_json_len",
-  pointer: "amemory_i386_lab_compact_proof_json_ptr",
-  byte: "amemory_i386_lab_compact_proof_json_byte",
+const GPU_WITNESS_RESULT_ABI = Object.freeze({
+  available: "amemory_i386_lab_result_available",
+  length: "amemory_i386_lab_result_json_len",
+  pointer: "amemory_i386_lab_result_json_ptr",
+  byte: "amemory_i386_lab_result_json_byte",
 });
 
-function sameU32Prefix(actual, expected, prefixLength) {
-  return Array.isArray(expected) &&
-    Number.isInteger(prefixLength) &&
-    prefixLength >= 0 &&
-    actual.length === prefixLength &&
-    expected.length >= prefixLength &&
-    actual.every(
-      (value, index) => (value >>> 0) === (expected[index] >>> 0),
-    );
+function requireMux1StaticRoots(metadata, carrier) {
+  if (metadata?.schemaVersion !== 1 ||
+      metadata?.representationId !== "amemory-i386-lab-result-json" ||
+      metadata?.witnessKind !== "gpu-carrier" ||
+      metadata?.compactProofAvailable !== false ||
+      metadata?.payload?.staticProgram !== true ||
+      metadata?.payload?.linkCount !== carrier.layout.linkCount ||
+      !Array.isArray(metadata?.payload?.semanticRoots)) {
+    throw new Error("WebGPU static PREPARE metadata mismatch");
+  }
+  const roots = {};
+  for (const root of metadata.payload.semanticRoots) {
+    if (typeof root?.role !== "string" ||
+        !Number.isInteger(root?.carrierRef) ||
+        root.carrierRef < 1 ||
+        root.carrierRef > carrier.layout.linkCount) {
+      throw new Error("WebGPU static PREPARE contains invalid semantic root");
+    }
+    roots[root.role] = root.carrierRef >>> 0;
+  }
+  for (const role of [
+    "function.mux1",
+    "data.zero",
+    "data.one",
+    "execution.interpreter",
+    "execution.theory",
+    "execution.apply",
+    "context.caller",
+    "result.tag",
+  ]) {
+    if (!Number.isInteger(roots[role])) {
+      throw new Error("WebGPU static PREPARE misses root " + role);
+    }
+  }
+  for (const forbidden of [
+    "data.select",
+    "data.a",
+    "data.b",
+    "invocation.args",
+    "invocation.call",
+    "scope.initial",
+  ]) {
+    if (Object.hasOwn(roots, forbidden)) {
+      throw new Error(
+        "WebGPU static PREPARE illegally contains runtime root " + forbidden,
+      );
+    }
+  }
+  return Object.freeze(roots);
 }
 
-function sameU32Segment(actual, expected, offset, length) {
-  return Array.isArray(expected) &&
-    Number.isInteger(offset) &&
-    Number.isInteger(length) &&
-    offset >= 0 &&
-    length >= 0 &&
-    actual.length === length &&
-    expected.length >= offset + length &&
-    actual.every(
-      (value, index) =>
-        (value >>> 0) === (expected[offset + index] >>> 0),
+function mux1ResidentConfigurationRecipe(carrier, roots, inputs) {
+  const bit = (key) => {
+    const value = Number(inputs?.[key]);
+    if (!Number.isInteger(value) || value < 0 || value > 1) {
+      throw new Error("canonical MUX1 Scenario input " + key + " is not BIT");
+    }
+    return value === 0 ? roots["data.zero"] : roots["data.one"];
+  };
+  const H = (handle) => ({ handle });
+  const O = (operation) => ({ operation });
+  const operations = [];
+  let sequence = H(carrier.layout.rootHandle);
+
+  for (const key of ["S", "A", "B"]) {
+    const pair = operations.length;
+    operations.push({
+      kind: "PAIR",
+      start: sequence,
+      end: H(bit(key)),
+    });
+    const cell = operations.length;
+    operations.push({ kind: "START", child: O(pair) });
+    sequence = O(cell);
+  }
+
+  const functionArgument = operations.length;
+  operations.push({
+    kind: "PAIR",
+    start: H(roots["function.mux1"]),
+    end: sequence,
+  });
+  const invocation = operations.length;
+  operations.push({
+    kind: "PAIR",
+    start: H(roots["execution.apply"]),
+    end: O(functionArgument),
+  });
+  const initial = operations.length;
+  operations.push({
+    kind: "PAIR",
+    start: H(roots["context.caller"]),
+    end: O(invocation),
+  });
+
+  return Object.freeze({
+    interpreterHandle: roots["execution.interpreter"],
+    operations: Object.freeze(operations),
+    initial: O(initial),
+  });
+}
+
+function topologyPoles(carrier, residentStarts, residentEnds, handle) {
+  if (!Number.isInteger(handle) || handle < 1) return null;
+  if (handle <= carrier.layout.linkCount) {
+    return [
+      carrier.sections.starts[handle - 1] >>> 0,
+      carrier.sections.ends[handle - 1] >>> 0,
+    ];
+  }
+  const index = handle - carrier.layout.linkCount - 1;
+  if (index < 0 || index >= residentStarts.length ||
+      index >= residentEnds.length) {
+    return null;
+  }
+  return [residentStarts[index] >>> 0, residentEnds[index] >>> 0];
+}
+
+function readExactSequenceTopology(
+  carrier,
+  residentStarts,
+  residentEnds,
+  finalHandle,
+) {
+  if (finalHandle === carrier.layout.rootHandle) return [];
+  const reversed = [];
+  const seen = new Set();
+  let current = finalHandle;
+  while (current !== carrier.layout.rootHandle) {
+    if (seen.has(current)) {
+      throw new Error("WebGPU result ExactSequence is cyclic");
+    }
+    seen.add(current);
+    const cell = topologyPoles(
+      carrier,
+      residentStarts,
+      residentEnds,
+      current,
     );
+    if (!cell || cell[0] !== current || cell[1] === current) {
+      throw new Error("WebGPU result is not an ExactSequence");
+    }
+    const payload = topologyPoles(
+      carrier,
+      residentStarts,
+      residentEnds,
+      cell[1],
+    );
+    if (!payload) {
+      throw new Error("WebGPU result ExactSequence payload is missing");
+    }
+    reversed.push(payload[1]);
+    current = payload[0];
+  }
+  reversed.reverse();
+  return reversed;
+}
+
+function decodeMux1ResidentResult(
+  carrier,
+  residentStarts,
+  residentEnds,
+  finalHandle,
+  roots,
+) {
+  const final = topologyPoles(
+    carrier,
+    residentStarts,
+    residentEnds,
+    finalHandle,
+  );
+  if (!final || final[0] !== roots["context.caller"]) {
+    throw new Error("WebGPU MUX1 final Scope lost context.caller");
+  }
+  const endpoint = topologyPoles(
+    carrier,
+    residentStarts,
+    residentEnds,
+    final[1],
+  );
+  if (!endpoint || endpoint[0] !== roots["result.tag"]) {
+    throw new Error("WebGPU MUX1 final Scope lost result.tag");
+  }
+  const values = readExactSequenceTopology(
+    carrier,
+    residentStarts,
+    residentEnds,
+    endpoint[1],
+  );
+  if (values.length !== 1) {
+    throw new Error("WebGPU MUX1 result must contain exactly one bit");
+  }
+  if (values[0] === roots["data.zero"]) return 0;
+  if (values[0] === roots["data.one"]) return 1;
+  throw new Error("WebGPU MUX1 result is not data.zero/data.one");
+}
+
+function manifestAssertion(run, kind, field = null) {
+  const assertion = (run?.assertions || []).find((candidate) =>
+    candidate?.kind === kind &&
+    (field === null || candidate?.field === field)
+  );
+  if (!assertion) {
+    throw new Error(
+      "canonical Scenario run " + (run?.runId || "?") +
+      " misses assertion " + kind,
+    );
+  }
+  return assertion.expected;
 }
 
 export async function runWorkbenchWebGpuWitness(
@@ -890,37 +1076,55 @@ export async function runWorkbenchWebGpuWitness(
   }
   if (typeof catalogWasm?.amemory_i386_lab_gpu_carrier_prepare !== "function" ||
       catalogWasm.amemory_i386_lab_gpu_carrier_prepare() !== 1) {
-    throw new Error("A-Circuit WASM не подготовил C4c3 packed carrier");
+    throw new Error("A-Circuit WASM не подготовил static MUX1 packed carrier");
   }
 
   const suffix = /^[0-9a-f]{40}$/.test(sourceSha || "")
     ? "?v=" + sourceSha
     : "";
-  const [gpuModule, jsonModule] = await Promise.all([
-    import("./gpu-carrier.mjs" + suffix),
-    import("./i386-wasm-json.mjs" + suffix),
-  ]);
+  const [gpuModule, jsonModule, presetModule, scenarioModule] =
+    await Promise.all([
+      import("./gpu-carrier.mjs" + suffix),
+      import("./i386-wasm-json.mjs" + suffix),
+      import("./scenario-presets.mjs" + suffix),
+      import("./scenario-transport.mjs" + suffix),
+    ]);
+
   const carrier = gpuModule.readGpuCarrierWordsAbi(
     catalogWasm,
     undefined,
-    "Workbench C4c3 carrier",
+    "Workbench static MUX1 carrier",
   );
-  const compact = jsonModule.readJsonAbi(
+  const metadata = jsonModule.readJsonAbi(
     catalogWasm,
-    GPU_WITNESS_COMPACT_ABI,
-    "Workbench C4c3 compact proof",
+    GPU_WITNESS_RESULT_ABI,
+    "Workbench static MUX1 carrier metadata",
   );
-  if (!carrier || !compact ||
-      compact.schemaVersion !== 2 ||
-      compact.representationId !== "amemory-proof-compact-json" ||
-      compact.sourceProofSchemaVersion !== 4) {
-    throw new Error("C4c3 carrier/proof provenance mismatch");
+  if (!carrier) {
+    throw new Error("WebGPU static MUX1 carrier is unavailable");
+  }
+  const roots = requireMux1StaticRoots(metadata, carrier);
+
+  // The four typed input vectors come only from the canonical embedded Scenario.
+  const registry = presetModule.refreshScenarioPresetRegistry(catalogWasm);
+  const preset = presetModule.loadScenarioPresetManifest(
+    catalogWasm,
+    registry,
+    "mux1-lifecycle",
+    "1.0.0",
+  );
+  if (!preset) {
+    throw new Error("canonical mux1-lifecycle@1.0.0 Scenario is unavailable");
+  }
+  const manifest = JSON.parse(preset.source);
+  if (manifest?.scenarioId !== "mux1-lifecycle" ||
+      manifest?.scenarioVersion !== "1.0.0" ||
+      manifest?.programProfile?.profileId !== "a-circuit:mux1" ||
+      !Array.isArray(manifest?.runSequence) ||
+      manifest.runSequence.length !== 4) {
+    throw new Error("canonical MUX1 Scenario manifest mismatch");
   }
 
-  const input0 = gpuModule.deriveGpuCarrierReactionInput(
-    carrier,
-    compact.roots,
-  );
   const adapter = await navigator.gpu.requestAdapter();
   if (!adapter) {
     return {
@@ -936,215 +1140,214 @@ export async function runWorkbenchWebGpuWitness(
       device,
       carrier,
     );
-    const run = await resident.runToQuiescence(
-      input0,
-      { maxReactions: 4096 },
+
+    let residentStarts = [];
+    let residentEnds = [];
+    let firstInitialHandle = null;
+    const gpuRuns = [];
+
+    // GPU execution happens first. CPU/Rust/WASM Scenario execution below is
+    // post-readback comparison only and cannot seed Scope/result/append data.
+    for (let index = 0; index < manifest.runSequence.length; index += 1) {
+      const scenarioRun = manifest.runSequence[index];
+      if (scenarioRun.executionMode !== "TO_QUIESCENCE") {
+        throw new Error(
+          "WebGPU witness supports only canonical TO_QUIESCENCE runs",
+        );
+      }
+
+      const recipe = mux1ResidentConfigurationRecipe(
+        carrier,
+        roots,
+        scenarioRun.inputs,
+      );
+      const configured = await resident.configure(recipe);
+      residentStarts = [...configured.residentStarts];
+      residentEnds = [...configured.residentEnds];
+
+      if (index < 3 && configured.appendCount <= 0) {
+        throw new Error(
+          "new canonical MUX1 configuration did not publish Links at run " +
+          index,
+        );
+      }
+      if (index === 0) {
+        firstInitialHandle = configured.initialHandle;
+      }
+      if (index === 3 &&
+          (configured.appendCount !== 0 ||
+           configured.initialHandle !== firstInitialHandle)) {
+        throw new Error(
+          "return-to-first MUX1 configuration was not canonically reused",
+        );
+      }
+
+      const beforeExecution = resident.telemetry();
+      const run = await resident.runToQuiescence(
+        {
+          currentHandle: configured.initialHandle,
+          interpreterHandle: configured.interpreterHandle,
+        },
+        { maxReactions: scenarioRun.maxReactions ?? 4096 },
+      );
+      if (run.stopReason !== "QUIESCENT" || run.quiescent !== true) {
+        throw new Error(
+          "WebGPU Scenario run " + scenarioRun.runId +
+          " did not reach real QUIESCENT: " + run.stopReason,
+        );
+      }
+
+      for (const step of run.steps) {
+        const observed = step.observed;
+        if (observed.appendCount !== observed.appendStarts.length ||
+            observed.appendCount !== observed.appendEnds.length) {
+          throw new Error("WebGPU reaction append readback is inconsistent");
+        }
+        residentStarts.push(...observed.appendStarts);
+        residentEnds.push(...observed.appendEnds);
+      }
+
+      const value = decodeMux1ResidentResult(
+        carrier,
+        residentStarts,
+        residentEnds,
+        run.finalCurrentHandle,
+        roots,
+      );
+      const expectedValue = Number(
+        manifestAssertion(
+          scenarioRun,
+          "RESULT_FIELD_EQUALS",
+          "value",
+        ),
+      );
+      const expectedReactions = Number(
+        manifestAssertion(
+          scenarioRun,
+          "REACTION_COUNT_EQUALS",
+        ),
+      );
+      const expectedQuiescent = Boolean(
+        manifestAssertion(
+          scenarioRun,
+          "QUIESCENT_EQUALS",
+        ),
+      );
+      if (value !== expectedValue ||
+          run.activeReactionCount !== expectedReactions ||
+          run.quiescent !== expectedQuiescent) {
+        throw new Error(
+          "WebGPU Scenario assertions failed for " + scenarioRun.runId +
+          " value=" + value +
+          " active=" + run.activeReactionCount +
+          " quiescent=" + run.quiescent,
+        );
+      }
+
+      const afterExecution = resident.telemetry();
+      gpuRuns.push(Object.freeze({
+        manifestRunId: scenarioRun.runId,
+        inputs: Object.freeze({ ...scenarioRun.inputs }),
+        configurationAppendCount: configured.appendCount,
+        configurationReused: configured.appendCount === 0,
+        initialHandle: configured.initialHandle,
+        finalHandle: run.finalCurrentHandle,
+        value,
+        activeReactionCount: run.activeReactionCount,
+        stepCount: run.steps.length,
+        stopReason: run.stopReason,
+        executionAppendCount:
+          afterExecution.residentAppendCount -
+          beforeExecution.residentAppendCount,
+      }));
+    }
+
+    // Only after all four GPU results have been read back do we execute the
+    // same canonical manifest through the Rust/WASM optimized-CPU Session.
+    const cpu = scenarioModule.executeScenarioManifest(
+      catalogWasm,
+      manifest,
+      "optimized-cpu",
     );
-    const proofReactions = compact.execute?.reactions;
-    const append = compact.topology?.append;
-    if (!Array.isArray(proofReactions) ||
-        proofReactions.length === 0 ||
-        compact.execute?.finalQuiescent !== true ||
-        !Number.isInteger(compact.execute?.activeReactionCount)) {
-      throw new Error("Rust/WASM complete reaction evidence is incomplete");
-    }
-    if (run.stopReason !== "QUIESCENT" ||
-        run.quiescent !== true ||
-        run.steps.length !== proofReactions.length) {
+    if (!cpu.ok || cpu.report?.overallPass !== true ||
+        !Array.isArray(cpu.report?.runs) ||
+        cpu.report.runs.length !== gpuRuns.length) {
       throw new Error(
-        "WebGPU full run did not reach the accepted quiescent boundary" +
-        " stop=" + run.stopReason +
-        " gpuSteps=" + run.steps.length +
-        " proofSteps=" + proofReactions.length,
+        "post-readback optimized-CPU Scenario differential is unavailable",
       );
     }
 
-    let previousLinks = compact.load.linksAfterLoad >>> 0;
-    let appendOffset = 0;
-    let activeProofReactions = 0;
-    for (let index = 0; index < proofReactions.length; index += 1) {
-      const proof = proofReactions[index];
-      const gpu = run.steps[index];
-      const observed = gpu.observed;
-      if (!Array.isArray(proof.scopeBefore) ||
-          !Array.isArray(proof.scopeAfter) ||
-          proof.scopeBefore.length !== 1 ||
-          proof.scopeAfter.length !== 1) {
+    for (let index = 0; index < gpuRuns.length; index += 1) {
+      const gpu = gpuRuns[index];
+      const reference = cpu.report.runs[index];
+      if (reference?.manifestRunId !== gpu.manifestRunId ||
+          Number(reference?.result?.fields?.value) !== gpu.value ||
+          reference?.observed?.finalQuiescent !== true ||
+          Number(reference?.observed?.activeReactionCount) !==
+            gpu.activeReactionCount) {
         throw new Error(
-          "Rust/WASM reaction " + index + " has invalid Scope evidence",
+          "post-readback CPU/WebGPU Scenario differential failed at " +
+          gpu.manifestRunId,
         );
       }
-
-      const proofQuiescent = proof.quiescent === true;
-      const proofBefore = proof.scopeBefore[0] >>> 0;
-      const proofAfter = proof.scopeAfter[0] >>> 0;
-      const proofLinksAfter = proof.linksAfter >>> 0;
-      const proofAppend = proofLinksAfter - previousLinks;
-      const gpuAfter = observed.quiescent
-        ? observed.currentHandle
-        : observed.publishedHandle;
-      const sameAppend =
-        observed.appendCount === proofAppend &&
-        sameU32Segment(
-          observed.appendStarts,
-          append?.starts,
-          appendOffset,
-          proofAppend,
-        ) &&
-        sameU32Segment(
-          observed.appendEnds,
-          append?.ends,
-          appendOffset,
-          proofAppend,
-        );
-      const sameStep =
-        gpu.differential === true &&
-        observed.currentHandle === proofBefore &&
-        gpuAfter === proofAfter &&
-        observed.rawRuleMatches === (proof.rawRuleMatches >>> 0) &&
-        observed.quiescent === proofQuiescent &&
-        sameAppend;
-
-      if (!sameStep) {
-        throw new Error(
-          "C4c3 full resident differential disagreement at reaction " +
-          index +
-          " proofBefore=L" + proofBefore +
-          " gpuBefore=L" + observed.currentHandle +
-          " proofAfter=L" + proofAfter +
-          " gpuAfter=L" + gpuAfter +
-          " proofMatches=" + (proof.rawRuleMatches >>> 0) +
-          " gpuMatches=" + observed.rawRuleMatches +
-          " proofQuiescent=" + proofQuiescent +
-          " gpuQuiescent=" + observed.quiescent +
-          " proofAppend=" + proofAppend +
-          " gpuAppend=" + observed.appendCount,
-        );
-      }
-
-      if (!proofQuiescent) activeProofReactions += 1;
-      appendOffset += proofAppend;
-      previousLinks = proofLinksAfter;
     }
 
-    const lastProof = proofReactions[proofReactions.length - 1];
-    const proofFinalScope = lastProof.scopeAfter[0] >>> 0;
     const residency = resident.telemetry();
-    const sameRun =
-      run.activeReactionCount === activeProofReactions &&
-      activeProofReactions === (compact.execute.activeReactionCount >>> 0) &&
-      run.finalCurrentHandle === proofFinalScope &&
-      run.accounting.appendedLinksConsumed === appendOffset &&
-      run.accounting.totalLinks ===
-        carrier.layout.linkCount + appendOffset &&
-      residency.baseUploadCount === 1 &&
-      residency.baseUploadBytes === carrier.layout.totalBytes &&
-      residency.residentAppendCount === appendOffset &&
-      residency.reactionDispatchCount === proofReactions.length &&
-      residency.closed === false;
-
-    if (!sameRun) {
+    const expectedDispatches = gpuRuns.reduce(
+      (sum, run) => sum + run.stepCount,
+      0,
+    );
+    if (residency.baseUploadCount !== 1 ||
+        residency.configurationCommitCount !== gpuRuns.length ||
+        residency.configurationDispatchCount !== 3 ||
+        residency.reactionDispatchCount !== expectedDispatches ||
+        residency.closed !== false) {
       throw new Error(
-        "C4c3 full resident run accounting disagreement" +
-        " gpuActive=" + run.activeReactionCount +
-        " proofActive=" + activeProofReactions +
-        " gpuFinal=L" + run.finalCurrentHandle +
-        " proofFinal=L" + proofFinalScope +
-        " gpuAppend=" + residency.residentAppendCount +
-        " proofAppend=" + appendOffset +
-        " uploads=" + residency.baseUploadCount +
-        " dispatches=" + residency.reactionDispatchCount,
-      );
-    }
-
-    // Negative controls execute in fresh resident Sessions so they cannot
-    // contaminate the accepted full-run carrier. They prove bounded stops are
-    // not misreported as semantic quiescence.
-    let reactionBudgetProbe = null;
-    let reactionBudgetRun = null;
-    try {
-      reactionBudgetProbe = await gpuModule.openGpuCarrierResidentSession(
-        device,
-        carrier,
-      );
-      reactionBudgetRun = await reactionBudgetProbe.runToQuiescence(
-        input0,
-        { maxReactions: 1 },
-      );
-    } finally {
-      reactionBudgetProbe?.close();
-    }
-    const reactionBudgetFalsifier =
-      reactionBudgetRun?.stopReason === "REACTION_BUDGET_EXCEEDED" &&
-      reactionBudgetRun?.quiescent === false &&
-      reactionBudgetRun?.activeReactionCount === 1 &&
-      reactionBudgetRun?.stepsConsumed === 1 &&
-      reactionBudgetRun?.accounting?.reactionsConsumed === 1 &&
-      reactionBudgetRun?.residency?.baseUploadCount === 1;
-    if (!reactionBudgetFalsifier) {
-      throw new Error(
-        "C4c3 reaction-budget falsifier failed: " +
-        JSON.stringify(reactionBudgetRun),
-      );
-    }
-
-    let capacityProbe = null;
-    let capacityRun = null;
-    try {
-      capacityProbe = await gpuModule.openGpuCarrierResidentSession(
-        device,
-        carrier,
-        { maxResidentAppend: 1 },
-      );
-      capacityRun = await capacityProbe.runToQuiescence(
-        input0,
-        { maxReactions: 4096 },
-      );
-    } finally {
-      capacityProbe?.close();
-    }
-    const capacityFalsifier =
-      capacityRun?.stopReason === "APPENDED_LINKS_BUDGET_EXCEEDED" &&
-      capacityRun?.backendStopReason ===
-        "RESIDENT_APPEND_CAPACITY_EXCEEDED" &&
-      capacityRun?.quiescent === false &&
-      capacityRun?.stepsConsumed === 0 &&
-      capacityRun?.activeReactionCount === 0 &&
-      capacityRun?.accounting?.appendedLinksConsumed === 0 &&
-      capacityRun?.residency?.residentAppendCount === 0 &&
-      capacityRun?.residency?.baseUploadCount === 1;
-    if (!capacityFalsifier) {
-      throw new Error(
-        "C4c3 resident-capacity falsifier failed: " +
-        JSON.stringify(capacityRun),
+        "WebGPU persistent Scenario accounting mismatch: " +
+        JSON.stringify(residency),
       );
     }
 
     return {
       status: "verified",
-      tripleDifferential: true,
+      scenarioManifestDriven: true,
+      staticPreparedCarrier: true,
+      noExecutionSeed: true,
+      postReadbackCpuDifferential: true,
+      cpuReferenceSharesRustCore: true,
       sequentialResidentExecution: true,
-      fullResidentRun: true,
-      reactionBudgetFalsifier,
-      capacityFalsifier,
+      residentBaseReuse: true,
+      returnToFirstReuse:
+        gpuRuns[3].configurationReused === true &&
+        gpuRuns[3].initialHandle === gpuRuns[0].initialHandle,
+      allQuiescent: gpuRuns.every((run) => run.stopReason === "QUIESCENT"),
+      manifestAssertionsPassed: true,
       sourceSha: /^[0-9a-f]{40}$/.test(sourceSha || "")
         ? sourceSha
         : null,
+      scenarioId: manifest.scenarioId,
+      scenarioVersion: manifest.scenarioVersion,
       planMode: resident.plan.mode,
       linkCount: carrier.layout.linkCount,
-      stopReason: run.stopReason,
-      activeReactionCount: run.activeReactionCount,
-      stepCount: run.steps.length,
-      finalScopeHandle: run.finalCurrentHandle,
-      rustWasmFinalScope: proofFinalScope,
-      cpuGpuDifferential:
-        run.steps.every((step) => step.differential === true),
-      residentBaseReuse: true,
+      runCount: gpuRuns.length,
+      values: gpuRuns.map((run) => run.value),
+      activeReactionCounts:
+        gpuRuns.map((run) => run.activeReactionCount),
+      stepCounts: gpuRuns.map((run) => run.stepCount),
+      configurationAppendCounts:
+        gpuRuns.map((run) => run.configurationAppendCount),
+      executionAppendCounts:
+        gpuRuns.map((run) => run.executionAppendCount),
+      initialHandles: gpuRuns.map((run) => run.initialHandle),
+      finalScopeHandles: gpuRuns.map((run) => run.finalHandle),
       residentAppendCount: residency.residentAppendCount,
       residentCapacity: residency.residentCapacity,
       residentBufferBytes: residency.residentBufferBytes,
       baseUploadCount: residency.baseUploadCount,
       baseUploadBytes: residency.baseUploadBytes,
+      configurationCommitCount: residency.configurationCommitCount,
+      configurationDispatchCount: residency.configurationDispatchCount,
+      configurationUploadBytes: residency.configurationUploadBytes,
       reactionDispatchCount: residency.reactionDispatchCount,
     };
   } finally {
@@ -1182,32 +1385,33 @@ function gpuWitnessHtml(state) {
     failed: "ОШИБКА",
   };
   const detail = status === "verified"
-    ? '<strong>CPU = WebGPU = Rust/WASM</strong>' +
-      '<small>reaction₀ → … → QUIESCENT · ' +
-      esc(witness.planMode) + ' · Links ' +
-      esc(witness.linkCount) + ' · active ' +
-      esc(witness.activeReactionCount) + ' · steps ' +
-      esc(witness.stepCount) + ' · append ' +
-      esc(witness.residentAppendCount) + ' · base upload ×' +
-      esc(witness.baseUploadCount) + '</small>' +
-      '<code>Final Scope L' + esc(witness.finalScopeHandle) +
-      ' · ' + esc(witness.stopReason) + '</code>'
+    ? '<strong>WebGPU ↔ Rust/WASM после readback</strong>' +
+      '<small>' + esc(witness.scenarioId) + '@' +
+      esc(witness.scenarioVersion) + ' · runs ' +
+      esc(witness.runCount) + ' · values ' +
+      esc((witness.values || []).join(",")) + ' · active ' +
+      esc((witness.activeReactionCounts || []).join(",")) +
+      ' · config append ' +
+      esc((witness.configurationAppendCounts || []).join(",")) +
+      ' · base upload ×' + esc(witness.baseUploadCount) + '</small>' +
+      '<code>return-to-first=' + esc(witness.returnToFirstReuse) +
+      ' · resident Links ' + esc(witness.residentAppendCount) + '</code>'
     : status === "running"
-      ? '<small>Реальный браузер компилирует WGSL, выполняет DISCOVER и отдельный PUBLISH и читает результат обратно.</small>'
+      ? '<small>Один static packed base загружается в WebGPU; четыре конфигурации берутся из canonical Scenario и исполняются до QUIESCENT.</small>'
       : '<small>' + esc(
           witness.reason ||
-          "Ограниченный C4c3-свидетель ещё не запускался.",
+          "WebGPU Scenario-свидетель ещё не запускался.",
         ) + '</small>';
 
-  return '<div class="wb-gpu-witness"><div><strong>WebGPU C4c3 · живой ограниченный свидетель</strong>' +
+  return '<div class="wb-gpu-witness"><div><strong>WebGPU · постоянная Session ×4</strong>' +
     '<span class="wb-chip ' +
     (status === "verified" ? "good" : status === "failed" ? "bad" : "") +
     '">' + esc(labels[status] || status) + '</span></div>' +
     detail +
     '<button id="wb-gpu-witness"' +
     (status === "running" ? " disabled" : "") +
-    '>Проверить WebGPU C4c3</button>' +
-    '<div class="wb-help">Packed base загружается один раз. WebGPU выполняет весь bounded generalized-MP цикл в одной resident Session: каждый следующий Scope берётся из предыдущей GPU-публикации, а zero-match завершает run как QUIESCENT. CPU fallback здесь запрещён.</div></div>';
+    '>Проверить WebGPU Scenario ×4</button>' +
+    '<div class="wb-help">PREPARE/LOAD выполняются один раз. S/A/B берутся только из canonical mux1-lifecycle manifest и публикуются generic PAIR/START CONFIGURE-дельтой. GPU исполняет четыре запуска в одной resident Session; Rust/WASM сравнивается только после GPU readback и не может задавать Scope, successor или append.</div></div>';
 }
 
 function presetInputs(state) {

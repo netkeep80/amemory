@@ -61,44 +61,47 @@ const workbenchSource = fs.readFileSync(
 );
 for (const required of [
   "runWorkbenchWebGpuWitness",
-  "Проверить WebGPU C4c3",
-  "CPU = WebGPU = Rust/WASM",
-  "webgpuWitness",
+  "Проверить WebGPU Scenario ×4",
+  "WebGPU ↔ Rust/WASM после readback",
   "amemory_i386_lab_gpu_carrier_prepare",
-  "sameU32Segment",
-  "expected.length >= offset + length",
+  "GPU_WITNESS_RESULT_ABI",
+  "refreshScenarioPresetRegistry",
+  "loadScenarioPresetManifest",
+  '"mux1-lifecycle"',
+  '"1.0.0"',
+  "mux1ResidentConfigurationRecipe",
+  "resident.configure(recipe)",
   "resident.runToQuiescence",
-  "maxReactions: 4096",
-  "fullResidentRun: true",
-  "reactionBudgetFalsifier",
-  "capacityFalsifier",
-  "maxReactions: 1",
-  "maxResidentAppend: 1",
-  "REACTION_BUDGET_EXCEEDED",
-  "APPENDED_LINKS_BUDGET_EXCEEDED",
-  "RESIDENT_APPEND_CAPACITY_EXCEEDED",
-  "stopReason: run.stopReason",
-  "activeReactionCount",
-  "finalScopeHandle",
-  "residentAppendCount",
-  "openGpuCarrierResidentSession",
-  "resident.telemetry()",
+  "decodeMux1ResidentResult",
+  "executeScenarioManifest",
+  "postReadbackCpuDifferential: true",
+  "cpuReferenceSharesRustCore: true",
+  "scenarioManifestDriven: true",
+  "staticPreparedCarrier: true",
+  "noExecutionSeed: true",
+  "returnToFirstReuse",
+  "configurationAppendCounts",
+  "configurationCommitCount",
+  "configurationDispatchCount",
   "baseUploadCount",
   "reactionDispatchCount",
-  "reaction₀ → … → QUIESCENT",
-  "zero-match завершает run как QUIESCENT",
 ]) {
   if (!workbenchSource.includes(required)) {
-    throw new Error("live WebGPU Workbench witness missing: " + required);
+    throw new Error("live WebGPU Scenario witness missing: " + required);
   }
 }
 for (const forbidden of [
+  "GPU_WITNESS_COMPACT_ABI",
+  "deriveGpuCarrierReactionInput(",
+  "CPU = WebGPU = Rust/WASM",
   "scopeAfter: expected.",
   "publishedHandle: expected.",
-  "sameU32Array",
 ]) {
   if (workbenchSource.includes(forbidden)) {
-    throw new Error("Workbench WebGPU witness seeded expected result: " + forbidden);
+    throw new Error(
+      "Workbench WebGPU Scenario regained execution seeding/overclaim: " +
+      forbidden,
+    );
   }
 }
 
@@ -109,23 +112,28 @@ const pagesWebGpuSmokeSource = fs.readFileSync(
 for (const required of [
   "--enable-unsafe-webgpu",
   "--use-webgpu-adapter=swiftshader",
-  "residentBaseReuse",
-  "sequentialResidentExecution",
-  "fullResidentRun",
-  "reactionBudgetFalsifier",
-  "capacityFalsifier",
-  "residentAppendCount",
-  "finalScopeHandle",
-  "stopReason",
-  "activeReactionCount",
-  "stepCount",
+  "scenarioManifestDriven",
+  "staticPreparedCarrier",
+  "noExecutionSeed",
+  "postReadbackCpuDifferential",
+  "cpuReferenceSharesRustCore",
+  "returnToFirstReuse",
+  "manifestAssertionsPassed",
+  "runCount",
+  "values",
+  "activeReactionCounts",
+  "configurationAppendCounts",
   "baseUploadCount",
+  "configurationCommitCount",
+  "configurationDispatchCount",
   "reactionDispatchCount",
+  "PAGES_WEBGPU_SCENARIO=PASS",
 ]) {
   if (!pagesWebGpuSmokeSource.includes(required)) {
-    throw new Error("compute-only WebGPU launch flag missing: " + required);
+    throw new Error("WebGPU Scenario live smoke contract missing: " + required);
   }
 }
+
 for (const forbidden of [
   "--use-angle=vulkan",
   "--use-vulkan=swiftshader",
