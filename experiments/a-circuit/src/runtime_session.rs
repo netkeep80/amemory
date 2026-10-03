@@ -115,7 +115,7 @@ impl RunWorkUsageV1 {
     }
 }
 
-fn run_stop_reason_from_step_error(
+pub(crate) fn run_stop_reason_from_step_error(
     error: CpuSessionStepError,
 ) -> RunStopReasonV1 {
     match error {
