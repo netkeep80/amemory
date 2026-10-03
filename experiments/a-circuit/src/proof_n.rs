@@ -13,7 +13,10 @@ use super::observability::{
     RUN_OBSERVABILITY_SCHEMA_VERSION,
 };
 use amemory_optimized_cpu_probe::{
-    structural::{OptimizedStructuralEngine, StructuralRunProfile},
+    structural::{
+        export_direct_recursive_wire_from, OptimizedStructuralEngine,
+        StructuralReadV1, StructuralRunProfile,
+    },
     Handle, OptimizedLinkStore,
 };
 use serde::Serialize;
@@ -605,6 +608,78 @@ pub(crate) fn prepare_stage(
     }
 }
 
+pub(crate) fn project_load_stage_from_structural_store_v1<
+    R: StructuralReadV1 + ?Sized,
+>(
+    prepare: &WebProofPrepareStage,
+    store: &R,
+    memory_instance_id: String,
+    links_before_load: u32,
+    links_after_load: u32,
+) -> Option<WebProofLoadStage> {
+    if links_after_load != prepare.compiled_links
+        || prepare.carrier_duplets.len() as u32 != links_after_load
+    {
+        return None;
+    }
+
+    let mut carrier_round_trip = true;
+    for (index, duplet) in prepare.carrier_duplets.iter().enumerate() {
+        let handle = u32::try_from(index + 1).ok()?;
+        let poles = store.poles(handle).ok()?;
+        if poles != (duplet.start, duplet.end) {
+            carrier_round_trip = false;
+        }
+    }
+
+    let mut loaded_roots =
+        Vec::with_capacity(prepare.semantic_roots.len());
+    for root in &prepare.semantic_roots {
+        let handle = root.carrier_ref;
+        if handle == 0 || handle > links_after_load {
+            return None;
+        }
+        store.poles(handle).ok()?;
+        if export_direct_recursive_wire_from(store, handle)
+            .ok()
+            .as_deref()
+            != Some(root.source.as_str())
+        {
+            carrier_round_trip = false;
+        }
+        loaded_roots.push(WebProofLoadedRoot {
+            role: root.role.clone(),
+            carrier_ref: root.carrier_ref,
+            source: root.source.clone(),
+            local_handle: handle,
+        });
+    }
+
+    let theory_handle = loaded_roots
+        .iter()
+        .find(|root| root.role == "execution.theory")
+        .map(|root| root.local_handle)?;
+    for admission in &prepare.theory_admissions {
+        let handle = admission
+            .strip_prefix('L')?
+            .parse::<Handle>()
+            .ok()?;
+        let (start, _end) = store.poles(handle).ok()?;
+        if start != theory_handle {
+            return None;
+        }
+    }
+
+    Some(WebProofLoadStage {
+        memory_instance_id,
+        links_before_load,
+        links_after_load,
+        imported_duplets: prepare.carrier_duplets.len() as u32,
+        carrier_round_trip,
+        semantic_roots: loaded_roots,
+    })
+}
+
 pub(crate) fn load_runtime(
     prepare: &WebProofPrepareStage,
 ) -> Option<(CpuMemoryInstance, WebProofLoadStage)> {
@@ -619,61 +694,13 @@ pub(crate) fn load_runtime(
     memory.store.load_packed_duplets(&carrier).ok()?;
     let links_after_load = memory.store.link_count() as u32;
 
-    if links_after_load != prepare.compiled_links {
-        return None;
-    }
-
-    let before_roots = memory.store.link_count();
-    let mut loaded_roots =
-        Vec::with_capacity(prepare.semantic_roots.len());
-    let mut carrier_round_trip =
-        memory.store.export_packed_duplets() == carrier;
-
-    for root in &prepare.semantic_roots {
-        let handle = root.carrier_ref;
-        if handle == 0 || handle > links_after_load {
-            return None;
-        }
-        memory.store.poles(handle).ok()?;
-        if memory.store.export_anum(handle).ok().as_deref()
-            != Some(root.source.as_str())
-        {
-            carrier_round_trip = false;
-        }
-        loaded_roots.push(WebProofLoadedRoot {
-            role: root.role.clone(),
-            carrier_ref: root.carrier_ref,
-            source: root.source.clone(),
-            local_handle: handle,
-        });
-    }
-    if memory.store.link_count() != before_roots {
-        return None;
-    }
-
-    let theory_handle = loaded_roots
-        .iter()
-        .find(|root| root.role == "execution.theory")
-        .map(|root| root.local_handle)?;
-    for admission in &prepare.theory_admissions {
-        let handle = admission
-            .strip_prefix('L')?
-            .parse::<Handle>()
-            .ok()?;
-        let (start, _end) = memory.store.poles(handle).ok()?;
-        if start != theory_handle {
-            return None;
-        }
-    }
-
-    let load = WebProofLoadStage {
-        memory_instance_id: memory.id.clone(),
+    let load = project_load_stage_from_structural_store_v1(
+        prepare,
+        &memory.store,
+        memory.id.clone(),
         links_before_load,
         links_after_load,
-        imported_duplets: prepare.carrier_duplets.len() as u32,
-        carrier_round_trip,
-        semantic_roots: loaded_roots,
-    };
+    )?;
 
     Some((memory, load))
 }
