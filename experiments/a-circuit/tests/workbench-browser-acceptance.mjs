@@ -254,6 +254,11 @@ for (const required of [
   "configurationDispatchCount",
   "baseUploadCount",
   "reactionDispatchCount",
+  "normalizeWebGpuResidentRunV2",
+  "normalizeCpuScenarioRunV2",
+  "normalizedObservationSchemaVersion: 2",
+  "normalizedGpuRuns",
+  "normalizedCpuRuns",
 ]) {
   if (!workbenchSource.includes(required)) {
     throw new Error("live WebGPU Scenario witness missing: " + required);
@@ -296,6 +301,12 @@ for (const required of [
   "configurationCommitCount",
   "configurationDispatchCount",
   "reactionDispatchCount",
+  "normalizedObservationSchemaVersion",
+  "normalizedGpuRuns",
+  "normalizedCpuRuns",
+  "readbackBytes",
+  "UNAVAILABLE",
+  "UNSUPPORTED",
   "PAGES_WEBGPU_SCENARIO=PASS",
 ]) {
   if (!pagesWebGpuSmokeSource.includes(required)) {
