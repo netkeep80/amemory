@@ -1789,6 +1789,31 @@ mod tests {
     }
 
     #[test]
+    fn structural_store_port_preserves_cpu_append_rollback() {
+        let mut store = OptimizedLinkStore::new();
+        let checkpoint =
+            StructuralStoreV1::append_checkpoint(&store);
+        let pair = StructuralStoreV1::ensure_pair(
+            &mut store,
+            ROOT_HANDLE,
+            ROOT_HANDLE,
+        )
+        .unwrap();
+
+        assert_eq!(pair, 2);
+        assert_eq!(StructuralStoreV1::link_count(&store), 2);
+
+        StructuralStoreV1::rollback_append(&mut store, checkpoint);
+
+        assert_eq!(StructuralStoreV1::link_count(&store), 1);
+        assert_eq!(
+            store.ensure_pair(ROOT_HANDLE, ROOT_HANDLE).unwrap(),
+            2,
+            "rollback through the port must restore canonical identity",
+        );
+    }
+
+    #[test]
     fn exact_sequence_is_root_originating_and_ordered() {
         let mut store = OptimizedLinkStore::new();
         let o = store.ensure_start_self_closed(ROOT_HANDLE).unwrap();
