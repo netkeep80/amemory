@@ -1746,6 +1746,8 @@ function syncResidentTopologyFromWords(resident, words, committedCount) {
   resident.residentAppendCount = committedCount;
 }
 
+let nextGpuResidentSessionId = 1;
+
 // Truth boundary: this executor accepts only carrier + current/interpreter handles.
 // Proof traces and expected successors are deliberately unavailable until readback.
 export async function openGpuCarrierResidentSession(
@@ -1825,6 +1827,7 @@ export async function openGpuCarrierResidentSession(
   }
 
   const state = {
+    sessionId: "webgpu-resident#" + nextGpuResidentSessionId++,
     plan,
     baseEntries,
     baseBuffers,
@@ -1842,6 +1845,7 @@ export async function openGpuCarrierResidentSession(
     reactionDispatchCount: 0,
   };
   const telemetry = () => Object.freeze({
+    sessionId: state.sessionId,
     baseUploadCount: 1,
     baseUploadBytes: plan.logicalBytes,
     baseBufferCount: baseBuffers.length,
@@ -2109,6 +2113,7 @@ export async function openGpuCarrierResidentSession(
   };
 
   return Object.freeze({
+    sessionId: state.sessionId,
     plan,
     logicalFingerprint: gpuCarrierLogicalFingerprint(parsed),
     telemetry,

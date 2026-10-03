@@ -1,5 +1,9 @@
 import { ScenarioWorkerClient } from "./scenario-worker-client.mjs";
 import {
+  normalizeCpuScenarioRunV2,
+  normalizeWebGpuResidentRunV2,
+} from "./run-observation.mjs";
+import {
   loadScenarioPresetManifestByIndex,
   refreshScenarioPresetRegistry,
 } from "./scenario-presets.mjs";
@@ -1161,7 +1165,13 @@ export async function runWorkbenchWebGpuWitness(
         roots,
         scenarioRun.inputs,
       );
+      const beforeConfigure = resident.telemetry();
+      const linksBeforeConfigure =
+        carrier.layout.linkCount + beforeConfigure.residentAppendCount;
       const configured = await resident.configure(recipe);
+      const afterConfigure = resident.telemetry();
+      const linksAfterConfigure =
+        carrier.layout.linkCount + afterConfigure.residentAppendCount;
       residentStarts = [...configured.residentStarts];
       residentEnds = [...configured.residentEnds];
 
@@ -1245,6 +1255,23 @@ export async function runWorkbenchWebGpuWitness(
       }
 
       const afterExecution = resident.telemetry();
+      const normalizedObservation = normalizeWebGpuResidentRunV2({
+        sessionId: resident.sessionId,
+        runId: index + 1,
+        manifestRunId: scenarioRun.runId,
+        configurationReused: configured.appendCount === 0,
+        baseLinkCount: carrier.layout.linkCount,
+        linksBeforeConfigure,
+        linksAfterConfigure,
+        run,
+        telemetryBeforeConfigure: beforeConfigure,
+        telemetryAfterConfigure: afterConfigure,
+        telemetryBeforeExecute: beforeExecution,
+        telemetryAfterExecute: afterExecution,
+        result: Object.freeze({
+          fields: Object.freeze({ value }),
+        }),
+      });
       gpuRuns.push(Object.freeze({
         manifestRunId: scenarioRun.runId,
         inputs: Object.freeze({ ...scenarioRun.inputs }),
@@ -1259,6 +1286,7 @@ export async function runWorkbenchWebGpuWitness(
         executionAppendCount:
           afterExecution.residentAppendCount -
           beforeExecution.residentAppendCount,
+        normalizedObservation,
       }));
     }
 
@@ -1277,16 +1305,31 @@ export async function runWorkbenchWebGpuWitness(
       );
     }
 
+    const normalizedCpuRuns = [];
     for (let index = 0; index < gpuRuns.length; index += 1) {
       const gpu = gpuRuns[index];
       const reference = cpu.report.runs[index];
+      const normalizedCpu = normalizeCpuScenarioRunV2(reference);
+      normalizedCpuRuns.push(normalizedCpu);
+      const gpuProfile = gpu.normalizedObservation.profile;
+      const cpuProfile = normalizedCpu.profile;
       if (reference?.manifestRunId !== gpu.manifestRunId ||
           Number(reference?.result?.fields?.value) !== gpu.value ||
           reference?.observed?.finalQuiescent !== true ||
           Number(reference?.observed?.activeReactionCount) !==
-            gpu.activeReactionCount) {
+            gpu.activeReactionCount ||
+          gpuProfile.backendId !== "webgpu" ||
+          cpuProfile.backendId !== "optimized-cpu" ||
+          gpuProfile.stopReason !== "QUIESCENT" ||
+          cpuProfile.stopReason !== "QUIESCENT" ||
+          gpuProfile.finalQuiescent !== true ||
+          cpuProfile.finalQuiescent !== true ||
+          gpuProfile.activeReactionCount?.availability !== "MEASURED" ||
+          cpuProfile.activeReactionCount?.availability !== "MEASURED" ||
+          gpuProfile.activeReactionCount.value !==
+            cpuProfile.activeReactionCount.value) {
         throw new Error(
-          "post-readback CPU/WebGPU Scenario differential failed at " +
+          "post-readback CPU/WebGPU normalized differential failed at " +
           gpu.manifestRunId,
         );
       }
@@ -1349,6 +1392,10 @@ export async function runWorkbenchWebGpuWitness(
       configurationDispatchCount: residency.configurationDispatchCount,
       configurationUploadBytes: residency.configurationUploadBytes,
       reactionDispatchCount: residency.reactionDispatchCount,
+      normalizedObservationSchemaVersion: 2,
+      normalizedGpuRuns:
+        gpuRuns.map((run) => run.normalizedObservation),
+      normalizedCpuRuns,
     };
   } finally {
     resident?.close();
