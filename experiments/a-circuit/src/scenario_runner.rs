@@ -490,6 +490,144 @@ pub(crate) fn open_cpu_scenario_session_v1(
     })
 }
 
+#[cfg(not(target_family = "wasm"))]
+fn open_linksdb_scenario_session_v1(
+    manifest: &ScenarioManifestV1,
+) -> Result<ScenarioLinksDbSessionV1, ScenarioRunnerErrorV1> {
+    let validation = validate_manifest_v1(manifest);
+    if !validation.is_empty() {
+        return Err(ScenarioRunnerErrorV1::Validation {
+            errors: validation,
+        });
+    }
+
+    if !manifest
+        .supported_backends
+        .contains(&ScenarioBackendV1::Linksdb)
+    {
+        return Err(ScenarioRunnerErrorV1::UnsupportedBackend {
+            backend: ScenarioBackendV1::Linksdb,
+        });
+    }
+
+    let adapter = resolve_program_adapter_v1(&manifest.program_profile)?;
+    let program_profile = adapter.canonical_program_profile();
+    if program_profile.profile_id != "a-circuit:mux1" {
+        return Err(ScenarioRunnerErrorV1::UnsupportedProgramProfile {
+            profile_id: program_profile.profile_id,
+        });
+    }
+
+    let (prepare, prepare_ns) = time_stage(|| adapter.prepare());
+    let prepare = prepare.ok_or_else(|| {
+        ScenarioRunnerErrorV1::PrepareFailed {
+            profile_id: manifest.program_profile.profile_id.clone(),
+        }
+    })?;
+    let prepared_links = prepare.compiled_links;
+    let program_fingerprint = prepared_aset_fingerprint_v1(&prepare);
+    let carrier = prepare
+        .carrier_duplets
+        .iter()
+        .map(|duplet| (duplet.start, duplet.end))
+        .collect::<Vec<_>>();
+    let image = PackedCarrierImage::from_duplets(&carrier).map_err(|_| {
+        ScenarioRunnerErrorV1::LoadFailed {
+            profile_id: manifest.program_profile.profile_id.clone(),
+        }
+    })?;
+    let interpreter = prepare
+        .semantic_roots
+        .iter()
+        .find(|root| root.role == "execution.interpreter")
+        .map(|root| root.carrier_ref)
+        .ok_or_else(|| ScenarioRunnerErrorV1::LoadFailed {
+            profile_id: manifest.program_profile.profile_id.clone(),
+        })?;
+
+    let (loaded, load_ns) = time_stage(|| {
+        let store =
+            DoubletsPhysicalStoreV1::from_packed_carrier_v1(&image).ok()?;
+        let session =
+            LinksDbSessionV1::open_structural(store, interpreter, 32).ok()?;
+        let runtime = session.runtime_snapshot_v1();
+        let load = project_load_stage_from_structural_store_v1(
+            &prepare,
+            session.physical_store_v1(),
+            runtime.identity.memory_instance_id,
+            1,
+            runtime.base_link_count,
+        )?;
+        load.carrier_round_trip.then_some((session, load))
+    });
+    let (session, load) = loaded.ok_or_else(|| {
+        ScenarioRunnerErrorV1::LoadFailed {
+            profile_id: manifest.program_profile.profile_id.clone(),
+        }
+    })?;
+
+    let runtime = session.runtime_snapshot_v1();
+    let session_open_profile = session_open_profile_for_backend_v1(
+        runtime.identity.session_id,
+        LINKSDB_BACKEND_ID,
+        prepare_ns,
+        load_ns,
+        prepared_links,
+        runtime.base_link_count,
+    );
+
+    Ok(ScenarioLinksDbSessionV1 {
+        manifest: manifest.clone(),
+        program_profile,
+        adapter,
+        session,
+        load,
+        loaded_prefix: carrier,
+        session_open_profile,
+        program_fingerprint,
+        completed_runs: 0,
+    })
+}
+
+#[cfg(not(target_family = "wasm"))]
+fn ensure_linksdb_session_configurable(
+    live: &ScenarioLinksDbSessionV1,
+    run_id: &str,
+) -> Result<(), ScenarioRunnerErrorV1> {
+    if matches!(
+        live.session.runtime_state_v1(),
+        SessionStateV1::Open | SessionStateV1::Quiescent
+    ) {
+        return Ok(());
+    }
+
+    Err(ScenarioRunnerErrorV1::StepControlFailed {
+        run_id: run_id.to_owned(),
+        message: format!(
+            "LinksDB Session is not configurable in state {:?}",
+            live.session.runtime_state_v1(),
+        ),
+    })
+}
+
+#[cfg(not(target_family = "wasm"))]
+fn linksdb_loaded_prefix_matches_v1(
+    live: &ScenarioLinksDbSessionV1,
+) -> bool {
+    live.loaded_prefix
+        .iter()
+        .enumerate()
+        .all(|(index, &(start, end))| {
+            let Ok(handle) = u32::try_from(index + 1) else {
+                return false;
+            };
+            live.session
+                .physical_store_v1()
+                .poles(handle)
+                .is_ok_and(|poles| poles == (start, end))
+        })
+}
+
 fn ensure_cpu_session_configurable(
     live: &ScenarioCpuSessionV1,
     run_id: &str,
