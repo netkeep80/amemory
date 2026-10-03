@@ -134,7 +134,9 @@
     }
   ],
   "supportedBackends": [
-    "optimized-cpu"
+    "optimized-cpu",
+    "webgpu",
+    "linksdb"
   ],
   "oraclePolicy": "FRESH_INSTANCE",
   "invariants": [

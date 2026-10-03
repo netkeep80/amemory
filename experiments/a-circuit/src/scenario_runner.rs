@@ -1,14 +1,15 @@
 use super::{
     observability::{
         project_cpu_session_step_v1, run_pipeline_profile_v1,
-        session_open_profile_v1, time_stage, CpuSessionReactionEvidenceV1,
+        session_open_profile_for_backend_v1, session_open_profile_v1,
+        time_stage, CpuSessionReactionEvidenceV1, ObservationTimer,
         ObservedRunV1, RunObservationLevel, RunPipelineProfileV1,
-        SessionOpenProfileV1,
+        SessionOpenProfileV1, LINKSDB_BACKEND_ID,
     },
     proof_n::{
         execute_session_observed_to_quiescence,
-        load_runtime_session,
-        WebProofLoadStage,
+        load_runtime_session, project_bounded_run_observation_v1,
+        project_load_stage_from_structural_store_v1, WebProofLoadStage,
         WebProofPrepareStage,
     },
     runtime_session::{
@@ -25,6 +26,7 @@ use super::{
         ScenarioProgramProfileV1, ScenarioRunV1, ScenarioValidationErrorV1,
     },
     scenario_cpu_adapter::{
+        configure_mux1_store_from_inputs, project_mux1_store_result,
         resolve_cpu_scenario_adapter, CpuScenarioAdapter,
         CpuScenarioAdapterResolutionErrorV1, ScenarioNormalizedResultV1,
     },
@@ -34,7 +36,15 @@ use super::{
     logic_effect_n::prepare_logic32_session_program,
     mux_n::{configure_mux1_session, prepare_mux1_session_program},
 };
+#[cfg(not(target_family = "wasm"))]
+use super::linksdb_session::{
+    DoubletsPhysicalStoreV1, LinksDbSessionV1,
+};
 use amemory_optimized_cpu_probe::Handle;
+#[cfg(not(target_family = "wasm"))]
+use amemory_optimized_cpu_probe::{
+    structural::StructuralReadV1, PackedCarrierImage,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -310,6 +320,19 @@ fn prepared_aset_fingerprint_v1(
     format!("{PREPARED_ASET_FINGERPRINT_ID}:{hash:016x}")
 }
 
+#[cfg(not(target_family = "wasm"))]
+struct ScenarioLinksDbSessionV1 {
+    manifest: ScenarioManifestV1,
+    program_profile: ScenarioProgramProfileV1,
+    adapter: &'static CpuScenarioAdapter,
+    session: LinksDbSessionV1<DoubletsPhysicalStoreV1>,
+    load: WebProofLoadStage,
+    loaded_prefix: Vec<(Handle, Handle)>,
+    session_open_profile: SessionOpenProfileV1,
+    program_fingerprint: String,
+    completed_runs: u64,
+}
+
 pub(crate) struct ScenarioCpuSessionV1 {
     manifest: ScenarioManifestV1,
     program_profile: ScenarioProgramProfileV1,
@@ -373,6 +396,25 @@ impl ScenarioCpuSessionV1 {
     }
 }
 
+fn resolve_program_adapter_v1(
+    requested: &ScenarioProgramProfileV1,
+) -> Result<&'static CpuScenarioAdapter, ScenarioRunnerErrorV1> {
+    resolve_cpu_scenario_adapter(requested).map_err(|error| match error {
+        CpuScenarioAdapterResolutionErrorV1::UnsupportedProgramProfile {
+            profile_id,
+        } => ScenarioRunnerErrorV1::UnsupportedProgramProfile {
+            profile_id,
+        },
+        CpuScenarioAdapterResolutionErrorV1::ProgramProfileMismatch {
+            requested,
+            canonical,
+        } => ScenarioRunnerErrorV1::ProgramProfileMismatch {
+            requested,
+            canonical,
+        },
+    })
+}
+
 pub(crate) fn open_cpu_scenario_session_v1(
     manifest: &ScenarioManifestV1,
 ) -> Result<ScenarioCpuSessionV1, ScenarioRunnerErrorV1> {
@@ -395,21 +437,7 @@ pub(crate) fn open_cpu_scenario_session_v1(
     // Resolve the complete descriptor before PREPARE. The adapter registry,
     // not caller-provided provenance text, is authority for the built-in
     // program that will actually be loaded.
-    let adapter = resolve_cpu_scenario_adapter(&manifest.program_profile)
-        .map_err(|error| match error {
-            CpuScenarioAdapterResolutionErrorV1::UnsupportedProgramProfile {
-                profile_id,
-            } => ScenarioRunnerErrorV1::UnsupportedProgramProfile {
-                profile_id,
-            },
-            CpuScenarioAdapterResolutionErrorV1::ProgramProfileMismatch {
-                requested,
-                canonical,
-            } => ScenarioRunnerErrorV1::ProgramProfileMismatch {
-                requested,
-                canonical,
-            },
-        })?;
+    let adapter = resolve_program_adapter_v1(&manifest.program_profile)?;
     let program_profile = adapter.canonical_program_profile();
 
     let (prepare, prepare_ns) = time_stage(|| adapter.prepare());
@@ -459,6 +487,144 @@ pub(crate) fn open_cpu_scenario_session_v1(
         completed_runs: 0,
         active_step_run: None,
     })
+}
+
+#[cfg(not(target_family = "wasm"))]
+fn open_linksdb_scenario_session_v1(
+    manifest: &ScenarioManifestV1,
+) -> Result<ScenarioLinksDbSessionV1, ScenarioRunnerErrorV1> {
+    let validation = validate_manifest_v1(manifest);
+    if !validation.is_empty() {
+        return Err(ScenarioRunnerErrorV1::Validation {
+            errors: validation,
+        });
+    }
+
+    if !manifest
+        .supported_backends
+        .contains(&ScenarioBackendV1::Linksdb)
+    {
+        return Err(ScenarioRunnerErrorV1::UnsupportedBackend {
+            backend: ScenarioBackendV1::Linksdb,
+        });
+    }
+
+    let adapter = resolve_program_adapter_v1(&manifest.program_profile)?;
+    let program_profile = adapter.canonical_program_profile();
+    if program_profile.profile_id != "a-circuit:mux1" {
+        return Err(ScenarioRunnerErrorV1::UnsupportedProgramProfile {
+            profile_id: program_profile.profile_id,
+        });
+    }
+
+    let (prepare, prepare_ns) = time_stage(|| adapter.prepare());
+    let prepare = prepare.ok_or_else(|| {
+        ScenarioRunnerErrorV1::PrepareFailed {
+            profile_id: manifest.program_profile.profile_id.clone(),
+        }
+    })?;
+    let prepared_links = prepare.compiled_links;
+    let program_fingerprint = prepared_aset_fingerprint_v1(&prepare);
+    let carrier = prepare
+        .carrier_duplets
+        .iter()
+        .map(|duplet| (duplet.start, duplet.end))
+        .collect::<Vec<_>>();
+    let image = PackedCarrierImage::from_duplets(&carrier).map_err(|_| {
+        ScenarioRunnerErrorV1::LoadFailed {
+            profile_id: manifest.program_profile.profile_id.clone(),
+        }
+    })?;
+    let interpreter = prepare
+        .semantic_roots
+        .iter()
+        .find(|root| root.role == "execution.interpreter")
+        .map(|root| root.carrier_ref)
+        .ok_or_else(|| ScenarioRunnerErrorV1::LoadFailed {
+            profile_id: manifest.program_profile.profile_id.clone(),
+        })?;
+
+    let (loaded, load_ns) = time_stage(|| {
+        let store =
+            DoubletsPhysicalStoreV1::from_packed_carrier_v1(&image).ok()?;
+        let session =
+            LinksDbSessionV1::open_structural(store, interpreter, 32).ok()?;
+        let runtime = session.runtime_snapshot_v1();
+        let load = project_load_stage_from_structural_store_v1(
+            &prepare,
+            session.physical_store_v1(),
+            runtime.identity.memory_instance_id,
+            1,
+            runtime.base_link_count,
+        )?;
+        load.carrier_round_trip.then_some((session, load))
+    });
+    let (session, load) = loaded.ok_or_else(|| {
+        ScenarioRunnerErrorV1::LoadFailed {
+            profile_id: manifest.program_profile.profile_id.clone(),
+        }
+    })?;
+
+    let runtime = session.runtime_snapshot_v1();
+    let session_open_profile = session_open_profile_for_backend_v1(
+        runtime.identity.session_id,
+        LINKSDB_BACKEND_ID,
+        prepare_ns,
+        load_ns,
+        prepared_links,
+        runtime.base_link_count,
+    );
+
+    Ok(ScenarioLinksDbSessionV1 {
+        manifest: manifest.clone(),
+        program_profile,
+        adapter,
+        session,
+        load,
+        loaded_prefix: carrier,
+        session_open_profile,
+        program_fingerprint,
+        completed_runs: 0,
+    })
+}
+
+#[cfg(not(target_family = "wasm"))]
+fn ensure_linksdb_session_configurable(
+    live: &ScenarioLinksDbSessionV1,
+    run_id: &str,
+) -> Result<(), ScenarioRunnerErrorV1> {
+    if matches!(
+        live.session.runtime_state_v1(),
+        SessionStateV1::Open | SessionStateV1::Quiescent
+    ) {
+        return Ok(());
+    }
+
+    Err(ScenarioRunnerErrorV1::StepControlFailed {
+        run_id: run_id.to_owned(),
+        message: format!(
+            "LinksDB Session is not configurable in state {:?}",
+            live.session.runtime_state_v1(),
+        ),
+    })
+}
+
+#[cfg(not(target_family = "wasm"))]
+fn linksdb_loaded_prefix_matches_v1(
+    live: &ScenarioLinksDbSessionV1,
+) -> bool {
+    live.loaded_prefix
+        .iter()
+        .enumerate()
+        .all(|(index, &(start, end))| {
+            let Ok(handle) = u32::try_from(index + 1) else {
+                return false;
+            };
+            live.session
+                .physical_store_v1()
+                .poles(handle)
+                .is_ok_and(|poles| poles == (start, end))
+        })
 }
 
 fn ensure_cpu_session_configurable(
@@ -614,6 +780,216 @@ pub(crate) fn run_cpu_scenario_session_once_v1(
         || &carrier[..live.loaded_link_count]
             != live.loaded_prefix.as_slice()
     {
+        return Err(ScenarioRunnerErrorV1::LoadedBaseMutated {
+            run_id: run.run_id.clone(),
+        });
+    }
+
+    let session_run_id = observed.run_id;
+    let report = ScenarioRunReportV1 {
+        manifest_run_id: run.run_id.clone(),
+        session_run_id,
+        inputs: run.inputs.clone(),
+        configuration_reused:
+            configured.links_after == configured.links_before,
+        links_before_configure: configured.links_before,
+        links_after_configure: configured.links_after,
+        result,
+        assertion_results,
+        oracle_matches,
+        fresh_instance_matches,
+        scalar_oracle_matches,
+        observed,
+        pipeline_profile,
+    };
+    live.completed_runs = session_run_id;
+    Ok(report)
+}
+
+#[cfg(not(target_family = "wasm"))]
+fn fresh_linksdb_mux1_result_v1(
+    manifest: &ScenarioManifestV1,
+    run: &ScenarioRunV1,
+) -> Result<ScenarioNormalizedResultV1, String> {
+    let mut fresh_manifest = manifest.clone();
+    fresh_manifest.oracle_policy = ScenarioOraclePolicyV1::None;
+    fresh_manifest.run_sequence = vec![run.clone()];
+
+    let report = run_linksdb_scenario_manifest_v1(&fresh_manifest)
+        .map_err(|error| {
+            format!("fresh LinksDB Scenario execution failed: {error:?}")
+        })?;
+    if report.backend != ScenarioBackendV1::Linksdb
+        || report.runs.len() != 1
+    {
+        return Err(
+            "fresh LinksDB Scenario used an unexpected backend/report shape"
+                .to_owned(),
+        );
+    }
+
+    Ok(report.runs[0].result.clone())
+}
+
+#[cfg(not(target_family = "wasm"))]
+fn run_linksdb_scenario_session_once_v1(
+    live: &mut ScenarioLinksDbSessionV1,
+    run: &ScenarioRunV1,
+) -> Result<ScenarioRunReportV1, ScenarioRunnerErrorV1> {
+    let mut validation_manifest = live.manifest.clone();
+    validation_manifest.run_sequence = vec![run.clone()];
+    let validation = validate_manifest_v1(&validation_manifest);
+    if !validation.is_empty() {
+        return Err(ScenarioRunnerErrorV1::Validation {
+            errors: validation,
+        });
+    }
+
+    if run.execution_mode != ScenarioExecutionModeV1::ToQuiescence {
+        return Err(ScenarioRunnerErrorV1::UnsupportedExecutionMode {
+            run_id: run.run_id.clone(),
+            mode: run.execution_mode,
+        });
+    }
+    ensure_linksdb_session_configurable(live, &run.run_id)?;
+
+    let (configured, configure_ns) = time_stage(|| {
+        configure_mux1_store_from_inputs(
+            live.session.physical_store_mut_v1(),
+            &live.load,
+            &run.inputs,
+        )
+    });
+    let configured = configured.map_err(|message| {
+        ScenarioRunnerErrorV1::ConfigureFailed {
+            run_id: run.run_id.clone(),
+            message,
+        }
+    })?;
+
+    let identity = live.session.runtime_identity_v1();
+    let base_links = live.session.runtime_base_link_count_v1();
+    let run_started = ObservationTimer::start();
+    let bounded = live
+        .session
+        .run_to_quiescence(
+            configured.initial,
+            RunBudgetV1::scenario_default(run.max_reactions),
+            live.manifest.observation_level.runtime_trace_mode(),
+        )
+        .map_err(|stop_reason| ScenarioRunnerErrorV1::ExecuteFailed {
+            run_id: run.run_id.clone(),
+            max_reactions: run.max_reactions,
+            stop_reason,
+            budget_accounting: None,
+        })?;
+    if bounded.stop_reason != RunStopReasonV1::Quiescent {
+        return Err(ScenarioRunnerErrorV1::ExecuteFailed {
+            run_id: run.run_id.clone(),
+            max_reactions: run.max_reactions,
+            stop_reason: bounded.stop_reason,
+            budget_accounting: Some(bounded.budget_accounting),
+        });
+    }
+
+    let final_scope = live
+        .session
+        .current_scope_v1()
+        .ok_or_else(|| ScenarioRunnerErrorV1::ProjectResultFailed {
+            run_id: run.run_id.clone(),
+            message: "LinksDB Session lost structural engine".to_owned(),
+        })?
+        .to_vec();
+    let observed = project_bounded_run_observation_v1(
+        identity.session_id,
+        LINKSDB_BACKEND_ID,
+        base_links,
+        final_scope.clone(),
+        live.manifest.observation_level,
+        &run_started,
+        bounded,
+    );
+
+    let links_before_result =
+        live.session.runtime_current_link_count_v1();
+    let (projected, result_ns) = time_stage(|| {
+        project_mux1_store_result(
+            live.session.physical_store_v1(),
+            &final_scope,
+            &live.load,
+        )
+    });
+    let result = projected.map_err(|message| {
+        ScenarioRunnerErrorV1::ProjectResultFailed {
+            run_id: run.run_id.clone(),
+            message,
+        }
+    })?;
+    if live.session.runtime_current_link_count_v1()
+        != links_before_result
+    {
+        return Err(
+            ScenarioRunnerErrorV1::ResultProjectionMutatedCarrier {
+                run_id: run.run_id.clone(),
+            },
+        );
+    }
+
+    let assertion_results =
+        evaluate_assertions(&run.assertions, &result, &observed);
+
+    let scalar_oracle =
+        live.adapter.scalar_oracle(&run.inputs).map_err(|message| {
+            ScenarioRunnerErrorV1::OracleFailed {
+                run_id: run.run_id.clone(),
+                message,
+            }
+        })?;
+    let scalar_oracle_matches = scalar_oracle == result.fields;
+
+    let fresh_instance_matches = match live.manifest.oracle_policy {
+        ScenarioOraclePolicyV1::FreshInstance => {
+            let fresh = fresh_linksdb_mux1_result_v1(
+                &live.manifest,
+                run,
+            )
+            .map_err(|message| ScenarioRunnerErrorV1::OracleFailed {
+                run_id: run.run_id.clone(),
+                message,
+            })?;
+            Some(fresh == result)
+        }
+        ScenarioOraclePolicyV1::None
+        | ScenarioOraclePolicyV1::ExpectedAssertions => None,
+    };
+    let oracle_matches = fresh_instance_matches;
+
+    let links_before_evidence =
+        live.session.runtime_current_link_count_v1();
+    let (_, external_evidence_ns) = time_stage(|| {
+        serde_json::to_string(&(&observed, &result, &assertion_results))
+            .expect("serializable LinksDB scenario evidence")
+    });
+    if live.session.runtime_current_link_count_v1()
+        != links_before_evidence
+    {
+        return Err(
+            ScenarioRunnerErrorV1::EvidenceProjectionMutatedCarrier {
+                run_id: run.run_id.clone(),
+            },
+        );
+    }
+
+    let pipeline_profile = run_pipeline_profile_v1(
+        &observed,
+        configure_ns,
+        result_ns,
+        external_evidence_ns,
+        configured.links_before,
+        configured.links_after,
+    );
+
+    if !linksdb_loaded_prefix_matches_v1(live) {
         return Err(ScenarioRunnerErrorV1::LoadedBaseMutated {
             run_id: run.run_id.clone(),
         });
@@ -853,37 +1229,15 @@ pub(crate) fn step_cpu_scenario_session_v1(
     }
 }
 
-pub(crate) fn run_scenario_manifest_v1(
+fn build_scenario_execution_report_v1(
     manifest: &ScenarioManifestV1,
     backend: ScenarioBackendV1,
-) -> Result<ScenarioExecutionReportV1, ScenarioRunnerErrorV1> {
-    let validation = validate_manifest_v1(manifest);
-    if !validation.is_empty() {
-        return Err(ScenarioRunnerErrorV1::Validation {
-            errors: validation,
-        });
-    }
-
-    if !manifest.supported_backends.contains(&backend)
-        || backend != ScenarioBackendV1::OptimizedCpu
-    {
-        return Err(ScenarioRunnerErrorV1::UnsupportedBackend { backend });
-    }
-
-    let mut live = open_cpu_scenario_session_v1(manifest)?;
-    let session_id = live.session.runtime_identity_v1().session_id;
-    let session_open_profile = live.session_open_profile.clone();
-    let program_fingerprint = live.program_fingerprint.clone();
-    let program_profile = live.program_profile.clone();
-    let mut reports = Vec::with_capacity(manifest.run_sequence.len());
-
-    for run in &manifest.run_sequence {
-        reports.push(run_cpu_scenario_session_once_v1(
-            &mut live,
-            run,
-        )?);
-    }
-
+    session_id: String,
+    session_open_profile: SessionOpenProfileV1,
+    program_profile: ScenarioProgramProfileV1,
+    program_fingerprint: String,
+    reports: Vec<ScenarioRunReportV1>,
+) -> ScenarioExecutionReportV1 {
     let overall_pass = reports.iter().all(|run| {
         run.assertion_results
             .iter()
@@ -892,7 +1246,7 @@ pub(crate) fn run_scenario_manifest_v1(
             && run.scalar_oracle_matches
     });
 
-    Ok(ScenarioExecutionReportV1 {
+    ScenarioExecutionReportV1 {
         schema_version: SCENARIO_REPORT_SCHEMA_VERSION,
         scenario_id: manifest.scenario_id.clone(),
         scenario_version: manifest.scenario_version.clone(),
@@ -916,7 +1270,101 @@ pub(crate) fn run_scenario_manifest_v1(
             program_profile,
             program_fingerprint: Some(program_fingerprint),
         },
-    })
+    }
+}
+
+fn run_cpu_scenario_manifest_v1(
+    manifest: &ScenarioManifestV1,
+) -> Result<ScenarioExecutionReportV1, ScenarioRunnerErrorV1> {
+    let mut live = open_cpu_scenario_session_v1(manifest)?;
+    let session_id = live.session.runtime_identity_v1().session_id;
+    let session_open_profile = live.session_open_profile.clone();
+    let program_fingerprint = live.program_fingerprint.clone();
+    let program_profile = live.program_profile.clone();
+    let mut reports = Vec::with_capacity(manifest.run_sequence.len());
+
+    for run in &manifest.run_sequence {
+        reports.push(run_cpu_scenario_session_once_v1(
+            &mut live,
+            run,
+        )?);
+    }
+
+    Ok(build_scenario_execution_report_v1(
+        manifest,
+        ScenarioBackendV1::OptimizedCpu,
+        session_id,
+        session_open_profile,
+        program_profile,
+        program_fingerprint,
+        reports,
+    ))
+}
+
+#[cfg(not(target_family = "wasm"))]
+fn run_linksdb_scenario_manifest_v1(
+    manifest: &ScenarioManifestV1,
+) -> Result<ScenarioExecutionReportV1, ScenarioRunnerErrorV1> {
+    let mut live = open_linksdb_scenario_session_v1(manifest)?;
+    let session_id = live.session.runtime_identity_v1().session_id;
+    let session_open_profile = live.session_open_profile.clone();
+    let program_fingerprint = live.program_fingerprint.clone();
+    let program_profile = live.program_profile.clone();
+    let mut reports = Vec::with_capacity(manifest.run_sequence.len());
+
+    for run in &manifest.run_sequence {
+        reports.push(run_linksdb_scenario_session_once_v1(
+            &mut live,
+            run,
+        )?);
+    }
+
+    Ok(build_scenario_execution_report_v1(
+        manifest,
+        ScenarioBackendV1::Linksdb,
+        session_id,
+        session_open_profile,
+        program_profile,
+        program_fingerprint,
+        reports,
+    ))
+}
+
+pub(crate) fn run_scenario_manifest_v1(
+    manifest: &ScenarioManifestV1,
+    backend: ScenarioBackendV1,
+) -> Result<ScenarioExecutionReportV1, ScenarioRunnerErrorV1> {
+    let validation = validate_manifest_v1(manifest);
+    if !validation.is_empty() {
+        return Err(ScenarioRunnerErrorV1::Validation {
+            errors: validation,
+        });
+    }
+
+    if !manifest.supported_backends.contains(&backend) {
+        return Err(ScenarioRunnerErrorV1::UnsupportedBackend { backend });
+    }
+
+    match backend {
+        ScenarioBackendV1::OptimizedCpu => {
+            run_cpu_scenario_manifest_v1(manifest)
+        }
+        ScenarioBackendV1::Linksdb => {
+            #[cfg(not(target_family = "wasm"))]
+            {
+                run_linksdb_scenario_manifest_v1(manifest)
+            }
+            #[cfg(target_family = "wasm")]
+            {
+                Err(ScenarioRunnerErrorV1::UnsupportedBackend { backend })
+            }
+        }
+        ScenarioBackendV1::Webgpu => {
+            // WebGPU is a real persistent browser adapter, but not a native
+            // Rust Scenario host. Never silently substitute CPU.
+            Err(ScenarioRunnerErrorV1::UnsupportedBackend { backend })
+        }
+    }
 }
 
 fn evaluate_assertions(
@@ -1035,6 +1483,122 @@ mod tests {
         include_str!("../scenarios/mul32-lifecycle-v1.json");
     const RADIX_MEMORY8_LIFECYCLE: &str =
         include_str!("../scenarios/radix-memory8-lifecycle-v1.json");
+
+    #[cfg(not(target_family = "wasm"))]
+    #[test]
+    fn canonical_mux1_manifest_runs_end_to_end_on_linksdb_only_where_proven() {
+        let manifest =
+            parse_and_validate_manifest_v1(MUX1_LIFECYCLE).unwrap();
+        assert!(
+            manifest.supported_backends.contains(
+                &ScenarioBackendV1::OptimizedCpu,
+            )
+        );
+        assert!(
+            manifest.supported_backends.contains(
+                &ScenarioBackendV1::Webgpu,
+            )
+        );
+        assert!(
+            manifest.supported_backends.contains(
+                &ScenarioBackendV1::Linksdb,
+            )
+        );
+
+        let report =
+            run_scenario_manifest_v1(
+                &manifest,
+                ScenarioBackendV1::Linksdb,
+            )
+            .unwrap();
+
+        assert_eq!(report.backend, ScenarioBackendV1::Linksdb);
+        assert!(report.overall_pass);
+        assert_eq!(report.runs.len(), 4);
+        assert_eq!(
+            report.session_open_profile.backend_id,
+            LINKSDB_BACKEND_ID,
+        );
+        assert!(report.provenance.program_fingerprint.is_some());
+
+        let values = report
+            .runs
+            .iter()
+            .map(|run| {
+                run.result.fields["value"]
+                    .as_u64()
+                    .expect("MUX1 value")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(values, vec![0, 1, 1, 0]);
+
+        let run_ids = report
+            .runs
+            .iter()
+            .map(|run| run.session_run_id)
+            .collect::<Vec<_>>();
+        assert_eq!(run_ids, vec![1, 2, 3, 4]);
+        assert_eq!(
+            report
+                .runs
+                .iter()
+                .map(|run| run.configuration_reused)
+                .collect::<Vec<_>>(),
+            vec![false, false, false, true],
+        );
+
+        for run in &report.runs {
+            assert_eq!(run.observed.session_id, report.session_id);
+            assert_eq!(run.observed.backend_id, LINKSDB_BACKEND_ID);
+            assert_eq!(run.observed.active_reaction_count, 7);
+            assert!(run.observed.final_quiescent);
+            assert_eq!(run.fresh_instance_matches, Some(true));
+            assert_eq!(run.oracle_matches, Some(true));
+            assert!(run.scalar_oracle_matches);
+            assert!(run
+                .assertion_results
+                .iter()
+                .all(|assertion| assertion.passed));
+
+            let profile = run
+                .observed
+                .profile
+                .as_ref()
+                .expect("TRACE includes profile");
+            assert_eq!(profile.dense_carrier_allocated_bytes, None);
+            assert_eq!(profile.max_dense_carrier_bytes, None);
+            assert!(!profile.full_resident_bytes_available);
+            let accounting = profile
+                .budget_accounting
+                .as_ref()
+                .expect("bounded accounting");
+            assert_eq!(accounting.dense_carrier_allocated_bytes, None);
+            assert_eq!(accounting.max_dense_carrier_bytes, None);
+            assert!(run.pipeline_profile.is_some());
+            assert!(run.result.result_recursive_wire.is_some());
+        }
+
+        assert_eq!(
+            report.runs[0].result.result_recursive_wire,
+            report.runs[3].result.result_recursive_wire,
+            "return-to-first must reproduce the same portable result wire",
+        );
+
+        let mut unsupported =
+            parse_and_validate_manifest_v1(XOR32_LIFECYCLE).unwrap();
+        unsupported
+            .supported_backends
+            .push(ScenarioBackendV1::Linksdb);
+        assert!(matches!(
+            run_scenario_manifest_v1(
+                &unsupported,
+                ScenarioBackendV1::Linksdb,
+            ),
+            Err(
+                ScenarioRunnerErrorV1::UnsupportedProgramProfile { .. }
+            ),
+        ));
+    }
 
     #[test]
     fn prepared_aset_fingerprint_is_stable_and_program_specific() {
@@ -2506,9 +3070,8 @@ mod tests {
 
     #[test]
     fn unsupported_backend_fails_without_cpu_fallback() {
-        let mut manifest =
+        let manifest =
             parse_and_validate_manifest_v1(MUX1_LIFECYCLE).unwrap();
-        manifest.supported_backends.push(ScenarioBackendV1::Webgpu);
 
         let error = run_scenario_manifest_v1(
             &manifest,

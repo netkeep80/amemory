@@ -253,6 +253,71 @@ pub trait StructuralReadV1 {
     ) -> Result<Vec<Handle>, StoreError>;
 }
 
+/// Serialize one structural Link as the direct-gauge recursive wire.
+///
+/// This is a read-only projection over the neutral structural port. It is not
+/// semantic START/END authority; it preserves the historical technical carrier
+/// encoding used by evidence/results:
+///
+/// - ROOT -> 8
+/// - first-pole self-closed -> 9<child>
+/// - second-pole self-closed -> 6<child>
+/// - ordinary pair -> 1<start><end>
+///
+/// Cycle detection is path-based and heap-backed, matching the existing
+/// OptimizedLinkStore exporter without consuming the host call stack.
+pub fn export_direct_recursive_wire_from<R: StructuralReadV1 + ?Sized>(
+    store: &R,
+    handle: Handle,
+) -> Result<String, StoreError> {
+    #[derive(Clone, Copy)]
+    enum Frame {
+        Enter(Handle),
+        Exit(Handle),
+    }
+
+    let mut visiting = HashSet::new();
+    let mut output = String::new();
+    let mut pending = vec![Frame::Enter(handle)];
+
+    while let Some(frame) = pending.pop() {
+        match frame {
+            Frame::Exit(handle) => {
+                visiting.remove(&handle);
+            }
+            Frame::Enter(handle) => {
+                let (start, end) = store.poles(handle)?;
+
+                if start == handle && end == handle {
+                    output.push('8');
+                    continue;
+                }
+
+                if !visiting.insert(handle) {
+                    return Err(StoreError::NonWellFounded(handle));
+                }
+
+                if start == handle {
+                    output.push('9');
+                    pending.push(Frame::Exit(handle));
+                    pending.push(Frame::Enter(end));
+                } else if end == handle {
+                    output.push('6');
+                    pending.push(Frame::Exit(handle));
+                    pending.push(Frame::Enter(start));
+                } else {
+                    output.push('1');
+                    pending.push(Frame::Exit(handle));
+                    pending.push(Frame::Enter(end));
+                    pending.push(Frame::Enter(start));
+                }
+            }
+        }
+    }
+
+    Ok(output)
+}
+
 pub trait StructuralStoreV1: StructuralReadV1 {
     fn instance_id(&self) -> u64;
     fn link_count(&self) -> usize;

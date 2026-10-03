@@ -468,7 +468,11 @@ mod tests {
         assert_eq!(manifest.run_sequence.len(), 4);
         assert_eq!(
             manifest.supported_backends,
-            vec![ScenarioBackendV1::OptimizedCpu]
+            vec![
+                ScenarioBackendV1::OptimizedCpu,
+                ScenarioBackendV1::Webgpu,
+                ScenarioBackendV1::Linksdb,
+            ],
         );
         assert_eq!(
             manifest.run_sequence[0].inputs,

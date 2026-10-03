@@ -22,9 +22,38 @@ import {
   unsupported,
 } from "../../browser-accelerator/web/run-observation.mjs";
 
+import {
+  workbenchBackendAvailability,
+  workbenchDefaultBackend,
+} from "../../browser-accelerator/web/workbench.mjs";
+
 // Keep the generic resident configuration planner executable without changing
 // CI governance. This module is assertions-only and performs no GPU execution.
 await import("../../browser-accelerator/tests/gpu-carrier-configuration.test.mjs");
+
+const multiBackendManifest = {
+  supportedBackends: ["optimized-cpu", "webgpu", "linksdb"],
+};
+const cpuAvailability =
+  workbenchBackendAvailability(multiBackendManifest, "optimized-cpu");
+const gpuAvailability =
+  workbenchBackendAvailability(multiBackendManifest, "webgpu");
+const linksdbAvailability =
+  workbenchBackendAvailability(multiBackendManifest, "linksdb");
+if (!cpuAvailability.scenarioSupported ||
+    !cpuAvailability.sessionHostSupported ||
+    !cpuAvailability.executable ||
+    !gpuAvailability.scenarioSupported ||
+    gpuAvailability.sessionHostSupported ||
+    gpuAvailability.executable ||
+    !linksdbAvailability.scenarioSupported ||
+    linksdbAvailability.sessionHostSupported ||
+    linksdbAvailability.executable ||
+    workbenchDefaultBackend(multiBackendManifest) !== "optimized-cpu") {
+  throw new Error(
+    "Workbench conflates Scenario backend support with Session-host availability",
+  );
+}
 
 const metricZero = measured(0);
 const metricUnavailable = unavailable("not measured");
@@ -222,6 +251,18 @@ if (!gpuCarrierSource.includes("let slot = expected + i;") ||
     "resident configuration WGSL uses a reserved/unstable local identifier",
   );
 }
+for (const required of [
+  "WORKBENCH_HOST_BACKENDS",
+  "workbenchBackendAvailability",
+  "sessionHostSupported",
+  "недоступен как Workbench Session",
+  "Обычный Workbench Session не подменяет их CPU",
+]) {
+  if (!workbenchSource.includes(required)) {
+    throw new Error("Workbench host/backend truthfulness missing: " + required);
+  }
+}
+
 if (!workbenchSource.includes("supportedBackends") ||
     workbenchSource.includes("supportedИсполнительs")) {
   throw new Error(

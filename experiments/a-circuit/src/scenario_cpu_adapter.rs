@@ -14,7 +14,8 @@ use super::{
         project_radix_memory_session_result, web_prove_radix_memory,
     },
     mux_n::{
-        configure_mux1_session, configure_mux32_session,
+        configure_mux1_session, configure_mux1_store,
+        configure_mux32_session, decode_mux1_store_result,
         prepare_mux1_session_program, prepare_mux32_session_program,
         project_mux1_session_result, project_mux32_session_result,
         web_prove_mux1, web_prove_mux32,
@@ -54,7 +55,13 @@ use super::{
         project_shift32_session_result, web_prove_shift32,
     },
 };
-use amemory_optimized_cpu_probe::Handle;
+use amemory_optimized_cpu_probe::{
+    structural::{
+        export_direct_recursive_wire_from, StructuralReadV1,
+        StructuralStoreV1,
+    },
+    Handle,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -527,8 +534,10 @@ pub(crate) struct ScenarioNormalizedResultV1 {
     pub(crate) result_recursive_wire: Option<String>,
 }
 
-fn configure_mux1_from_inputs(
-    session: &mut CpuRuntimeSession,
+pub(crate) fn configure_mux1_store_from_inputs<
+    S: StructuralStoreV1 + ?Sized,
+>(
+    store: &mut S,
     load: &WebProofLoadStage,
     inputs: &BTreeMap<String, Value>,
 ) -> Result<ConfiguredRun, String> {
@@ -536,7 +545,7 @@ fn configure_mux1_from_inputs(
     let a = bit_input(inputs, "A")?;
     let b = bit_input(inputs, "B")?;
     let (initial, before, after) =
-        configure_mux1_session(session, load, select, a, b)
+        configure_mux1_store(store, load, select, a, b)
             .ok_or_else(|| "MUX1 configuration failed".to_owned())?;
     Ok(ConfiguredRun {
         initial,
@@ -545,21 +554,53 @@ fn configure_mux1_from_inputs(
     })
 }
 
+fn configure_mux1_from_inputs(
+    session: &mut CpuRuntimeSession,
+    load: &WebProofLoadStage,
+    inputs: &BTreeMap<String, Value>,
+) -> Result<ConfiguredRun, String> {
+    configure_mux1_store_from_inputs(
+        &mut session.memory.store,
+        load,
+        inputs,
+    )
+}
+
+pub(crate) fn project_mux1_store_result<
+    R: StructuralReadV1 + ?Sized,
+>(
+    store: &R,
+    current: &[Handle],
+    load: &WebProofLoadStage,
+) -> Result<ScenarioNormalizedResultV1, String> {
+    let (value, final_link) =
+        decode_mux1_store_result(store, current, load)
+            .ok_or_else(|| "MUX1 result projection failed".to_owned())?;
+    let recursive_wire =
+        export_direct_recursive_wire_from(store, final_link)
+            .map_err(|error| format!(
+                "MUX1 recursive-wire projection failed: {error:?}"
+            ))?;
+    let mut fields = BTreeMap::new();
+    fields.insert("value".to_owned(), Value::from(value));
+    Ok(ScenarioNormalizedResultV1 {
+        fields,
+        result_recursive_wire: Some(recursive_wire),
+    })
+}
+
 fn project_mux1_result(
     session: &CpuRuntimeSession,
     load: &WebProofLoadStage,
 ) -> Result<ScenarioNormalizedResultV1, String> {
-    let projected = project_mux1_session_result(session, load)
-        .ok_or_else(|| "MUX1 result projection failed".to_owned())?;
-    let mut fields = BTreeMap::new();
-    fields.insert("value".to_owned(), Value::from(projected.value));
-    Ok(ScenarioNormalizedResultV1 {
-        fields,
-        result_recursive_wire: Some(projected.result_recursive_wire),
-    })
+    project_mux1_store_result(
+        &session.memory.store,
+        session.engine.current(),
+        load,
+    )
 }
 
-fn fresh_instance_mux1_result(
+pub(crate) fn fresh_instance_mux1_result(
     inputs: &BTreeMap<String, Value>,
 ) -> Result<ScenarioNormalizedResultV1, String> {
     let select = bit_input(inputs, "S")? as u32;
@@ -1420,7 +1461,7 @@ fn scalar_even_parity_low_byte(value: u32) -> bool {
     (value as u8).count_ones() % 2 == 0
 }
 
-fn scalar_mux1_result(
+pub(crate) fn scalar_mux1_result(
     inputs: &BTreeMap<String, Value>,
 ) -> Result<BTreeMap<String, Value>, String> {
     let select = bit_input(inputs, "S")?;

@@ -1750,10 +1750,7 @@ impl OptimizedLinkStore {
         &self,
         handle: Handle,
     ) -> Result<String, StoreError> {
-        let mut visiting = HashSet::new();
-        let mut output = String::new();
-        self.write_node(handle, &mut visiting, &mut output)?;
-        Ok(output)
+        structural::export_direct_recursive_wire_from(self, handle)
     }
 
     /// Historical direct-gauge compatibility name.
@@ -1946,62 +1943,7 @@ impl OptimizedLinkStore {
         }
     }
 
-    fn write_node(
-        &self,
-        handle: Handle,
-        visiting: &mut HashSet<Handle>,
-        output: &mut String,
-    ) -> Result<(), StoreError> {
-        #[derive(Clone, Copy)]
-        enum Frame {
-            Enter(Handle),
-            Exit(Handle),
-        }
 
-        // Recursive wire depth is a property of the represented structure,
-        // not a reason to consume the host call stack. Keep the historical
-        // path-based cycle semantics explicitly on the heap instead.
-        let mut pending = vec![Frame::Enter(handle)];
-
-        while let Some(frame) = pending.pop() {
-            match frame {
-                Frame::Exit(handle) => {
-                    visiting.remove(&handle);
-                }
-                Frame::Enter(handle) => {
-                    let (start, end) = self.poles(handle)?;
-
-                    if start == handle && end == handle {
-                        output.push('8');
-                        continue;
-                    }
-
-                    if !visiting.insert(handle) {
-                        return Err(StoreError::NonWellFounded(handle));
-                    }
-
-                    if start == handle {
-                        output.push('9');
-                        pending.push(Frame::Exit(handle));
-                        pending.push(Frame::Enter(end));
-                    } else if end == handle {
-                        output.push('6');
-                        pending.push(Frame::Exit(handle));
-                        pending.push(Frame::Enter(start));
-                    } else {
-                        output.push('1');
-                        // LIFO: END is pushed first so START is serialized
-                        // first, exactly matching the historical recursion.
-                        pending.push(Frame::Exit(handle));
-                        pending.push(Frame::Enter(end));
-                        pending.push(Frame::Enter(start));
-                    }
-                }
-            }
-        }
-
-        Ok(())
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
