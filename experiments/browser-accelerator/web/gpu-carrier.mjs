@@ -1436,6 +1436,316 @@ export function gpuCarrierReactionShaderSource(
   throw new Error("unsupported GPU carrier reaction mode: " + mode);
 }
 
+
+function normalizeResidentTopology(parsed, residentTopology, residentCapacity) {
+  const starts = residentTopology?.starts ?? [];
+  const ends = residentTopology?.ends ?? [];
+  if (!Array.isArray(starts) || !Array.isArray(ends) ||
+      starts.length !== ends.length) {
+    throw new TypeError("resident topology must contain equal starts/ends arrays");
+  }
+  if (starts.length > residentCapacity) {
+    throw new RangeError("resident topology exceeds configured capacity");
+  }
+  const maxHandle = parsed.layout.linkCount + starts.length;
+  for (let i = 0; i < starts.length; i += 1) {
+    const handle = parsed.layout.linkCount + i + 1;
+    const start = checkedInteger(Number(starts[i]), "resident start", { min: 1 });
+    const end = checkedInteger(Number(ends[i]), "resident end", { min: 1 });
+    const previousMax = handle - 1;
+    const ordinary = start !== handle && end !== handle;
+    const startSelf = start === handle && end !== handle;
+    const endSelf = end === handle && start !== handle;
+    if ((!ordinary && !startSelf && !endSelf) ||
+        (ordinary && (start > previousMax || end > previousMax)) ||
+        (startSelf && end > previousMax) ||
+        (endSelf && start > previousMax)) {
+      throw new RangeError("resident topology contains invalid append ordering");
+    }
+  }
+  return {
+    starts: starts.map((value) => value >>> 0),
+    ends: ends.map((value) => value >>> 0),
+    maxHandle,
+  };
+}
+
+function basePoles(parsed, handle) {
+  if (handle <= 0 || handle > parsed.layout.linkCount) return null;
+  return [
+    parsed.sections.starts[handle - 1] >>> 0,
+    parsed.sections.ends[handle - 1] >>> 0,
+  ];
+}
+
+function residentPoles(parsed, starts, ends, handle) {
+  if (handle <= parsed.layout.linkCount) {
+    return basePoles(parsed, handle);
+  }
+  const index = handle - parsed.layout.linkCount - 1;
+  if (index < 0 || index >= starts.length) return null;
+  return [starts[index] >>> 0, ends[index] >>> 0];
+}
+
+function findCanonicalResidentHandle(parsed, starts, ends, kind, a, b = 0) {
+  const total = parsed.layout.linkCount + starts.length;
+  const matches = (handle) => {
+    const poles = residentPoles(parsed, starts, ends, handle);
+    if (!poles) return false;
+    const [start, end] = poles;
+    if (kind === "PAIR") {
+      return start === a && end === b && start !== handle && end !== handle;
+    }
+    if (kind === "START") {
+      return start === handle && end === a && end !== handle;
+    }
+    if (kind === "END") {
+      return end === handle && start === a && start !== handle;
+    }
+    return false;
+  };
+
+  // Runtime append canonicalization searches resident topology before base.
+  for (let handle = total; handle > parsed.layout.linkCount; handle -= 1) {
+    if (matches(handle)) return handle;
+  }
+  for (let handle = parsed.layout.linkCount; handle >= 1; handle -= 1) {
+    if (matches(handle)) return handle;
+  }
+  return 0;
+}
+
+function resolveConfigurationRef(ref, outputs, maxExisting, label) {
+  if (!ref || typeof ref !== "object") {
+    throw new TypeError(label + " must be a structural reference");
+  }
+  if (Object.hasOwn(ref, "handle")) {
+    const handle = checkedInteger(Number(ref.handle), label + ".handle", { min: 1 });
+    if (handle > maxExisting) {
+      throw new RangeError(
+        label + " handle " + handle + " exceeds current resident topology " +
+        maxExisting,
+      );
+    }
+    return handle;
+  }
+  if (Object.hasOwn(ref, "operation")) {
+    const index = checkedInteger(Number(ref.operation), label + ".operation", {
+      min: 0,
+    });
+    if (index >= outputs.length) {
+      throw new RangeError(label + " references a future configuration operation");
+    }
+    return outputs[index];
+  }
+  throw new TypeError(label + " must use handle or operation");
+}
+
+export function planGpuResidentConfiguration(
+  parsed,
+  residentTopology,
+  recipe,
+  { residentCapacity = 256 } = {},
+) {
+  checkedInteger(residentCapacity, "residentCapacity", { min: 1 });
+  if (!recipe || typeof recipe !== "object" || !Array.isArray(recipe.operations)) {
+    throw new TypeError("resident configuration recipe is required");
+  }
+  const normalized = normalizeResidentTopology(
+    parsed,
+    residentTopology,
+    residentCapacity,
+  );
+  const starts = [...normalized.starts];
+  const ends = [...normalized.ends];
+  const beforeCount = starts.length;
+  const outputs = [];
+  let reusedOperationCount = 0;
+
+  for (let index = 0; index < recipe.operations.length; index += 1) {
+    const operation = recipe.operations[index];
+    const kind = String(operation?.kind ?? "").toUpperCase();
+    const maxExisting = parsed.layout.linkCount + starts.length;
+    let handle = 0;
+
+    if (kind === "PAIR") {
+      const start = resolveConfigurationRef(
+        operation.start,
+        outputs,
+        maxExisting,
+        "operation[" + index + "].start",
+      );
+      const end = resolveConfigurationRef(
+        operation.end,
+        outputs,
+        maxExisting,
+        "operation[" + index + "].end",
+      );
+      handle = findCanonicalResidentHandle(
+        parsed,
+        starts,
+        ends,
+        "PAIR",
+        start,
+        end,
+      );
+      if (handle === 0) {
+        if (starts.length >= residentCapacity) {
+          throw new RangeError("resident configuration capacity exceeded");
+        }
+        handle = parsed.layout.linkCount + starts.length + 1;
+        starts.push(start);
+        ends.push(end);
+      } else {
+        reusedOperationCount += 1;
+      }
+    } else if (kind === "START" || kind === "END") {
+      const child = resolveConfigurationRef(
+        operation.child,
+        outputs,
+        maxExisting,
+        "operation[" + index + "].child",
+      );
+      handle = findCanonicalResidentHandle(
+        parsed,
+        starts,
+        ends,
+        kind,
+        child,
+      );
+      if (handle === 0) {
+        if (starts.length >= residentCapacity) {
+          throw new RangeError("resident configuration capacity exceeded");
+        }
+        handle = parsed.layout.linkCount + starts.length + 1;
+        if (kind === "START") {
+          starts.push(handle);
+          ends.push(child);
+        } else {
+          starts.push(child);
+          ends.push(handle);
+        }
+      } else {
+        reusedOperationCount += 1;
+      }
+    } else {
+      throw new Error(
+        "unsupported resident configuration constructor: " + kind,
+      );
+    }
+    outputs.push(handle);
+  }
+
+  const totalHandleCount = parsed.layout.linkCount + starts.length;
+  const initialHandle = resolveConfigurationRef(
+    recipe.initial,
+    outputs,
+    totalHandleCount,
+    "initial",
+  );
+  const interpreterHandle = checkedInteger(
+    Number(recipe.interpreterHandle),
+    "interpreterHandle",
+    { min: 1 },
+  );
+  if (interpreterHandle > parsed.layout.linkCount) {
+    throw new RangeError(
+      "interpreterHandle must belong to the immutable loaded base",
+    );
+  }
+
+  return Object.freeze({
+    residentCountBefore: beforeCount,
+    residentCountAfter: starts.length,
+    appendCount: starts.length - beforeCount,
+    appendStarts: Object.freeze(starts.slice(beforeCount)),
+    appendEnds: Object.freeze(ends.slice(beforeCount)),
+    residentStarts: Object.freeze(starts),
+    residentEnds: Object.freeze(ends),
+    operationHandles: Object.freeze(outputs),
+    reusedOperationCount,
+    createdOperationCount: starts.length - beforeCount,
+    initialHandle,
+    interpreterHandle,
+  });
+}
+
+function residentConfigurationShaderSource(linkCount, residentCapacity) {
+  checkedInteger(linkCount, "linkCount", { min: 1 });
+  checkedInteger(residentCapacity, "residentCapacity", { min: 1 });
+  return [
+    "const LINK_COUNT: u32 = " + linkCount + "u;",
+    "const RESIDENT_CAPACITY: u32 = " + residentCapacity + "u;",
+    "@group(0) @binding(0) var<storage, read_write> resident: array<u32>;",
+    "@group(0) @binding(1) var<storage, read_write> config: array<u32>;",
+    "@compute @workgroup_size(1)",
+    "fn main(@builtin(global_invocation_id) id: vec3<u32>) {",
+    "  if (id.x != 0u) { return; }",
+    "  config[0] = 0u;",
+    "  let expected = config[1];",
+    "  let count = config[2];",
+    "  let initial = config[3];",
+    "  if (resident[0] != expected) { config[0] = 2u; return; }",
+    "  if (expected > RESIDENT_CAPACITY || count > RESIDENT_CAPACITY - expected) { config[0] = 3u; return; }",
+    "  if (initial == 0u || initial > LINK_COUNT + expected + count) { config[0] = 4u; return; }",
+    "  var i = 0u;",
+    "  loop {",
+    "    if (i >= count) { break; }",
+    "    let h = LINK_COUNT + expected + i + 1u;",
+    "    let previous_max = h - 1u;",
+    "    let start = config[4u + i * 2u];",
+    "    let end = config[5u + i * 2u];",
+    "    let ordinary = start != h && end != h;",
+    "    let start_self = start == h && end != h;",
+    "    let end_self = end == h && start != h;",
+    "    if ((!ordinary && !start_self && !end_self) ||",
+    "        (ordinary && (start == 0u || end == 0u || start > previous_max || end > previous_max)) ||",
+    "        (start_self && (end == 0u || end > previous_max)) ||",
+    "        (end_self && (start == 0u || start > previous_max))) {",
+    "      config[0] = 5u; return;",
+    "    }",
+    "    i = i + 1u;",
+    "  }",
+    "  i = 0u;",
+    "  loop {",
+    "    if (i >= count) { break; }",
+    "    let target = expected + i;",
+    "    resident[8u + target * 2u] = config[4u + i * 2u];",
+    "    resident[9u + target * 2u] = config[5u + i * 2u];",
+    "    i = i + 1u;",
+    "  }",
+    "  resident[0] = expected + count;",
+    "  resident[1] = resident[0];",
+    "  resident[2] = initial;",
+    "  resident[3] = 0u;",
+    "  resident[4] = 0u;",
+    "  config[0] = 1u;",
+    "}",
+  ].join("\n");
+}
+
+function syncResidentTopologyFromWords(resident, words, committedCount) {
+  const starts = [];
+  const ends = [];
+  for (let i = 0; i < committedCount; i += 1) {
+    starts.push(words[8 + i * 2] >>> 0);
+    ends.push(words[9 + i * 2] >>> 0);
+  }
+  const prefix = Math.min(
+    resident.residentStarts.length,
+    committedCount,
+  );
+  for (let i = 0; i < prefix; i += 1) {
+    if (resident.residentStarts[i] !== starts[i] ||
+        resident.residentEnds[i] !== ends[i]) {
+      throw new Error("WebGPU resident topology mutated a committed Link");
+    }
+  }
+  resident.residentStarts = starts;
+  resident.residentEnds = ends;
+  resident.residentAppendCount = committedCount;
+}
+
 // Truth boundary: this executor accepts only carrier + current/interpreter handles.
 // Proof traces and expected successors are deliberately unavailable until readback.
 export async function openGpuCarrierResidentSession(
@@ -1521,7 +1831,13 @@ export async function openGpuCarrierResidentSession(
     residentBuffer,
     residentCapacity: maxResidentAppend,
     residentAppendCount: 0,
+    residentStarts: [],
+    residentEnds: [],
     residentBufferBytes: residentWords.byteLength,
+    configurationAppendCount: 0,
+    configurationCommitCount: 0,
+    configurationDispatchCount: 0,
+    configurationUploadBytes: 0,
     closed: false,
     reactionDispatchCount: 0,
   };
@@ -1532,6 +1848,12 @@ export async function openGpuCarrierResidentSession(
     residentAppendCount: state.residentAppendCount,
     residentCapacity: state.residentCapacity,
     residentBufferBytes: state.residentBufferBytes,
+    configurationAppendCount: state.configurationAppendCount,
+    executionAppendCount:
+      state.residentAppendCount - state.configurationAppendCount,
+    configurationCommitCount: state.configurationCommitCount,
+    configurationDispatchCount: state.configurationDispatchCount,
+    configurationUploadBytes: state.configurationUploadBytes,
     reactionDispatchCount: state.reactionDispatchCount,
     closed: state.closed,
   });
@@ -1542,6 +1864,131 @@ export async function openGpuCarrierResidentSession(
     for (const buffer of baseBuffers) buffer.destroy();
     return true;
   };
+  const configure = async (recipe) => {
+    if (state.closed) {
+      throw new Error("WebGPU resident carrier Session is closed");
+    }
+    const planned = planGpuResidentConfiguration(
+      parsed,
+      { starts: state.residentStarts, ends: state.residentEnds },
+      recipe,
+      { residentCapacity: state.residentCapacity },
+    );
+
+    if (planned.appendCount === 0) {
+      state.configurationCommitCount += 1;
+      return Object.freeze({
+        ...planned,
+        uploadBytes: 0,
+        residency: telemetry(),
+      });
+    }
+
+    const configWords = new Uint32Array(4 + planned.appendCount * 2);
+    configWords[1] = planned.residentCountBefore;
+    configWords[2] = planned.appendCount;
+    configWords[3] = planned.initialHandle;
+    for (let i = 0; i < planned.appendCount; i += 1) {
+      configWords[4 + i * 2] = planned.appendStarts[i];
+      configWords[5 + i * 2] = planned.appendEnds[i];
+    }
+
+    const usage = gpuLookupUsage();
+    const configBuffer = createLookupBuffer(
+      device,
+      configWords,
+      usage.STORAGE | usage.COPY_SRC | usage.COPY_DST,
+    );
+    device.pushErrorScope?.("validation");
+    try {
+      const shader = device.createShaderModule({
+        code: residentConfigurationShaderSource(
+          parsed.layout.linkCount,
+          state.residentCapacity,
+        ),
+      });
+      if (typeof shader.getCompilationInfo === "function") {
+        const info = await shader.getCompilationInfo();
+        const errors = info.messages.filter(
+          (message) => message.type === "error",
+        );
+        if (errors.length) {
+          throw new Error(
+            "resident configuration WGSL compilation failed: " +
+            errors.map((message) => message.message).join(" | "),
+          );
+        }
+      }
+      const descriptor = {
+        layout: "auto",
+        compute: { module: shader, entryPoint: "main" },
+      };
+      const pipeline =
+        typeof device.createComputePipelineAsync === "function"
+          ? await device.createComputePipelineAsync(descriptor)
+          : device.createComputePipeline(descriptor);
+      const group = device.createBindGroup({
+        layout: pipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: state.residentBuffer } },
+          { binding: 1, resource: { buffer: configBuffer } },
+        ],
+      });
+      const encoder = device.createCommandEncoder();
+      const pass = encoder.beginComputePass();
+      pass.setPipeline(pipeline);
+      pass.setBindGroup(0, group);
+      pass.dispatchWorkgroups(1);
+      pass.end();
+      device.queue.submit([encoder.finish()]);
+      await device.queue.onSubmittedWorkDone();
+
+      const observed = await readLookupWords(
+        device,
+        configBuffer,
+        configWords.length,
+      );
+      const status = observed[0] >>> 0;
+      if (status !== 1) {
+        const error = new Error(
+          "WebGPU resident configuration failed closed with status " + status,
+        );
+        error.code = status === 2
+          ? "STALE_RESIDENT_CONFIGURATION"
+          : status === 3
+            ? "RESIDENT_APPEND_CAPACITY_EXCEEDED"
+            : "INVALID_RESIDENT_CONFIGURATION";
+        error.configurationStatus = status;
+        throw error;
+      }
+
+      state.residentStarts = [...planned.residentStarts];
+      state.residentEnds = [...planned.residentEnds];
+      state.residentAppendCount = planned.residentCountAfter;
+      state.configurationAppendCount += planned.appendCount;
+      state.configurationCommitCount += 1;
+      state.configurationDispatchCount += 1;
+      state.configurationUploadBytes += configWords.byteLength;
+
+      return Object.freeze({
+        ...planned,
+        uploadBytes: configWords.byteLength,
+        residency: telemetry(),
+      });
+    } finally {
+      configBuffer.destroy();
+      if (typeof device.popErrorScope === "function") {
+        const validationError = await device.popErrorScope();
+        if (validationError) {
+          throw new Error(
+            "WebGPU resident configuration validation failed: " +
+            validationError.message,
+          );
+        }
+      }
+    }
+  };
+
   const reaction = async (input, { maxAppend = 64 } = {}) => {
     if (state.closed) {
       throw new Error("WebGPU resident carrier Session is closed");
@@ -1665,6 +2112,7 @@ export async function openGpuCarrierResidentSession(
     plan,
     logicalFingerprint: gpuCarrierLogicalFingerprint(parsed),
     telemetry,
+    configure,
     reaction,
     runToQuiescence,
     close,
@@ -1788,7 +2236,7 @@ async function runGpuCarrierReactionOnResidentBase(
           committedCount > resident.residentCapacity) {
         throw new Error("WebGPU resident append metadata is invalid");
       }
-      resident.residentAppendCount = committedCount;
+      syncResidentTopologyFromWords(resident, o, committedCount);
 
       const committedStarts = [];
       const committedEnds = [];
@@ -1931,7 +2379,7 @@ async function runGpuCarrierReactionOnResidentBase(
         committedCount > resident.residentCapacity) {
       throw new Error("WebGPU resident append metadata is invalid");
     }
-    resident.residentAppendCount = committedCount;
+    syncResidentTopologyFromWords(resident, o, committedCount);
 
     const appendCount = committedCount - reactionStartCount;
     const appendStarts = [];

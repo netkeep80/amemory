@@ -13,6 +13,10 @@ import {
   openGpuCarrierResidentSession,
 } from "../../browser-accelerator/web/gpu-carrier.mjs";
 
+// Keep the generic resident configuration planner executable without changing
+// CI governance. This module is assertions-only and performs no GPU execution.
+await import("../../browser-accelerator/tests/gpu-carrier-configuration.test.mjs");
+
 const root = process.cwd();
 
 const gpuCarrierSource = fs.readFileSync(
