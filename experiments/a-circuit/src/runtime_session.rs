@@ -95,12 +95,6 @@ pub(crate) enum BackendRunResourceBudgetV1 {
     OptimizedCpuDenseCarrier(CpuRunResourceBudgetV1),
 }
 
-impl BackendRunResourceBudgetV1 {
-    fn optimized_cpu_default() -> Self {
-        Self::OptimizedCpuDenseCarrier(CpuRunResourceBudgetV1::default())
-    }
-}
-
 impl RunWorkUsageV1 {
     fn accumulate(&mut self, profile: &StructuralRunProfile) {
         self.match_candidates = self
@@ -168,19 +162,6 @@ pub(crate) struct RunControllerV1 {
 }
 
 impl RunControllerV1 {
-    fn new(
-        budget: RunBudgetV1,
-        run_id: u64,
-        links_before_run: u32,
-    ) -> Self {
-        Self::new_with_resource_budget(
-            budget,
-            BackendRunResourceBudgetV1::optimized_cpu_default(),
-            run_id,
-            links_before_run,
-        )
-    }
-
     pub(crate) fn new_with_resource_budget(
         budget: RunBudgetV1,
         resource_budget: BackendRunResourceBudgetV1,
@@ -945,15 +926,56 @@ mod tests {
     }
 
     #[test]
-    fn carrier_byte_reason_is_cpu_physical_and_exact() {
-        let budget = CpuRunResourceBudgetV1 {
-            max_dense_carrier_bytes: 99,
-        };
-        assert_eq!(budget.carrier_stop_reason(99), None);
+    fn cpu_physical_byte_policy_is_explicit_on_common_host_boundary() {
+        let mut memory = CpuMemoryInstance::new();
+        memory.store.ensure_pair(1, 1).unwrap();
+        let current =
+            memory.store.dense_carrier_index_allocated_bytes();
+        assert!(current > 0);
+
+        let session = CpuRuntimeSession::new(
+            memory,
+            OptimizedStructuralEngine::new(8),
+            1,
+        );
+
         assert_eq!(
-            budget.carrier_stop_reason(100),
+            session.bounded_backend_stop_reason_v1(
+                BackendRunResourceBudgetV1::OptimizedCpuDenseCarrier(
+                    CpuRunResourceBudgetV1 {
+                        max_dense_carrier_bytes: current,
+                    },
+                ),
+            ),
+            None,
+        );
+        assert_eq!(
+            session.bounded_backend_stop_reason_v1(
+                BackendRunResourceBudgetV1::OptimizedCpuDenseCarrier(
+                    CpuRunResourceBudgetV1 {
+                        max_dense_carrier_bytes: current - 1,
+                    },
+                ),
+            ),
             Some(RunStopReasonV1::CarrierBytesBudgetExceeded),
         );
+        assert!(matches!(
+            session.bounded_backend_accounting_v1(
+                BackendRunResourceBudgetV1::OptimizedCpuDenseCarrier(
+                    CpuRunResourceBudgetV1 {
+                        max_dense_carrier_bytes: current,
+                    },
+                ),
+            ),
+            Some(
+                BackendResourceAccountingV1::OptimizedCpuDenseCarrier {
+                    dense_carrier_allocated_bytes,
+                    max_dense_carrier_bytes,
+                    full_resident_bytes_available: false,
+                }
+            ) if dense_carrier_allocated_bytes == current
+                && max_dense_carrier_bytes == current
+        ));
     }
 
     #[test]
