@@ -1428,7 +1428,10 @@ mod tests {
         );
         assert_eq!(
             accounting.max_dense_carrier_bytes,
-            CpuRunResourceBudgetV1::default().max_dense_carrier_bytes,
+            Some(
+                CpuRunResourceBudgetV1::default()
+                    .max_dense_carrier_bytes,
+            ),
         );
         assert_eq!(accounting.total_links, profile.links_after_run);
         assert_eq!(
@@ -1450,7 +1453,7 @@ mod tests {
         );
         assert_eq!(
             accounting.dense_carrier_allocated_bytes,
-            profile.dense_carrier_allocated_bytes.unwrap(),
+            profile.dense_carrier_allocated_bytes,
         );
         assert!(!accounting.full_resident_bytes_available);
     }
