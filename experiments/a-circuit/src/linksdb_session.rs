@@ -124,6 +124,14 @@ impl<S: LinksDbPhysicalStoreV1> LinksDbSessionV1<S> {
         self.closed = true;
         true
     }
+
+    pub(crate) fn physical_store_v1(&self) -> &S {
+        &self.store
+    }
+
+    pub(crate) fn physical_store_mut_v1(&mut self) -> &mut S {
+        &mut self.store
+    }
 }
 
 #[cfg(not(target_family = "wasm"))]
@@ -199,6 +207,14 @@ where
         runtime
             .step(&session_id, store, engine, trace_mode)
             .map_err(Into::into)
+    }
+
+    pub(crate) fn current_scope_v1(&self) -> Option<&[Handle]> {
+        self.engine.as_ref().map(OptimizedStructuralEngine::current)
+    }
+
+    pub(crate) fn structural_store_instance_id_v1(&self) -> u64 {
+        StructuralStoreV1::instance_id(&self.store)
     }
 
     pub(crate) fn run_to_quiescence(
