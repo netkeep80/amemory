@@ -40,6 +40,60 @@ jobs:
       - name: Install pinned Rust toolchain once
         run: rustup toolchain install 1.98.1 --profile minimal
 
+      - name: Verify exact LinksDB Doublets provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import pathlib
+          import tomllib
+
+          pin = json.loads(
+              pathlib.Path("experiments/a-circuit/linksdb-doublets.lock.json")
+              .read_text(encoding="utf-8")
+          )
+          expected_commit = "1d54fd692960258b9b72380e67e2c4f6369372bf"
+          expected_tag_object = "98bcaad1490beed1a6c583bc58ba864bebf009f3"
+          assert pin["schemaVersion"] == 1, pin
+          assert pin["commit"] == expected_commit, pin
+          assert pin["tag"] == "v0.5.0", pin
+          assert pin["tagObjectSha"] == expected_tag_object, pin
+          assert pin["crate"] == "doublets", pin
+          assert pin["crateVersion"] == "0.5.0", pin
+          assert pin["amemoryRustToolchain"] == "1.98.1", pin
+
+          cargo = tomllib.loads(
+              pathlib.Path("experiments/a-circuit/Cargo.toml")
+              .read_text(encoding="utf-8")
+          )
+          target = cargo["target"]['cfg(not(target_family = "wasm"))']
+          dep = target["dependencies"]["doublets"]
+          assert dep["git"] == "https://github.com/linksplatform/doublets-rs", dep
+          assert dep["rev"] == expected_commit, dep
+          assert dep["version"] == "=0.5.0", dep
+
+          lock = pathlib.Path("Cargo.lock").read_text(encoding="utf-8")
+          expected_source = (
+              "git+https://github.com/linksplatform/doublets-rs"
+              f"?rev={expected_commit}#{expected_commit}"
+          )
+          assert 'name = "doublets"' in lock
+          assert 'version = "0.5.0"' in lock
+          assert f'source = "{expected_source}"' in lock
+          print("LINKSDB_DOUBLETS_PROVENANCE=PASS")
+          PY
+
+      - name: LinksDB Doublets physical-store falsifiers
+        run: |
+          set -euo pipefail
+          cargo +1.98.1 test \
+            --locked \
+            --manifest-path experiments/a-circuit/Cargo.toml \
+            linksdb_doublets_ \
+            -- --nocapture --test-threads=1
+          echo "LINKSDB_DOUBLETS_L1=PASS"
+
       - name: Workspace dependency direction and locked graph
         run: |
           set -euo pipefail
