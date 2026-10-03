@@ -807,6 +807,31 @@ pub(crate) fn run_cpu_scenario_session_once_v1(
 }
 
 #[cfg(not(target_family = "wasm"))]
+fn fresh_linksdb_mux1_result_v1(
+    manifest: &ScenarioManifestV1,
+    run: &ScenarioRunV1,
+) -> Result<ScenarioNormalizedResultV1, String> {
+    let mut fresh_manifest = manifest.clone();
+    fresh_manifest.oracle_policy = ScenarioOraclePolicyV1::None;
+    fresh_manifest.run_sequence = vec![run.clone()];
+
+    let report = run_linksdb_scenario_manifest_v1(&fresh_manifest)
+        .map_err(|error| {
+            format!("fresh LinksDB Scenario execution failed: {error:?}")
+        })?;
+    if report.backend != ScenarioBackendV1::Linksdb
+        || report.runs.len() != 1
+    {
+        return Err(
+            "fresh LinksDB Scenario used an unexpected backend/report shape"
+                .to_owned(),
+        );
+    }
+
+    Ok(report.runs[0].result.clone())
+}
+
+#[cfg(not(target_family = "wasm"))]
 fn run_linksdb_scenario_session_once_v1(
     live: &mut ScenarioLinksDbSessionV1,
     run: &ScenarioRunV1,
@@ -924,13 +949,14 @@ fn run_linksdb_scenario_session_once_v1(
 
     let fresh_instance_matches = match live.manifest.oracle_policy {
         ScenarioOraclePolicyV1::FreshInstance => {
-            let fresh =
-                live.adapter.fresh_instance(&run.inputs).map_err(
-                    |message| ScenarioRunnerErrorV1::OracleFailed {
-                        run_id: run.run_id.clone(),
-                        message,
-                    },
-                )?;
+            let fresh = fresh_linksdb_mux1_result_v1(
+                &live.manifest,
+                run,
+            )
+            .map_err(|message| ScenarioRunnerErrorV1::OracleFailed {
+                run_id: run.run_id.clone(),
+                message,
+            })?;
             Some(fresh == result)
         }
         ScenarioOraclePolicyV1::None
