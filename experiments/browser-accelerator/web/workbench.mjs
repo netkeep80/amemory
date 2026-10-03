@@ -1438,7 +1438,7 @@ async function loadManifest(state, index) {
   state.presetIndex = 0;
   state.mode = "preset";
   state.backend =
-    (state.manifest.supportedИсполнительs || [])[0] || "optimized-cpu";
+    (state.manifest.supportedBackends || [])[0] || "optimized-cpu";
   state.session = null;
   state.run = null;
   state.step = null;
@@ -1814,7 +1814,7 @@ function tab(state) {
           ).join("") + '</tbody></table>');
   }
   if (state.tab === "compare") {
-    const supported = new Set(state.manifest.supportedИсполнительs || []);
+    const supported = new Set(state.manifest.supportedBackends || []);
     return '<div class="wb-help">Интерфейс не выдумывает дифференциальный результат. Сравнение станет исполняемым, когда один и тот же сценарий будут поддерживать как минимум два постоянных адаптера.</div>' +
       '<table class="wb-table"><thead><tr><th>Исполнитель</th><th>Поддержка сценарием</th><th>Текущее состояние</th></tr></thead><tbody>' +
       BACKENDS.map(([id, label]) =>
@@ -1920,7 +1920,7 @@ function render(state) {
 
     '<div class="wb-field"><label>Исполнитель</label><select id="wb-backend"' + (openSession ? " disabled" : "") + '>' +
     BACKENDS.map(([id, label]) => {
-      const supported = (state.manifest.supportedИсполнительs || []).includes(id);
+      const supported = (state.manifest.supportedBackends || []).includes(id);
       return '<option value="' + id + '"' + (id === state.backend ? " selected" : "") +
         (supported ? "" : " disabled") + '>' + esc(label + (supported ? "" : " — не поддерживается")) + '</option>';
     }).join("") + '</select><div class="wb-help">Неподдерживаемые исполнители показаны явно; скрытого переключения на другой исполнитель нет.</div></div>' +
