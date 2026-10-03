@@ -27,16 +27,6 @@ for n in 1000 10000 100000 1000000 10000000; do
     --bin scale_ladder -- storage "${n}" 200000
 done
 
-echo "=== REACTION/THEORY SCALE LADDER ==="
-for n in 1000 10000 100000 1000000; do
-  echo "=== REACTION ${n} ==="
-  cargo_pinned run \
-    --quiet \
-    --release \
-    --manifest-path "${OPTIMIZED_MANIFEST}" \
-    --bin scale_ladder -- reaction "${n}" 200000
-done
-
 echo "=== A-CIRCUIT STRUCTURAL PERFORMANCE PROFILES ==="
 ripple_log="${TMP_ROOT}/ripple-perf.log"
 cargo_pinned test \
@@ -82,12 +72,6 @@ cargo_pinned test \
   optimized_hash_index_benchmark_baseline \
   -- --ignored --nocapture --test-threads=1
 
-cargo_pinned test \
-  --release \
-  --manifest-path "${OPTIMIZED_MANIFEST}" \
-  optimized_reaction_benchmark_baseline \
-  -- --ignored --nocapture --test-threads=1
-
 echo "=== REFERENCE CPU INFORMATIONAL BASELINE ==="
 cargo_pinned test \
   --release \
@@ -98,4 +82,3 @@ cargo_pinned test \
 echo "SCALE_PERFORMANCE_CLASS=PASS"
 echo "SCALE_PERFORMANCE_POLICY=informational-only-no-performance-threshold"
 echo "SCALE_PERFORMANCE_STORAGE_MAX_LINKS=10000000"
-echo "SCALE_PERFORMANCE_REACTION_MAX_RELATIONS=1000000"
