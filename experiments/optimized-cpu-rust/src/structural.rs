@@ -399,8 +399,8 @@ impl StructuralReadV1 for PackedExecutionRef<'_> {
     }
 }
 
-pub fn materialize_exact_sequence(
-    store: &mut OptimizedLinkStore,
+pub fn materialize_exact_sequence<S: StructuralStoreV1 + ?Sized>(
+    store: &mut S,
     values: &[Handle],
 ) -> Result<Handle, StructuralError> {
     let mut current = ROOT_HANDLE;
@@ -448,8 +448,8 @@ fn read_exact_sequence_from<R: StructuralReadV1 + ?Sized>(
     Ok(reversed)
 }
 
-pub fn read_exact_sequence(
-    store: &OptimizedLinkStore,
+pub fn read_exact_sequence<R: StructuralReadV1 + ?Sized>(
+    store: &R,
     final_link: Handle,
 ) -> Result<Vec<Handle>, StructuralError> {
     read_exact_sequence_from(store, final_link)
