@@ -807,6 +807,190 @@ pub(crate) fn run_cpu_scenario_session_once_v1(
     Ok(report)
 }
 
+#[cfg(not(target_family = "wasm"))]
+fn run_linksdb_scenario_session_once_v1(
+    live: &mut ScenarioLinksDbSessionV1,
+    run: &ScenarioRunV1,
+) -> Result<ScenarioRunReportV1, ScenarioRunnerErrorV1> {
+    let mut validation_manifest = live.manifest.clone();
+    validation_manifest.run_sequence = vec![run.clone()];
+    let validation = validate_manifest_v1(&validation_manifest);
+    if !validation.is_empty() {
+        return Err(ScenarioRunnerErrorV1::Validation {
+            errors: validation,
+        });
+    }
+
+    if run.execution_mode != ScenarioExecutionModeV1::ToQuiescence {
+        return Err(ScenarioRunnerErrorV1::UnsupportedExecutionMode {
+            run_id: run.run_id.clone(),
+            mode: run.execution_mode,
+        });
+    }
+    ensure_linksdb_session_configurable(live, &run.run_id)?;
+
+    let (configured, configure_ns) = time_stage(|| {
+        configure_mux1_store_from_inputs(
+            live.session.physical_store_mut_v1(),
+            &live.load,
+            &run.inputs,
+        )
+    });
+    let configured = configured.map_err(|message| {
+        ScenarioRunnerErrorV1::ConfigureFailed {
+            run_id: run.run_id.clone(),
+            message,
+        }
+    })?;
+
+    let identity = live.session.runtime_identity_v1();
+    let base_links = live.session.runtime_base_link_count_v1();
+    let run_started = ObservationTimer::start();
+    let bounded = live
+        .session
+        .run_to_quiescence(
+            configured.initial,
+            RunBudgetV1::scenario_default(run.max_reactions),
+            live.manifest.observation_level.runtime_trace_mode(),
+        )
+        .map_err(|stop_reason| ScenarioRunnerErrorV1::ExecuteFailed {
+            run_id: run.run_id.clone(),
+            max_reactions: run.max_reactions,
+            stop_reason,
+            budget_accounting: None,
+        })?;
+    if bounded.stop_reason != RunStopReasonV1::Quiescent {
+        return Err(ScenarioRunnerErrorV1::ExecuteFailed {
+            run_id: run.run_id.clone(),
+            max_reactions: run.max_reactions,
+            stop_reason: bounded.stop_reason,
+            budget_accounting: Some(bounded.budget_accounting),
+        });
+    }
+
+    let final_scope = live
+        .session
+        .current_scope_v1()
+        .ok_or_else(|| ScenarioRunnerErrorV1::ProjectResultFailed {
+            run_id: run.run_id.clone(),
+            message: "LinksDB Session lost structural engine".to_owned(),
+        })?
+        .to_vec();
+    let observed = project_bounded_run_observation_v1(
+        identity.session_id,
+        LINKSDB_BACKEND_ID,
+        base_links,
+        final_scope.clone(),
+        live.manifest.observation_level,
+        &run_started,
+        bounded,
+    );
+
+    let links_before_result =
+        live.session.runtime_current_link_count_v1();
+    let (projected, result_ns) = time_stage(|| {
+        project_mux1_store_result(
+            live.session.physical_store_v1(),
+            &final_scope,
+            &live.load,
+        )
+    });
+    let result = projected.map_err(|message| {
+        ScenarioRunnerErrorV1::ProjectResultFailed {
+            run_id: run.run_id.clone(),
+            message,
+        }
+    })?;
+    if live.session.runtime_current_link_count_v1()
+        != links_before_result
+    {
+        return Err(
+            ScenarioRunnerErrorV1::ResultProjectionMutatedCarrier {
+                run_id: run.run_id.clone(),
+            },
+        );
+    }
+
+    let assertion_results =
+        evaluate_assertions(&run.assertions, &result, &observed);
+
+    let scalar_oracle =
+        live.adapter.scalar_oracle(&run.inputs).map_err(|message| {
+            ScenarioRunnerErrorV1::OracleFailed {
+                run_id: run.run_id.clone(),
+                message,
+            }
+        })?;
+    let scalar_oracle_matches = scalar_oracle == result.fields;
+
+    let fresh_instance_matches = match live.manifest.oracle_policy {
+        ScenarioOraclePolicyV1::FreshInstance => {
+            let fresh =
+                live.adapter.fresh_instance(&run.inputs).map_err(
+                    |message| ScenarioRunnerErrorV1::OracleFailed {
+                        run_id: run.run_id.clone(),
+                        message,
+                    },
+                )?;
+            Some(fresh == result)
+        }
+        ScenarioOraclePolicyV1::None
+        | ScenarioOraclePolicyV1::ExpectedAssertions => None,
+    };
+    let oracle_matches = fresh_instance_matches;
+
+    let links_before_evidence =
+        live.session.runtime_current_link_count_v1();
+    let (_, external_evidence_ns) = time_stage(|| {
+        serde_json::to_string(&(&observed, &result, &assertion_results))
+            .expect("serializable LinksDB scenario evidence")
+    });
+    if live.session.runtime_current_link_count_v1()
+        != links_before_evidence
+    {
+        return Err(
+            ScenarioRunnerErrorV1::EvidenceProjectionMutatedCarrier {
+                run_id: run.run_id.clone(),
+            },
+        );
+    }
+
+    let pipeline_profile = run_pipeline_profile_v1(
+        &observed,
+        configure_ns,
+        result_ns,
+        external_evidence_ns,
+        configured.links_before,
+        configured.links_after,
+    );
+
+    if !linksdb_loaded_prefix_matches_v1(live) {
+        return Err(ScenarioRunnerErrorV1::LoadedBaseMutated {
+            run_id: run.run_id.clone(),
+        });
+    }
+
+    let session_run_id = observed.run_id;
+    let report = ScenarioRunReportV1 {
+        manifest_run_id: run.run_id.clone(),
+        session_run_id,
+        inputs: run.inputs.clone(),
+        configuration_reused:
+            configured.links_after == configured.links_before,
+        links_before_configure: configured.links_before,
+        links_after_configure: configured.links_after,
+        result,
+        assertion_results,
+        oracle_matches,
+        fresh_instance_matches,
+        scalar_oracle_matches,
+        observed,
+        pipeline_profile,
+    };
+    live.completed_runs = session_run_id;
+    Ok(report)
+}
+
 pub(crate) fn begin_cpu_scenario_step_run_v1(
     live: &mut ScenarioCpuSessionV1,
     run: &ScenarioRunV1,
