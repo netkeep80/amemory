@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(not(target_family = "wasm"))]
 use amemory_optimized_cpu_probe::ROOT_HANDLE;
 #[cfg(not(target_family = "wasm"))]
-use doublets::Doublets;
+use doublets::{Doublets, Links};
 #[cfg(not(target_family = "wasm"))]
 use std::collections::HashMap;
 
