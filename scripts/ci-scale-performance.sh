@@ -65,7 +65,7 @@ do
   grep -q "${witness}" "${shift_log}"
 done
 
-echo "=== OPTIMIZED CPU INFORMATIONAL BASELINES ==="
+echo "=== OPTIMIZED CPU STORAGE/INDEX INFORMATIONAL BASELINES ==="
 cargo_pinned test \
   --release \
   --manifest-path "${OPTIMIZED_MANIFEST}" \
