@@ -171,4 +171,20 @@ mod tests {
             .expect_err("unknown schema must fail");
         assert!(error.contains("unsupported package schema"));
     }
+
+    #[test]
+    fn replays_pinned_mts_v015_recursive_package_in_real_amemory() {
+        let package = include_str!("../../upstream/mts-v015-and-recursive-package.fixture");
+        let evidence = execute(package).expect("generated recursive package must replay");
+        assert_eq!(evidence.runs.len(), 4);
+        assert!(evidence.runs.iter().all(|run| {
+            run.raw_rule_matches == 1
+                && run.transitioned_members == 1
+                && run.result == run.expected
+        }));
+        let negative = evidence.negative_run.expect("foreign-Theory negative launch");
+        assert_eq!(negative.raw_rule_matches, 0);
+        assert_eq!(negative.transitioned_members, 0);
+        assert_eq!(negative.result, negative.expected);
+    }
 }
