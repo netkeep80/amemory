@@ -12,7 +12,7 @@ use super::{
         WebProofPrepareStage,
     },
     runtime_session::{
-        CpuRunControllerV1, CpuRunResourceBudgetV1, CpuRuntimeSession,
+        RunControllerV1, CpuRunResourceBudgetV1, CpuRuntimeSession,
     },
     session_contract::{
         BackendResourceAccountingV1, CapabilitySupportV1,
@@ -83,7 +83,7 @@ pub(crate) struct ScenarioRunReportV1 {
 struct ScenarioActiveStepRunV1 {
     run: ScenarioRunV1,
     session_run_id: u64,
-    controller: CpuRunControllerV1,
+    controller: RunControllerV1,
     active_reaction_count: u32,
 }
 
