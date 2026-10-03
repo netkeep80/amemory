@@ -1486,6 +1486,218 @@ mod tests {
 
     #[cfg(not(target_family = "wasm"))]
     #[test]
+    fn canonical_mux1_cpu_linksdb_portable_semantics_match() {
+        let manifest =
+            parse_and_validate_manifest_v1(MUX1_LIFECYCLE).unwrap();
+        let cpu = run_scenario_manifest_v1(
+            &manifest,
+            ScenarioBackendV1::OptimizedCpu,
+        )
+        .unwrap();
+        let linksdb = run_scenario_manifest_v1(
+            &manifest,
+            ScenarioBackendV1::Linksdb,
+        )
+        .unwrap();
+
+        assert!(cpu.overall_pass);
+        assert!(linksdb.overall_pass);
+        assert_eq!(cpu.program_profile, linksdb.program_profile);
+        assert_eq!(
+            cpu.provenance.program_fingerprint,
+            linksdb.provenance.program_fingerprint,
+            "both backends must execute the exact same prepared Aset",
+        );
+        assert_eq!(
+            cpu.session_open_profile.prepared_links,
+            linksdb.session_open_profile.prepared_links,
+        );
+        assert_eq!(
+            cpu.session_open_profile.base_links,
+            linksdb.session_open_profile.base_links,
+        );
+        assert_eq!(cpu.runs.len(), linksdb.runs.len());
+
+        for (cpu_run, linksdb_run) in
+            cpu.runs.iter().zip(&linksdb.runs)
+        {
+            assert_eq!(
+                cpu_run.manifest_run_id,
+                linksdb_run.manifest_run_id,
+            );
+            assert_eq!(cpu_run.session_run_id, linksdb_run.session_run_id);
+            assert_eq!(cpu_run.inputs, linksdb_run.inputs);
+            assert_eq!(
+                cpu_run.configuration_reused,
+                linksdb_run.configuration_reused,
+            );
+            assert_eq!(
+                cpu_run.links_before_configure,
+                linksdb_run.links_before_configure,
+            );
+            assert_eq!(
+                cpu_run.links_after_configure,
+                linksdb_run.links_after_configure,
+            );
+            assert_eq!(
+                cpu_run.result,
+                linksdb_run.result,
+                "normalized Result + recursive wire diverged",
+            );
+            assert_eq!(
+                cpu_run.assertion_results,
+                linksdb_run.assertion_results,
+            );
+            assert_eq!(
+                cpu_run.fresh_instance_matches,
+                linksdb_run.fresh_instance_matches,
+            );
+            assert_eq!(
+                cpu_run.scalar_oracle_matches,
+                linksdb_run.scalar_oracle_matches,
+            );
+            assert_eq!(
+                cpu_run.observed.active_reaction_count,
+                linksdb_run.observed.active_reaction_count,
+            );
+            assert_eq!(
+                cpu_run.observed.final_quiescent,
+                linksdb_run.observed.final_quiescent,
+            );
+
+            let cpu_profile = cpu_run
+                .observed
+                .profile
+                .as_ref()
+                .expect("canonical TRACE run must have CPU profile");
+            let linksdb_profile = linksdb_run
+                .observed
+                .profile
+                .as_ref()
+                .expect("canonical TRACE run must have LinksDB profile");
+
+            assert_eq!(cpu_profile.base_links, linksdb_profile.base_links);
+            assert_eq!(
+                cpu_profile.links_before_run,
+                linksdb_profile.links_before_run,
+            );
+            assert_eq!(
+                cpu_profile.links_after_run,
+                linksdb_profile.links_after_run,
+            );
+            assert_eq!(
+                cpu_profile.execution_link_delta,
+                linksdb_profile.execution_link_delta,
+            );
+            assert_eq!(
+                cpu_profile.scope_before_width,
+                linksdb_profile.scope_before_width,
+            );
+            assert_eq!(
+                cpu_profile.scope_after_width,
+                linksdb_profile.scope_after_width,
+            );
+            assert_eq!(
+                cpu_profile.active_reaction_count,
+                linksdb_profile.active_reaction_count,
+            );
+
+            let mut cpu_structural = cpu_profile.structural.clone();
+            let mut linksdb_structural =
+                linksdb_profile.structural.clone();
+            for profile in [
+                &mut cpu_structural,
+                &mut linksdb_structural,
+            ] {
+                profile.timing_available = false;
+                profile.discovery_ns = 0;
+                profile.role_decode_ns = 0;
+                profile.unification_ns = 0;
+                profile.instantiation_ns = 0;
+                profile.publication_ns = 0;
+                profile.total_ns = 0;
+            }
+            assert_eq!(
+                cpu_structural,
+                linksdb_structural,
+                "common non-timing structural counters diverged",
+            );
+
+            let mut cpu_budget = cpu_profile
+                .budget_accounting
+                .clone()
+                .expect("CPU bounded accounting");
+            let mut linksdb_budget = linksdb_profile
+                .budget_accounting
+                .clone()
+                .expect("LinksDB bounded accounting");
+
+            assert!(
+                cpu_budget.dense_carrier_allocated_bytes.is_some()
+            );
+            assert!(
+                cpu_budget.max_dense_carrier_bytes.is_some()
+            );
+            assert_eq!(
+                linksdb_budget.dense_carrier_allocated_bytes,
+                None,
+            );
+            assert_eq!(
+                linksdb_budget.max_dense_carrier_bytes,
+                None,
+            );
+
+            for budget in [&mut cpu_budget, &mut linksdb_budget] {
+                budget.dense_carrier_allocated_bytes = None;
+                budget.max_dense_carrier_bytes = None;
+                budget.full_resident_bytes_available = false;
+            }
+            assert_eq!(
+                cpu_budget,
+                linksdb_budget,
+                "common bounded-run accounting diverged after removing backend physical extensions",
+            );
+
+            let cpu_pipeline = cpu_run
+                .pipeline_profile
+                .as_ref()
+                .expect("CPU pipeline profile");
+            let linksdb_pipeline = linksdb_run
+                .pipeline_profile
+                .as_ref()
+                .expect("LinksDB pipeline profile");
+            assert_eq!(
+                cpu_pipeline.links_before_configure,
+                linksdb_pipeline.links_before_configure,
+            );
+            assert_eq!(
+                cpu_pipeline.links_after_configure,
+                linksdb_pipeline.links_after_configure,
+            );
+            assert_eq!(
+                cpu_pipeline.links_after_execute,
+                linksdb_pipeline.links_after_execute,
+            );
+        }
+
+        assert_eq!(
+            cpu.runs
+                .iter()
+                .map(|run| run.configuration_reused)
+                .collect::<Vec<_>>(),
+            vec![false, false, false, true],
+        );
+        assert_eq!(
+            linksdb.runs
+                .iter()
+                .map(|run| run.configuration_reused)
+                .collect::<Vec<_>>(),
+            vec![false, false, false, true],
+        );
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    #[test]
     fn canonical_mux1_manifest_runs_end_to_end_on_linksdb_only_where_proven() {
         let manifest =
             parse_and_validate_manifest_v1(MUX1_LIFECYCLE).unwrap();
