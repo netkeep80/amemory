@@ -194,6 +194,569 @@ pub(crate) struct ScenarioExecutionReportV1 {
     pub(crate) provenance: ScenarioProvenanceV1,
 }
 
+pub(crate) const SCENARIO_DIFFERENTIAL_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ScenarioComparisonCheckV1 {
+    pub(crate) path: String,
+    pub(crate) matches: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) left: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) right: Option<Value>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub(crate) enum ScenarioDifferentialExclusionClassV1 {
+    BackendIdentity,
+    Timing,
+    PhysicalResource,
+    BackendLocalHandle,
+    Provenance,
+    LegacyAlias,
+    EvidenceClass,
+    TraceDetail,
+    DerivedDuplicate,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ScenarioDifferentialExcludedFieldV1 {
+    pub(crate) path: String,
+    pub(crate) class: ScenarioDifferentialExclusionClassV1,
+    pub(crate) reason: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ScenarioRunEvidenceSummaryV1 {
+    pub(crate) manifest_run_id: String,
+    pub(crate) assertion_results: Vec<ScenarioAssertionResultV1>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) fresh_instance_matches: Option<bool>,
+    pub(crate) scalar_oracle_matches: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ScenarioEvidenceSummaryV1 {
+    pub(crate) overall_pass: bool,
+    pub(crate) runs: Vec<ScenarioRunEvidenceSummaryV1>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ScenarioDifferentialReportV1 {
+    pub(crate) schema_version: u32,
+    pub(crate) left_backend: ScenarioBackendV1,
+    pub(crate) right_backend: ScenarioBackendV1,
+    // Semantic/lifecycle correctness only. Never include backend physics here.
+    pub(crate) portable_match: bool,
+    pub(crate) portable_checks: Vec<ScenarioComparisonCheckV1>,
+    // Shared implementation diagnostics. This is not semantic authority.
+    pub(crate) diagnostic_match: bool,
+    pub(crate) diagnostic_checks: Vec<ScenarioComparisonCheckV1>,
+    pub(crate) excluded_fields: Vec<ScenarioDifferentialExcludedFieldV1>,
+    pub(crate) left_evidence: ScenarioEvidenceSummaryV1,
+    pub(crate) right_evidence: ScenarioEvidenceSummaryV1,
+}
+
+fn push_comparison_check_v1<T: PartialEq + Serialize>(
+    checks: &mut Vec<ScenarioComparisonCheckV1>,
+    path: impl Into<String>,
+    left: &T,
+    right: &T,
+) {
+    let matches = left == right;
+    let (left_value, right_value) = if matches {
+        (None, None)
+    } else {
+        (
+            serde_json::to_value(left).ok(),
+            serde_json::to_value(right).ok(),
+        )
+    };
+    checks.push(ScenarioComparisonCheckV1 {
+        path: path.into(),
+        matches,
+        left: left_value,
+        right: right_value,
+    });
+}
+
+fn scenario_evidence_summary_v1(
+    report: &ScenarioExecutionReportV1,
+) -> ScenarioEvidenceSummaryV1 {
+    ScenarioEvidenceSummaryV1 {
+        overall_pass: report.overall_pass,
+        runs: report
+            .runs
+            .iter()
+            .map(|run| ScenarioRunEvidenceSummaryV1 {
+                manifest_run_id: run.manifest_run_id.clone(),
+                assertion_results: run.assertion_results.clone(),
+                fresh_instance_matches: run.fresh_instance_matches,
+                scalar_oracle_matches: run.scalar_oracle_matches,
+            })
+            .collect(),
+    }
+}
+
+fn scenario_differential_exclusions_v1(
+) -> Vec<ScenarioDifferentialExcludedFieldV1> {
+    use ScenarioDifferentialExclusionClassV1 as Class;
+
+    [
+        (
+            "backend",
+            Class::BackendIdentity,
+            "backend identity is reported explicitly and is expected to differ",
+        ),
+        (
+            "sessionId",
+            Class::BackendIdentity,
+            "Session identity is host-local",
+        ),
+        (
+            "sessionOpenProfile.sessionId",
+            Class::BackendIdentity,
+            "Session identity is host-local",
+        ),
+        (
+            "sessionOpenProfile.backendId",
+            Class::BackendIdentity,
+            "backend identity is host-local",
+        ),
+        (
+            "sessionOpenProfile.stages",
+            Class::Timing,
+            "prepare/load wall-clock timing is not semantic equality",
+        ),
+        (
+            "provenance.amemoryVersion",
+            Class::Provenance,
+            "build version identifies provenance, not Scenario semantics",
+        ),
+        (
+            "provenance.buildSha",
+            Class::Provenance,
+            "build SHA identifies provenance, not Scenario semantics",
+        ),
+        (
+            "runs[*].oracleMatches",
+            Class::LegacyAlias,
+            "historical fresh-instance compatibility alias is not independent evidence",
+        ),
+        (
+            "runs[*].assertionResults",
+            Class::EvidenceClass,
+            "manifest assertions are reported separately from portable semantic equality",
+        ),
+        (
+            "runs[*].freshInstanceMatches",
+            Class::EvidenceClass,
+            "fresh-instance lifecycle evidence is reported separately",
+        ),
+        (
+            "runs[*].scalarOracleMatches",
+            Class::EvidenceClass,
+            "scalar oracle evidence is reported separately",
+        ),
+        (
+            "runs[*].observed.sessionId",
+            Class::BackendIdentity,
+            "Session identity is host-local",
+        ),
+        (
+            "runs[*].observed.backendId",
+            Class::BackendIdentity,
+            "backend identity is host-local",
+        ),
+        (
+            "runs[*].observed.timingAvailable",
+            Class::Timing,
+            "timing availability is a host capability",
+        ),
+        (
+            "runs[*].observed.finalScope",
+            Class::BackendLocalHandle,
+            "raw final Scope contains backend-local handles; compare only a future normalized structural projection",
+        ),
+        (
+            "runs[*].observed.events",
+            Class::TraceDetail,
+            "raw trace events may contain backend-local handles and elapsed timing",
+        ),
+        (
+            "runs[*].observed.profile.sessionId",
+            Class::BackendIdentity,
+            "Session identity is host-local",
+        ),
+        (
+            "runs[*].observed.profile.backendId",
+            Class::BackendIdentity,
+            "backend identity is host-local",
+        ),
+        (
+            "runs[*].observed.profile.timingAvailable",
+            Class::Timing,
+            "timing availability is a host capability",
+        ),
+        (
+            "runs[*].observed.profile.executeNs",
+            Class::Timing,
+            "execute wall-clock timing is measured separately from correctness",
+        ),
+        (
+            "runs[*].observed.profile.traceProjectionNs",
+            Class::Timing,
+            "trace projection timing is measured separately from correctness",
+        ),
+        (
+            "runs[*].observed.profile.structural.*Ns",
+            Class::Timing,
+            "structural stage timings are measured separately from correctness",
+        ),
+        (
+            "runs[*].observed.profile.denseCarrierAllocatedBytes",
+            Class::PhysicalResource,
+            "dense-carrier bytes are backend-local physical accounting",
+        ),
+        (
+            "runs[*].observed.profile.maxDenseCarrierBytes",
+            Class::PhysicalResource,
+            "dense-carrier limits are backend-local physical accounting",
+        ),
+        (
+            "runs[*].observed.profile.fullResidentBytesAvailable",
+            Class::PhysicalResource,
+            "resident-byte availability is a backend capability",
+        ),
+        (
+            "runs[*].observed.profile.budgetAccounting.denseCarrierAllocatedBytes",
+            Class::PhysicalResource,
+            "dense-carrier bytes are backend-local physical accounting",
+        ),
+        (
+            "runs[*].observed.profile.budgetAccounting.maxDenseCarrierBytes",
+            Class::PhysicalResource,
+            "dense-carrier limits are backend-local physical accounting",
+        ),
+        (
+            "runs[*].observed.profile.budgetAccounting.fullResidentBytesAvailable",
+            Class::PhysicalResource,
+            "resident-byte availability is a backend capability",
+        ),
+        (
+            "runs[*].pipelineProfile.sessionId",
+            Class::BackendIdentity,
+            "Session identity is host-local",
+        ),
+        (
+            "runs[*].pipelineProfile.backendId",
+            Class::BackendIdentity,
+            "backend identity is host-local",
+        ),
+        (
+            "runs[*].pipelineProfile.stages",
+            Class::Timing,
+            "pipeline stage timings are measured separately from correctness",
+        ),
+        (
+            "runs[*].pipelineProfile.executeProfile",
+            Class::DerivedDuplicate,
+            "portable diagnostics are compared through observed.profile; this envelope also contains backend-local/timing fields",
+        ),
+    ]
+    .into_iter()
+    .map(|(path, class, reason)| ScenarioDifferentialExcludedFieldV1 {
+        path: path.to_owned(),
+        class,
+        reason: reason.to_owned(),
+    })
+    .collect()
+}
+
+pub(crate) fn compare_scenario_execution_reports_v1(
+    left: &ScenarioExecutionReportV1,
+    right: &ScenarioExecutionReportV1,
+) -> ScenarioDifferentialReportV1 {
+    let mut portable_checks = Vec::new();
+    let mut diagnostic_checks = Vec::new();
+
+    push_comparison_check_v1(
+        &mut portable_checks,
+        "schemaVersion",
+        &left.schema_version,
+        &right.schema_version,
+    );
+    push_comparison_check_v1(
+        &mut portable_checks,
+        "scenarioId",
+        &left.scenario_id,
+        &right.scenario_id,
+    );
+    push_comparison_check_v1(
+        &mut portable_checks,
+        "scenarioVersion",
+        &left.scenario_version,
+        &right.scenario_version,
+    );
+    push_comparison_check_v1(
+        &mut portable_checks,
+        "programProfile",
+        &left.program_profile,
+        &right.program_profile,
+    );
+    push_comparison_check_v1(
+        &mut portable_checks,
+        "manifestFieldSemantics",
+        &left.manifest_field_semantics,
+        &right.manifest_field_semantics,
+    );
+    push_comparison_check_v1(
+        &mut portable_checks,
+        "provenance.programFingerprint",
+        &left.provenance.program_fingerprint,
+        &right.provenance.program_fingerprint,
+    );
+    push_comparison_check_v1(
+        &mut portable_checks,
+        "runs.length",
+        &left.runs.len(),
+        &right.runs.len(),
+    );
+
+    push_comparison_check_v1(
+        &mut diagnostic_checks,
+        "sessionOpenProfile.preparedLinks",
+        &left.session_open_profile.prepared_links,
+        &right.session_open_profile.prepared_links,
+    );
+    push_comparison_check_v1(
+        &mut diagnostic_checks,
+        "sessionOpenProfile.baseLinks",
+        &left.session_open_profile.base_links,
+        &right.session_open_profile.base_links,
+    );
+
+    for (index, (left_run, right_run)) in
+        left.runs.iter().zip(&right.runs).enumerate()
+    {
+        let prefix = format!("runs[{index}]");
+        push_comparison_check_v1(
+            &mut portable_checks,
+            format!("{prefix}.manifestRunId"),
+            &left_run.manifest_run_id,
+            &right_run.manifest_run_id,
+        );
+        push_comparison_check_v1(
+            &mut portable_checks,
+            format!("{prefix}.sessionRunId"),
+            &left_run.session_run_id,
+            &right_run.session_run_id,
+        );
+        push_comparison_check_v1(
+            &mut portable_checks,
+            format!("{prefix}.inputs"),
+            &left_run.inputs,
+            &right_run.inputs,
+        );
+        push_comparison_check_v1(
+            &mut portable_checks,
+            format!("{prefix}.configurationReused"),
+            &left_run.configuration_reused,
+            &right_run.configuration_reused,
+        );
+        push_comparison_check_v1(
+            &mut portable_checks,
+            format!("{prefix}.result"),
+            &left_run.result,
+            &right_run.result,
+        );
+        push_comparison_check_v1(
+            &mut portable_checks,
+            format!("{prefix}.observed.activeReactionCount"),
+            &left_run.observed.active_reaction_count,
+            &right_run.observed.active_reaction_count,
+        );
+        push_comparison_check_v1(
+            &mut portable_checks,
+            format!("{prefix}.observed.finalQuiescent"),
+            &left_run.observed.final_quiescent,
+            &right_run.observed.final_quiescent,
+        );
+
+        push_comparison_check_v1(
+            &mut diagnostic_checks,
+            format!("{prefix}.linksBeforeConfigure"),
+            &left_run.links_before_configure,
+            &right_run.links_before_configure,
+        );
+        push_comparison_check_v1(
+            &mut diagnostic_checks,
+            format!("{prefix}.linksAfterConfigure"),
+            &left_run.links_after_configure,
+            &right_run.links_after_configure,
+        );
+
+        let left_profile_present = left_run.observed.profile.is_some();
+        let right_profile_present = right_run.observed.profile.is_some();
+        push_comparison_check_v1(
+            &mut diagnostic_checks,
+            format!("{prefix}.observed.profile.present"),
+            &left_profile_present,
+            &right_profile_present,
+        );
+
+        if let (Some(left_profile), Some(right_profile)) = (
+            left_run.observed.profile.as_ref(),
+            right_run.observed.profile.as_ref(),
+        ) {
+            push_comparison_check_v1(
+                &mut diagnostic_checks,
+                format!("{prefix}.observed.profile.baseLinks"),
+                &left_profile.base_links,
+                &right_profile.base_links,
+            );
+            push_comparison_check_v1(
+                &mut diagnostic_checks,
+                format!("{prefix}.observed.profile.linksBeforeRun"),
+                &left_profile.links_before_run,
+                &right_profile.links_before_run,
+            );
+            push_comparison_check_v1(
+                &mut diagnostic_checks,
+                format!("{prefix}.observed.profile.linksAfterRun"),
+                &left_profile.links_after_run,
+                &right_profile.links_after_run,
+            );
+            push_comparison_check_v1(
+                &mut diagnostic_checks,
+                format!("{prefix}.observed.profile.executionLinkDelta"),
+                &left_profile.execution_link_delta,
+                &right_profile.execution_link_delta,
+            );
+            push_comparison_check_v1(
+                &mut diagnostic_checks,
+                format!("{prefix}.observed.profile.scopeBeforeWidth"),
+                &left_profile.scope_before_width,
+                &right_profile.scope_before_width,
+            );
+            push_comparison_check_v1(
+                &mut diagnostic_checks,
+                format!("{prefix}.observed.profile.scopeAfterWidth"),
+                &left_profile.scope_after_width,
+                &right_profile.scope_after_width,
+            );
+            push_comparison_check_v1(
+                &mut diagnostic_checks,
+                format!("{prefix}.observed.profile.activeReactionCount"),
+                &left_profile.active_reaction_count,
+                &right_profile.active_reaction_count,
+            );
+
+            let mut left_structural = left_profile.structural.clone();
+            let mut right_structural = right_profile.structural.clone();
+            for profile in [&mut left_structural, &mut right_structural] {
+                profile.timing_available = false;
+                profile.discovery_ns = 0;
+                profile.role_decode_ns = 0;
+                profile.unification_ns = 0;
+                profile.instantiation_ns = 0;
+                profile.publication_ns = 0;
+                profile.total_ns = 0;
+            }
+            push_comparison_check_v1(
+                &mut diagnostic_checks,
+                format!("{prefix}.observed.profile.structural.commonCounters"),
+                &left_structural,
+                &right_structural,
+            );
+
+            let left_budget_present = left_profile.budget_accounting.is_some();
+            let right_budget_present = right_profile.budget_accounting.is_some();
+            push_comparison_check_v1(
+                &mut diagnostic_checks,
+                format!("{prefix}.observed.profile.budgetAccounting.present"),
+                &left_budget_present,
+                &right_budget_present,
+            );
+            if let (Some(left_budget), Some(right_budget)) = (
+                left_profile.budget_accounting.as_ref(),
+                right_profile.budget_accounting.as_ref(),
+            ) {
+                let mut left_budget = left_budget.clone();
+                let mut right_budget = right_budget.clone();
+                for budget in [&mut left_budget, &mut right_budget] {
+                    budget.dense_carrier_allocated_bytes = None;
+                    budget.max_dense_carrier_bytes = None;
+                    budget.full_resident_bytes_available = false;
+                }
+                push_comparison_check_v1(
+                    &mut diagnostic_checks,
+                    format!(
+                        "{prefix}.observed.profile.budgetAccounting.commonCounters"
+                    ),
+                    &left_budget,
+                    &right_budget,
+                );
+            }
+        }
+
+        let left_pipeline_present = left_run.pipeline_profile.is_some();
+        let right_pipeline_present = right_run.pipeline_profile.is_some();
+        push_comparison_check_v1(
+            &mut diagnostic_checks,
+            format!("{prefix}.pipelineProfile.present"),
+            &left_pipeline_present,
+            &right_pipeline_present,
+        );
+        if let (Some(left_pipeline), Some(right_pipeline)) = (
+            left_run.pipeline_profile.as_ref(),
+            right_run.pipeline_profile.as_ref(),
+        ) {
+            push_comparison_check_v1(
+                &mut diagnostic_checks,
+                format!("{prefix}.pipelineProfile.linksBeforeConfigure"),
+                &left_pipeline.links_before_configure,
+                &right_pipeline.links_before_configure,
+            );
+            push_comparison_check_v1(
+                &mut diagnostic_checks,
+                format!("{prefix}.pipelineProfile.linksAfterConfigure"),
+                &left_pipeline.links_after_configure,
+                &right_pipeline.links_after_configure,
+            );
+            push_comparison_check_v1(
+                &mut diagnostic_checks,
+                format!("{prefix}.pipelineProfile.linksAfterExecute"),
+                &left_pipeline.links_after_execute,
+                &right_pipeline.links_after_execute,
+            );
+        }
+    }
+
+    let portable_match =
+        portable_checks.iter().all(|check| check.matches);
+    let diagnostic_match =
+        diagnostic_checks.iter().all(|check| check.matches);
+    ScenarioDifferentialReportV1 {
+        schema_version: SCENARIO_DIFFERENTIAL_SCHEMA_VERSION,
+        left_backend: left.backend,
+        right_backend: right.backend,
+        portable_match,
+        portable_checks,
+        diagnostic_match,
+        diagnostic_checks,
+        excluded_fields: scenario_differential_exclusions_v1(),
+        left_evidence: scenario_evidence_summary_v1(left),
+        right_evidence: scenario_evidence_summary_v1(right),
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "code", rename_all = "SCREAMING_SNAKE_CASE")]
 pub(crate) enum ScenarioRunnerErrorV1 {
@@ -1500,184 +2063,139 @@ mod tests {
         )
         .unwrap();
 
-        assert!(cpu.overall_pass);
-        assert!(linksdb.overall_pass);
-        assert_eq!(cpu.program_profile, linksdb.program_profile);
-        assert_eq!(
-            cpu.provenance.program_fingerprint,
-            linksdb.provenance.program_fingerprint,
-            "both backends must execute the exact same prepared Aset",
+        let comparison =
+            compare_scenario_execution_reports_v1(&cpu, &linksdb);
+        assert!(
+            comparison.portable_match,
+            "portable Scenario semantics diverged: {:?}",
+            comparison
+                .portable_checks
+                .iter()
+                .filter(|check| !check.matches)
+                .collect::<Vec<_>>(),
+        );
+        assert!(
+            comparison.diagnostic_match,
+            "CPU/LinksDB common diagnostics diverged: {:?}",
+            comparison
+                .diagnostic_checks
+                .iter()
+                .filter(|check| !check.matches)
+                .collect::<Vec<_>>(),
+        );
+        assert!(
+            comparison.left_evidence.overall_pass
+                && comparison.right_evidence.overall_pass
         );
         assert_eq!(
-            cpu.session_open_profile.prepared_links,
-            linksdb.session_open_profile.prepared_links,
+            comparison.left_evidence,
+            comparison.right_evidence,
+            "independent evidence classes must remain separately inspectable",
         );
-        assert_eq!(
-            cpu.session_open_profile.base_links,
-            linksdb.session_open_profile.base_links,
+        assert!(
+            comparison.excluded_fields.iter().any(|field| {
+                field.path == "runs[*].observed.finalScope"
+                    && field.class
+                        == ScenarioDifferentialExclusionClassV1::BackendLocalHandle
+            }),
+            "local Scope handles must be explicitly classified as non-portable",
         );
-        assert_eq!(cpu.runs.len(), linksdb.runs.len());
+        assert!(
+            comparison.excluded_fields.iter().any(|field| {
+                field.path
+                    == "runs[*].observed.profile.budgetAccounting.denseCarrierAllocatedBytes"
+                    && field.class
+                        == ScenarioDifferentialExclusionClassV1::PhysicalResource
+            }),
+            "backend-local resource metrics must be explicitly classified",
+        );
 
-        for (cpu_run, linksdb_run) in
-            cpu.runs.iter().zip(&linksdb.runs)
-        {
-            assert_eq!(
-                cpu_run.manifest_run_id,
-                linksdb_run.manifest_run_id,
-            );
-            assert_eq!(cpu_run.session_run_id, linksdb_run.session_run_id);
-            assert_eq!(cpu_run.inputs, linksdb_run.inputs);
-            assert_eq!(
-                cpu_run.configuration_reused,
-                linksdb_run.configuration_reused,
-            );
-            assert_eq!(
-                cpu_run.links_before_configure,
-                linksdb_run.links_before_configure,
-            );
-            assert_eq!(
-                cpu_run.links_after_configure,
-                linksdb_run.links_after_configure,
-            );
-            assert_eq!(
-                cpu_run.result,
-                linksdb_run.result,
-                "normalized Result + recursive wire diverged",
-            );
-            assert_eq!(
-                cpu_run.assertion_results,
-                linksdb_run.assertion_results,
-            );
-            assert_eq!(
-                cpu_run.fresh_instance_matches,
-                linksdb_run.fresh_instance_matches,
-            );
-            assert_eq!(
-                cpu_run.scalar_oracle_matches,
-                linksdb_run.scalar_oracle_matches,
-            );
-            assert_eq!(
-                cpu_run.observed.active_reaction_count,
-                linksdb_run.observed.active_reaction_count,
-            );
-            assert_eq!(
-                cpu_run.observed.final_quiescent,
-                linksdb_run.observed.final_quiescent,
-            );
+        let json = serde_json::to_string(&comparison).unwrap();
+        let decoded: ScenarioDifferentialReportV1 =
+            serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, comparison);
 
-            let cpu_profile = cpu_run
+        let mut evidence_only_difference = linksdb.clone();
+        evidence_only_difference.runs[0].scalar_oracle_matches = false;
+        evidence_only_difference.overall_pass = false;
+        let evidence_comparison = compare_scenario_execution_reports_v1(
+            &linksdb,
+            &evidence_only_difference,
+        );
+        assert!(
+            evidence_comparison.portable_match,
+            "independent evidence must not silently become semantic equality"
+        );
+        assert_ne!(
+            evidence_comparison.left_evidence,
+            evidence_comparison.right_evidence,
+        );
+        assert!(evidence_comparison.diagnostic_match);
+
+        let mut diagnostic_difference = linksdb.clone();
+        diagnostic_difference.runs[0]
+            .observed
+            .profile
+            .as_mut()
+            .expect("canonical TRACE run must have profile")
+            .structural
+            .trigger_incidence_candidates += 1;
+        let diagnostic_comparison = compare_scenario_execution_reports_v1(
+            &linksdb,
+            &diagnostic_difference,
+        );
+        assert!(
+            diagnostic_comparison.portable_match,
+            "implementation diagnostics must not become semantic authority"
+        );
+        assert!(!diagnostic_comparison.diagnostic_match);
+
+        let mut semantic_difference = linksdb.clone();
+        semantic_difference.runs[0]
+            .result
+            .fields
+            .insert("d0MismatchProbe".to_owned(), Value::from(true));
+        let semantic_comparison =
+            compare_scenario_execution_reports_v1(&linksdb, &semantic_difference);
+        assert!(!semantic_comparison.portable_match);
+        let result_mismatch = semantic_comparison
+            .portable_checks
+            .iter()
+            .find(|check| check.path == "runs[0].result")
+            .expect("normalized Result must be a portable comparison field");
+        assert!(!result_mismatch.matches);
+        assert!(result_mismatch.left.is_some());
+        assert!(result_mismatch.right.is_some());
+
+        for (cpu_run, linksdb_run) in cpu.runs.iter().zip(&linksdb.runs) {
+            let cpu_budget = cpu_run
                 .observed
                 .profile
                 .as_ref()
-                .expect("canonical TRACE run must have CPU profile");
-            let linksdb_profile = linksdb_run
-                .observed
-                .profile
-                .as_ref()
-                .expect("canonical TRACE run must have LinksDB profile");
-
-            assert_eq!(cpu_profile.base_links, linksdb_profile.base_links);
-            assert_eq!(
-                cpu_profile.links_before_run,
-                linksdb_profile.links_before_run,
-            );
-            assert_eq!(
-                cpu_profile.links_after_run,
-                linksdb_profile.links_after_run,
-            );
-            assert_eq!(
-                cpu_profile.execution_link_delta,
-                linksdb_profile.execution_link_delta,
-            );
-            assert_eq!(
-                cpu_profile.scope_before_width,
-                linksdb_profile.scope_before_width,
-            );
-            assert_eq!(
-                cpu_profile.scope_after_width,
-                linksdb_profile.scope_after_width,
-            );
-            assert_eq!(
-                cpu_profile.active_reaction_count,
-                linksdb_profile.active_reaction_count,
-            );
-
-            let mut cpu_structural = cpu_profile.structural.clone();
-            let mut linksdb_structural =
-                linksdb_profile.structural.clone();
-            for profile in [
-                &mut cpu_structural,
-                &mut linksdb_structural,
-            ] {
-                profile.timing_available = false;
-                profile.discovery_ns = 0;
-                profile.role_decode_ns = 0;
-                profile.unification_ns = 0;
-                profile.instantiation_ns = 0;
-                profile.publication_ns = 0;
-                profile.total_ns = 0;
-            }
-            assert_eq!(
-                cpu_structural,
-                linksdb_structural,
-                "common non-timing structural counters diverged",
-            );
-
-            let mut cpu_budget = cpu_profile
+                .expect("canonical TRACE run must have CPU profile")
                 .budget_accounting
-                .clone()
+                .as_ref()
                 .expect("CPU bounded accounting");
-            let mut linksdb_budget = linksdb_profile
+            let linksdb_budget = linksdb_run
+                .observed
+                .profile
+                .as_ref()
+                .expect("canonical TRACE run must have LinksDB profile")
                 .budget_accounting
-                .clone()
+                .as_ref()
                 .expect("LinksDB bounded accounting");
 
             assert!(
-                cpu_budget.dense_carrier_allocated_bytes.is_some()
+                cpu_budget.dense_carrier_allocated_bytes.is_some(),
+                "optimized CPU must report its dense-carrier allocation"
             );
-            assert!(
-                cpu_budget.max_dense_carrier_bytes.is_some()
-            );
+            assert!(cpu_budget.max_dense_carrier_bytes.is_some());
             assert_eq!(
                 linksdb_budget.dense_carrier_allocated_bytes,
                 None,
+                "unavailable LinksDB dense-carrier bytes must stay absent, not zero"
             );
-            assert_eq!(
-                linksdb_budget.max_dense_carrier_bytes,
-                None,
-            );
-
-            for budget in [&mut cpu_budget, &mut linksdb_budget] {
-                budget.dense_carrier_allocated_bytes = None;
-                budget.max_dense_carrier_bytes = None;
-                budget.full_resident_bytes_available = false;
-            }
-            assert_eq!(
-                cpu_budget,
-                linksdb_budget,
-                "common bounded-run accounting diverged after removing backend physical extensions",
-            );
-
-            let cpu_pipeline = cpu_run
-                .pipeline_profile
-                .as_ref()
-                .expect("CPU pipeline profile");
-            let linksdb_pipeline = linksdb_run
-                .pipeline_profile
-                .as_ref()
-                .expect("LinksDB pipeline profile");
-            assert_eq!(
-                cpu_pipeline.links_before_configure,
-                linksdb_pipeline.links_before_configure,
-            );
-            assert_eq!(
-                cpu_pipeline.links_after_configure,
-                linksdb_pipeline.links_after_configure,
-            );
-            assert_eq!(
-                cpu_pipeline.links_after_execute,
-                linksdb_pipeline.links_after_execute,
-            );
+            assert_eq!(linksdb_budget.max_dense_carrier_bytes, None);
         }
 
         assert_eq!(
