@@ -194,7 +194,6 @@ pub(crate) struct ScenarioExecutionReportV1 {
     pub(crate) provenance: ScenarioProvenanceV1,
 }
 
-
 pub(crate) const SCENARIO_DIFFERENTIAL_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -253,8 +252,10 @@ pub(crate) struct ScenarioDifferentialReportV1 {
     pub(crate) schema_version: u32,
     pub(crate) left_backend: ScenarioBackendV1,
     pub(crate) right_backend: ScenarioBackendV1,
+    // Semantic/lifecycle correctness only. Never include backend physics here.
     pub(crate) portable_match: bool,
     pub(crate) portable_checks: Vec<ScenarioComparisonCheckV1>,
+    // Shared implementation diagnostics. This is not semantic authority.
     pub(crate) diagnostic_match: bool,
     pub(crate) diagnostic_checks: Vec<ScenarioComparisonCheckV1>,
     pub(crate) excluded_fields: Vec<ScenarioDifferentialExcludedFieldV1>,
