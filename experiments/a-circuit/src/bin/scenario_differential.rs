@@ -1,9 +1,11 @@
+#[cfg(not(target_family = "wasm"))]
 use std::{
     env, fs,
     io::{self, Read},
     process,
 };
 
+#[cfg(not(target_family = "wasm"))]
 fn read_manifest_source() -> Result<String, String> {
     if let Some(path) = env::args_os().nth(1) {
         return fs::read_to_string(&path).map_err(|error| {
@@ -18,6 +20,7 @@ fn read_manifest_source() -> Result<String, String> {
     Ok(source)
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn main() {
     let source = match read_manifest_source() {
         Ok(source) => source,
@@ -37,3 +40,9 @@ fn main() {
         }
     }
 }
+
+// Cargo builds bin targets for the WASM target as part of release verification.
+// Keep this target compileable there without pretending that native LinksDB
+// execution is available in WASM.
+#[cfg(target_family = "wasm")]
+fn main() {}
