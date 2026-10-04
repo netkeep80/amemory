@@ -199,7 +199,7 @@ pub(crate) const SCENARIO_DIFFERENTIAL_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct ScenarioPortableCheckV1 {
+pub(crate) struct ScenarioComparisonCheckV1 {
     pub(crate) path: String,
     pub(crate) matches: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -254,14 +254,16 @@ pub(crate) struct ScenarioDifferentialReportV1 {
     pub(crate) left_backend: ScenarioBackendV1,
     pub(crate) right_backend: ScenarioBackendV1,
     pub(crate) portable_match: bool,
-    pub(crate) portable_checks: Vec<ScenarioPortableCheckV1>,
+    pub(crate) portable_checks: Vec<ScenarioComparisonCheckV1>,
+    pub(crate) diagnostic_match: bool,
+    pub(crate) diagnostic_checks: Vec<ScenarioComparisonCheckV1>,
     pub(crate) excluded_fields: Vec<ScenarioDifferentialExcludedFieldV1>,
     pub(crate) left_evidence: ScenarioEvidenceSummaryV1,
     pub(crate) right_evidence: ScenarioEvidenceSummaryV1,
 }
 
-fn push_portable_check_v1<T: PartialEq + Serialize>(
-    checks: &mut Vec<ScenarioPortableCheckV1>,
+fn push_comparison_check_v1<T: PartialEq + Serialize>(
+    checks: &mut Vec<ScenarioComparisonCheckV1>,
     path: impl Into<String>,
     left: &T,
     right: &T,
@@ -275,7 +277,7 @@ fn push_portable_check_v1<T: PartialEq + Serialize>(
             serde_json::to_value(right).ok(),
         )
     };
-    checks.push(ScenarioPortableCheckV1 {
+    checks.push(ScenarioComparisonCheckV1 {
         path: path.into(),
         matches,
         left: left_value,
@@ -464,7 +466,7 @@ fn scenario_differential_exclusions_v1(
         (
             "runs[*].pipelineProfile.executeProfile",
             Class::DerivedDuplicate,
-            "portable execute counters are compared through observed.profile; this envelope also contains backend-local/timing fields",
+            "portable diagnostics are compared through observed.profile; this envelope also contains backend-local/timing fields",
         ),
     ]
     .into_iter()
@@ -480,126 +482,129 @@ pub(crate) fn compare_scenario_execution_reports_v1(
     left: &ScenarioExecutionReportV1,
     right: &ScenarioExecutionReportV1,
 ) -> ScenarioDifferentialReportV1 {
-    let mut checks = Vec::new();
+    let mut portable_checks = Vec::new();
+    let mut diagnostic_checks = Vec::new();
 
-    push_portable_check_v1(
-        &mut checks,
+    push_comparison_check_v1(
+        &mut portable_checks,
         "schemaVersion",
         &left.schema_version,
         &right.schema_version,
     );
-    push_portable_check_v1(
-        &mut checks,
+    push_comparison_check_v1(
+        &mut portable_checks,
         "scenarioId",
         &left.scenario_id,
         &right.scenario_id,
     );
-    push_portable_check_v1(
-        &mut checks,
+    push_comparison_check_v1(
+        &mut portable_checks,
         "scenarioVersion",
         &left.scenario_version,
         &right.scenario_version,
     );
-    push_portable_check_v1(
-        &mut checks,
+    push_comparison_check_v1(
+        &mut portable_checks,
         "programProfile",
         &left.program_profile,
         &right.program_profile,
     );
-    push_portable_check_v1(
-        &mut checks,
+    push_comparison_check_v1(
+        &mut portable_checks,
         "manifestFieldSemantics",
         &left.manifest_field_semantics,
         &right.manifest_field_semantics,
     );
-    push_portable_check_v1(
-        &mut checks,
+    push_comparison_check_v1(
+        &mut portable_checks,
         "provenance.programFingerprint",
         &left.provenance.program_fingerprint,
         &right.provenance.program_fingerprint,
     );
-    push_portable_check_v1(
-        &mut checks,
+    push_comparison_check_v1(
+        &mut portable_checks,
+        "runs.length",
+        &left.runs.len(),
+        &right.runs.len(),
+    );
+
+    push_comparison_check_v1(
+        &mut diagnostic_checks,
         "sessionOpenProfile.preparedLinks",
         &left.session_open_profile.prepared_links,
         &right.session_open_profile.prepared_links,
     );
-    push_portable_check_v1(
-        &mut checks,
+    push_comparison_check_v1(
+        &mut diagnostic_checks,
         "sessionOpenProfile.baseLinks",
         &left.session_open_profile.base_links,
         &right.session_open_profile.base_links,
-    );
-    push_portable_check_v1(
-        &mut checks,
-        "runs.length",
-        &left.runs.len(),
-        &right.runs.len(),
     );
 
     for (index, (left_run, right_run)) in
         left.runs.iter().zip(&right.runs).enumerate()
     {
         let prefix = format!("runs[{index}]");
-        push_portable_check_v1(
-            &mut checks,
+        push_comparison_check_v1(
+            &mut portable_checks,
             format!("{prefix}.manifestRunId"),
             &left_run.manifest_run_id,
             &right_run.manifest_run_id,
         );
-        push_portable_check_v1(
-            &mut checks,
+        push_comparison_check_v1(
+            &mut portable_checks,
             format!("{prefix}.sessionRunId"),
             &left_run.session_run_id,
             &right_run.session_run_id,
         );
-        push_portable_check_v1(
-            &mut checks,
+        push_comparison_check_v1(
+            &mut portable_checks,
             format!("{prefix}.inputs"),
             &left_run.inputs,
             &right_run.inputs,
         );
-        push_portable_check_v1(
-            &mut checks,
+        push_comparison_check_v1(
+            &mut portable_checks,
             format!("{prefix}.configurationReused"),
             &left_run.configuration_reused,
             &right_run.configuration_reused,
         );
-        push_portable_check_v1(
-            &mut checks,
-            format!("{prefix}.linksBeforeConfigure"),
-            &left_run.links_before_configure,
-            &right_run.links_before_configure,
-        );
-        push_portable_check_v1(
-            &mut checks,
-            format!("{prefix}.linksAfterConfigure"),
-            &left_run.links_after_configure,
-            &right_run.links_after_configure,
-        );
-        push_portable_check_v1(
-            &mut checks,
+        push_comparison_check_v1(
+            &mut portable_checks,
             format!("{prefix}.result"),
             &left_run.result,
             &right_run.result,
         );
-        push_portable_check_v1(
-            &mut checks,
+        push_comparison_check_v1(
+            &mut portable_checks,
             format!("{prefix}.observed.activeReactionCount"),
             &left_run.observed.active_reaction_count,
             &right_run.observed.active_reaction_count,
         );
-        push_portable_check_v1(
-            &mut checks,
+        push_comparison_check_v1(
+            &mut portable_checks,
             format!("{prefix}.observed.finalQuiescent"),
             &left_run.observed.final_quiescent,
             &right_run.observed.final_quiescent,
         );
 
+        push_comparison_check_v1(
+            &mut diagnostic_checks,
+            format!("{prefix}.linksBeforeConfigure"),
+            &left_run.links_before_configure,
+            &right_run.links_before_configure,
+        );
+        push_comparison_check_v1(
+            &mut diagnostic_checks,
+            format!("{prefix}.linksAfterConfigure"),
+            &left_run.links_after_configure,
+            &right_run.links_after_configure,
+        );
+
         let left_profile_present = left_run.observed.profile.is_some();
         let right_profile_present = right_run.observed.profile.is_some();
-        push_portable_check_v1(
-            &mut checks,
+        push_comparison_check_v1(
+            &mut diagnostic_checks,
             format!("{prefix}.observed.profile.present"),
             &left_profile_present,
             &right_profile_present,
@@ -609,44 +614,44 @@ pub(crate) fn compare_scenario_execution_reports_v1(
             left_run.observed.profile.as_ref(),
             right_run.observed.profile.as_ref(),
         ) {
-            push_portable_check_v1(
-                &mut checks,
+            push_comparison_check_v1(
+                &mut diagnostic_checks,
                 format!("{prefix}.observed.profile.baseLinks"),
                 &left_profile.base_links,
                 &right_profile.base_links,
             );
-            push_portable_check_v1(
-                &mut checks,
+            push_comparison_check_v1(
+                &mut diagnostic_checks,
                 format!("{prefix}.observed.profile.linksBeforeRun"),
                 &left_profile.links_before_run,
                 &right_profile.links_before_run,
             );
-            push_portable_check_v1(
-                &mut checks,
+            push_comparison_check_v1(
+                &mut diagnostic_checks,
                 format!("{prefix}.observed.profile.linksAfterRun"),
                 &left_profile.links_after_run,
                 &right_profile.links_after_run,
             );
-            push_portable_check_v1(
-                &mut checks,
+            push_comparison_check_v1(
+                &mut diagnostic_checks,
                 format!("{prefix}.observed.profile.executionLinkDelta"),
                 &left_profile.execution_link_delta,
                 &right_profile.execution_link_delta,
             );
-            push_portable_check_v1(
-                &mut checks,
+            push_comparison_check_v1(
+                &mut diagnostic_checks,
                 format!("{prefix}.observed.profile.scopeBeforeWidth"),
                 &left_profile.scope_before_width,
                 &right_profile.scope_before_width,
             );
-            push_portable_check_v1(
-                &mut checks,
+            push_comparison_check_v1(
+                &mut diagnostic_checks,
                 format!("{prefix}.observed.profile.scopeAfterWidth"),
                 &left_profile.scope_after_width,
                 &right_profile.scope_after_width,
             );
-            push_portable_check_v1(
-                &mut checks,
+            push_comparison_check_v1(
+                &mut diagnostic_checks,
                 format!("{prefix}.observed.profile.activeReactionCount"),
                 &left_profile.active_reaction_count,
                 &right_profile.active_reaction_count,
@@ -663,8 +668,8 @@ pub(crate) fn compare_scenario_execution_reports_v1(
                 profile.publication_ns = 0;
                 profile.total_ns = 0;
             }
-            push_portable_check_v1(
-                &mut checks,
+            push_comparison_check_v1(
+                &mut diagnostic_checks,
                 format!("{prefix}.observed.profile.structural.commonCounters"),
                 &left_structural,
                 &right_structural,
@@ -672,8 +677,8 @@ pub(crate) fn compare_scenario_execution_reports_v1(
 
             let left_budget_present = left_profile.budget_accounting.is_some();
             let right_budget_present = right_profile.budget_accounting.is_some();
-            push_portable_check_v1(
-                &mut checks,
+            push_comparison_check_v1(
+                &mut diagnostic_checks,
                 format!("{prefix}.observed.profile.budgetAccounting.present"),
                 &left_budget_present,
                 &right_budget_present,
@@ -689,8 +694,8 @@ pub(crate) fn compare_scenario_execution_reports_v1(
                     budget.max_dense_carrier_bytes = None;
                     budget.full_resident_bytes_available = false;
                 }
-                push_portable_check_v1(
-                    &mut checks,
+                push_comparison_check_v1(
+                    &mut diagnostic_checks,
                     format!(
                         "{prefix}.observed.profile.budgetAccounting.commonCounters"
                     ),
@@ -702,8 +707,8 @@ pub(crate) fn compare_scenario_execution_reports_v1(
 
         let left_pipeline_present = left_run.pipeline_profile.is_some();
         let right_pipeline_present = right_run.pipeline_profile.is_some();
-        push_portable_check_v1(
-            &mut checks,
+        push_comparison_check_v1(
+            &mut diagnostic_checks,
             format!("{prefix}.pipelineProfile.present"),
             &left_pipeline_present,
             &right_pipeline_present,
@@ -712,20 +717,20 @@ pub(crate) fn compare_scenario_execution_reports_v1(
             left_run.pipeline_profile.as_ref(),
             right_run.pipeline_profile.as_ref(),
         ) {
-            push_portable_check_v1(
-                &mut checks,
+            push_comparison_check_v1(
+                &mut diagnostic_checks,
                 format!("{prefix}.pipelineProfile.linksBeforeConfigure"),
                 &left_pipeline.links_before_configure,
                 &right_pipeline.links_before_configure,
             );
-            push_portable_check_v1(
-                &mut checks,
+            push_comparison_check_v1(
+                &mut diagnostic_checks,
                 format!("{prefix}.pipelineProfile.linksAfterConfigure"),
                 &left_pipeline.links_after_configure,
                 &right_pipeline.links_after_configure,
             );
-            push_portable_check_v1(
-                &mut checks,
+            push_comparison_check_v1(
+                &mut diagnostic_checks,
                 format!("{prefix}.pipelineProfile.linksAfterExecute"),
                 &left_pipeline.links_after_execute,
                 &right_pipeline.links_after_execute,
@@ -733,13 +738,18 @@ pub(crate) fn compare_scenario_execution_reports_v1(
         }
     }
 
-    let portable_match = checks.iter().all(|check| check.matches);
+    let portable_match =
+        portable_checks.iter().all(|check| check.matches);
+    let diagnostic_match =
+        diagnostic_checks.iter().all(|check| check.matches);
     ScenarioDifferentialReportV1 {
         schema_version: SCENARIO_DIFFERENTIAL_SCHEMA_VERSION,
         left_backend: left.backend,
         right_backend: right.backend,
         portable_match,
-        portable_checks: checks,
+        portable_checks,
+        diagnostic_match,
+        diagnostic_checks,
         excluded_fields: scenario_differential_exclusions_v1(),
         left_evidence: scenario_evidence_summary_v1(left),
         right_evidence: scenario_evidence_summary_v1(right),
