@@ -2249,6 +2249,47 @@ mod tests {
 
     #[cfg(not(target_family = "wasm"))]
     #[test]
+    fn native_cpu_linksdb_differential_driver_serializes_d0_report() {
+        let json =
+            run_native_cpu_linksdb_differential_json_v1(MUX1_LIFECYCLE)
+                .unwrap();
+        let report: ScenarioDifferentialReportV1 =
+            serde_json::from_str(&json).unwrap();
+
+        assert_eq!(
+            report.left_backend,
+            ScenarioBackendV1::OptimizedCpu
+        );
+        assert_eq!(report.right_backend, ScenarioBackendV1::Linksdb);
+        assert!(report.portable_match);
+        assert!(report.diagnostic_match);
+        assert!(
+            report.left_evidence.overall_pass
+                && report.right_evidence.overall_pass
+        );
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    #[test]
+    fn native_cpu_linksdb_differential_driver_fails_closed_when_linksdb_is_unsupported(
+    ) {
+        let error =
+            run_native_cpu_linksdb_differential_json_v1(XOR32_LIFECYCLE)
+                .unwrap_err();
+
+        assert!(
+            error.starts_with("LINKSDB_EXECUTION_FAILED:"),
+            "unexpected error: {error}"
+        );
+        assert!(
+            error.contains("UnsupportedBackend")
+                || error.contains("UnsupportedProgramProfile"),
+            "must expose the real unsupported LinksDB boundary: {error}"
+        );
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    #[test]
     fn canonical_mux1_manifest_runs_end_to_end_on_linksdb_only_where_proven() {
         let manifest =
             parse_and_validate_manifest_v1(MUX1_LIFECYCLE).unwrap();
