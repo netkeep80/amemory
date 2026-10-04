@@ -1930,6 +1930,39 @@ pub(crate) fn run_scenario_manifest_v1(
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
+pub(crate) fn run_native_cpu_linksdb_differential_json_v1(
+    source: &str,
+) -> Result<String, String> {
+    let manifest = super::scenario::parse_and_validate_manifest_v1(source)
+        .map_err(|errors| {
+            let detail = serde_json::to_string(&errors)
+                .unwrap_or_else(|_| "manifest validation failed".to_owned());
+            format!("MANIFEST_INVALID: {detail}")
+        })?;
+
+    let cpu = run_scenario_manifest_v1(
+        &manifest,
+        ScenarioBackendV1::OptimizedCpu,
+    )
+    .map_err(|error| {
+        format!("OPTIMIZED_CPU_EXECUTION_FAILED: {error:?}")
+    })?;
+
+    let linksdb = run_scenario_manifest_v1(
+        &manifest,
+        ScenarioBackendV1::Linksdb,
+    )
+    .map_err(|error| {
+        format!("LINKSDB_EXECUTION_FAILED: {error:?}")
+    })?;
+
+    let comparison =
+        compare_scenario_execution_reports_v1(&cpu, &linksdb);
+    serde_json::to_string_pretty(&comparison)
+        .map_err(|error| format!("DIFFERENTIAL_SERIALIZE_FAILED: {error}"))
+}
+
 fn evaluate_assertions(
     assertions: &[ScenarioAssertionV1],
     result: &ScenarioNormalizedResultV1,
