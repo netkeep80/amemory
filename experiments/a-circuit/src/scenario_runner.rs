@@ -194,6 +194,558 @@ pub(crate) struct ScenarioExecutionReportV1 {
     pub(crate) provenance: ScenarioProvenanceV1,
 }
 
+
+pub(crate) const SCENARIO_DIFFERENTIAL_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ScenarioPortableCheckV1 {
+    pub(crate) path: String,
+    pub(crate) matches: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) left: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) right: Option<Value>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub(crate) enum ScenarioDifferentialExclusionClassV1 {
+    BackendIdentity,
+    Timing,
+    PhysicalResource,
+    BackendLocalHandle,
+    Provenance,
+    LegacyAlias,
+    EvidenceClass,
+    TraceDetail,
+    DerivedDuplicate,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ScenarioDifferentialExcludedFieldV1 {
+    pub(crate) path: String,
+    pub(crate) class: ScenarioDifferentialExclusionClassV1,
+    pub(crate) reason: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ScenarioRunEvidenceSummaryV1 {
+    pub(crate) manifest_run_id: String,
+    pub(crate) assertion_results: Vec<ScenarioAssertionResultV1>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) fresh_instance_matches: Option<bool>,
+    pub(crate) scalar_oracle_matches: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ScenarioEvidenceSummaryV1 {
+    pub(crate) overall_pass: bool,
+    pub(crate) runs: Vec<ScenarioRunEvidenceSummaryV1>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ScenarioDifferentialReportV1 {
+    pub(crate) schema_version: u32,
+    pub(crate) left_backend: ScenarioBackendV1,
+    pub(crate) right_backend: ScenarioBackendV1,
+    pub(crate) portable_match: bool,
+    pub(crate) portable_checks: Vec<ScenarioPortableCheckV1>,
+    pub(crate) excluded_fields: Vec<ScenarioDifferentialExcludedFieldV1>,
+    pub(crate) left_evidence: ScenarioEvidenceSummaryV1,
+    pub(crate) right_evidence: ScenarioEvidenceSummaryV1,
+}
+
+fn push_portable_check_v1<T: PartialEq + Serialize>(
+    checks: &mut Vec<ScenarioPortableCheckV1>,
+    path: impl Into<String>,
+    left: &T,
+    right: &T,
+) {
+    let matches = left == right;
+    let (left_value, right_value) = if matches {
+        (None, None)
+    } else {
+        (
+            serde_json::to_value(left).ok(),
+            serde_json::to_value(right).ok(),
+        )
+    };
+    checks.push(ScenarioPortableCheckV1 {
+        path: path.into(),
+        matches,
+        left: left_value,
+        right: right_value,
+    });
+}
+
+fn scenario_evidence_summary_v1(
+    report: &ScenarioExecutionReportV1,
+) -> ScenarioEvidenceSummaryV1 {
+    ScenarioEvidenceSummaryV1 {
+        overall_pass: report.overall_pass,
+        runs: report
+            .runs
+            .iter()
+            .map(|run| ScenarioRunEvidenceSummaryV1 {
+                manifest_run_id: run.manifest_run_id.clone(),
+                assertion_results: run.assertion_results.clone(),
+                fresh_instance_matches: run.fresh_instance_matches,
+                scalar_oracle_matches: run.scalar_oracle_matches,
+            })
+            .collect(),
+    }
+}
+
+fn scenario_differential_exclusions_v1(
+) -> Vec<ScenarioDifferentialExcludedFieldV1> {
+    use ScenarioDifferentialExclusionClassV1 as Class;
+
+    [
+        (
+            "backend",
+            Class::BackendIdentity,
+            "backend identity is reported explicitly and is expected to differ",
+        ),
+        (
+            "sessionId",
+            Class::BackendIdentity,
+            "Session identity is host-local",
+        ),
+        (
+            "sessionOpenProfile.sessionId",
+            Class::BackendIdentity,
+            "Session identity is host-local",
+        ),
+        (
+            "sessionOpenProfile.backendId",
+            Class::BackendIdentity,
+            "backend identity is host-local",
+        ),
+        (
+            "sessionOpenProfile.stages",
+            Class::Timing,
+            "prepare/load wall-clock timing is not semantic equality",
+        ),
+        (
+            "provenance.amemoryVersion",
+            Class::Provenance,
+            "build version identifies provenance, not Scenario semantics",
+        ),
+        (
+            "provenance.buildSha",
+            Class::Provenance,
+            "build SHA identifies provenance, not Scenario semantics",
+        ),
+        (
+            "runs[*].oracleMatches",
+            Class::LegacyAlias,
+            "historical fresh-instance compatibility alias is not independent evidence",
+        ),
+        (
+            "runs[*].assertionResults",
+            Class::EvidenceClass,
+            "manifest assertions are reported separately from portable semantic equality",
+        ),
+        (
+            "runs[*].freshInstanceMatches",
+            Class::EvidenceClass,
+            "fresh-instance lifecycle evidence is reported separately",
+        ),
+        (
+            "runs[*].scalarOracleMatches",
+            Class::EvidenceClass,
+            "scalar oracle evidence is reported separately",
+        ),
+        (
+            "runs[*].observed.sessionId",
+            Class::BackendIdentity,
+            "Session identity is host-local",
+        ),
+        (
+            "runs[*].observed.backendId",
+            Class::BackendIdentity,
+            "backend identity is host-local",
+        ),
+        (
+            "runs[*].observed.timingAvailable",
+            Class::Timing,
+            "timing availability is a host capability",
+        ),
+        (
+            "runs[*].observed.finalScope",
+            Class::BackendLocalHandle,
+            "raw final Scope contains backend-local handles; compare only a future normalized structural projection",
+        ),
+        (
+            "runs[*].observed.events",
+            Class::TraceDetail,
+            "raw trace events may contain backend-local handles and elapsed timing",
+        ),
+        (
+            "runs[*].observed.profile.sessionId",
+            Class::BackendIdentity,
+            "Session identity is host-local",
+        ),
+        (
+            "runs[*].observed.profile.backendId",
+            Class::BackendIdentity,
+            "backend identity is host-local",
+        ),
+        (
+            "runs[*].observed.profile.timingAvailable",
+            Class::Timing,
+            "timing availability is a host capability",
+        ),
+        (
+            "runs[*].observed.profile.executeNs",
+            Class::Timing,
+            "execute wall-clock timing is measured separately from correctness",
+        ),
+        (
+            "runs[*].observed.profile.traceProjectionNs",
+            Class::Timing,
+            "trace projection timing is measured separately from correctness",
+        ),
+        (
+            "runs[*].observed.profile.structural.*Ns",
+            Class::Timing,
+            "structural stage timings are measured separately from correctness",
+        ),
+        (
+            "runs[*].observed.profile.denseCarrierAllocatedBytes",
+            Class::PhysicalResource,
+            "dense-carrier bytes are backend-local physical accounting",
+        ),
+        (
+            "runs[*].observed.profile.maxDenseCarrierBytes",
+            Class::PhysicalResource,
+            "dense-carrier limits are backend-local physical accounting",
+        ),
+        (
+            "runs[*].observed.profile.fullResidentBytesAvailable",
+            Class::PhysicalResource,
+            "resident-byte availability is a backend capability",
+        ),
+        (
+            "runs[*].observed.profile.budgetAccounting.denseCarrierAllocatedBytes",
+            Class::PhysicalResource,
+            "dense-carrier bytes are backend-local physical accounting",
+        ),
+        (
+            "runs[*].observed.profile.budgetAccounting.maxDenseCarrierBytes",
+            Class::PhysicalResource,
+            "dense-carrier limits are backend-local physical accounting",
+        ),
+        (
+            "runs[*].observed.profile.budgetAccounting.fullResidentBytesAvailable",
+            Class::PhysicalResource,
+            "resident-byte availability is a backend capability",
+        ),
+        (
+            "runs[*].pipelineProfile.sessionId",
+            Class::BackendIdentity,
+            "Session identity is host-local",
+        ),
+        (
+            "runs[*].pipelineProfile.backendId",
+            Class::BackendIdentity,
+            "backend identity is host-local",
+        ),
+        (
+            "runs[*].pipelineProfile.stages",
+            Class::Timing,
+            "pipeline stage timings are measured separately from correctness",
+        ),
+        (
+            "runs[*].pipelineProfile.executeProfile",
+            Class::DerivedDuplicate,
+            "portable execute counters are compared through observed.profile; this envelope also contains backend-local/timing fields",
+        ),
+    ]
+    .into_iter()
+    .map(|(path, class, reason)| ScenarioDifferentialExcludedFieldV1 {
+        path: path.to_owned(),
+        class,
+        reason: reason.to_owned(),
+    })
+    .collect()
+}
+
+pub(crate) fn compare_scenario_execution_reports_v1(
+    left: &ScenarioExecutionReportV1,
+    right: &ScenarioExecutionReportV1,
+) -> ScenarioDifferentialReportV1 {
+    let mut checks = Vec::new();
+
+    push_portable_check_v1(
+        &mut checks,
+        "schemaVersion",
+        &left.schema_version,
+        &right.schema_version,
+    );
+    push_portable_check_v1(
+        &mut checks,
+        "scenarioId",
+        &left.scenario_id,
+        &right.scenario_id,
+    );
+    push_portable_check_v1(
+        &mut checks,
+        "scenarioVersion",
+        &left.scenario_version,
+        &right.scenario_version,
+    );
+    push_portable_check_v1(
+        &mut checks,
+        "programProfile",
+        &left.program_profile,
+        &right.program_profile,
+    );
+    push_portable_check_v1(
+        &mut checks,
+        "manifestFieldSemantics",
+        &left.manifest_field_semantics,
+        &right.manifest_field_semantics,
+    );
+    push_portable_check_v1(
+        &mut checks,
+        "provenance.programFingerprint",
+        &left.provenance.program_fingerprint,
+        &right.provenance.program_fingerprint,
+    );
+    push_portable_check_v1(
+        &mut checks,
+        "sessionOpenProfile.preparedLinks",
+        &left.session_open_profile.prepared_links,
+        &right.session_open_profile.prepared_links,
+    );
+    push_portable_check_v1(
+        &mut checks,
+        "sessionOpenProfile.baseLinks",
+        &left.session_open_profile.base_links,
+        &right.session_open_profile.base_links,
+    );
+    push_portable_check_v1(
+        &mut checks,
+        "runs.length",
+        &left.runs.len(),
+        &right.runs.len(),
+    );
+
+    for (index, (left_run, right_run)) in
+        left.runs.iter().zip(&right.runs).enumerate()
+    {
+        let prefix = format!("runs[{index}]");
+        push_portable_check_v1(
+            &mut checks,
+            format!("{prefix}.manifestRunId"),
+            &left_run.manifest_run_id,
+            &right_run.manifest_run_id,
+        );
+        push_portable_check_v1(
+            &mut checks,
+            format!("{prefix}.sessionRunId"),
+            &left_run.session_run_id,
+            &right_run.session_run_id,
+        );
+        push_portable_check_v1(
+            &mut checks,
+            format!("{prefix}.inputs"),
+            &left_run.inputs,
+            &right_run.inputs,
+        );
+        push_portable_check_v1(
+            &mut checks,
+            format!("{prefix}.configurationReused"),
+            &left_run.configuration_reused,
+            &right_run.configuration_reused,
+        );
+        push_portable_check_v1(
+            &mut checks,
+            format!("{prefix}.linksBeforeConfigure"),
+            &left_run.links_before_configure,
+            &right_run.links_before_configure,
+        );
+        push_portable_check_v1(
+            &mut checks,
+            format!("{prefix}.linksAfterConfigure"),
+            &left_run.links_after_configure,
+            &right_run.links_after_configure,
+        );
+        push_portable_check_v1(
+            &mut checks,
+            format!("{prefix}.result"),
+            &left_run.result,
+            &right_run.result,
+        );
+        push_portable_check_v1(
+            &mut checks,
+            format!("{prefix}.observed.activeReactionCount"),
+            &left_run.observed.active_reaction_count,
+            &right_run.observed.active_reaction_count,
+        );
+        push_portable_check_v1(
+            &mut checks,
+            format!("{prefix}.observed.finalQuiescent"),
+            &left_run.observed.final_quiescent,
+            &right_run.observed.final_quiescent,
+        );
+
+        let left_profile_present = left_run.observed.profile.is_some();
+        let right_profile_present = right_run.observed.profile.is_some();
+        push_portable_check_v1(
+            &mut checks,
+            format!("{prefix}.observed.profile.present"),
+            &left_profile_present,
+            &right_profile_present,
+        );
+
+        if let (Some(left_profile), Some(right_profile)) = (
+            left_run.observed.profile.as_ref(),
+            right_run.observed.profile.as_ref(),
+        ) {
+            push_portable_check_v1(
+                &mut checks,
+                format!("{prefix}.observed.profile.baseLinks"),
+                &left_profile.base_links,
+                &right_profile.base_links,
+            );
+            push_portable_check_v1(
+                &mut checks,
+                format!("{prefix}.observed.profile.linksBeforeRun"),
+                &left_profile.links_before_run,
+                &right_profile.links_before_run,
+            );
+            push_portable_check_v1(
+                &mut checks,
+                format!("{prefix}.observed.profile.linksAfterRun"),
+                &left_profile.links_after_run,
+                &right_profile.links_after_run,
+            );
+            push_portable_check_v1(
+                &mut checks,
+                format!("{prefix}.observed.profile.executionLinkDelta"),
+                &left_profile.execution_link_delta,
+                &right_profile.execution_link_delta,
+            );
+            push_portable_check_v1(
+                &mut checks,
+                format!("{prefix}.observed.profile.scopeBeforeWidth"),
+                &left_profile.scope_before_width,
+                &right_profile.scope_before_width,
+            );
+            push_portable_check_v1(
+                &mut checks,
+                format!("{prefix}.observed.profile.scopeAfterWidth"),
+                &left_profile.scope_after_width,
+                &right_profile.scope_after_width,
+            );
+            push_portable_check_v1(
+                &mut checks,
+                format!("{prefix}.observed.profile.activeReactionCount"),
+                &left_profile.active_reaction_count,
+                &right_profile.active_reaction_count,
+            );
+
+            let mut left_structural = left_profile.structural.clone();
+            let mut right_structural = right_profile.structural.clone();
+            for profile in [&mut left_structural, &mut right_structural] {
+                profile.timing_available = false;
+                profile.discovery_ns = 0;
+                profile.role_decode_ns = 0;
+                profile.unification_ns = 0;
+                profile.instantiation_ns = 0;
+                profile.publication_ns = 0;
+                profile.total_ns = 0;
+            }
+            push_portable_check_v1(
+                &mut checks,
+                format!("{prefix}.observed.profile.structural.commonCounters"),
+                &left_structural,
+                &right_structural,
+            );
+
+            let left_budget_present = left_profile.budget_accounting.is_some();
+            let right_budget_present = right_profile.budget_accounting.is_some();
+            push_portable_check_v1(
+                &mut checks,
+                format!("{prefix}.observed.profile.budgetAccounting.present"),
+                &left_budget_present,
+                &right_budget_present,
+            );
+            if let (Some(left_budget), Some(right_budget)) = (
+                left_profile.budget_accounting.as_ref(),
+                right_profile.budget_accounting.as_ref(),
+            ) {
+                let mut left_budget = left_budget.clone();
+                let mut right_budget = right_budget.clone();
+                for budget in [&mut left_budget, &mut right_budget] {
+                    budget.dense_carrier_allocated_bytes = None;
+                    budget.max_dense_carrier_bytes = None;
+                    budget.full_resident_bytes_available = false;
+                }
+                push_portable_check_v1(
+                    &mut checks,
+                    format!(
+                        "{prefix}.observed.profile.budgetAccounting.commonCounters"
+                    ),
+                    &left_budget,
+                    &right_budget,
+                );
+            }
+        }
+
+        let left_pipeline_present = left_run.pipeline_profile.is_some();
+        let right_pipeline_present = right_run.pipeline_profile.is_some();
+        push_portable_check_v1(
+            &mut checks,
+            format!("{prefix}.pipelineProfile.present"),
+            &left_pipeline_present,
+            &right_pipeline_present,
+        );
+        if let (Some(left_pipeline), Some(right_pipeline)) = (
+            left_run.pipeline_profile.as_ref(),
+            right_run.pipeline_profile.as_ref(),
+        ) {
+            push_portable_check_v1(
+                &mut checks,
+                format!("{prefix}.pipelineProfile.linksBeforeConfigure"),
+                &left_pipeline.links_before_configure,
+                &right_pipeline.links_before_configure,
+            );
+            push_portable_check_v1(
+                &mut checks,
+                format!("{prefix}.pipelineProfile.linksAfterConfigure"),
+                &left_pipeline.links_after_configure,
+                &right_pipeline.links_after_configure,
+            );
+            push_portable_check_v1(
+                &mut checks,
+                format!("{prefix}.pipelineProfile.linksAfterExecute"),
+                &left_pipeline.links_after_execute,
+                &right_pipeline.links_after_execute,
+            );
+        }
+    }
+
+    let portable_match = checks.iter().all(|check| check.matches);
+    ScenarioDifferentialReportV1 {
+        schema_version: SCENARIO_DIFFERENTIAL_SCHEMA_VERSION,
+        left_backend: left.backend,
+        right_backend: right.backend,
+        portable_match,
+        portable_checks: checks,
+        excluded_fields: scenario_differential_exclusions_v1(),
+        left_evidence: scenario_evidence_summary_v1(left),
+        right_evidence: scenario_evidence_summary_v1(right),
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "code", rename_all = "SCREAMING_SNAKE_CASE")]
 pub(crate) enum ScenarioRunnerErrorV1 {
