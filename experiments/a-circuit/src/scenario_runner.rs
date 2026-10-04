@@ -1930,6 +1930,39 @@ pub(crate) fn run_scenario_manifest_v1(
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
+pub(crate) fn run_native_cpu_linksdb_differential_json_v1(
+    source: &str,
+) -> Result<String, String> {
+    let manifest = super::scenario::parse_and_validate_manifest_v1(source)
+        .map_err(|errors| {
+            let detail = serde_json::to_string(&errors)
+                .unwrap_or_else(|_| "manifest validation failed".to_owned());
+            format!("MANIFEST_INVALID: {detail}")
+        })?;
+
+    let cpu = run_scenario_manifest_v1(
+        &manifest,
+        ScenarioBackendV1::OptimizedCpu,
+    )
+    .map_err(|error| {
+        format!("OPTIMIZED_CPU_EXECUTION_FAILED: {error:?}")
+    })?;
+
+    let linksdb = run_scenario_manifest_v1(
+        &manifest,
+        ScenarioBackendV1::Linksdb,
+    )
+    .map_err(|error| {
+        format!("LINKSDB_EXECUTION_FAILED: {error:?}")
+    })?;
+
+    let comparison =
+        compare_scenario_execution_reports_v1(&cpu, &linksdb);
+    serde_json::to_string_pretty(&comparison)
+        .map_err(|error| format!("DIFFERENTIAL_SERIALIZE_FAILED: {error}"))
+}
+
 fn evaluate_assertions(
     assertions: &[ScenarioAssertionV1],
     result: &ScenarioNormalizedResultV1,
@@ -2211,6 +2244,47 @@ mod tests {
                 .map(|run| run.configuration_reused)
                 .collect::<Vec<_>>(),
             vec![false, false, false, true],
+        );
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    #[test]
+    fn native_cpu_linksdb_differential_driver_serializes_d0_report() {
+        let json =
+            run_native_cpu_linksdb_differential_json_v1(MUX1_LIFECYCLE)
+                .unwrap();
+        let report: ScenarioDifferentialReportV1 =
+            serde_json::from_str(&json).unwrap();
+
+        assert_eq!(
+            report.left_backend,
+            ScenarioBackendV1::OptimizedCpu
+        );
+        assert_eq!(report.right_backend, ScenarioBackendV1::Linksdb);
+        assert!(report.portable_match);
+        assert!(report.diagnostic_match);
+        assert!(
+            report.left_evidence.overall_pass
+                && report.right_evidence.overall_pass
+        );
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    #[test]
+    fn native_cpu_linksdb_differential_driver_fails_closed_when_linksdb_is_unsupported(
+    ) {
+        let error =
+            run_native_cpu_linksdb_differential_json_v1(XOR32_LIFECYCLE)
+                .unwrap_err();
+
+        assert!(
+            error.starts_with("LINKSDB_EXECUTION_FAILED:"),
+            "unexpected error: {error}"
+        );
+        assert!(
+            error.contains("UnsupportedBackend")
+                || error.contains("UnsupportedProgramProfile"),
+            "must expose the real unsupported LinksDB boundary: {error}"
         );
     }
 

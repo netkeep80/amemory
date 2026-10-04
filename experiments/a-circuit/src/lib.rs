@@ -36,6 +36,13 @@ mod mul32_n;
 mod mul_effect_n;
 mod web_lab;
 
+#[cfg(not(target_family = "wasm"))]
+pub fn run_native_cpu_linksdb_differential_json_v1(
+    source: &str,
+) -> Result<String, String> {
+    scenario_runner::run_native_cpu_linksdb_differential_json_v1(source)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
