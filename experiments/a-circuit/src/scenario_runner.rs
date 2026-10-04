@@ -2095,6 +2095,39 @@ mod tests {
             serde_json::from_str(&json).unwrap();
         assert_eq!(decoded, comparison);
 
+        let mut evidence_only_difference = linksdb.clone();
+        evidence_only_difference.runs[0].scalar_oracle_matches = false;
+        evidence_only_difference.overall_pass = false;
+        let evidence_comparison = compare_scenario_execution_reports_v1(
+            &linksdb,
+            &evidence_only_difference,
+        );
+        assert!(
+            evidence_comparison.portable_match,
+            "independent evidence must not silently become semantic equality"
+        );
+        assert_ne!(
+            evidence_comparison.left_evidence,
+            evidence_comparison.right_evidence,
+        );
+
+        let mut semantic_difference = linksdb.clone();
+        semantic_difference.runs[0]
+            .result
+            .fields
+            .insert("d0MismatchProbe".to_owned(), Value::from(true));
+        let semantic_comparison =
+            compare_scenario_execution_reports_v1(&linksdb, &semantic_difference);
+        assert!(!semantic_comparison.portable_match);
+        let result_mismatch = semantic_comparison
+            .portable_checks
+            .iter()
+            .find(|check| check.path == "runs[0].result")
+            .expect("normalized Result must be a portable comparison field");
+        assert!(!result_mismatch.matches);
+        assert!(result_mismatch.left.is_some());
+        assert!(result_mismatch.right.is_some());
+
         for (cpu_run, linksdb_run) in cpu.runs.iter().zip(&linksdb.runs) {
             let cpu_budget = cpu_run
                 .observed
