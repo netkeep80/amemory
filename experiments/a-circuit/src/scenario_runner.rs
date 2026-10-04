@@ -2074,6 +2074,15 @@ mod tests {
                 .collect::<Vec<_>>(),
         );
         assert!(
+            comparison.diagnostic_match,
+            "CPU/LinksDB common diagnostics diverged: {:?}",
+            comparison
+                .diagnostic_checks
+                .iter()
+                .filter(|check| !check.matches)
+                .collect::<Vec<_>>(),
+        );
+        assert!(
             comparison.left_evidence.overall_pass
                 && comparison.right_evidence.overall_pass
         );
@@ -2120,6 +2129,25 @@ mod tests {
             evidence_comparison.left_evidence,
             evidence_comparison.right_evidence,
         );
+        assert!(evidence_comparison.diagnostic_match);
+
+        let mut diagnostic_difference = linksdb.clone();
+        diagnostic_difference.runs[0]
+            .observed
+            .profile
+            .as_mut()
+            .expect("canonical TRACE run must have profile")
+            .structural
+            .trigger_incidence_candidates += 1;
+        let diagnostic_comparison = compare_scenario_execution_reports_v1(
+            &linksdb,
+            &diagnostic_difference,
+        );
+        assert!(
+            diagnostic_comparison.portable_match,
+            "implementation diagnostics must not become semantic authority"
+        );
+        assert!(!diagnostic_comparison.diagnostic_match);
 
         let mut semantic_difference = linksdb.clone();
         semantic_difference.runs[0]
