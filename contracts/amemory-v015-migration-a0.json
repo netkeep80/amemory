@@ -159,5 +159,10 @@
     "everyLegacySemanticAuthorityOwned": true,
     "newSemanticRuntimeIntroduced": false,
     "nextPhase": "A1_MINIMAL_SELF_HOSTED_EXECUTION_VERTICAL"
+  },
+  "migrationRelease": {
+    "version": "0.176.0",
+    "semanticRuntimeChanged": false,
+    "reason": "first post-MTS-v0.15 A0 authority/pinning release"
   }
 }
