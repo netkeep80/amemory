@@ -263,6 +263,92 @@ pub(crate) struct ScenarioDifferentialReportV1 {
     pub(crate) right_evidence: ScenarioEvidenceSummaryV1,
 }
 
+pub(crate) const SCENARIO_HOST_ENVELOPE_SCHEMA_VERSION: u32 = 1;
+pub(crate) const SCENARIO_PORTABLE_DIFFERENTIAL_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ScenarioHostRunV1 {
+    pub(crate) manifest_run_id: String,
+    pub(crate) session_run_id: u64,
+    pub(crate) inputs: BTreeMap<String, Value>,
+    pub(crate) configuration_reused: bool,
+    pub(crate) result: ScenarioNormalizedResultV1,
+    pub(crate) active_reaction_count: u32,
+    pub(crate) final_quiescent: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ScenarioHostEnvelopeV1 {
+    pub(crate) schema_version: u32,
+    pub(crate) backend: ScenarioBackendV1,
+    pub(crate) program_fingerprint: String,
+    pub(crate) runs: Vec<ScenarioHostRunV1>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ScenarioPortableRunV1 {
+    pub(crate) manifest_run_id: String,
+    pub(crate) session_run_id: u64,
+    pub(crate) inputs: BTreeMap<String, Value>,
+    pub(crate) configuration_reused: bool,
+    pub(crate) result: ScenarioNormalizedResultV1,
+    pub(crate) active_reaction_count: u32,
+    pub(crate) final_quiescent: bool,
+    pub(crate) assertion_results: Vec<ScenarioAssertionResultV1>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) fresh_instance_matches: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) scalar_oracle_matches: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ScenarioPortableReportV1 {
+    pub(crate) schema_version: u32,
+    pub(crate) scenario_id: String,
+    pub(crate) scenario_version: String,
+    pub(crate) program_profile: ScenarioProgramProfileV1,
+    pub(crate) manifest_field_semantics: ScenarioManifestFieldSemanticsV1,
+    pub(crate) backend: ScenarioBackendV1,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) program_fingerprint: Option<String>,
+    pub(crate) runs: Vec<ScenarioPortableRunV1>,
+    pub(crate) overall_pass: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ScenarioPortableRunEvidenceSummaryV1 {
+    pub(crate) manifest_run_id: String,
+    pub(crate) assertion_results: Vec<ScenarioAssertionResultV1>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) fresh_instance_matches: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) scalar_oracle_matches: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ScenarioPortableEvidenceSummaryV1 {
+    pub(crate) overall_pass: bool,
+    pub(crate) runs: Vec<ScenarioPortableRunEvidenceSummaryV1>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ScenarioPortableDifferentialReportV1 {
+    pub(crate) schema_version: u32,
+    pub(crate) left_backend: ScenarioBackendV1,
+    pub(crate) right_backend: ScenarioBackendV1,
+    pub(crate) portable_match: bool,
+    pub(crate) portable_checks: Vec<ScenarioComparisonCheckV1>,
+    pub(crate) left_evidence: ScenarioPortableEvidenceSummaryV1,
+    pub(crate) right_evidence: ScenarioPortableEvidenceSummaryV1,
+}
+
 fn push_comparison_check_v1<T: PartialEq + Serialize>(
     checks: &mut Vec<ScenarioComparisonCheckV1>,
     path: impl Into<String>,
@@ -284,6 +370,280 @@ fn push_comparison_check_v1<T: PartialEq + Serialize>(
         left: left_value,
         right: right_value,
     });
+}
+
+
+pub(crate) fn scenario_portable_report_from_execution_v1(
+    report: &ScenarioExecutionReportV1,
+) -> ScenarioPortableReportV1 {
+    ScenarioPortableReportV1 {
+        schema_version: report.schema_version,
+        scenario_id: report.scenario_id.clone(),
+        scenario_version: report.scenario_version.clone(),
+        program_profile: report.program_profile.clone(),
+        manifest_field_semantics: report.manifest_field_semantics.clone(),
+        backend: report.backend,
+        program_fingerprint: report.provenance.program_fingerprint.clone(),
+        runs: report
+            .runs
+            .iter()
+            .map(|run| ScenarioPortableRunV1 {
+                manifest_run_id: run.manifest_run_id.clone(),
+                session_run_id: run.session_run_id,
+                inputs: run.inputs.clone(),
+                configuration_reused: run.configuration_reused,
+                result: run.result.clone(),
+                active_reaction_count: run.observed.active_reaction_count,
+                final_quiescent: run.observed.final_quiescent,
+                assertion_results: run.assertion_results.clone(),
+                fresh_instance_matches: run.fresh_instance_matches,
+                scalar_oracle_matches: Some(run.scalar_oracle_matches),
+            })
+            .collect(),
+        overall_pass: report.overall_pass,
+    }
+}
+
+pub(crate) fn scenario_portable_report_from_host_v1(
+    manifest: &ScenarioManifestV1,
+    host: &ScenarioHostEnvelopeV1,
+) -> Result<ScenarioPortableReportV1, String> {
+    if host.schema_version != SCENARIO_HOST_ENVELOPE_SCHEMA_VERSION {
+        return Err(format!(
+            "HOST_SCHEMA_VERSION: expected {}, got {}",
+            SCENARIO_HOST_ENVELOPE_SCHEMA_VERSION,
+            host.schema_version,
+        ));
+    }
+    if host.backend != ScenarioBackendV1::Webgpu {
+        return Err(format!(
+            "HOST_BACKEND: external host envelope must be webgpu, got {:?}",
+            host.backend,
+        ));
+    }
+    if !manifest.supported_backends.contains(&host.backend) {
+        return Err("HOST_BACKEND: manifest does not support webgpu".to_owned());
+    }
+    let fingerprint = host.program_fingerprint.as_str();
+    let fingerprint_ok = fingerprint
+        .strip_prefix("prepared-aset-fnv1a64-v1:")
+        .map(|suffix| {
+            suffix.len() == 16
+                && suffix.bytes().all(|byte| byte.is_ascii_hexdigit())
+        })
+        .unwrap_or(false);
+    if !fingerprint_ok {
+        return Err(
+            "HOST_PROGRAM_FINGERPRINT: invalid prepared-Aset fingerprint"
+                .to_owned(),
+        );
+    }
+    if host.runs.len() != manifest.run_sequence.len() {
+        return Err(format!(
+            "HOST_RUN_COUNT: expected {}, got {}",
+            manifest.run_sequence.len(),
+            host.runs.len(),
+        ));
+    }
+
+    let mut runs = Vec::with_capacity(host.runs.len());
+    for (index, (expected, observed)) in manifest
+        .run_sequence
+        .iter()
+        .zip(&host.runs)
+        .enumerate()
+    {
+        if observed.manifest_run_id != expected.run_id {
+            return Err(format!(
+                "HOST_RUN_ID: run[{index}] expected {}, got {}",
+                expected.run_id,
+                observed.manifest_run_id,
+            ));
+        }
+        let expected_session_run_id = (index as u64) + 1;
+        if observed.session_run_id != expected_session_run_id {
+            return Err(format!(
+                "HOST_SESSION_RUN_ID: run[{index}] expected {}, got {}",
+                expected_session_run_id,
+                observed.session_run_id,
+            ));
+        }
+        if observed.inputs != expected.inputs {
+            return Err(format!(
+                "HOST_INPUTS: run[{index}] inputs differ from manifest"
+            ));
+        }
+
+        let assertion_results = evaluate_assertions_with_state(
+            &expected.assertions,
+            &observed.result,
+            observed.final_quiescent,
+            observed.active_reaction_count,
+        );
+        runs.push(ScenarioPortableRunV1 {
+            manifest_run_id: observed.manifest_run_id.clone(),
+            session_run_id: observed.session_run_id,
+            inputs: observed.inputs.clone(),
+            configuration_reused: observed.configuration_reused,
+            result: observed.result.clone(),
+            active_reaction_count: observed.active_reaction_count,
+            final_quiescent: observed.final_quiescent,
+            assertion_results,
+            // D2 does not manufacture independent evidence that the browser
+            // host did not actually run.
+            fresh_instance_matches: None,
+            scalar_oracle_matches: None,
+        });
+    }
+
+    let overall_pass = runs.iter().all(|run| {
+        run.assertion_results
+            .iter()
+            .all(|assertion| assertion.passed)
+    });
+    Ok(ScenarioPortableReportV1 {
+        schema_version: SCENARIO_REPORT_SCHEMA_VERSION,
+        scenario_id: manifest.scenario_id.clone(),
+        scenario_version: manifest.scenario_version.clone(),
+        program_profile: manifest.program_profile.clone(),
+        manifest_field_semantics: scenario_manifest_field_semantics_v1(),
+        backend: host.backend,
+        program_fingerprint: Some(host.program_fingerprint.clone()),
+        runs,
+        overall_pass,
+    })
+}
+
+fn scenario_portable_evidence_summary_v1(
+    report: &ScenarioPortableReportV1,
+) -> ScenarioPortableEvidenceSummaryV1 {
+    ScenarioPortableEvidenceSummaryV1 {
+        overall_pass: report.overall_pass,
+        runs: report
+            .runs
+            .iter()
+            .map(|run| ScenarioPortableRunEvidenceSummaryV1 {
+                manifest_run_id: run.manifest_run_id.clone(),
+                assertion_results: run.assertion_results.clone(),
+                fresh_instance_matches: run.fresh_instance_matches,
+                scalar_oracle_matches: run.scalar_oracle_matches,
+            })
+            .collect(),
+    }
+}
+
+fn scenario_portable_checks_v1(
+    left: &ScenarioPortableReportV1,
+    right: &ScenarioPortableReportV1,
+) -> Vec<ScenarioComparisonCheckV1> {
+    let mut checks = Vec::new();
+    push_comparison_check_v1(
+        &mut checks,
+        "schemaVersion",
+        &left.schema_version,
+        &right.schema_version,
+    );
+    push_comparison_check_v1(
+        &mut checks,
+        "scenarioId",
+        &left.scenario_id,
+        &right.scenario_id,
+    );
+    push_comparison_check_v1(
+        &mut checks,
+        "scenarioVersion",
+        &left.scenario_version,
+        &right.scenario_version,
+    );
+    push_comparison_check_v1(
+        &mut checks,
+        "programProfile",
+        &left.program_profile,
+        &right.program_profile,
+    );
+    push_comparison_check_v1(
+        &mut checks,
+        "manifestFieldSemantics",
+        &left.manifest_field_semantics,
+        &right.manifest_field_semantics,
+    );
+    push_comparison_check_v1(
+        &mut checks,
+        "provenance.programFingerprint",
+        &left.program_fingerprint,
+        &right.program_fingerprint,
+    );
+    push_comparison_check_v1(
+        &mut checks,
+        "runs.length",
+        &left.runs.len(),
+        &right.runs.len(),
+    );
+
+    for (index, (left_run, right_run)) in
+        left.runs.iter().zip(&right.runs).enumerate()
+    {
+        let prefix = format!("runs[{index}]");
+        push_comparison_check_v1(
+            &mut checks,
+            format!("{prefix}.manifestRunId"),
+            &left_run.manifest_run_id,
+            &right_run.manifest_run_id,
+        );
+        push_comparison_check_v1(
+            &mut checks,
+            format!("{prefix}.sessionRunId"),
+            &left_run.session_run_id,
+            &right_run.session_run_id,
+        );
+        push_comparison_check_v1(
+            &mut checks,
+            format!("{prefix}.inputs"),
+            &left_run.inputs,
+            &right_run.inputs,
+        );
+        push_comparison_check_v1(
+            &mut checks,
+            format!("{prefix}.configurationReused"),
+            &left_run.configuration_reused,
+            &right_run.configuration_reused,
+        );
+        push_comparison_check_v1(
+            &mut checks,
+            format!("{prefix}.result"),
+            &left_run.result,
+            &right_run.result,
+        );
+        push_comparison_check_v1(
+            &mut checks,
+            format!("{prefix}.observed.activeReactionCount"),
+            &left_run.active_reaction_count,
+            &right_run.active_reaction_count,
+        );
+        push_comparison_check_v1(
+            &mut checks,
+            format!("{prefix}.observed.finalQuiescent"),
+            &left_run.final_quiescent,
+            &right_run.final_quiescent,
+        );
+    }
+    checks
+}
+
+pub(crate) fn compare_scenario_portable_reports_v1(
+    left: &ScenarioPortableReportV1,
+    right: &ScenarioPortableReportV1,
+) -> ScenarioPortableDifferentialReportV1 {
+    let portable_checks = scenario_portable_checks_v1(left, right);
+    ScenarioPortableDifferentialReportV1 {
+        schema_version: SCENARIO_PORTABLE_DIFFERENTIAL_SCHEMA_VERSION,
+        left_backend: left.backend,
+        right_backend: right.backend,
+        portable_match: portable_checks.iter().all(|check| check.matches),
+        portable_checks,
+        left_evidence: scenario_portable_evidence_summary_v1(left),
+        right_evidence: scenario_portable_evidence_summary_v1(right),
+    }
 }
 
 fn scenario_evidence_summary_v1(
@@ -483,51 +843,11 @@ pub(crate) fn compare_scenario_execution_reports_v1(
     left: &ScenarioExecutionReportV1,
     right: &ScenarioExecutionReportV1,
 ) -> ScenarioDifferentialReportV1 {
-    let mut portable_checks = Vec::new();
+    let left_portable = scenario_portable_report_from_execution_v1(left);
+    let right_portable = scenario_portable_report_from_execution_v1(right);
+    let mut portable_checks =
+        scenario_portable_checks_v1(&left_portable, &right_portable);
     let mut diagnostic_checks = Vec::new();
-
-    push_comparison_check_v1(
-        &mut portable_checks,
-        "schemaVersion",
-        &left.schema_version,
-        &right.schema_version,
-    );
-    push_comparison_check_v1(
-        &mut portable_checks,
-        "scenarioId",
-        &left.scenario_id,
-        &right.scenario_id,
-    );
-    push_comparison_check_v1(
-        &mut portable_checks,
-        "scenarioVersion",
-        &left.scenario_version,
-        &right.scenario_version,
-    );
-    push_comparison_check_v1(
-        &mut portable_checks,
-        "programProfile",
-        &left.program_profile,
-        &right.program_profile,
-    );
-    push_comparison_check_v1(
-        &mut portable_checks,
-        "manifestFieldSemantics",
-        &left.manifest_field_semantics,
-        &right.manifest_field_semantics,
-    );
-    push_comparison_check_v1(
-        &mut portable_checks,
-        "provenance.programFingerprint",
-        &left.provenance.program_fingerprint,
-        &right.provenance.program_fingerprint,
-    );
-    push_comparison_check_v1(
-        &mut portable_checks,
-        "runs.length",
-        &left.runs.len(),
-        &right.runs.len(),
-    );
 
     push_comparison_check_v1(
         &mut diagnostic_checks,
@@ -546,49 +866,6 @@ pub(crate) fn compare_scenario_execution_reports_v1(
         left.runs.iter().zip(&right.runs).enumerate()
     {
         let prefix = format!("runs[{index}]");
-        push_comparison_check_v1(
-            &mut portable_checks,
-            format!("{prefix}.manifestRunId"),
-            &left_run.manifest_run_id,
-            &right_run.manifest_run_id,
-        );
-        push_comparison_check_v1(
-            &mut portable_checks,
-            format!("{prefix}.sessionRunId"),
-            &left_run.session_run_id,
-            &right_run.session_run_id,
-        );
-        push_comparison_check_v1(
-            &mut portable_checks,
-            format!("{prefix}.inputs"),
-            &left_run.inputs,
-            &right_run.inputs,
-        );
-        push_comparison_check_v1(
-            &mut portable_checks,
-            format!("{prefix}.configurationReused"),
-            &left_run.configuration_reused,
-            &right_run.configuration_reused,
-        );
-        push_comparison_check_v1(
-            &mut portable_checks,
-            format!("{prefix}.result"),
-            &left_run.result,
-            &right_run.result,
-        );
-        push_comparison_check_v1(
-            &mut portable_checks,
-            format!("{prefix}.observed.activeReactionCount"),
-            &left_run.observed.active_reaction_count,
-            &right_run.observed.active_reaction_count,
-        );
-        push_comparison_check_v1(
-            &mut portable_checks,
-            format!("{prefix}.observed.finalQuiescent"),
-            &left_run.observed.final_quiescent,
-            &right_run.observed.final_quiescent,
-        );
-
         push_comparison_check_v1(
             &mut diagnostic_checks,
             format!("{prefix}.linksBeforeConfigure"),
@@ -845,7 +1122,7 @@ fn fingerprint_mix_u32(hash: &mut u64, value: u32) {
 ///
 /// This is a versioned reproducibility fingerprint, not a cryptographic
 /// signature. Source identity remains the exact build SHA in provenance.
-fn prepared_aset_fingerprint_v1(
+pub(crate) fn prepared_aset_fingerprint_v1(
     prepare: &WebProofPrepareStage,
 ) -> String {
     let mut hash = FNV1A64_OFFSET;
