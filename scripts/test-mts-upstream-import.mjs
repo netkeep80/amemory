@@ -240,6 +240,174 @@ function validV014Docs() {
   };
 }
 
+const v015Ids = Array.from(
+  { length: 48 },
+  (_, i) => `V15-T${String(i + 1).padStart(2, "0")}`,
+);
+const v015Laws = Object.fromEntries(
+  v015Ids.map((id) => [id, `law ${id}`]),
+);
+const v015Trace = Object.fromEntries(
+  v015Ids.map((id, i) => [
+    id,
+    {
+      state: i === 47 ? "ACCEPTED" : "COMPONENT_GREEN",
+      positiveVectors: ["p"],
+      negativeVectors: ["n"],
+      requiredExecutableGates: ["gate"],
+    },
+  ]),
+);
+const v015Lock = {
+  schema: "amemory-upstream-mts-lock/v0.3",
+  normative: true,
+  repository: "netkeep80/anum_docs",
+  acceptedMtsVersion: "mts-contract/v0.15",
+  acceptedCommit: "9".repeat(40),
+  floatingRefsAllowed: false,
+  artifacts: {
+    contract: { path: "contract-v015.json", blobSha: "a".repeat(40) },
+    conformance: { path: "conformance-v015.json", blobSha: "b".repeat(40) },
+    traceability: { path: "trace-v015.json", blobSha: "c".repeat(40) },
+    acceptance: { path: "accept-v015.json", blobSha: "d".repeat(40) },
+    requirements: { path: "requirements-v015.json", blobSha: "e".repeat(40) },
+  },
+  executionKernel: {
+    repository: "netkeep80/anum_docs",
+    commit: "9".repeat(40),
+    path: "profiles/mts-v015-meta-interpreter-kernel.json",
+    blobSha: "f".repeat(40),
+    schema: "mts-v015-meta-interpreter-kernel/v0.1",
+    id: "mts-v015-meta-interpreter-kernel",
+    status: "ACCEPTED_EXECUTION_AUTHORITY",
+  },
+  frozenCompatibilityBackend: {
+    repository: "netkeep80/amemory",
+    commit: "832daa89f15fd0f3b7b40819b6d3670c7fd57e7d",
+    version: "0.175.0",
+    role: "COMPATIBILITY_CONFORMANCE_ONLY",
+    semanticAuthority: false,
+  },
+  generatedProjection: "projection-v015.json",
+};
+
+function validV015Docs() {
+  const currentAccepted = {
+    mtsVersion: "v0.15",
+    requirements: "requirements-v015.json",
+    traceability: "trace-v015.json",
+    contract: "contract-v015.json",
+    conformance: "conformance-v015.json",
+  };
+  return {
+    contract: {
+      schema: "mts-contract/v0.15",
+      status: "accepted",
+      accepted: true,
+      requiredSemanticLaws: { ...v015Laws },
+      semanticAuthority: {
+        kernel: "profiles/mts-v015-meta-interpreter-kernel.json",
+        programSpecificHostSemanticInjectionAllowed: false,
+        jsonSpecificSemanticPathAllowed: false,
+        specialBooleanRuntimeAllowed: false,
+      },
+      implementation: {
+        frozenCompatibilityBackend:
+          "netkeep80/amemory@832daa89f15fd0f3b7b40819b6d3670c7fd57e7d/0.175.0",
+      },
+    },
+    conformance: {
+      contract: "mts-contract/v0.15",
+      status: "accepted",
+      accepted: true,
+      coverageState: "complete",
+      requiredPositiveVectors: ["p15"],
+      requiredNegativeVectors: ["n15"],
+      requiredExecutableGates: ["gate15"],
+    },
+    traceability: {
+      mtsVersion: "v0.15",
+      status: "accepted",
+      accepted: true,
+      contract: "contract-v015.json",
+      conformance: "conformance-v015.json",
+      acceptance: "accept-v015.json",
+      currentAccepted,
+      authorDecision: { decision: "ACCEPT_MTS_V0_15" },
+      requirements: structuredClone(v015Trace),
+      approvedJsonCorpus: {
+        entries: Array.from({ length: 6 }, (_, i) => ({
+          id: `artifact-${i + 1}`,
+        })),
+      },
+    },
+    acceptance: {
+      decision: "ACCEPT_MTS_V0_15",
+      versionDecision: {
+        previousAcceptedVersion: "mts-contract/v0.14",
+        acceptedVersion: "mts-contract/v0.15",
+      },
+      current: {
+        contract: "contract-v015.json",
+        conformance: "conformance-v015.json",
+      },
+      acceptance: {
+        cutoverPerformed: true,
+        downstreamRepinAllowed: true,
+        singleLiveSemanticRuntime: true,
+        amemorySemanticPatchUsed: false,
+      },
+      veto: {},
+      postAcceptanceWork: [],
+    },
+    requirements: {
+      mtsVersion: "v0.15",
+      status: "accepted",
+      accepted: true,
+      contract: "contract-v015.json",
+      traceability: "trace-v015.json",
+      currentAccepted,
+      requirements: v015Ids.map((id, i) => ({
+        id,
+        mandatory: true,
+        state: i === 47 ? "ACCEPTED" : "COMPONENT_GREEN",
+      })),
+    },
+    executionKernel: {
+      schema: "mts-v015-meta-interpreter-kernel/v0.1",
+      id: "mts-v015-meta-interpreter-kernel",
+      status: "ACCEPTED_EXECUTION_AUTHORITY",
+      acceptedBaseline: "MTS v0.15",
+      semanticAuthority: { versionAccepted: true },
+      command: {
+        repeatedCommandCount: 1,
+        localReaction: "STRUCTURAL_UNARY_J0",
+        externalSemanticGrounderAllowed: false,
+        programSpecificDispatchAllowed: false,
+      },
+      authority: {
+        physicalLinkExistenceAlone: false,
+        hostNameAuthority: false,
+        externalCurrentPointer: false,
+        externalScopePointer: false,
+        externalSelectedTheoryPointer: false,
+        externalProgramCounter: false,
+      },
+      frozenBackend: {
+        repository: "netkeep80/amemory",
+        main: "832daa89f15fd0f3b7b40819b6d3670c7fd57e7d",
+        version: "0.175.0",
+        role: "COMPATIBILITY_CONFORMANCE_ONLY",
+        semanticAuthority: false,
+      },
+      phases: {},
+      context: {},
+      causalLaws: {},
+      bootstrapBoundary: {},
+    },
+  };
+}
+
 // Positive controls.
 validateLock(baseLock);
 validateExecutionProfile(baseLock, validProfile());
@@ -264,6 +432,27 @@ validateLock(v014Lock);
 validateUpstream(v014Lock, validV014Docs());
 const v014ProjectionUnit = buildProjection(v014Lock, validV014Docs());
 assert.equal(v014ProjectionUnit.schema, "amemory-mts-requirements-projection/v0.3");
+
+validateLock(v015Lock);
+validateUpstream(v015Lock, validV015Docs());
+const v015ProjectionUnit = buildProjection(v015Lock, validV015Docs());
+assert.equal(
+  v015ProjectionUnit.schema,
+  "amemory-mts-requirements-projection/v0.4",
+);
+assert.equal(
+  v015ProjectionUnit.authoritySplit.acceptedFoundation.version,
+  "v0.15",
+);
+assert.equal(
+  v015ProjectionUnit.authoritySplit.runtimeMigration.productionV015ConformanceClaimed,
+  false,
+);
+assert.equal(
+  v015ProjectionUnit.authoritySplit.frozenCompatibilityBackend.semanticAuthority,
+  false,
+);
+assert.equal(v015ProjectionUnit.approvedExecutableCorpus.count, 6);
 assert.equal(Object.keys(v014ProjectionUnit.laws).length, 14);
 assert.equal(v014ProjectionUnit.authoritySplit.acceptedFoundation.version, "v0.14");
 assert.equal(v014ProjectionUnit.authoritySplit.executionProfile.foundationMtsVersion, "v0.13");
@@ -292,6 +481,36 @@ assert.equal(v014ProjectionUnit.authoritySplit.executionProfileMayBeRelabeledAsA
   expectThrow(
     () => validateUpstream(v014Lock, docs),
     /does not preserve accepted MTS v0.13/,
+  );
+}
+
+{
+  const docs = validV015Docs();
+  docs.executionKernel.authority.externalSelectedTheoryPointer = true;
+  expectThrow(
+    () => validateUpstream(v015Lock, docs),
+    /authority veto mismatch: externalSelectedTheoryPointer/,
+  );
+}
+
+expectThrow(
+  () =>
+    validateLock({
+      ...v015Lock,
+      frozenCompatibilityBackend: {
+        ...v015Lock.frozenCompatibilityBackend,
+        semanticAuthority: true,
+      },
+    }),
+  /frozen compatibility backend boundary mismatch/,
+);
+
+{
+  const docs = validV015Docs();
+  docs.requirements.requirements.pop();
+  expectThrow(
+    () => validateUpstream(v015Lock, docs),
+    /requirements registry mismatch/,
   );
 }
 
@@ -443,6 +662,48 @@ expectThrow(
 }
 
 console.log("MTS_AND_AMEMORY_PROFILE_IMPORT_NEGATIVE_WITNESSES=GREEN");
+
+// v0.15 A0 repository-level pin/migration-boundary guards.
+{
+  const lock = JSON.parse(
+    readFileSync("contracts/upstream/mts-v0.15.lock.json", "utf8"),
+  );
+  const projection = JSON.parse(
+    readFileSync("contracts/upstream/mts-v0.15-requirements.json", "utf8"),
+  );
+  const a0 = JSON.parse(
+    readFileSync("contracts/amemory-v015-migration-a0.json", "utf8"),
+  );
+
+  validateLock(lock);
+  assert.equal(
+    lock.acceptedCommit,
+    "813a1569300b241a3b70eb282eecd8231db15e4b",
+  );
+  assert.equal(
+    lock.executionKernel.blobSha,
+    "10cebb70618e4317afb94666bc705ce7b3799cdd",
+  );
+  assert.equal(
+    projection.schema,
+    "amemory-mts-requirements-projection/v0.4",
+  );
+  assert.equal(projection.authoritySplit.runtimeMigration.state, "A0_A1_PENDING");
+  assert.equal(
+    projection.authoritySplit.runtimeMigration.productionV015ConformanceClaimed,
+    false,
+  );
+  assert.equal(a0.claims.productionV015Conformance, false);
+  assert.equal(a0.claims.a1SelfHostedVerticalGreen, false);
+  assert.equal(a0.claims.legacyDraftPrsMergeAuthorized, false);
+  assert(
+    a0.dispositions.some(
+      (item) =>
+        item.id === "A0-INTERPRETER" &&
+        item.classification === "DELETE_AFTER_A1",
+    ),
+  );
+}
 
 // D7 repository-level convergence guards.
 {

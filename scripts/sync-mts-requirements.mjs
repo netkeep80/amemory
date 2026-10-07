@@ -8,6 +8,7 @@ export const REQUIRED_LAWS = REQUIRED_V013_LAWS;
 export const KNOWN_LOCK_PATHS = [
   "contracts/upstream/mts-v0.13.lock.json",
   "contracts/upstream/mts-v0.14.lock.json",
+  "contracts/upstream/mts-v0.15.lock.json",
 ];
 
 function foundationVersionTag(acceptedMtsVersion) {
@@ -47,7 +48,11 @@ function exactBlob(value, label) {
 }
 
 export function validateLock(lock) {
-  if (lock?.schema !== "amemory-upstream-mts-lock/v0.2") {
+  const v015 = lock?.acceptedMtsVersion === "mts-contract/v0.15";
+  const expectedSchema = v015
+    ? "amemory-upstream-mts-lock/v0.3"
+    : "amemory-upstream-mts-lock/v0.2";
+  if (lock?.schema !== expectedSchema) {
     throw new Error("unexpected upstream lock schema");
   }
   if (lock.floatingRefsAllowed !== false) {
@@ -58,12 +63,44 @@ export function validateLock(lock) {
     throw new Error("repository and acceptedMtsVersion are required");
   }
 
-  for (const name of ["contract", "conformance", "traceability", "acceptance"]) {
+  const artifactNames = v015
+    ? ["contract", "conformance", "traceability", "acceptance", "requirements"]
+    : ["contract", "conformance", "traceability", "acceptance"];
+  for (const name of artifactNames) {
     const artifact = lock.artifacts?.[name];
     if (!artifact?.path) {
       throw new Error(`invalid pinned artifact path: ${name}`);
     }
     exactBlob(artifact.blobSha, `${name} blobSha`);
+  }
+
+  if (v015) {
+    const kernel = lock.executionKernel;
+    if (!kernel || kernel.repository !== lock.repository) {
+      throw new Error("executionKernel must use the pinned upstream repository");
+    }
+    exactCommit(kernel.commit, "executionKernel.commit");
+    exactBlob(kernel.blobSha, "executionKernel.blobSha");
+    if (
+      kernel.commit !== lock.acceptedCommit ||
+      !kernel.path ||
+      !kernel.schema ||
+      !kernel.id ||
+      !kernel.status
+    ) {
+      throw new Error("executionKernel pin is incomplete or not co-pinned with accepted v0.15");
+    }
+    const frozen = lock.frozenCompatibilityBackend;
+    if (
+      frozen?.repository !== "netkeep80/amemory" ||
+      frozen?.commit !== "832daa89f15fd0f3b7b40819b6d3670c7fd57e7d" ||
+      frozen?.version !== "0.175.0" ||
+      frozen?.role !== "COMPATIBILITY_CONFORMANCE_ONLY" ||
+      frozen?.semanticAuthority !== false
+    ) {
+      throw new Error("frozen compatibility backend boundary mismatch");
+    }
+    return;
   }
 
   const profile = lock.executionProfile;
@@ -186,7 +223,160 @@ export function validateExecutionProfile(lock, profile) {
   }
 }
 
+export function validateV015ExecutionKernel(lock, kernel) {
+  const pin = lock.executionKernel;
+  if (
+    kernel?.schema !== pin.schema ||
+    kernel?.id !== pin.id ||
+    kernel?.status !== pin.status ||
+    kernel?.acceptedBaseline !== "MTS v0.15" ||
+    kernel?.semanticAuthority?.versionAccepted !== true
+  ) {
+    throw new Error("v0.15 execution kernel identity/acceptance mismatch");
+  }
+  if (
+    kernel.command?.repeatedCommandCount !== 1 ||
+    kernel.command?.localReaction !== "STRUCTURAL_UNARY_J0" ||
+    kernel.command?.externalSemanticGrounderAllowed !== false ||
+    kernel.command?.programSpecificDispatchAllowed !== false
+  ) {
+    throw new Error("v0.15 execution kernel command boundary mismatch");
+  }
+  for (const key of [
+    "physicalLinkExistenceAlone",
+    "hostNameAuthority",
+    "externalCurrentPointer",
+    "externalScopePointer",
+    "externalSelectedTheoryPointer",
+    "externalProgramCounter",
+  ]) {
+    if (kernel.authority?.[key] !== false) {
+      throw new Error(`v0.15 execution kernel authority veto mismatch: ${key}`);
+    }
+  }
+  if (
+    kernel.frozenBackend?.repository !== lock.frozenCompatibilityBackend.repository ||
+    kernel.frozenBackend?.main !== lock.frozenCompatibilityBackend.commit ||
+    kernel.frozenBackend?.version !== lock.frozenCompatibilityBackend.version ||
+    kernel.frozenBackend?.role !== "COMPATIBILITY_CONFORMANCE_ONLY" ||
+    kernel.frozenBackend?.semanticAuthority !== false
+  ) {
+    throw new Error("v0.15 kernel frozen compatibility boundary mismatch");
+  }
+}
+
+function sameStringSet(left, right) {
+  return JSON.stringify([...left].sort()) === JSON.stringify([...right].sort());
+}
+
+function validateV015Upstream(lock, docs) {
+  const {
+    contract,
+    conformance,
+    traceability,
+    acceptance,
+    requirements,
+    executionKernel,
+  } = docs;
+
+  if (
+    contract?.schema !== lock.acceptedMtsVersion ||
+    contract?.status !== "accepted" ||
+    contract?.accepted !== true
+  ) {
+    throw new Error("pinned MTS v0.15 contract is not accepted");
+  }
+  if (
+    conformance?.contract !== lock.acceptedMtsVersion ||
+    conformance?.status !== "accepted" ||
+    conformance?.accepted !== true ||
+    conformance?.coverageState !== "complete"
+  ) {
+    throw new Error("pinned MTS v0.15 conformance mismatch");
+  }
+  if (
+    traceability?.mtsVersion !== "v0.15" ||
+    traceability?.status !== "accepted" ||
+    traceability?.accepted !== true ||
+    traceability?.contract !== lock.artifacts.contract.path ||
+    traceability?.conformance !== lock.artifacts.conformance.path ||
+    traceability?.acceptance !== lock.artifacts.acceptance.path ||
+    traceability?.authorDecision?.decision !== "ACCEPT_MTS_V0_15"
+  ) {
+    throw new Error("v0.15 traceability acceptance binding mismatch");
+  }
+  if (
+    acceptance?.decision !== "ACCEPT_MTS_V0_15" ||
+    acceptance?.versionDecision?.acceptedVersion !== lock.acceptedMtsVersion ||
+    acceptance?.current?.contract !== lock.artifacts.contract.path ||
+    acceptance?.current?.conformance !== lock.artifacts.conformance.path ||
+    acceptance?.acceptance?.cutoverPerformed !== true ||
+    acceptance?.acceptance?.downstreamRepinAllowed !== true ||
+    acceptance?.acceptance?.amemorySemanticPatchUsed !== false
+  ) {
+    throw new Error("v0.15 acceptance artifact does not authorize downstream repin");
+  }
+  if (
+    requirements?.mtsVersion !== "v0.15" ||
+    requirements?.status !== "accepted" ||
+    requirements?.accepted !== true ||
+    requirements?.contract !== lock.artifacts.contract.path ||
+    requirements?.traceability !== lock.artifacts.traceability.path ||
+    !Array.isArray(requirements?.requirements) ||
+    requirements.requirements.length !== 48
+  ) {
+    throw new Error("v0.15 requirements registry mismatch");
+  }
+
+  const lawIds = Object.keys(contract.requiredSemanticLaws ?? {});
+  const traceIds = Object.keys(traceability.requirements ?? {});
+  const registryIds = requirements.requirements.map((item) => item.id);
+  if (
+    lawIds.length !== 48 ||
+    !sameStringSet(lawIds, traceIds) ||
+    !sameStringSet(lawIds, registryIds)
+  ) {
+    throw new Error("v0.15 law/traceability/requirements identity mismatch");
+  }
+  if (
+    requirements.requirements.some(
+      (item) => item.mandatory !== true || item.state === "OPEN",
+    )
+  ) {
+    throw new Error("v0.15 mandatory requirement unresolved");
+  }
+  if (traceability.approvedJsonCorpus?.entries?.length !== 6) {
+    throw new Error("v0.15 approved executable corpus must contain exactly six artifacts");
+  }
+  if (
+    contract.semanticAuthority?.kernel !== lock.executionKernel.path ||
+    contract.semanticAuthority?.programSpecificHostSemanticInjectionAllowed !== false ||
+    contract.semanticAuthority?.jsonSpecificSemanticPathAllowed !== false ||
+    contract.semanticAuthority?.specialBooleanRuntimeAllowed !== false
+  ) {
+    throw new Error("v0.15 contract semantic authority boundary mismatch");
+  }
+  if (
+    contract.implementation?.frozenCompatibilityBackend !==
+      `netkeep80/amemory@${lock.frozenCompatibilityBackend.commit}/${lock.frozenCompatibilityBackend.version}`
+  ) {
+    throw new Error("v0.15 contract frozen compatibility backend pin mismatch");
+  }
+  if (
+    !Array.isArray(conformance.requiredPositiveVectors) ||
+    !Array.isArray(conformance.requiredNegativeVectors) ||
+    !Array.isArray(conformance.requiredExecutableGates)
+  ) {
+    throw new Error("v0.15 conformance inventory missing");
+  }
+
+  validateV015ExecutionKernel(lock, executionKernel);
+}
+
 export function validateUpstream(lock, docs) {
+  if (lock?.acceptedMtsVersion === "mts-contract/v0.15") {
+    return validateV015Upstream(lock, docs);
+  }
   const { contract, conformance, traceability, acceptance, executionProfile } = docs;
 
   if (
@@ -437,12 +627,147 @@ function buildV014Projection(lock, docs) {
   };
 }
 
+function buildV015Projection(lock, docs) {
+  validateLock(lock);
+  validateUpstream(lock, docs);
+
+  const {
+    contract,
+    conformance,
+    traceability,
+    acceptance,
+    requirements,
+    executionKernel,
+  } = docs;
+  const stateCounts = {};
+  for (const item of requirements.requirements) {
+    stateCounts[item.state] = (stateCounts[item.state] ?? 0) + 1;
+  }
+  const criticalIds = [
+    "V15-AUTH-01",
+    "V15-CLOSE-03",
+    "V15-FRESH-01",
+    "V15-FRESH-02",
+    "V15-FRESH-03",
+    "V15-AND-01",
+    "V15-AND-02",
+    "V15-AND-03",
+    "V15-AND-04",
+    "V15-CTX-01",
+    "V15-CTX-02",
+    "V15-GAMMA-01",
+    "V15-REG-01",
+    "V15-REG-02",
+    "V15-READY-03",
+  ];
+
+  return {
+    schema: "amemory-mts-requirements-projection/v0.4",
+    generated: true,
+    generatedFrom: {
+      foundation: {
+        repository: lock.repository,
+        commit: lock.acceptedCommit,
+        mtsVersion: lock.acceptedMtsVersion,
+        artifacts: lock.artifacts,
+      },
+      executionKernel: {
+        repository: lock.executionKernel.repository,
+        commit: lock.executionKernel.commit,
+        path: lock.executionKernel.path,
+        blobSha: lock.executionKernel.blobSha,
+      },
+    },
+    acceptance: {
+      decision: acceptance.decision,
+      acceptedVersion: acceptance.versionDecision.acceptedVersion,
+      previousAcceptedVersion: acceptance.versionDecision.previousAcceptedVersion,
+      current: acceptance.current,
+      contractAccepted: contract.accepted,
+      conformanceAccepted: conformance.accepted,
+      conformanceCoverageState: conformance.coverageState,
+      downstreamRepinAllowed: acceptance.acceptance.downstreamRepinAllowed,
+      singleLiveSemanticRuntime: acceptance.acceptance.singleLiveSemanticRuntime,
+      amemorySemanticPatchUsed: acceptance.acceptance.amemorySemanticPatchUsed,
+    },
+    authoritySplit: {
+      acceptedFoundation: {
+        version: "v0.15",
+        contract: lock.acceptedMtsVersion,
+        commit: lock.acceptedCommit,
+      },
+      executionKernel: {
+        id: executionKernel.id,
+        schema: executionKernel.schema,
+        status: executionKernel.status,
+        acceptedBaseline: executionKernel.acceptedBaseline,
+        commit: lock.executionKernel.commit,
+      },
+      frozenCompatibilityBackend: lock.frozenCompatibilityBackend,
+      runtimeMigration: {
+        state: "A0_A1_PENDING",
+        primaryIssue: 455,
+        a0Issue: 492,
+        productionV015ConformanceClaimed: false,
+      },
+    },
+    semanticAuthority: contract.semanticAuthority,
+    executionKernel: {
+      command: executionKernel.command,
+      phases: executionKernel.phases,
+      authority: executionKernel.authority,
+      context: executionKernel.context,
+      causalLaws: executionKernel.causalLaws,
+      bootstrapBoundary: executionKernel.bootstrapBoundary,
+    },
+    laws: contract.requiredSemanticLaws,
+    conformance: {
+      requiredPositiveVectors: conformance.requiredPositiveVectors,
+      requiredNegativeVectors: conformance.requiredNegativeVectors,
+      requiredExecutableGates: conformance.requiredExecutableGates,
+    },
+    requirements: {
+      registryPath: lock.artifacts.requirements.path,
+      total: requirements.requirements.length,
+      stateCounts,
+      currentAccepted: requirements.currentAccepted,
+      states: Object.fromEntries(
+        Object.entries(traceability.requirements).map(([id, item]) => [
+          id,
+          item.state,
+        ]),
+      ),
+      criticalExecutionRequirements: Object.fromEntries(
+        criticalIds.map((id) => [id, traceability.requirements[id]]),
+      ),
+    },
+    approvedExecutableCorpus: {
+      count: traceability.approvedJsonCorpus.entries.length,
+      entries: traceability.approvedJsonCorpus.entries.map((entry) => ({
+        id: entry.id,
+        formalSourceArtifact: entry.formalSourceArtifact,
+        formalSourceDigest: entry.formalSourceDigest,
+        canonicalJsonArtifact: entry.canonicalJsonArtifact,
+        canonicalJsonDigest: entry.canonicalJsonDigest,
+        semanticEntry: entry.semanticEntry,
+        expectedRecursiveRepresentation: entry.expectedRecursiveRepresentation,
+        expectedRecursiveDigest: entry.expectedRecursiveDigest,
+      })),
+    },
+    veto: acceptance.veto,
+    postAcceptanceWork: acceptance.postAcceptanceWork,
+  };
+}
+
 export function buildProjection(lock, docs) {
   if (lock?.acceptedMtsVersion === "mts-contract/v0.13") {
     return buildV013Projection(lock, docs);
   }
   if (lock?.acceptedMtsVersion === "mts-contract/v0.14") {
     return buildV014Projection(lock, docs);
+  }
+  if (lock?.acceptedMtsVersion === "mts-contract/v0.15") {
+    return buildV015Projection(lock, docs);
   }
   throw new Error(`unsupported accepted MTS version: ${lock?.acceptedMtsVersion}`);
 }
@@ -470,7 +795,11 @@ async function fetchPinnedJson(repository, commit, artifact, label) {
 
 async function loadPinnedDocs(lock) {
   const docs = {};
-  for (const name of ["contract", "conformance", "traceability", "acceptance"]) {
+  const v015 = lock.acceptedMtsVersion === "mts-contract/v0.15";
+  const artifactNames = v015
+    ? ["contract", "conformance", "traceability", "acceptance", "requirements"]
+    : ["contract", "conformance", "traceability", "acceptance"];
+  for (const name of artifactNames) {
     docs[name] = await fetchPinnedJson(
       lock.repository,
       lock.acceptedCommit,
@@ -478,15 +807,27 @@ async function loadPinnedDocs(lock) {
       name,
     );
   }
-  docs.executionProfile = await fetchPinnedJson(
-    lock.executionProfile.repository,
-    lock.executionProfile.commit,
-    {
-      path: lock.executionProfile.path,
-      blobSha: lock.executionProfile.blobSha,
-    },
-    "executionProfile",
-  );
+  if (v015) {
+    docs.executionKernel = await fetchPinnedJson(
+      lock.executionKernel.repository,
+      lock.executionKernel.commit,
+      {
+        path: lock.executionKernel.path,
+        blobSha: lock.executionKernel.blobSha,
+      },
+      "executionKernel",
+    );
+  } else {
+    docs.executionProfile = await fetchPinnedJson(
+      lock.executionProfile.repository,
+      lock.executionProfile.commit,
+      {
+        path: lock.executionProfile.path,
+        blobSha: lock.executionProfile.blobSha,
+      },
+      "executionProfile",
+    );
+  }
   return docs;
 }
 

@@ -1,0 +1,168 @@
+{
+  "schema": "amemory-v015-migration-a0/v0.1",
+  "status": "A0_ACTIVE",
+  "primaryIssue": 455,
+  "auditIssue": 492,
+  "acceptedUpstream": {
+    "version": "mts-contract/v0.15",
+    "repository": "netkeep80/anum_docs",
+    "commit": "813a1569300b241a3b70eb282eecd8231db15e4b",
+    "lock": "contracts/upstream/mts-v0.15.lock.json",
+    "projection": "contracts/upstream/mts-v0.15-requirements.json",
+    "executionKernel": "profiles/mts-v015-meta-interpreter-kernel.json"
+  },
+  "frozenBaseline": {
+    "repository": "netkeep80/amemory",
+    "commit": "832daa89f15fd0f3b7b40819b6d3670c7fd57e7d",
+    "version": "0.175.0",
+    "role": "MIGRATION_REFERENCE_AND_COMPATIBILITY_EVIDENCE"
+  },
+  "claims": {
+    "productionV015Conformance": false,
+    "a1SelfHostedVerticalGreen": false,
+    "legacyDraftPrsMergeAuthorized": false
+  },
+  "a1EntryContract": {
+    "hostMay": [
+      "load",
+      "select generic entry/start only where accepted machine contract requires it",
+      "run",
+      "step",
+      "observe",
+      "resource-limit",
+      "cancel",
+      "generic transport validation"
+    ],
+    "hostMustNot": [
+      "set semantic Theory",
+      "set semantic Context/currentness",
+      "select semantic interpreter/meta-program",
+      "dispatch RuleKind",
+      "dispatch logical element/theorem",
+      "provide external semantic grounder",
+      "treat recursive 8/9/6/1 or scenario metadata as independent semantic authority"
+    ]
+  },
+  "dispositions": [
+    {
+      "id": "A0-UPSTREAM",
+      "classification": "KEEP_REPIN",
+      "paths": [
+        "contracts/upstream/mts-v0.14.lock.json",
+        "contracts/upstream/mts-v0.14-requirements.json"
+      ],
+      "target": "add immutable v0.15 foundation+kernel pin while preserving historical v0.14 evidence"
+    },
+    {
+      "id": "A0-STORE",
+      "classification": "KEEP",
+      "paths": [
+        "experiments/optimized-cpu-rust/src/lib.rs",
+        "experiments/optimized-cpu-rust/src/structural.rs"
+      ],
+      "target": "physical Link/incidence/canonicalization substrate remains a non-semantic implementation mechanism"
+    },
+    {
+      "id": "A0-MATCHER",
+      "classification": "KEEP_ADAPT",
+      "paths": [
+        "experiments/optimized-cpu-rust/src/structural.rs"
+      ],
+      "target": "generic unification, role binding, synthesis, canonical Link construction, rollback and atomic publication survive; authority discovery becomes v0.15 ANet-native"
+    },
+    {
+      "id": "A0-INTERPRETER",
+      "classification": "DELETE_AFTER_A1",
+      "paths": [
+        "experiments/optimized-cpu-rust/src/structural.rs"
+      ],
+      "symbols": [
+        "OptimizedStructuralEngine.interpreter",
+        "set_interpreter"
+      ],
+      "target": "no production host-selected semantic interpreter/Theory handle"
+    },
+    {
+      "id": "A0-CURRENT",
+      "classification": "ADAPT_THEN_DELETE_EXTERNAL_AUTHORITY",
+      "paths": [
+        "experiments/optimized-cpu-rust/src/structural.rs"
+      ],
+      "symbols": [
+        "scope_banks",
+        "current_bank",
+        "set_current"
+      ],
+      "target": "physical generation buffers may remain; semantic currentness comes from positive semantic ANet membership"
+    },
+    {
+      "id": "A0-REPLAY",
+      "classification": "RETAIN_TEST_REPLACE_PRODUCTION_CONTRACT",
+      "paths": [
+        "experiments/a-circuit/src/bin/formal_recursive_replay.rs"
+      ],
+      "target": "retain frozen launch replay only as compatibility evidence; A1 loads one self-contained canonical v0.15 ANet"
+    },
+    {
+      "id": "A0-SESSION",
+      "classification": "KEEP_ADAPT",
+      "paths": [
+        "experiments/a-circuit/src/runtime_session.rs"
+      ],
+      "target": "retain generic step/run/budget/cancel/accounting; remove external semantic interpreter/current dependency"
+    },
+    {
+      "id": "A0-SCENARIO",
+      "classification": "MIGRATE",
+      "paths": [
+        "experiments/a-circuit/src/scenario.rs",
+        "experiments/a-circuit/src/scenario_cpu_adapter.rs",
+        "experiments/a-circuit/src/scenario_runner.rs",
+        "experiments/a-circuit/src/scenario_registry.rs"
+      ],
+      "target": "scenario metadata becomes transport/oracle/provenance only; canonical FORMAL/JSON/native ANet is semantic source"
+    },
+    {
+      "id": "A0-LOGIC",
+      "classification": "MIGRATE_RETAIN_TEST",
+      "paths": [
+        "experiments/a-circuit/src/logic_n.rs",
+        "experiments/a-circuit/src/full_adder.rs",
+        "experiments/a-circuit/src/mux_n.rs"
+      ],
+      "target": "replace maintained host-built rule/admission/trigger programs with canonical FORMAL/JSON artifacts; retain expected vectors"
+    },
+    {
+      "id": "A0-ARITH",
+      "classification": "MIGRATE_RETAIN_TEST",
+      "paths": [
+        "experiments/a-circuit/src/arithmetic_n.rs",
+        "experiments/a-circuit/src/ripple_n.rs",
+        "experiments/a-circuit/src/subtractor_n.rs",
+        "experiments/a-circuit/src/unary_arith_n.rs"
+      ],
+      "target": "canonical-source migration follows the minimal accepted logical corpus; retained #444 vectors remain oracle/benchmark evidence"
+    },
+    {
+      "id": "A0-BACKENDS",
+      "classification": "DEFER_TO_A4_AFTER_A1",
+      "paths": [
+        "experiments/browser-accelerator/**",
+        "experiments/a-circuit/src/linksdb_session.rs"
+      ],
+      "target": "CPU reference self-hosted vertical first; WASM/WebGPU/LinksDB reconverge later on the same semantic ANet contract"
+    }
+  ],
+  "a0ExitGate": {
+    "exactV015PinRequired": true,
+    "deletionReplacementMapRequired": true,
+    "everyLegacySemanticAuthorityOwned": true,
+    "newSemanticRuntimeIntroduced": false,
+    "nextPhase": "A1_MINIMAL_SELF_HOSTED_EXECUTION_VERTICAL"
+  },
+  "migrationRelease": {
+    "version": "0.176.0",
+    "semanticRuntimeChanged": false,
+    "reason": "first post-MTS-v0.15 A0 authority/pinning release"
+  }
+}

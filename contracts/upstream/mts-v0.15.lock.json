@@ -1,0 +1,48 @@
+{
+  "schema": "amemory-upstream-mts-lock/v0.3",
+  "normative": true,
+  "repository": "netkeep80/anum_docs",
+  "acceptedMtsVersion": "mts-contract/v0.15",
+  "acceptedCommit": "813a1569300b241a3b70eb282eecd8231db15e4b",
+  "floatingRefsAllowed": false,
+  "artifacts": {
+    "contract": {
+      "path": "contracts/mts-contract-v0.15.json",
+      "blobSha": "f091c9142b8e25dc1fbb2b331dc3a6f60729706d"
+    },
+    "conformance": {
+      "path": "contracts/mts-conformance-v0.15.json",
+      "blobSha": "3634e7993ef601b5566d1ce205b80f036d0dd4b5"
+    },
+    "traceability": {
+      "path": "traceability/mts-v0.15.json",
+      "blobSha": "6b43a9c8b6186ff002218b44ef69a57b24460974"
+    },
+    "acceptance": {
+      "path": "cutover/typescript-c1-acceptance-v0.8.json",
+      "blobSha": "2fe197b409ae2dca4eb8110ed62a7932cf9be4c8"
+    },
+    "requirements": {
+      "path": "requirements/mts-v0.15.json",
+      "blobSha": "f7729caa54f91e1a8632a094667c68e9ee330ec4"
+    }
+  },
+  "executionKernel": {
+    "repository": "netkeep80/anum_docs",
+    "commit": "813a1569300b241a3b70eb282eecd8231db15e4b",
+    "path": "profiles/mts-v015-meta-interpreter-kernel.json",
+    "blobSha": "10cebb70618e4317afb94666bc705ce7b3799cdd",
+    "schema": "mts-v015-meta-interpreter-kernel/v0.1",
+    "id": "mts-v015-meta-interpreter-kernel",
+    "status": "ACCEPTED_EXECUTION_AUTHORITY"
+  },
+  "frozenCompatibilityBackend": {
+    "repository": "netkeep80/amemory",
+    "commit": "832daa89f15fd0f3b7b40819b6d3670c7fd57e7d",
+    "version": "0.175.0",
+    "role": "COMPATIBILITY_CONFORMANCE_ONLY",
+    "semanticAuthority": false
+  },
+  "generatedProjection": "contracts/upstream/mts-v0.15-requirements.json",
+  "upgradePolicy": "explicit-governance-only-v015-foundation-and-kernel-pin"
+}

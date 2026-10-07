@@ -1,0 +1,1126 @@
+{
+  "schema": "amemory-mts-requirements-projection/v0.4",
+  "generated": true,
+  "generatedFrom": {
+    "foundation": {
+      "repository": "netkeep80/anum_docs",
+      "commit": "813a1569300b241a3b70eb282eecd8231db15e4b",
+      "mtsVersion": "mts-contract/v0.15",
+      "artifacts": {
+        "contract": {
+          "path": "contracts/mts-contract-v0.15.json",
+          "blobSha": "f091c9142b8e25dc1fbb2b331dc3a6f60729706d"
+        },
+        "conformance": {
+          "path": "contracts/mts-conformance-v0.15.json",
+          "blobSha": "3634e7993ef601b5566d1ce205b80f036d0dd4b5"
+        },
+        "traceability": {
+          "path": "traceability/mts-v0.15.json",
+          "blobSha": "6b43a9c8b6186ff002218b44ef69a57b24460974"
+        },
+        "acceptance": {
+          "path": "cutover/typescript-c1-acceptance-v0.8.json",
+          "blobSha": "2fe197b409ae2dca4eb8110ed62a7932cf9be4c8"
+        },
+        "requirements": {
+          "path": "requirements/mts-v0.15.json",
+          "blobSha": "f7729caa54f91e1a8632a094667c68e9ee330ec4"
+        }
+      }
+    },
+    "executionKernel": {
+      "repository": "netkeep80/anum_docs",
+      "commit": "813a1569300b241a3b70eb282eecd8231db15e4b",
+      "path": "profiles/mts-v015-meta-interpreter-kernel.json",
+      "blobSha": "10cebb70618e4317afb94666bc705ce7b3799cdd"
+    }
+  },
+  "acceptance": {
+    "decision": "ACCEPT_MTS_V0_15",
+    "acceptedVersion": "mts-contract/v0.15",
+    "previousAcceptedVersion": "mts-contract/v0.14",
+    "current": {
+      "contract": "contracts/mts-contract-v0.15.json",
+      "conformance": "contracts/mts-conformance-v0.15.json",
+      "publicFacade": "ts/src/public.ts",
+      "packageManifest": "ts/package.json"
+    },
+    "contractAccepted": true,
+    "conformanceAccepted": true,
+    "conformanceCoverageState": "complete",
+    "downstreamRepinAllowed": true,
+    "singleLiveSemanticRuntime": true,
+    "amemorySemanticPatchUsed": false
+  },
+  "authoritySplit": {
+    "acceptedFoundation": {
+      "version": "v0.15",
+      "contract": "mts-contract/v0.15",
+      "commit": "813a1569300b241a3b70eb282eecd8231db15e4b"
+    },
+    "executionKernel": {
+      "id": "mts-v015-meta-interpreter-kernel",
+      "schema": "mts-v015-meta-interpreter-kernel/v0.1",
+      "status": "ACCEPTED_EXECUTION_AUTHORITY",
+      "acceptedBaseline": "MTS v0.15",
+      "commit": "813a1569300b241a3b70eb282eecd8231db15e4b"
+    },
+    "frozenCompatibilityBackend": {
+      "repository": "netkeep80/amemory",
+      "commit": "832daa89f15fd0f3b7b40819b6d3670c7fd57e7d",
+      "version": "0.175.0",
+      "role": "COMPATIBILITY_CONFORMANCE_ONLY",
+      "semanticAuthority": false
+    },
+    "runtimeMigration": {
+      "state": "A0_A1_PENDING",
+      "primaryIssue": 455,
+      "a0Issue": 492,
+      "productionV015ConformanceClaimed": false
+    }
+  },
+  "semanticAuthority": {
+    "sourceModel": "FORMAL/JSON -> one native source ANet",
+    "denotation": "shared contextual resolver and DAS denotation",
+    "execution": "GAMMA_STRUCTURAL_ASET / STRUCTURAL_UNARY_J0",
+    "kernel": "profiles/mts-v015-meta-interpreter-kernel.json",
+    "programSpecificHostSemanticInjectionAllowed": false,
+    "jsonSpecificSemanticPathAllowed": false,
+    "specialBooleanRuntimeAllowed": false
+  },
+  "executionKernel": {
+    "command": {
+      "name": "GAMMA_STRUCTURAL_ASET",
+      "repeatedCommandCount": 1,
+      "localReaction": "STRUCTURAL_UNARY_J0",
+      "scalarPositiveLaw": "MP0_RETAINED",
+      "jointAntecedentArity": "ONE_CURRENT_ENDPOINT",
+      "imageArity": "ZERO_ONE_MANY",
+      "scopeLift": "POINTWISE_N_CURRENT_MEMBERS_DERIVED",
+      "crossMemberJoin": "J1_NOT_REQUIRED",
+      "externalSemanticGrounderAllowed": false,
+      "programSpecificDispatchAllowed": false
+    },
+    "phases": {
+      "analysis": {
+        "id": "S1",
+        "role": "STRUCTURAL_MATCH_BIND",
+        "readOnly": true,
+        "completePlanBeforeSynthesis": true
+      },
+      "synthesis": {
+        "id": "S2",
+        "role": "CANONICAL_SUBSTITUTION_AND_LINK_CONSTRUCTION",
+        "startsAfterCompleteAnalysisPlan": true
+      },
+      "publication": {
+        "role": "ATOMIC_SEMANTIC_ASET_MEMBERSHIP_REWRITE",
+        "completeSuccessorBeforePublication": true,
+        "sameGenerationReadOwnWrites": false
+      }
+    },
+    "authority": {
+      "currentness": "POSITIVE_SEMANTIC_ANET_MEMBERSHIP",
+      "theory": "LINK_STRUCTURE_AND_REACTION_START_SEMANTIC_MEMBERSHIP_SNAPSHOT",
+      "physicalLinkExistenceAlone": false,
+      "hostNameAuthority": false,
+      "externalCurrentPointer": false,
+      "externalScopePointer": false,
+      "externalSelectedTheoryPointer": false,
+      "externalProgramCounter": false
+    },
+    "context": {
+      "directGaugeBoundary": "C",
+      "rootRelation": "C = END(R)",
+      "authorDecision": "APPROVED_FOR_V015_ACCEPTED",
+      "versionAcceptance": true,
+      "freezeResumeWithoutSerializedContextHandle": true,
+      "foreignTheoryIsolation": true,
+      "designAcceptanceScope": "V0.15_ACCEPTED_EXECUTION_CONTEXT",
+      "foundationGlobalPrivilege": false,
+      "chiralityCovariantMirrorRequired": true
+    },
+    "causalLaws": {
+      "newTheoryAdmissionVisibleSameReaction": false,
+      "newTheoryAdmissionVisibleNextReaction": true,
+      "noMatchPreservesCurrentMembership": true,
+      "matchedEmptyProducesZeroSuccessorContribution": true,
+      "duplicateSuccessorsConvergeByCanonicalLinkIdentity": true,
+      "entryCreationOrderSemantic": false,
+      "freezeResumeBetweenGenerationsSemantic": false
+    },
+    "bootstrapBoundary": {
+      "sourceCompilerOwner": "#2006",
+      "bootstrapFormalJsonMetacompilerMayBeHostImplemented": true,
+      "bootstrapCompilerIsRuntimeSemanticGrounder": false,
+      "bootstrapCompilerIsSecondAMemoryCommand": false
+    }
+  },
+  "laws": {
+    "V15-TERM-01": "Normative English term for «асеть / асеть связей» is ANet. Aset is not an MTS English term; legacy Aset/aset code identifiers have no terminology or semantic authority.",
+    "V15-AUTH-01": "One v0.15 execution-core semantic authority path: universal FORMAL and canonical JSON converge to the same native source ANet, then shared resolution/denotation/compiler/Γ execution/projection; no consumer-specific host semantic path is authoritative.",
+    "V15-AUTH-02": "FORMAL_MIGRATED or VERTICAL_GREEN requires tracked canonical FORMAL artifact, entry, digest, profile and evidence.",
+    "V15-ONTO-01": "One-Link ontology: host kinds do not acquire MTS semantic authority.",
+    "V15-ONTO-02": "Prefer ordinary Link + ExactSequence + self-reference topology before extending Grammar.",
+    "V15-ONTO-03": "Presentation names carry no semantic authority; topology-preserving rename preserves behavior.",
+    "V15-STRUCT-01": "The v0.15 direct FORMAL/JSON source path preserves the already accepted ROOT/START/END/PAIR structural aspect constructors and lowers them to native Link topology / recursive 8/9/6/1 without enabling arbitrary cyclic bindings.",
+    "V15-CLOSE-01": "VERTICAL_GREEN requires transitive semantic dependency closure for the declared artifact scope.",
+    "V15-CLOSE-02": "Every dependency outside the artifact is explicitly classified and versioned.",
+    "V15-CLOSE-03": "Program-specific host semantic injection budget is exactly zero. Generic orchestration and backend compatibility/optimization lowerings may exist but have no MTS semantic authority.",
+    "V15-FRESH-01": "A canonical FORMAL executable artifact reconstructs its executable package in fresh Memory using only fixed generic authorities.",
+    "V15-FRESH-02": "Canonical JSON alone reconstructs the same package in fresh Memory without source-specific repair.",
+    "V15-FRESH-03": "Two fresh Memories with unrelated allocation noise preserve canonical recursive representation and behavior.",
+    "V15-NAME-01": "Every FORMAL name is contextual. Absolute name :A is shorthand for R:A; no host-global atom namespace is semantic authority. Structured expressions resolve their endpoint names through the same contextual-name resolver before Link construction.",
+    "V15-JSON-01": "JSON losslessly projects the complete supported canonical source ANet/model, not only passive carriers.",
+    "V15-JSON-02": "FORMAL text and direct JSON converge to the same native source ANet roles, resolver and DAS denotation path before semantics.",
+    "V15-JSON-03": "Semantic JSON mutations must predictably change or reject source/denotation/execution behavior; transport-only mutations must not create semantic authority.",
+    "V15-VERT-01": "VERTICAL_GREEN requires the complete mandatory evidence bundle and zero semantic injection.",
+    "V15-VERT-02": "Completion state may only come from registered evidence, never PR/issue/test naming or partial round-trip.",
+    "V15-AND-01": "A compact Author-gated Boolean AND source ANet contains only the exact local T/F truth-table semantics expressed as zero-role Rules; legacy RoleDictionary/index/Scope/interpreter scaffolding is not canonical source.",
+    "V15-AND-02": "Boolean AND executes through the shared matcher/Γ-compatible path and frozen compatibility adapter with zero AND-specific host dispatch; operands outside the local T/F domain are NO_MATCH rather than pass-through.",
+    "V15-AND-03": "MTS has one canonical semantic Boolean AND source/model. Frozen or future A-memory backends may use generated compatibility or optimized AND lowerings only when they are semantics-preserving with respect to the exact T/F-domain truth table and NO_MATCH boundary, remain generic/backend-owned, and stay outside canonical AND semantic authority.",
+    "V15-AND-04": "Author-gated strict Boolean NOT/OR/XOR reuse the exact same FORMAL/JSON source model, semantic Theory->Rule discovery, zero-role Rule topology, generic Γ-compatible execution path and generic frozen-backend lowering as approved AND; no operator-specific semantic/runtime path is permitted.",
+    "V15-CTX-01": "Theory, Context/currentness, interpreter/meta-program, entry and result execution roles are represented by Links and semantic ANet membership. Host package/launch code may perform only generic selection/orchestration allowed by the machine contract and cannot supply semantic role authority.",
+    "V15-CTX-02": "The same Link may have different execution roles under different selected ANet contexts only because the corresponding contextual Link memberships differ; host names, manifests or pointers cannot create those roles.",
+    "V15-GAMMA-01": "One repeated universal Γ is the shared v0.15 semantic execution operation for ordinary executable ANets and self-hosted meta/interpreter ANets: reaction-start snapshot; J0 structural-unary applicability over one explicit current endpoint; S1 read-only structural match/bind; S2 substitution/canonical Link construction during synthesis; 0/1/N ordered image contribution; complete staged successor and atomic publication. Exact grounded MP is the zero-role refinement. J1 cross-current-member join, external semantic grounder commands, consumer-specific opcodes and a second semantic runtime are not required/permitted by the selected profile.",
+    "V15-FORMAL-PROOF-01": "Lean4 and Rocq independently formalize the supported v0.15 FORMAL mathematical core and classify exact premises/domain/exclusions for contextual names, source denotation, DAS and ExactSequence.",
+    "V15-FORMAL-PROOF-02": "Paired external assurance proves/cross-checks semantic preservation of FORMAL/JSON convergence and canonical recursive 8/9/6/1 metacompilation for the declared fragment; corpus GREEN alone is not proof of soundness.",
+    "V15-JSON-04": "JSON arrays lower canonically to ExactSequence of already-denoted element Links; []=R. R-rooted fold F_R is a separate derived projection, not the positional/execution carrier.",
+    "V15-STAGE-01": "Source bytes, native source ANet, resolution/denotation, semantic ANet, recursive metacompilation, backend compatibility lowering, execution/replay and projection remain separately observable.",
+    "V15-STAGE-02": "Read/find/validation are read-only; materialization/publication is explicit and failure-safe.",
+    "V15-FALS-01": "Every semantic capability has positive, structural mutation, missing authority, context, identity, JSON mutation and fresh-memory falsifiers as applicable.",
+    "V15-GOV-01": "Machine-readable candidate v0.15 requirements/traceability registry governs completion state.",
+    "V15-GOV-02": "Acceptance corpus audits direct semantic construction and rejects hidden program-specific host injection or backend-specific semantic authority.",
+    "V15-GOV-03": "Roadmap/status projections derive completion from registry/evidence rather than hand-maintained prose.",
+    "V15-CORPUS-01": "Every Author-approved v0.15 executable artifact is pinned and replayed through FORMAL/JSON -> native source ANet -> semantic ANet -> recursive 8/9/6/1 -> generic compatibility lowering where required -> frozen A-memory 0.175.0, with zero semantic backend patches.",
+    "V15-GOV-04": "Normal MTS merge paths cannot bypass required CI/repo-guard enforcement: broad always-bypass repository roles are removed or contained to an explicitly audited emergency actor/process, and an intentional RED repo-guard pull request is mechanically blocked from merging until restored GREEN.",
+    "V15-DOCS-01": "The canonical «Формальная нотация МТС.md» is a deterministic generated projection of the current v0.15 execution-core FORMAL/JSON model, machine registries, selected Gamma/context profiles and Author-approved executable corpus; hand-maintained semantic prose and stale v0.14-only projection are forbidden.",
+    "V15-READY-01": "RELEASE_READY is impossible while any mandatory requirement is below VERTICAL_GREEN or explicitly resolved release state.",
+    "V15-READY-02": "Independent readiness audit attempts to falsify hidden semantics, incomplete JSON, drift, omissions and nondeterminism.",
+    "V15-READY-03": "Only explicit Author ACCEPT/REJECT can change accepted/current from v0.14 to v0.15.",
+    "V15-AUTHOR-JSON-01": "Every new canonical logical/executable JSON artifact in v0.15 stops at AUTHOR_REVIEW_PENDING before completion. Proof/aprover artifacts are separately Author-gated in v0.16.",
+    "V15-AUTHOR-JSON-02": "v0.15 Author review shows exact FORMAL, exact JSON, source/semantic mapping, external/backend boundary, round-trip, fresh executable replay and falsifiers.",
+    "V15-AUTHOR-JSON-03": "Author decision is recorded per exact artifact revision/digest; material changes invalidate prior approval.",
+    "V15-AUTHOR-JSON-04": "Author JSON review applies throughout v0.15; batch approval only for an explicitly shown exact batch.",
+    "V15-REG-01": "Every Author-approved JSON enters the permanent executable regression corpus.",
+    "V15-REG-02": "Every FORMAL/model/JSON/metacompiler/recursive/execution change that can affect v0.15 executable semantics replays the complete Author-approved executable JSON corpus.",
+    "V15-REG-03": "Approved JSON/evidence is never silently regenerated; incompatible changes use explicit migration and renewed Author approval."
+  },
+  "conformance": {
+    "requiredPositiveVectors": [
+      "a10-finite-exact-s0-fresh-structure-opacity-boundary",
+      "a11-snapshot-partition-reduction",
+      "a12-finite-materialized-generation",
+      "a5-freeze-resume-no-external-execution-sidecar",
+      "a6-theory-derived-from-link-ancestry",
+      "a8-positive-anet-currentness-membership",
+      "a9-one-gamma-structural-execution-no-external-current-scope-theory-pointer",
+      "a9-structural-unary-one-command-sufficiency",
+      "absolute-link-colon-Theory-to-colon-GroundRule-resolves-through-root-context",
+      "absolute-name-colon-A-equals-R-colon-A",
+      "accepted-v014-stable-anchors-preserved",
+      "all-approved-formal-rebuild-semantic-recursive-package-chain-in-fresh-memory",
+      "all-approved-json-formal-same-native-source-anet",
+      "all-approved-json-rebuild-same-native-source-and-recursive-semantics-in-fresh-memory",
+      "all-current-author-approved-json-present-in-approved-corpus",
+      "all-non-author-v015-mandatory-requirements-green",
+      "amemory-sha-version-explicit",
+      "approval-bound-to-exact-json-digest",
+      "approved-artifact-chain-formal-json-semantic-recursive-package-evidence",
+      "approved-corpus-array-replay",
+      "approved-corpus-audited-direct-source-and-generic-lowering",
+      "approved-corpus-complete-evidence-bundle",
+      "approved-corpus-formal-json-same-native-source-anet",
+      "approved-corpus-frozen-replay-green",
+      "approved-corpus-negative-replay",
+      "approved-corpus-permanent-artifact-chain",
+      "approved-corpus-permanent-formal-json-digests",
+      "approved-corpus-positive-and-negative-frozen-runs",
+      "approved-corpus-six-artifacts-current",
+      "approved-six-artifact-corpus-projected",
+      "author-approved-anet-terminology-locked-in-1976",
+      "boolean-family-and-not-or-xor-one-generic-harness",
+      "boolean-family-generic-zero-role-compatibility-lowering",
+      "boolean-family-semantic-theory-membership-rule-discovery",
+      "compact-and-four-grounded-rule-compatibility-lowering",
+      "compact-boolean-and-four-grounded-rules-4of4",
+      "compact-kernel-projection-authority",
+      "completion-derived-from-requirements-traceability-and-evidence",
+      "context-denotation-json-structural-falsifiers",
+      "contextual-name-resolve-read-only",
+      "contextual-name-source-role-dsa-exactsequence-structural-aspect-laws",
+      "contextual-theory-selection-is-link-structural",
+      "contract-observatory-index-green",
+      "currentness-follows-membership",
+      "currentness-follows-semantic-membership-not-physical-topology",
+      "currentness-moves-with-membership",
+      "declared-external-dependencies-pinned",
+      "direct-formal-json-native-source-anet-parity",
+      "direct-formal-root-start-end-pair",
+      "direct-json-empty-array-to-R-binding",
+      "direct-json-nested-object-to-anchored-source-anet",
+      "direct-json-null-to-bare-source-entry",
+      "direct-json-string-rhs-to-binding",
+      "direct-json-structured-bare-key-to-resolved-membership",
+      "direct-root-start-end-pair-link-forms",
+      "distinct-source-same-denotation",
+      "docs-sync-idempotent-and-isolated-fixture-green",
+      "duplicate-json-validation-rejects-before-materialization",
+      "empty-global-axiom-allowlists",
+      "every-approved-corpus-entry-has-explicit-author-review",
+      "exact-formal-json-recursive-package-replay-falsifiers-recorded",
+      "exact-persisted-package-and-evidence-parity",
+      "exactsequence-cell-pattern-with-start-aspect",
+      "exactsequence-positional-carrier",
+      "explicit-author-accept-mts-v0.15-recorded",
+      "explicit-batch-approval-recorded-for-not-or-xor",
+      "foreign-theory-membership-remains-isolated",
+      "formal-json-native-source-parity",
+      "frm01-08-paired-lean4-rocq",
+      "frm07-approved-production-refinement",
+      "frm08-structural-aspect-production-witness",
+      "frozen-amemory-compact-boolean-and-4of4",
+      "frozen-amemory-not-2of2",
+      "frozen-amemory-or-4of4",
+      "frozen-amemory-xor-4of4",
+      "frozen-backend-pinned",
+      "gamma-and-formal-proof-status-projected",
+      "generated-formal-current",
+      "generic-backend-compatibility-lowering-separated",
+      "generic-compatibility-lowering",
+      "gpr01-09-paired-lean4-rocq-closure",
+      "gpr01-09-proof-closure",
+      "green-restored-mergeable-clean",
+      "grounded-empty-role-bundle-admission-only",
+      "grounded-zero-role-is-generic-refinement",
+      "independent-hidden-semantics-drift-omission-nondeterminism-audit-complete",
+      "individual-and-role-artifact-approvals-recorded",
+      "intentional-red-repo-guard-merge-blocked-http405",
+      "json-array-exactsequence-empty-root-order-multiplicity",
+      "json-profile-canonical-roundtrip",
+      "metacompiler-revision-profile-explicit",
+      "metacompiler-revision-profile-pinned",
+      "one-link-source-denotation-execution-model",
+      "permanent-artifact-digests-and-frozen-evidence-locked",
+      "post-governance-final-readiness-r3-green",
+      "presentation-rename-membership-invariant",
+      "r0-terminology-lock",
+      "recursive-semantic-left-inverse",
+      "registry-traceability-state-projection-exact",
+      "required-status-checks-configured-on-protect-main",
+      "role-bundle-membership-plus-admission",
+      "root-binding-does-not-publish-membership",
+      "root-start-end-pair-as-link-forms",
+      "ruleset-bypass-actors-empty",
+      "russian-first-and-size-budget-green",
+      "s19-independent-audit-complete",
+      "s20-operational-governance-falsifier-green",
+      "s21-final-readiness-r3-green",
+      "s22-accepted-current-cutover",
+      "same-physical-link-can-retain-independent-theory-admission-role-after-currentness-moves",
+      "semantic-injection-budget-zero",
+      "semantic-theory-membership-rule-discovery",
+      "shared-das-denotation",
+      "shared-gamma-execution",
+      "six-author-approved-executable-artifacts-full-frozen-replay",
+      "source-anet-profile-read-read-only",
+      "source-native-anet-denotation-semantic-recursive-backend-replay-stages-observable",
+      "source-role-bare-binding-bundle-exactsequence-covered",
+      "textual-lu-no-intrinsic-truth-authority",
+      "two-fresh-memories-allocation-noise-same-recursive-semantics",
+      "v015-r0-registry-loads-and-validates",
+      "whole-file-formal-v015-projection-generated-from-clean-machine-sources",
+      "workflow-replays-grounded-two-role-and-boolean-family-on-semantic-affecting-change"
+    ],
+    "requiredNegativeVectors": [
+      "acceptance-without-explicit-author-decision-rejected",
+      "approved-artifact-cannot-point-to-candidates",
+      "approved-json-outside-regression-corpus-zero",
+      "arbitrary-cyclic-binding-rejected",
+      "arbitrary-cyclic-binding-remains-rejected",
+      "array-null-rejects",
+      "artifact-specific-bypass-zero",
+      "aset-not-normative-mts-term",
+      "backend-semantic-authority-zero",
+      "boolean-family-foreign-theory-inert",
+      "boolean-family-nonboolean-operands-no-match",
+      "boolean-family-program-specific-runtime-dispatch-zero",
+      "broad-repository-role-always-bypass-absent",
+      "candidate-path-in-approved-corpus-rejected",
+      "candidate-v015-does-not-relabel-current-accepted-v014",
+      "canonical-and-has-no-role-dictionary-index-scope-interpreter-scaffold",
+      "ci-and-audit-do-not-substitute-for-author-acceptance",
+      "compact-and-delete-ruleTT-admission",
+      "compact-and-foreign-theory-inert",
+      "compact-and-malformed-negative-no-match",
+      "compact-and-nonboolean-operands-no-match",
+      "compact-and-presentation-rename-invariant",
+      "consumer-specific-host-semantic-path-zero",
+      "consumer-specific-semantic-opcode-forbidden",
+      "duplicate-decoded-json-key-no-write",
+      "duplicate-decoded-json-key-rejects",
+      "duplicate-key-reject",
+      "duplicate-local-name-reject",
+      "explicit-author-acceptance-still-pending",
+      "external-grounder-command-forbidden",
+      "external-grounder-zero",
+      "external-semantic-grounder-command-forbidden",
+      "finite-exact-s0-alone-cannot-transform-arbitrary-fresh-structure",
+      "foreign-theory-is-inert",
+      "hand-edited-formal-spec-detected-as-stale",
+      "hand-maintained-state-overclaim-rejected",
+      "host-current-scope-theory-pointers-forbidden",
+      "host-global-name-authority-zero",
+      "host-manifest-pointer-does-not-create-theory-or-currentness",
+      "host-name-does-not-create-context-role",
+      "host-pointer-authority-zero",
+      "implicit-general-approval-zero",
+      "j1-cross-current-member-join-not-required",
+      "json-must-not-bypass-native-source-anet",
+      "json-only-semantic-path-forbidden",
+      "json-second-semantic-language-zero",
+      "memory-handle-allocation-order-not-authority",
+      "missing-author-approval-cannot-promote",
+      "missing-authority-foreign-theory-nonboolean-duplicate-json-fresh-identity-cases",
+      "missing-contextual-name-resolve-no-write",
+      "no-global-host-atom-authority",
+      "no-preexisting-program-handle-authority",
+      "no-proof-specific-grammar-opcodes",
+      "obsolete-meta-interpreter-monolith-not-projection-authority",
+      "optimized-lowering-must-not-widen-boolean-domain",
+      "partial-roundtrip-cannot-promote",
+      "pending-author-review-cannot-promote",
+      "physical-link-existence-alone-is-not-currentness",
+      "physical-link-without-membership-is-not-current",
+      "pr-issue-test-name-cannot-promote-state",
+      "presentation-name-rename-does-not-create-authority",
+      "program-specific-compatibility-dispatch-zero",
+      "program-specific-compatibility-lowering-forbidden",
+      "program-specific-host-injection-zero",
+      "program-specific-rule-discovery-forbidden",
+      "program-specific-runtime-dispatch-zero",
+      "proof-specific-grammar-zero",
+      "red-required-check-cannot-merge",
+      "rooted-fold-cannot-preserve-0-1-2-root-cardinality",
+      "rooted-fold-falsified-as-positional-carrier",
+      "rulekind-opcode-authority-zero",
+      "same-spelling-name-in-different-contexts-must-not-alias-without-resolution",
+      "second-semantic-runtime-forbidden",
+      "semantic-host-type-tags-zero",
+      "silent-regeneration-or-stale-author-digest-rejected",
+      "source-specific-json-repair-zero",
+      "stale-approval-after-material-digest-change-rejected",
+      "stale-physical-active-link-is-inert-without-semantic-membership",
+      "start-end-distinct",
+      "structural-aspect-is-not-host-kind",
+      "structured-binding-head-fails-closed-bounded-fragment",
+      "technical-green-alone-insufficient",
+      "top-level-null-rejects",
+      "typescript-implementation-mechanized-proof-not-claimed",
+      "unknown-field-reject",
+      "unqualified-host-global-atom-must-not-be-semantic-authority",
+      "unsupported-profile-reject",
+      "unversioned-backend-authority-rejected",
+      "v015-r0-rejects-illegal-state-promotion",
+      "v015-r0-rejects-missing-author-json-review",
+      "v015-r0-rejects-stale-approval-after-artifact-change",
+      "v016-proof-aprover-assurance-excluded",
+      "zero-amemory-semantic-patches"
+    ],
+    "requiredExecutableGates": [
+      "ts/test/anum-two-memory-conformance.test.ts",
+      "ts/test/docs-size-budget.test.ts",
+      "ts/test/docs-sync.test.ts",
+      "ts/test/quaternary-anum-hierarchical-two-memory.test.ts",
+      "ts/test/release-cutover.test.ts",
+      "ts/test/research-v012-interpreter-delta-c2.test.ts",
+      "ts/test/research-v013-application-closed-frontier-a17.test.ts",
+      "ts/test/research-v013-contextual-truth-dynamic-duality-a16.test.ts",
+      "ts/test/research-v013-flat-generalized-modus-ponens-a72w.test.ts",
+      "ts/test/research-v013-root-asymmetry-chirality-a14.test.ts",
+      "ts/test/research-v014-a4-operational-equivalence.test.ts",
+      "ts/test/research-v014-a4prime-chiral-torsor-bootstrap.test.ts",
+      "ts/test/research-v014-add-constructor-authority-boundary.test.ts",
+      "ts/test/research-v014-add-dependent-witness-boundary.test.ts",
+      "ts/test/research-v014-add-general-functionality.test.ts",
+      "ts/test/research-v014-add-general-proof-boundary.test.ts",
+      "ts/test/research-v014-constructor-inversion.test.ts",
+      "ts/test/research-v014-constructor-scoped-proof.test.ts",
+      "ts/test/research-v014-context-relative-a4prime.test.ts",
+      "ts/test/research-v014-count-nat-degree-separation.test.ts",
+      "ts/test/research-v014-dependent-witness-closure.test.ts",
+      "ts/test/research-v014-foundation-orientation-witness.test.ts",
+      "ts/test/research-v014-immutable-link-chiral-rewrite.test.ts",
+      "ts/test/research-v014-minimal-chiral-foundation-extension.test.ts",
+      "ts/test/research-v014-nat-add-bounded-closure.test.ts",
+      "ts/test/research-v014-nat-add-left-zero-closure.test.ts",
+      "ts/test/research-v014-nat-least-closed-authority.test.ts",
+      "ts/test/research-v014-order-replay-mul-scope.test.ts",
+      "ts/test/research-v014-orientation-gauge-view.test.ts",
+      "ts/test/research-v014-ostensive-formal-grammar.test.ts",
+      "ts/test/research-v014-parametric-closure.test.ts",
+      "ts/test/research-v014-preacceptance-closure.test.ts",
+      "ts/test/research-v014-reaction-result-basis.test.ts",
+      "ts/test/string-anum-two-memory-conformance.test.ts",
+      "ts/test/v012-formal-context-reading-c6.test.ts",
+      "ts/test/v012-formal-source-result-witness.test.ts",
+      "ts/test/v012-formal-square-rule-authority.test.ts",
+      "ts/test/v012-formal-square-string-child-c4.test.ts",
+      "ts/test/v012-ostensive-self-incidence-matching.test.ts",
+      "ts/test/v012-public-facade-c7.test.ts",
+      "ts/test/v012-q-compatibility-representation-c5.test.ts",
+      "ts/test/v012-quaternary-root-basis-boundary.test.ts",
+      "ts/test/v012-source-authority.test.ts",
+      "ts/test/v012-string-anum-protocol-c3a.test.ts",
+      "ts/test/v012-string-q-byte-bridge.test.ts",
+      "ts/test/v012-string-utf8-boundary.test.ts",
+      "ts/test/v013-binary-link-materialization-two-memory.test.ts",
+      "ts/test/v013-cyclic-grounding-boundary.test.ts",
+      "ts/test/v013-file-wire-conformance.test.ts",
+      "ts/test/v013-form-result-rule-authority.test.ts",
+      "ts/test/v013-formal-quaternary-grounding.test.ts",
+      "ts/test/v013-generic-semantic-carrier-shared-dag.test.ts",
+      "ts/test/v013-hierarchical-carrier-two-memory.test.ts",
+      "ts/test/v013-hierarchical-link-carrier.test.ts",
+      "ts/test/v013-link-native-abit-basis.test.ts",
+      "ts/test/v013-memory-cycle-boundary.test.ts",
+      "ts/test/v013-prefix-result-rule-authority.test.ts",
+      "ts/test/v013-public-facade.test.ts",
+      "ts/test/v013-quaternary-canonicality.test.ts",
+      "ts/test/v013-relative-form-materialization-two-memory.test.ts",
+      "ts/test/v013-relative-form-quartet.test.ts",
+      "ts/test/v013-relative-form-two-memory.test.ts",
+      "ts/test/v013-relative-pole-context.test.ts",
+      "ts/test/v013-relative-pole-source-authority.test.ts",
+      "ts/test/v013-root-aspect-formal-composition.test.ts",
+      "ts/test/v013-root-origin-law.test.ts",
+      "ts/test/v013-string-anum-acceptance.test.ts",
+      "ts/test/v013-symmetric-nonroot.test.ts",
+      "ts/test/v013-unknown-whole-two-memory.test.ts",
+      "ts/test/v014-independent-readiness-audit.test.ts",
+      "ts/test/v014-post-n20c-independent-readiness-audit.test.ts",
+      "ts/test/v014-q14-versioned-interpreter.test.ts",
+      "ts/test/v014-traceability-candidate.test.ts",
+      "ts/test/v015-boolean-package-replay-a2.test.ts",
+      "ts/test/v015-context-theory-self-contained-a6.test.ts",
+      "ts/test/v015-direct-formal-source-b20.test.ts",
+      "ts/test/v015-direct-json-denotation-das-a2b.test.ts",
+      "ts/test/v015-direct-structural-aspects-s1.test.ts",
+      "ts/test/v015-exact-finite-support-necessity-a10.test.ts",
+      "ts/test/v015-formal-decoder-b2.test.ts",
+      "ts/test/v015-formal-exact-sequence-b7.test.ts",
+      "ts/test/v015-formal-json-j1-b9.test.ts",
+      "ts/test/v015-formal-production-refinement-f1.test.ts",
+      "ts/test/v015-parallel-reaction-reduction-a11.test.ts",
+      "ts/test/v015-positive-aset-currentness-a8.test.ts",
+      "ts/test/v015-rule-bundle-denotation-das-a2c.test.ts",
+      "ts/test/v015-self-contained-context-freeze-resume-a5.test.ts",
+      "ts/test/v015-source-anet-denotation-core-das-a2a.test.ts",
+      "ts/test/v015-structural-aset-gamma-core-a9a.test.ts",
+      "ts/test/v015-structural-aset-role-bundle-a9b.test.ts"
+    ]
+  },
+  "requirements": {
+    "registryPath": "requirements/mts-v0.15.json",
+    "total": 48,
+    "stateCounts": {
+      "COMPONENT_GREEN": 41,
+      "VERTICAL_GREEN": 4,
+      "RELEASE_READY": 2,
+      "ACCEPTED": 1
+    },
+    "currentAccepted": {
+      "mtsVersion": "v0.15",
+      "requirements": "requirements/mts-v0.15.json",
+      "traceability": "traceability/mts-v0.15.json",
+      "contract": "contracts/mts-contract-v0.15.json",
+      "conformance": "contracts/mts-conformance-v0.15.json"
+    },
+    "states": {
+      "V15-AUTH-01": "COMPONENT_GREEN",
+      "V15-AUTH-02": "COMPONENT_GREEN",
+      "V15-ONTO-01": "COMPONENT_GREEN",
+      "V15-ONTO-02": "COMPONENT_GREEN",
+      "V15-ONTO-03": "COMPONENT_GREEN",
+      "V15-CLOSE-01": "COMPONENT_GREEN",
+      "V15-CLOSE-02": "COMPONENT_GREEN",
+      "V15-CLOSE-03": "COMPONENT_GREEN",
+      "V15-FRESH-01": "COMPONENT_GREEN",
+      "V15-FRESH-02": "COMPONENT_GREEN",
+      "V15-FRESH-03": "COMPONENT_GREEN",
+      "V15-JSON-01": "COMPONENT_GREEN",
+      "V15-JSON-02": "COMPONENT_GREEN",
+      "V15-JSON-03": "COMPONENT_GREEN",
+      "V15-VERT-01": "COMPONENT_GREEN",
+      "V15-VERT-02": "COMPONENT_GREEN",
+      "V15-AND-01": "VERTICAL_GREEN",
+      "V15-AND-02": "VERTICAL_GREEN",
+      "V15-AND-03": "VERTICAL_GREEN",
+      "V15-AND-04": "VERTICAL_GREEN",
+      "V15-CTX-01": "COMPONENT_GREEN",
+      "V15-CTX-02": "COMPONENT_GREEN",
+      "V15-STAGE-01": "COMPONENT_GREEN",
+      "V15-STAGE-02": "COMPONENT_GREEN",
+      "V15-FALS-01": "COMPONENT_GREEN",
+      "V15-GOV-01": "COMPONENT_GREEN",
+      "V15-GOV-02": "COMPONENT_GREEN",
+      "V15-GOV-03": "COMPONENT_GREEN",
+      "V15-CORPUS-01": "COMPONENT_GREEN",
+      "V15-READY-01": "RELEASE_READY",
+      "V15-READY-02": "RELEASE_READY",
+      "V15-READY-03": "ACCEPTED",
+      "V15-AUTHOR-JSON-01": "COMPONENT_GREEN",
+      "V15-AUTHOR-JSON-02": "COMPONENT_GREEN",
+      "V15-AUTHOR-JSON-03": "COMPONENT_GREEN",
+      "V15-AUTHOR-JSON-04": "COMPONENT_GREEN",
+      "V15-REG-01": "COMPONENT_GREEN",
+      "V15-REG-02": "COMPONENT_GREEN",
+      "V15-REG-03": "COMPONENT_GREEN",
+      "V15-TERM-01": "COMPONENT_GREEN",
+      "V15-JSON-04": "COMPONENT_GREEN",
+      "V15-NAME-01": "COMPONENT_GREEN",
+      "V15-GAMMA-01": "COMPONENT_GREEN",
+      "V15-FORMAL-PROOF-01": "COMPONENT_GREEN",
+      "V15-FORMAL-PROOF-02": "COMPONENT_GREEN",
+      "V15-STRUCT-01": "COMPONENT_GREEN",
+      "V15-GOV-04": "COMPONENT_GREEN",
+      "V15-DOCS-01": "COMPONENT_GREEN"
+    },
+    "criticalExecutionRequirements": {
+      "V15-AUTH-01": {
+        "state": "COMPONENT_GREEN",
+        "ownerIssue": 1976,
+        "dependsOn": [],
+        "positiveVectors": [
+          "approved-corpus-formal-json-same-native-source-anet",
+          "shared-das-denotation",
+          "shared-gamma-execution"
+        ],
+        "negativeVectors": [
+          "json-only-semantic-path-forbidden",
+          "consumer-specific-host-semantic-path-zero"
+        ],
+        "requiredExecutableGates": [
+          "ts/test/v015-context-authority-closure-c1.test.ts",
+          "ts/test/v015-formal-production-refinement-f1.test.ts",
+          "ts/test/v015-boolean-package-replay-a2.test.ts"
+        ],
+        "evidenceRefs": [
+          "profiles/mts-v015-meta-interpreter-kernel.json",
+          "ts/test/v015-context-authority-closure-c1.test.ts",
+          "ts/test/v015-formal-production-refinement-f1.test.ts",
+          "ts/test/v015-boolean-package-replay-a2.test.ts"
+        ],
+        "authorJsonReview": "NOT_APPLICABLE"
+      },
+      "V15-CLOSE-03": {
+        "state": "COMPONENT_GREEN",
+        "ownerIssue": 1976,
+        "dependsOn": [
+          "V15-CLOSE-01"
+        ],
+        "positiveVectors": [
+          "semantic-theory-membership-rule-discovery",
+          "generic-compatibility-lowering"
+        ],
+        "negativeVectors": [
+          "program-specific-compatibility-dispatch-zero",
+          "host-pointer-authority-zero",
+          "external-grounder-zero"
+        ],
+        "requiredExecutableGates": [
+          "ts/test/v015-structural-aset-gamma-antidrift-a9c.test.ts",
+          "ts/test/v015-context-authority-closure-c1.test.ts"
+        ],
+        "evidenceRefs": [
+          "profiles/mts-v015-meta-interpreter-kernel.json",
+          "ts/test/v015-structural-aset-gamma-antidrift-a9c.test.ts",
+          "ts/test/v015-context-authority-closure-c1.test.ts"
+        ],
+        "authorJsonReview": "NOT_APPLICABLE"
+      },
+      "V15-FRESH-01": {
+        "state": "COMPONENT_GREEN",
+        "ownerIssue": 1976,
+        "dependsOn": [
+          "V15-CLOSE-03",
+          "V15-NAME-01"
+        ],
+        "positiveVectors": [
+          "all-approved-formal-rebuild-semantic-recursive-package-chain-in-fresh-memory"
+        ],
+        "negativeVectors": [
+          "no-preexisting-program-handle-authority"
+        ],
+        "requiredExecutableGates": [
+          "ts/test/v015-formal-production-refinement-f1.test.ts",
+          "ts/test/v015-boolean-package-replay-a2.test.ts",
+          "ts/test/v015-frozen-replay-artifact-integrity.test.ts"
+        ],
+        "evidenceRefs": [
+          "ts/test/v015-formal-production-refinement-f1.test.ts",
+          "ts/test/v015-boolean-package-replay-a2.test.ts",
+          "ts/test/v015-frozen-replay-artifact-integrity.test.ts"
+        ],
+        "authorJsonReview": "NOT_APPLICABLE"
+      },
+      "V15-FRESH-02": {
+        "state": "COMPONENT_GREEN",
+        "ownerIssue": 1976,
+        "dependsOn": [
+          "V15-FRESH-01",
+          "V15-JSON-01",
+          "V15-NAME-01"
+        ],
+        "positiveVectors": [
+          "all-approved-json-rebuild-same-native-source-and-recursive-semantics-in-fresh-memory"
+        ],
+        "negativeVectors": [
+          "source-specific-json-repair-zero"
+        ],
+        "requiredExecutableGates": [
+          "ts/test/v015-formal-production-refinement-f1.test.ts",
+          "ts/test/v015-boolean-package-replay-a2.test.ts",
+          "ts/test/v015-frozen-replay-artifact-integrity.test.ts"
+        ],
+        "evidenceRefs": [
+          "ts/test/v015-formal-production-refinement-f1.test.ts",
+          "ts/test/v015-boolean-package-replay-a2.test.ts",
+          "ts/test/v015-frozen-replay-artifact-integrity.test.ts"
+        ],
+        "authorJsonReview": "NOT_APPLICABLE"
+      },
+      "V15-FRESH-03": {
+        "state": "COMPONENT_GREEN",
+        "ownerIssue": 1976,
+        "dependsOn": [
+          "V15-FRESH-01"
+        ],
+        "positiveVectors": [
+          "two-fresh-memories-allocation-noise-same-recursive-semantics"
+        ],
+        "negativeVectors": [
+          "memory-handle-allocation-order-not-authority"
+        ],
+        "requiredExecutableGates": [
+          "ts/test/v015-formal-production-refinement-f1.test.ts",
+          "ts/test/v015-boolean-package-replay-a2.test.ts",
+          "ts/test/v015-frozen-replay-artifact-integrity.test.ts"
+        ],
+        "evidenceRefs": [
+          "ts/test/v015-formal-production-refinement-f1.test.ts",
+          "ts/test/v015-boolean-package-replay-a2.test.ts",
+          "ts/test/v015-frozen-replay-artifact-integrity.test.ts"
+        ],
+        "authorJsonReview": "NOT_APPLICABLE"
+      },
+      "V15-AND-01": {
+        "state": "VERTICAL_GREEN",
+        "ownerIssue": 1980,
+        "dependsOn": [
+          "V15-VERT-02",
+          "V15-ONTO-02"
+        ],
+        "positiveVectors": [
+          "compact-boolean-and-four-grounded-rules-4of4"
+        ],
+        "negativeVectors": [
+          "compact-and-nonboolean-operands-no-match",
+          "compact-and-delete-ruleTT-admission",
+          "compact-and-foreign-theory-inert",
+          "compact-and-presentation-rename-invariant"
+        ],
+        "requiredExecutableGates": [
+          "ts/test/v015-compact-and-approved-source-integrity.test.ts",
+          "ts/test/v015-boolean-package-replay-a2.test.ts",
+          ".github/workflows/amemory-v015-regression.yml"
+        ],
+        "evidenceRefs": [
+          "formal/v0.15/regression/compact-and.formal",
+          "formal/v0.15/regression/compact-and.json",
+          "formal/v0.15/regression/compact-and.amemory-evidence.json",
+          "ts/test/v015-compact-and-approved-source-integrity.test.ts",
+          "ts/test/v015-boolean-package-replay-a2.test.ts",
+          ".github/workflows/amemory-v015-regression.yml"
+        ],
+        "authorJsonReview": "APPROVED",
+        "candidateSource": "formal/v0.15/regression/compact-and.formal"
+      },
+      "V15-AND-02": {
+        "state": "VERTICAL_GREEN",
+        "ownerIssue": 1980,
+        "dependsOn": [
+          "V15-AND-01",
+          "V15-CLOSE-03"
+        ],
+        "positiveVectors": [
+          "compact-boolean-and-four-grounded-rules-4of4",
+          "frozen-amemory-compact-boolean-and-4of4"
+        ],
+        "negativeVectors": [
+          "compact-and-nonboolean-operands-no-match",
+          "compact-and-foreign-theory-inert",
+          "compact-and-malformed-negative-no-match"
+        ],
+        "requiredExecutableGates": [
+          "ts/test/v015-compact-and-approved-source-integrity.test.ts",
+          "ts/test/v015-boolean-package-replay-a2.test.ts",
+          ".github/workflows/amemory-v015-regression.yml"
+        ],
+        "evidenceRefs": [
+          "formal/v0.15/regression/compact-and.amemory-evidence.json",
+          "ts/test/v015-compact-and-approved-source-integrity.test.ts",
+          "ts/test/v015-boolean-package-replay-a2.test.ts",
+          ".github/workflows/amemory-v015-regression.yml"
+        ],
+        "authorJsonReview": "APPROVED",
+        "candidateSource": "formal/v0.15/regression/compact-and.formal"
+      },
+      "V15-AND-03": {
+        "state": "VERTICAL_GREEN",
+        "ownerIssue": 1980,
+        "dependsOn": [
+          "V15-AND-02"
+        ],
+        "positiveVectors": [
+          "compact-and-four-grounded-rule-compatibility-lowering"
+        ],
+        "negativeVectors": [
+          "canonical-and-has-no-role-dictionary-index-scope-interpreter-scaffold",
+          "optimized-lowering-must-not-widen-boolean-domain"
+        ],
+        "requiredExecutableGates": [
+          "ts/test/v015-compact-and-approved-source-integrity.test.ts",
+          "ts/test/v015-boolean-package-replay-a2.test.ts"
+        ],
+        "evidenceRefs": [
+          "formal/v0.15/regression/compact-and.formal",
+          "ts/test/v015-compact-and-approved-source-integrity.test.ts",
+          "ts/test/v015-boolean-package-replay-a2.test.ts"
+        ],
+        "authorJsonReview": "APPROVED",
+        "candidateSource": "formal/v0.15/regression/compact-and.formal"
+      },
+      "V15-AND-04": {
+        "state": "VERTICAL_GREEN",
+        "ownerIssue": 1980,
+        "dependsOn": [
+          "V15-AND-03",
+          "V15-AUTHOR-JSON-01"
+        ],
+        "positiveVectors": [
+          "boolean-family-and-not-or-xor-one-generic-harness",
+          "boolean-family-semantic-theory-membership-rule-discovery",
+          "boolean-family-generic-zero-role-compatibility-lowering",
+          "frozen-amemory-not-2of2",
+          "frozen-amemory-or-4of4",
+          "frozen-amemory-xor-4of4"
+        ],
+        "negativeVectors": [
+          "boolean-family-nonboolean-operands-no-match",
+          "boolean-family-foreign-theory-inert",
+          "boolean-family-program-specific-runtime-dispatch-zero"
+        ],
+        "requiredExecutableGates": [
+          "ts/test/v015-compact-and-approved-source-integrity.test.ts",
+          "ts/test/v015-compact-not-approved-source-integrity.test.ts",
+          "ts/test/v015-compact-or-approved-source-integrity.test.ts",
+          "ts/test/v015-compact-xor-approved-source-integrity.test.ts",
+          "ts/test/v015-boolean-package-replay-a2.test.ts",
+          ".github/workflows/amemory-v015-regression.yml"
+        ],
+        "evidenceRefs": [
+          "formal/v0.15/regression/compact-not.amemory-evidence.json",
+          "formal/v0.15/regression/compact-or.amemory-evidence.json",
+          "formal/v0.15/regression/compact-xor.amemory-evidence.json",
+          "ts/test/v015-compact-and-approved-source-integrity.test.ts",
+          "ts/test/v015-compact-not-approved-source-integrity.test.ts",
+          "ts/test/v015-compact-or-approved-source-integrity.test.ts",
+          "ts/test/v015-compact-xor-approved-source-integrity.test.ts",
+          "ts/test/v015-boolean-package-replay-a2.test.ts",
+          ".github/workflows/amemory-v015-regression.yml"
+        ],
+        "authorJsonReview": "APPROVED"
+      },
+      "V15-CTX-01": {
+        "state": "COMPONENT_GREEN",
+        "ownerIssue": 1987,
+        "dependsOn": [
+          "V15-CLOSE-01"
+        ],
+        "positiveVectors": [
+          "a5-freeze-resume-no-external-execution-sidecar",
+          "a6-theory-derived-from-link-ancestry",
+          "a8-positive-anet-currentness-membership",
+          "a9-one-gamma-structural-execution-no-external-current-scope-theory-pointer",
+          "gpr01-09-proof-closure"
+        ],
+        "negativeVectors": [
+          "physical-link-existence-alone-is-not-currentness",
+          "foreign-theory-is-inert",
+          "presentation-name-rename-does-not-create-authority",
+          "host-current-scope-theory-pointers-forbidden",
+          "external-grounder-command-forbidden"
+        ],
+        "requiredExecutableGates": [
+          "ts/test/v015-self-contained-context-freeze-resume-a5.test.ts",
+          "ts/test/v015-context-theory-self-contained-a6.test.ts",
+          "ts/test/v015-positive-aset-currentness-a8.test.ts",
+          "ts/test/v015-structural-aset-gamma-core-a9a.test.ts",
+          "ts/test/v015-structural-aset-role-bundle-a9b.test.ts",
+          "ts/test/v015-structural-aset-gamma-antidrift-a9c.test.ts",
+          "ts/test/v015-context-authority-closure-c1.test.ts"
+        ],
+        "evidenceRefs": [
+          "profiles/mts-v015-meta-interpreter-kernel.json",
+          "profiles/mts-v015-generalized-reaction-candidate.json",
+          "ts/test/v015-self-contained-context-freeze-resume-a5.test.ts",
+          "ts/test/v015-context-theory-self-contained-a6.test.ts",
+          "ts/test/v015-positive-aset-currentness-a8.test.ts",
+          "ts/test/v015-structural-aset-gamma-core-a9a.test.ts",
+          "ts/test/v015-structural-aset-role-bundle-a9b.test.ts",
+          "ts/test/v015-structural-aset-gamma-antidrift-a9c.test.ts",
+          "ts/test/v015-context-authority-closure-c1.test.ts"
+        ],
+        "authorJsonReview": "NOT_APPLICABLE"
+      },
+      "V15-CTX-02": {
+        "state": "COMPONENT_GREEN",
+        "ownerIssue": 1987,
+        "dependsOn": [
+          "V15-CTX-01",
+          "V15-ONTO-03"
+        ],
+        "positiveVectors": [
+          "same-physical-link-can-retain-independent-theory-admission-role-after-currentness-moves",
+          "currentness-follows-semantic-membership-not-physical-topology",
+          "contextual-theory-selection-is-link-structural",
+          "foreign-theory-membership-remains-isolated"
+        ],
+        "negativeVectors": [
+          "host-name-does-not-create-context-role",
+          "host-manifest-pointer-does-not-create-theory-or-currentness",
+          "stale-physical-active-link-is-inert-without-semantic-membership"
+        ],
+        "requiredExecutableGates": [
+          "ts/test/v015-context-authority-closure-c1.test.ts",
+          "ts/test/v015-source-anet-denotation-core-das-a2a.test.ts",
+          "ts/test/v015-direct-json-denotation-das-a2b.test.ts",
+          "ts/test/v015-rule-bundle-denotation-das-a2c.test.ts"
+        ],
+        "evidenceRefs": [
+          "profiles/mts-v015-meta-interpreter-kernel.json",
+          "profiles/mts-v015-generalized-reaction-candidate.json",
+          "ts/test/v015-context-authority-closure-c1.test.ts",
+          "ts/test/v015-source-anet-denotation-core-das-a2a.test.ts",
+          "ts/test/v015-direct-json-denotation-das-a2b.test.ts",
+          "ts/test/v015-rule-bundle-denotation-das-a2c.test.ts"
+        ],
+        "authorJsonReview": "NOT_APPLICABLE"
+      },
+      "V15-GAMMA-01": {
+        "state": "COMPONENT_GREEN",
+        "ownerIssue": 2001,
+        "dependsOn": [
+          "V15-CLOSE-03"
+        ],
+        "positiveVectors": [
+          "gpr01-09-paired-lean4-rocq-closure",
+          "a9-structural-unary-one-command-sufficiency",
+          "a10-finite-exact-s0-fresh-structure-opacity-boundary",
+          "a11-snapshot-partition-reduction",
+          "a12-finite-materialized-generation",
+          "grounded-zero-role-is-generic-refinement"
+        ],
+        "negativeVectors": [
+          "finite-exact-s0-alone-cannot-transform-arbitrary-fresh-structure",
+          "j1-cross-current-member-join-not-required",
+          "external-semantic-grounder-command-forbidden",
+          "consumer-specific-semantic-opcode-forbidden",
+          "second-semantic-runtime-forbidden"
+        ],
+        "requiredExecutableGates": [
+          "ts/test/v015-structural-aset-gamma-core-a9a.test.ts",
+          "ts/test/v015-structural-aset-role-bundle-a9b.test.ts",
+          "ts/test/v015-structural-aset-gamma-antidrift-a9c.test.ts",
+          "ts/test/v015-exact-finite-support-necessity-a10.test.ts",
+          "ts/test/v015-parallel-reaction-reduction-a11.test.ts",
+          "ts/test/v015-finite-materialized-reaction-a12.test.ts"
+        ],
+        "evidenceRefs": [
+          "proofs/v015-external-proof-assurance.json",
+          "proofs/lean4/MtsV015GeneralizedReaction.lean",
+          "proofs/coq/MtsV015GeneralizedReaction.v",
+          "profiles/mts-v015-meta-interpreter-kernel.json",
+          "profiles/mts-v015-generalized-reaction-candidate.json",
+          "ts/test/v015-structural-aset-gamma-core-a9a.test.ts",
+          "ts/test/v015-structural-aset-role-bundle-a9b.test.ts",
+          "ts/test/v015-structural-aset-gamma-antidrift-a9c.test.ts",
+          "ts/test/v015-exact-finite-support-necessity-a10.test.ts",
+          "ts/test/v015-parallel-reaction-reduction-a11.test.ts",
+          "ts/test/v015-finite-materialized-reaction-a12.test.ts"
+        ],
+        "authorJsonReview": "NOT_APPLICABLE"
+      },
+      "V15-REG-01": {
+        "state": "COMPONENT_GREEN",
+        "ownerIssue": 1978,
+        "dependsOn": [
+          "V15-AUTHOR-JSON-03"
+        ],
+        "positiveVectors": [
+          "all-current-author-approved-json-present-in-approved-corpus"
+        ],
+        "negativeVectors": [
+          "approved-json-outside-regression-corpus-zero"
+        ],
+        "requiredExecutableGates": [
+          "ts/test/v015-requirements-traceability-r0.test.ts",
+          "ts/test/v015-grounded-approved-source-integrity.test.ts",
+          "ts/test/v015-two-role-approved-source-integrity.test.ts",
+          "ts/test/v015-compact-and-approved-source-integrity.test.ts",
+          "ts/test/v015-compact-not-approved-source-integrity.test.ts",
+          "ts/test/v015-compact-or-approved-source-integrity.test.ts",
+          "ts/test/v015-compact-xor-approved-source-integrity.test.ts"
+        ],
+        "evidenceRefs": [
+          "traceability/mts-v0.15.json",
+          "ts/test/v015-requirements-traceability-r0.test.ts",
+          "ts/test/v015-grounded-approved-source-integrity.test.ts",
+          "ts/test/v015-two-role-approved-source-integrity.test.ts",
+          "ts/test/v015-compact-and-approved-source-integrity.test.ts",
+          "ts/test/v015-compact-not-approved-source-integrity.test.ts",
+          "ts/test/v015-compact-or-approved-source-integrity.test.ts",
+          "ts/test/v015-compact-xor-approved-source-integrity.test.ts"
+        ],
+        "authorJsonReview": "NOT_APPLICABLE"
+      },
+      "V15-REG-02": {
+        "state": "COMPONENT_GREEN",
+        "ownerIssue": 1978,
+        "dependsOn": [
+          "V15-REG-01"
+        ],
+        "positiveVectors": [
+          "workflow-replays-grounded-two-role-and-boolean-family-on-semantic-affecting-change"
+        ],
+        "negativeVectors": [
+          "artifact-specific-bypass-zero"
+        ],
+        "requiredExecutableGates": [
+          "ts/test/v015-frozen-replay-artifact-integrity.test.ts",
+          ".github/workflows/amemory-v015-regression.yml"
+        ],
+        "evidenceRefs": [
+          "traceability/mts-v0.15.json",
+          "ts/test/v015-frozen-replay-artifact-integrity.test.ts",
+          ".github/workflows/amemory-v015-regression.yml"
+        ],
+        "authorJsonReview": "NOT_APPLICABLE"
+      },
+      "V15-READY-03": {
+        "state": "ACCEPTED",
+        "ownerIssue": 1876,
+        "dependsOn": [
+          "V15-READY-02"
+        ],
+        "positiveVectors": [
+          "explicit-author-accept-mts-v0.15-recorded",
+          "s22-accepted-current-cutover"
+        ],
+        "negativeVectors": [
+          "acceptance-without-explicit-author-decision-rejected"
+        ],
+        "requiredExecutableGates": [
+          "ts/test/v015-final-readiness-r3.test.ts",
+          "ts/test/release-cutover.test.ts"
+        ],
+        "evidenceRefs": [
+          "formal/v0.15/evidence/final-readiness-r3.json",
+          "cutover/typescript-c1-acceptance-v0.8.json",
+          "#1876 issuecomment-6046228475"
+        ],
+        "authorJsonReview": "NOT_APPLICABLE"
+      }
+    }
+  },
+  "approvedExecutableCorpus": {
+    "count": 6,
+    "entries": [
+      {
+        "id": "grounded-zero-role-rule",
+        "formalSourceArtifact": "formal/v0.15/regression/grounded-zero-role.formal",
+        "formalSourceDigest": "b0e5760786c900ab125f775f9f30d897336220ee2393f3c0e3fd5cff2296d51a",
+        "canonicalJsonArtifact": "formal/v0.15/regression/grounded-zero-role.json",
+        "canonicalJsonDigest": "d3304cee2d4037c8b144ac4c112b40591c8c1bf3bbd939f2e01393fa723a9f61",
+        "semanticEntry": "Theory->GroundRule",
+        "expectedRecursiveRepresentation": "formal/v0.15/regression/grounded-zero-role.recursive",
+        "expectedRecursiveDigest": "570950556cc0703a915c39e4e6f181ed55103f13544f8f8a1a5e25a099f76b11"
+      },
+      {
+        "id": "two-role-meta-rule",
+        "formalSourceArtifact": "formal/v0.15/regression/two-role-meta-rule.formal",
+        "formalSourceDigest": "f68e8629b5d476f49366f3f59e65ef64d523d5b5f8964dcf918283144ba292f9",
+        "canonicalJsonArtifact": "formal/v0.15/regression/two-role-meta-rule.json",
+        "canonicalJsonDigest": "7597ac64d98b6243b3ffdc1a9bb5b6022aacb5a30ad134399c8b06457b9adf56",
+        "semanticEntry": "V->X; V->Y; Theory->MetaRule",
+        "expectedRecursiveRepresentation": "formal/v0.15/regression/two-role-meta-rule.recursive",
+        "expectedRecursiveDigest": "ca6a6d39913a7a5947edaeaad9d45a43603781e7b2188fd5bc34a59712da8ed9"
+      },
+      {
+        "id": "compact-boolean-and",
+        "formalSourceArtifact": "formal/v0.15/regression/compact-and.formal",
+        "formalSourceDigest": "4a5bc92e661ee1d4e0c2c5d51769805b5406651bb491345200d088c9ad23e5f3",
+        "canonicalJsonArtifact": "formal/v0.15/regression/compact-and.json",
+        "canonicalJsonDigest": "cf5028f68500bba04ee10e06ac5512eec223078d8b428f4d5de1de6433ba5941",
+        "semanticEntry": "Theory->RuleFF;Theory->RuleFT;Theory->RuleTF;Theory->RuleTT",
+        "expectedRecursiveRepresentation": "formal/v0.15/regression/compact-and.recursive",
+        "expectedRecursiveDigest": "37b2c02b927eed6cdd061931b60930d0a31d674a49bc585b075401a5cb5ddcb0"
+      },
+      {
+        "id": "compact-boolean-not",
+        "formalSourceArtifact": "formal/v0.15/regression/compact-not.formal",
+        "formalSourceDigest": "42697be6cad8b522e1b4a7fbfd75fda5f7af5d313a995a42105c82f8ceec2c47",
+        "canonicalJsonArtifact": "formal/v0.15/regression/compact-not.json",
+        "canonicalJsonDigest": "eed9bebaf4ecd34be160da3a9cdf006f7f9c1802b780da0f0fe44d2fb2487da2",
+        "semanticEntry": "Theory->RuleF;Theory->RuleT",
+        "expectedRecursiveRepresentation": "formal/v0.15/regression/compact-not.recursive",
+        "expectedRecursiveDigest": "1728cf457b3d1cc6db132bb7d9e2b312d16999023002f73c3529cf622938c692"
+      },
+      {
+        "id": "compact-boolean-or",
+        "formalSourceArtifact": "formal/v0.15/regression/compact-or.formal",
+        "formalSourceDigest": "04f794a27c26249c0eb75a5163add1a46ddb5537d6b4b783782e3044db9528ee",
+        "canonicalJsonArtifact": "formal/v0.15/regression/compact-or.json",
+        "canonicalJsonDigest": "3fbcd16fb0e067fa5c84be5d86a39a964da45cf7fdcc03880d2e23c28f5b6c29",
+        "semanticEntry": "Theory->RuleFF;Theory->RuleFT;Theory->RuleTF;Theory->RuleTT",
+        "expectedRecursiveRepresentation": "formal/v0.15/regression/compact-or.recursive",
+        "expectedRecursiveDigest": "7f0253479dacc1d568a1ce931eab943264a42770554c46dd96966a9ed4f85668"
+      },
+      {
+        "id": "compact-boolean-xor",
+        "formalSourceArtifact": "formal/v0.15/regression/compact-xor.formal",
+        "formalSourceDigest": "4721b9f02400613ad05a8cc50ac0add3520c6aa72c836f95fdb4edf44bbaa038",
+        "canonicalJsonArtifact": "formal/v0.15/regression/compact-xor.json",
+        "canonicalJsonDigest": "1dc6cb2464f0bb1fc0d54388677ea9136d907caa174ad694388c054c57d24581",
+        "semanticEntry": "Theory->RuleFF;Theory->RuleFT;Theory->RuleTF;Theory->RuleTT",
+        "expectedRecursiveRepresentation": "formal/v0.15/regression/compact-xor.recursive",
+        "expectedRecursiveDigest": "40747a38d8fc3a9025a8576f3632145814c81688385bfc73ee44b64fc98fcd56"
+      }
+    ]
+  },
+  "veto": {
+    "secondSemanticRuntime": false,
+    "jsonSpecificSemanticAuthority": false,
+    "programSpecificLogicalOpcode": false,
+    "hiddenCurrentScopePointer": false,
+    "externalSelectedTheoryPointer": false,
+    "mergeWholeResearchAggregate1989": false
+  },
+  "postAcceptanceWork": [
+    "thaw and migrate A-memory under netkeep80/amemory#455",
+    "continue native Aprover/proof runtime under v0.16 owners #1912/#2003",
+    "migrate active documentation formulas to accepted FORMAL notation under #1951"
+  ]
+}
