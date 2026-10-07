@@ -18,33 +18,36 @@
       "README.md"
     ],
     "governance_paths": [
-      "repo-policy.json",
-      ".github/workflows/repo-guard.yml",
-      ".github/workflows/branch-hygiene.yml",
-      ".github/PULL_REQUEST_TEMPLATE.md",
       ".github/ISSUE_TEMPLATE/change-contract.yml",
-      "contracts/amemory-contract-v0.1.json",
+      ".github/PULL_REQUEST_TEMPLATE.md",
+      ".github/workflows/branch-hygiene.yml",
+      ".github/workflows/browser-structural-ci.yml",
+      ".github/workflows/mts-upstream-check.yml",
+      ".github/workflows/repo-guard.yml",
       "contracts/amemory-conformance-v0.1.json",
-      "contracts/upstream/mts-v0.13.lock.json",
+      "contracts/amemory-conformance-v0.2.json",
+      "contracts/amemory-contract-v0.1.json",
+      "contracts/amemory-contract-v0.2.json",
+      "contracts/amemory-v015-migration-a0.json",
       "contracts/upstream/mts-v0.13-requirements.json",
+      "contracts/upstream/mts-v0.13.lock.json",
       "contracts/upstream/mts-v0.14-requirements.json",
       "contracts/upstream/mts-v0.14.lock.json",
-      "scripts/sync-mts-requirements.mjs",
-      "scripts/test-mts-upstream-import.mjs",
-      ".github/workflows/mts-upstream-check.yml",
-      ".github/workflows/browser-structural-ci.yml",
-      "experiments/browser-accelerator/web/differential.mjs",
-      "experiments/browser-accelerator/tests/differential.test.mjs",
-      "experiments/browser-accelerator/web/canonicalization.mjs",
+      "contracts/upstream/mts-v0.15-requirements.json",
+      "contracts/upstream/mts-v0.15.lock.json",
+      "experiments/browser-accelerator/tests/anum-boundary.test.mjs",
       "experiments/browser-accelerator/tests/canonicalization.test.mjs",
-      "experiments/browser-accelerator/web/state-store.mjs",
+      "experiments/browser-accelerator/tests/differential.test.mjs",
+      "experiments/browser-accelerator/tests/reaction.test.mjs",
       "experiments/browser-accelerator/tests/state-store.test.mjs",
       "experiments/browser-accelerator/web/anum-boundary.mjs",
-      "experiments/browser-accelerator/tests/anum-boundary.test.mjs",
+      "experiments/browser-accelerator/web/canonicalization.mjs",
+      "experiments/browser-accelerator/web/differential.mjs",
       "experiments/browser-accelerator/web/reaction.mjs",
-      "experiments/browser-accelerator/tests/reaction.test.mjs",
-      "contracts/amemory-contract-v0.2.json",
-      "contracts/amemory-conformance-v0.2.json"
+      "experiments/browser-accelerator/web/state-store.mjs",
+      "repo-policy.json",
+      "scripts/sync-mts-requirements.mjs",
+      "scripts/test-mts-upstream-import.mjs"
     ],
     "operational_paths": []
   },
@@ -96,6 +99,13 @@
       "members": [
         "contracts/amemory-contract-v0.2.json",
         "contracts/amemory-conformance-v0.2.json"
+      ]
+    },
+    {
+      "id": "mts-upstream-v015-lock-projection",
+      "members": [
+        "contracts/upstream/mts-v0.15.lock.json",
+        "contracts/upstream/mts-v0.15-requirements.json"
       ]
     }
   ]
