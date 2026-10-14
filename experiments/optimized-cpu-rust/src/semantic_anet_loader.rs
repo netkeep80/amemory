@@ -11,16 +11,14 @@ use std::collections::BTreeSet;
 
 pub const SEMANTIC_ANET_SCHEMA: &str = "mts-v015-semantic-anet-transport/v0.1";
 pub const MTS_ACCEPTED_REVISION: &str = "813a1569300b241a3b70eb282eecd8231db15e4b";
-pub const TRANSPORT_IMPLEMENTATION_REVISION: &str =
-    "63bd6624e0e030b26ca5a79bc676892ed1408594";
+pub const TRANSPORT_IMPLEMENTATION_REVISION: &str = "63bd6624e0e030b26ca5a79bc676892ed1408594";
 pub const COMPACT_AND_SOURCE_SHA256: &str =
     "4a5bc92e661ee1d4e0c2c5d51769805b5406651bb491345200d088c9ad23e5f3";
+#[cfg(test)]
 const COMPACT_AND_CONTENT_SHA256: &str =
     "d332f148d42562e8585330493c78a9aa2db3f76641eb660e9804008e5276639c";
-const COMPILER: &str =
-    "v015-direct-formal-json-source@813a1569300b241a3b70eb282eecd8231db15e4b";
-const DENOTATION: &str =
-    "denoteV015ResolvedSourceAnet@813a1569300b241a3b70eb282eecd8231db15e4b";
+const COMPILER: &str = "v015-direct-formal-json-source@813a1569300b241a3b70eb282eecd8231db15e4b";
+const DENOTATION: &str = "denoteV015ResolvedSourceAnet@813a1569300b241a3b70eb282eecd8231db15e4b";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SemanticLoadError {
@@ -53,10 +51,18 @@ pub struct SourceReceipt {
 }
 
 impl SourceReceipt {
-    pub fn format(&self) -> &str { &self.format }
-    pub fn path(&self) -> &str { &self.path }
-    pub fn bytes_sha256(&self) -> &str { &self.bytes_sha256 }
-    pub fn native_source_sha256(&self) -> &str { &self.native_source_sha256 }
+    pub fn format(&self) -> &str {
+        &self.format
+    }
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+    pub fn bytes_sha256(&self) -> &str {
+        &self.bytes_sha256
+    }
+    pub fn native_source_sha256(&self) -> &str {
+        &self.native_source_sha256
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -142,11 +148,15 @@ impl SourceReplayVerified {
         Ok(Self { snapshot })
     }
 
-    pub fn source(&self) -> &SourceReceipt { &self.snapshot.source }
+    pub fn source(&self) -> &SourceReceipt {
+        &self.snapshot.source
+    }
 }
 
 fn hex64(s: &str) -> bool {
-    s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+    s.len() == 64
+        && s.bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
 }
 
 fn validate_snapshot(s: &TransportSnapshot) -> Result<(), SemanticLoadError> {
@@ -167,8 +177,10 @@ fn validate_snapshot(s: &TransportSnapshot) -> Result<(), SemanticLoadError> {
     }
     let links = &s.topology.links;
     if s.topology.schema != "mts-storage-topology/v0.1"
-        || s.topology.root != 0 || links.is_empty()
-        || links[0] != [0, 0] || links.len() > u32::MAX as usize
+        || s.topology.root != 0
+        || links.is_empty()
+        || links[0] != [0, 0]
+        || links.len() > u32::MAX as usize
     {
         return Err(SemanticLoadError::InvalidTopology);
     }
@@ -176,7 +188,10 @@ fn validate_snapshot(s: &TransportSnapshot) -> Result<(), SemanticLoadError> {
     while frontier < links.len() {
         let mut ready = Vec::new();
         for (i, &[a, b]) in links.iter().enumerate().skip(frontier) {
-            if a as usize >= links.len() || b as usize >= links.len() || (a == i as u32 && b == i as u32) {
+            if a as usize >= links.len()
+                || b as usize >= links.len()
+                || (a == i as u32 && b == i as u32)
+            {
                 return Err(SemanticLoadError::InvalidTopology);
             }
             let item = if a == i as u32 && (b as usize) < frontier {
@@ -185,15 +200,23 @@ fn validate_snapshot(s: &TransportSnapshot) -> Result<(), SemanticLoadError> {
                 Some((1u8, a, 0u32, i))
             } else if (a as usize) < frontier && (b as usize) < frontier {
                 Some((2u8, a, b, i))
-            } else { None };
-            if let Some(item) = item { ready.push(item); }
+            } else {
+                None
+            };
+            if let Some(item) = item {
+                ready.push(item);
+            }
         }
-        if ready.is_empty() { return Err(SemanticLoadError::InvalidTopology); }
+        if ready.is_empty() {
+            return Err(SemanticLoadError::InvalidTopology);
+        }
         ready.sort_unstable();
         for (offset, item) in ready.iter().enumerate() {
             if item.3 != frontier + offset
-                || (offset > 0 && item.0 == ready[offset - 1].0
-                    && item.1 == ready[offset - 1].1 && item.2 == ready[offset - 1].2)
+                || (offset > 0
+                    && item.0 == ready[offset - 1].0
+                    && item.1 == ready[offset - 1].1
+                    && item.2 == ready[offset - 1].2)
             {
                 return Err(SemanticLoadError::InvalidTopology);
             }
@@ -211,13 +234,19 @@ fn validate_snapshot(s: &TransportSnapshot) -> Result<(), SemanticLoadError> {
     visited[0] = true;
     let mut todo = s.members.clone();
     while let Some(coord) = todo.pop() {
-        if visited[coord as usize] { continue; }
+        if visited[coord as usize] {
+            continue;
+        }
         visited[coord as usize] = true;
         for pole in links[coord as usize] {
-            if pole != coord { todo.push(pole); }
+            if pole != coord {
+                todo.push(pole);
+            }
         }
     }
-    if visited.iter().any(|x| !x) { return Err(SemanticLoadError::InvalidTopology); }
+    if visited.iter().any(|x| !x) {
+        return Err(SemanticLoadError::InvalidTopology);
+    }
     Ok(())
 }
 
@@ -235,10 +264,18 @@ impl LoadedSemanticAnet {
     pub fn is_member(&self, handle: Handle) -> bool {
         self.positive_members.contains(&handle)
     }
-    pub fn members(&self) -> &BTreeSet<Handle> { &self.positive_members }
-    pub fn physical_coordinates(&self) -> &[Handle] { &self.coordinates }
-    pub fn source(&self) -> &SourceReceipt { &self.source }
-    pub fn content_sha256(&self) -> &str { &self.content_sha256 }
+    pub fn members(&self) -> &BTreeSet<Handle> {
+        &self.positive_members
+    }
+    pub fn physical_coordinates(&self) -> &[Handle] {
+        &self.coordinates
+    }
+    pub fn source(&self) -> &SourceReceipt {
+        &self.source
+    }
+    pub fn content_sha256(&self) -> &str {
+        &self.content_sha256
+    }
 }
 
 impl OptimizedLinkStore {
@@ -275,8 +312,11 @@ impl OptimizedLinkStore {
                 }
                 coordinates.push(handle);
             }
-            let positive_members = snapshot.members.iter()
-                .map(|&c| coordinates[c as usize]).collect();
+            let positive_members = snapshot
+                .members
+                .iter()
+                .map(|&c| coordinates[c as usize])
+                .collect();
             Ok(LoadedSemanticAnet {
                 coordinates,
                 positive_members,
@@ -284,11 +324,12 @@ impl OptimizedLinkStore {
                 content_sha256: snapshot.content_sha256,
             })
         })();
-        if imported.is_err() { self.rollback_append(checkpoint); }
+        if imported.is_err() {
+            self.rollback_append(checkpoint);
+        }
         imported
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -303,16 +344,21 @@ mod tests {
     fn a1_real_upstream_p1_p5_n1_n8() {
         let snapshot = std::fs::read_to_string(
             std::env::var("MTS_V015_SNAPSHOT_INPUT").expect("missing upstream fixture"),
-        ).unwrap();
+        )
+        .unwrap();
         let replay = std::fs::read_to_string(
             std::env::var("MTS_V015_VERIFIED_EVIDENCE").expect("missing verified upstream replay"),
-        ).unwrap();
+        )
+        .unwrap();
         // Set by the *trusted upstream verifier job*, not extracted by Rust from
         // the untrusted snapshot. An attacker controlling this variable would
         // cross the external provenance boundary: it must be protected.
         let digest = std::env::var("MTS_V015_EXPECTED_DIGEST")
             .expect("missing independently authenticated expected digest");
-        assert_eq!(digest, COMPACT_AND_CONTENT_SHA256, "independent compact AND digest pin");
+        assert_eq!(
+            digest, COMPACT_AND_CONTENT_SHA256,
+            "independent compact AND digest pin"
+        );
         let anchor = UpstreamReplayAnchor {
             authenticated_transport_revision: TRANSPORT_IMPLEMENTATION_REVISION,
             accepted_mts_revision: MTS_ACCEPTED_REVISION,
@@ -324,7 +370,9 @@ mod tests {
         let original: Value = serde_json::from_str(&snapshot).unwrap();
         assert_eq!(original["contentSha256"], digest);
         let mut first_memory = OptimizedLinkStore::new();
-        let first = first_memory.load_verified_semantic_anet(&snapshot, &verified).unwrap();
+        let first = first_memory
+            .load_verified_semantic_anet(&snapshot, &verified)
+            .unwrap();
         assert_eq!(first.members().len(), 4); // P1: real approved AND
         assert!(first.physical_coordinates().len() > first.members().len()); // P2
         for &link in first.physical_coordinates() {
@@ -333,19 +381,28 @@ mod tests {
             }
         }
         let before = first_memory.export_packed_duplets();
-        let repeat = first_memory.load_verified_semantic_anet(&snapshot, &verified).unwrap();
+        let repeat = first_memory
+            .load_verified_semantic_anet(&snapshot, &verified)
+            .unwrap();
         assert_eq!(before, first_memory.export_packed_duplets()); // P5 idempotent
         assert_eq!(first.members(), repeat.members());
         let mut second_memory = OptimizedLinkStore::new();
         let unrelated = second_memory.ensure_pair(ROOT_HANDLE, ROOT_HANDLE).unwrap();
         second_memory.ensure_start_self_closed(unrelated).unwrap();
-        let second = second_memory.load_verified_semantic_anet(&snapshot, &verified).unwrap();
+        let second = second_memory
+            .load_verified_semantic_anet(&snapshot, &verified)
+            .unwrap();
         let canonical = |store: &OptimizedLinkStore, result: &LoadedSemanticAnet| {
-            result.members().iter()
+            result
+                .members()
+                .iter()
                 .map(|&link| store.export_direct_recursive_wire(link).unwrap())
                 .collect::<BTreeSet<_>>()
         };
-        assert_eq!(canonical(&first_memory, &first), canonical(&second_memory, &second));
+        assert_eq!(
+            canonical(&first_memory, &first),
+            canonical(&second_memory, &second)
+        );
         assert_ne!(first.physical_coordinates(), second.physical_coordinates()); // P4
 
         // Every negative must leave physical carrier + all indices unchanged.
@@ -353,9 +410,14 @@ mod tests {
             let mut store = first_memory.clone();
             let before_carrier = store.export_packed_duplets();
             let before_incidence = store.export_packed_incidence_index_image();
-            assert!(store.load_verified_semantic_anet(&value.to_string(), &verified).is_err());
+            assert!(store
+                .load_verified_semantic_anet(&value.to_string(), &verified)
+                .is_err());
             assert_eq!(before_carrier, store.export_packed_duplets());
-            assert_eq!(before_incidence, store.export_packed_incidence_index_image());
+            assert_eq!(
+                before_incidence,
+                store.export_packed_incidence_index_image()
+            );
         };
         let mut bad = original.clone();
         bad["source"]["revision"] = json!("0000000000000000000000000000000000000000");
@@ -378,20 +440,29 @@ mod tests {
         bad = original.clone();
         let members = bad["members"].as_array().unwrap().clone();
         let nonmember = (1..bad["topology"]["links"].as_array().unwrap().len())
-            .find(|&n| !members.contains(&json!(n))).unwrap();
-        bad["members"].as_array_mut().unwrap().push(json!(nonmember));
-        bad["members"].as_array_mut().unwrap().sort_by_key(|v| v.as_u64().unwrap());
+            .find(|&n| !members.contains(&json!(n)))
+            .unwrap();
+        bad["members"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!(nonmember));
+        bad["members"]
+            .as_array_mut()
+            .unwrap()
+            .sort_by_key(|v| v.as_u64().unwrap());
         reject(&bad); // N6 physical nonmember cannot be promoted
         bad = original.clone();
         bad["members"].as_array_mut().unwrap().pop();
-        bad["contentSha256"] = json!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        bad["contentSha256"] =
+            json!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         reject(&bad);
         // N7: this adversarial file has a correctly recalculated transport
         // digest; only the separately authenticated source replay blocks it.
         let forged = std::fs::read_to_string(
             std::env::var("MTS_V015_TAMPERED_SNAPSHOT_INPUT")
                 .expect("missing independently recomputed N7 attack"),
-        ).unwrap();
+        )
+        .unwrap();
         let forged_json: Value = serde_json::from_str(&forged).unwrap();
         assert_ne!(forged_json["members"], original["members"]);
         assert_ne!(forged_json["contentSha256"], original["contentSha256"]);
@@ -399,25 +470,36 @@ mod tests {
         bad = original.clone();
         bad.as_object_mut().unwrap().remove("members");
         reject(&bad); // N8: no implicit fallback from physical Links
+        bad = original.clone();
+        bad["interpreter"] = json!("host-selected");
+        reject(&bad); // N8: no host interpreter injection
         let mut limited = OptimizedLinkStore::with_max_links(2);
         let limited_before = limited.export_packed_duplets();
         let limited_indexes = limited.export_packed_incidence_index_image();
-        assert!(limited.load_verified_semantic_anet(&snapshot, &verified).is_err());
+        assert!(limited
+            .load_verified_semantic_anet(&snapshot, &verified)
+            .is_err());
         assert_eq!(limited_before, limited.export_packed_duplets()); // late rollback
-        assert_eq!(limited_indexes, limited.export_packed_incidence_index_image());
-        println!("A1_LOAD_COMPONENT_PASS P1-P5 N1-N8=PASS");
+        assert_eq!(
+            limited_indexes,
+            limited.export_packed_incidence_index_image()
+        );
+        println!("A1_COMPONENT_RUST_LOADER_P1_P5_N1_N8=PASS");
     }
 
     #[test]
     fn a1_rejects_unauthenticated_semantic_claim_without_source_replay() {
         let untrusted = r#"{"schema":"mts-v015-semantic-anet-transport/v0.1","topology":{"schema":"mts-storage-topology/v0.1","root":0,"links":[[0,0]]},"members":[],"source":{},"contentSha256":"00"}"#;
-        let mut store = OptimizedLinkStore::new();
+        let store = OptimizedLinkStore::new();
         let original = store.export_packed_duplets();
         // There is no API importing a snapshot without a verified capability.
         // A text label SOURCE_REPLAY_VERIFIED alone is not a capability.
         assert!(serde_json::from_str::<ReplayEvidence>(untrusted).is_err());
         assert_eq!(store.export_packed_duplets(), original);
         assert_eq!(store.link_count(), 1);
-        assert_eq!(store.poles(ROOT_HANDLE).unwrap(), (ROOT_HANDLE, ROOT_HANDLE));
+        assert_eq!(
+            store.poles(ROOT_HANDLE).unwrap(),
+            (ROOT_HANDLE, ROOT_HANDLE)
+        );
     }
 }
