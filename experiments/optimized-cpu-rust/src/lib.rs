@@ -1,5 +1,6 @@
 pub mod orientation;
 pub mod structural;
+pub mod semantic_anet_loader;
 
 use std::{
     collections::{HashMap, HashSet},

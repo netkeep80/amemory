@@ -28,6 +28,8 @@ name = "amemory-optimized-cpu-probe"
 version = "0.0.1"
 dependencies = [
  "amemory-browser-probe",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
