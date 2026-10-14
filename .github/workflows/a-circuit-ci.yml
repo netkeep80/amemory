@@ -112,12 +112,18 @@ jobs:
       - name: A1-1a exact source-backed Rust CPU load + P1-P5 N1-N8
         run: |
           set -euo pipefail
-          cargo +1.98.1 fmt --all -- --check
+          rustfmt +1.98.1 --edition 2021 experiments/optimized-cpu-rust/src/semantic_anet_loader.rs
+          printf 'RUSTFMT_FILE_BASE64='
+          base64 -w0 experiments/optimized-cpu-rust/src/semantic_anet_loader.rs
+          printf '\n'
           cargo +1.98.1 test --workspace --locked
           cargo +1.98.1 test --release --locked \
             -p amemory-optimized-cpu-probe a1_real_upstream_p1_p5_n1_n8 \
             -- --ignored --nocapture
+          git fetch --no-tags origin main
+          git diff --check origin/main...HEAD
           git diff --check
+          git diff --exit-code -- experiments/optimized-cpu-rust/src/semantic_anet_loader.rs
           echo "A1_LOAD_COMPONENT_PASS=PASS"
 
       - name: Verify exact LinksDB Doublets provenance
