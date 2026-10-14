@@ -392,7 +392,9 @@ mod tests {
         ));
         let mut forged_structure: Value = serde_json::from_str(&replay).unwrap();
         forged_structure["topology"]["links"][1] = json!([1, 0]);
-        assert!(SourceReplayVerified::authenticate(&forged_structure.to_string(), &anchor).is_err());
+        assert!(
+            SourceReplayVerified::authenticate(&forged_structure.to_string(), &anchor).is_err()
+        );
         let original: Value = serde_json::from_str(&snapshot).unwrap();
         assert_eq!(original["contentSha256"], digest);
         let mut first_memory = OptimizedLinkStore::new();
