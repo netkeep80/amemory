@@ -391,7 +391,13 @@ mod tests {
             Err(SemanticLoadError::UntrustedSource)
         ));
         let mut forged_structure: Value = serde_json::from_str(&replay).unwrap();
-        forged_structure["topology"]["links"][1] = json!([1, 0]);
+        let original_poles = forged_structure["topology"]["links"][1].clone();
+        forged_structure["topology"]["links"][1] = if original_poles == json!([1, 0]) {
+            json!([0, 1])
+        } else {
+            json!([1, 0])
+        };
+        assert_ne!(forged_structure["topology"]["links"][1], original_poles);
         assert!(
             SourceReplayVerified::authenticate(&forged_structure.to_string(), &anchor).is_err()
         );
