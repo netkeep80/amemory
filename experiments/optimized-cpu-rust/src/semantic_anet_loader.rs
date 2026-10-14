@@ -98,7 +98,7 @@ struct ReplayEvidence {
 /// checkout/execution channel is the orchestration caller's responsibility.
 /// In particular, never populate expected_content_sha256 by reading the
 /// untrusted transport being admitted.
-pub struct UpstreamReplayAnchor<'a> {
+pub(crate) struct UpstreamReplayAnchor<'a> {
     pub authenticated_transport_revision: &'a str,
     pub accepted_mts_revision: &'a str,
     pub expected_source_sha256: &'a str,
@@ -114,7 +114,7 @@ pub struct SourceReplayVerified {
 }
 
 impl SourceReplayVerified {
-    pub fn authenticate(
+    pub(crate) fn authenticate(
         evidence_json: &str,
         anchor: &UpstreamReplayAnchor<'_>,
     ) -> Result<Self, SemanticLoadError> {
@@ -256,13 +256,15 @@ fn validate_snapshot(s: &TransportSnapshot) -> Result<(), SemanticLoadError> {
 pub struct LoadedSemanticAnet {
     coordinates: Vec<Handle>,
     positive_members: BTreeSet<Handle>,
+    store_instance_id: u32,
     source: SourceReceipt,
     content_sha256: String,
 }
 
 impl LoadedSemanticAnet {
-    pub fn is_member(&self, handle: Handle) -> bool {
-        self.positive_members.contains(&handle)
+    /// A physical handle is valid only in the store that received the load.
+    pub fn is_member(&self, store: &OptimizedLinkStore, handle: Handle) -> bool {
+        self.store_instance_id == store.instance_id() && self.positive_members.contains(&handle)
     }
     pub fn members(&self) -> &BTreeSet<Handle> {
         &self.positive_members
@@ -320,6 +322,7 @@ impl OptimizedLinkStore {
             Ok(LoadedSemanticAnet {
                 coordinates,
                 positive_members,
+                store_instance_id: self.instance_id(),
                 source: snapshot.source,
                 content_sha256: snapshot.content_sha256,
             })
@@ -377,7 +380,7 @@ mod tests {
         assert!(first.physical_coordinates().len() > first.members().len()); // P2
         for &link in first.physical_coordinates() {
             if !first.members().contains(&link) {
-                assert!(!first.is_member(link)); // P3: positive != incidence
+                assert!(!first.is_member(&first_memory, link)); // P3: positive != incidence
             }
         }
         let before = first_memory.export_packed_duplets();
@@ -404,6 +407,10 @@ mod tests {
             canonical(&second_memory, &second)
         );
         assert_ne!(first.physical_coordinates(), second.physical_coordinates()); // P4
+        // Physical handles belong to one Store; a witness from A cannot
+        // accidentally admit a coincidentally numbered physical Link in B.
+        let b_member = *second.members().iter().next().unwrap();
+        assert!(!first.is_member(&second_memory, b_member));
 
         // Every negative must leave physical carrier + all indices unchanged.
         let reject = |value: &Value| {
