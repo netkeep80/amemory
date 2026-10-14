@@ -83,7 +83,7 @@ struct TransportSnapshot {
     content_sha256: String,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct ReplayEvidence {
     status: String,
@@ -104,6 +104,9 @@ pub(crate) struct UpstreamReplayAnchor<'a> {
     pub expected_source_sha256: &'a str,
     pub expected_content_sha256: &'a str,
     pub expected_source_path: &'a str,
+    /// Entire independently authenticated SOURCE_REPLAY_VERIFIED evidence.
+    /// A matching hash string alone cannot authorize altered topology/members.
+    pub authenticated_replay_json: &'a str,
 }
 
 /// A capability minted only after comparing separately delivered source-backed
@@ -130,6 +133,14 @@ impl SourceReplayVerified {
             .map_err(|e| SemanticLoadError::Malformed(e.to_string()))?;
         if evidence.status != "SOURCE_REPLAY_VERIFIED" {
             return Err(SemanticLoadError::MissingIndependentVerification);
+        }
+        let independently_authenticated: ReplayEvidence =
+            serde_json::from_str(anchor.authenticated_replay_json)
+                .map_err(|_| SemanticLoadError::UntrustedSource)?;
+        if independently_authenticated.status != "SOURCE_REPLAY_VERIFIED"
+            || evidence != independently_authenticated
+        {
+            return Err(SemanticLoadError::UntrustedSource);
         }
         let snapshot = TransportSnapshot {
             schema: SEMANTIC_ANET_SCHEMA.to_owned(),
@@ -368,8 +379,20 @@ mod tests {
             expected_source_sha256: COMPACT_AND_SOURCE_SHA256,
             expected_content_sha256: &digest,
             expected_source_path: "formal/v0.15/regression/compact-and.formal",
+            authenticated_replay_json: &replay,
         };
         let verified = SourceReplayVerified::authenticate(&replay, &anchor).unwrap();
+        // Independent source-backed replay, not the advertised hash, grants
+        // authority. Keeping both digest strings intact cannot forge evidence.
+        let mut forged_replay: Value = serde_json::from_str(&replay).unwrap();
+        forged_replay["members"].as_array_mut().unwrap().pop();
+        assert!(matches!(
+            SourceReplayVerified::authenticate(&forged_replay.to_string(), &anchor),
+            Err(SemanticLoadError::UntrustedSource)
+        ));
+        let mut forged_structure: Value = serde_json::from_str(&replay).unwrap();
+        forged_structure["topology"]["links"][1] = json!([1, 0]);
+        assert!(SourceReplayVerified::authenticate(&forged_structure.to_string(), &anchor).is_err());
         let original: Value = serde_json::from_str(&snapshot).unwrap();
         assert_eq!(original["contentSha256"], digest);
         let mut first_memory = OptimizedLinkStore::new();
