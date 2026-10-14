@@ -407,6 +407,7 @@ mod tests {
             canonical(&second_memory, &second)
         );
         assert_ne!(first.physical_coordinates(), second.physical_coordinates()); // P4
+
         // Physical handles belong to one Store; a witness from A cannot
         // accidentally admit a coincidentally numbered physical Link in B.
         let b_member = *second.members().iter().next().unwrap();
