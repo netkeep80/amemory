@@ -15,6 +15,8 @@ pub const TRANSPORT_IMPLEMENTATION_REVISION: &str =
     "63bd6624e0e030b26ca5a79bc676892ed1408594";
 pub const COMPACT_AND_SOURCE_SHA256: &str =
     "4a5bc92e661ee1d4e0c2c5d51769805b5406651bb491345200d088c9ad23e5f3";
+const COMPACT_AND_CONTENT_SHA256: &str =
+    "d332f148d42562e8585330493c78a9aa2db3f76641eb660e9804008e5276639c";
 const COMPILER: &str =
     "v015-direct-formal-json-source@813a1569300b241a3b70eb282eecd8231db15e4b";
 const DENOTATION: &str =
@@ -310,6 +312,7 @@ mod tests {
         // cross the external provenance boundary: it must be protected.
         let digest = std::env::var("MTS_V015_EXPECTED_DIGEST")
             .expect("missing independently authenticated expected digest");
+        assert_eq!(digest, COMPACT_AND_CONTENT_SHA256, "independent compact AND digest pin");
         let anchor = UpstreamReplayAnchor {
             authenticated_transport_revision: TRANSPORT_IMPLEMENTATION_REVISION,
             accepted_mts_revision: MTS_ACCEPTED_REVISION,
@@ -382,7 +385,17 @@ mod tests {
         bad = original.clone();
         bad["members"].as_array_mut().unwrap().pop();
         bad["contentSha256"] = json!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-        reject(&bad); // N7: forged digest still fails source-backed comparison
+        reject(&bad);
+        // N7: this adversarial file has a correctly recalculated transport
+        // digest; only the separately authenticated source replay blocks it.
+        let forged = std::fs::read_to_string(
+            std::env::var("MTS_V015_TAMPERED_SNAPSHOT_INPUT")
+                .expect("missing independently recomputed N7 attack"),
+        ).unwrap();
+        let forged_json: Value = serde_json::from_str(&forged).unwrap();
+        assert_ne!(forged_json["members"], original["members"]);
+        assert_ne!(forged_json["contentSha256"], original["contentSha256"]);
+        reject(&forged_json); // N7: recalculated valid transport digest is not authority
         bad = original.clone();
         bad.as_object_mut().unwrap().remove("members");
         reject(&bad); // N8: no implicit fallback from physical Links
