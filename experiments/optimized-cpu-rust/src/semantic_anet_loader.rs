@@ -268,6 +268,7 @@ pub struct LoadedSemanticAnet {
     coordinates: Vec<Handle>,
     positive_members: BTreeSet<Handle>,
     store_instance_id: u32,
+    carrier_epoch: u64,
     source: SourceReceipt,
     content_sha256: String,
 }
@@ -275,7 +276,9 @@ pub struct LoadedSemanticAnet {
 impl LoadedSemanticAnet {
     /// A physical handle is valid only in the store that received the load.
     pub fn is_member(&self, store: &OptimizedLinkStore, handle: Handle) -> bool {
-        self.store_instance_id == store.instance_id() && self.positive_members.contains(&handle)
+        self.store_instance_id == store.instance_id()
+            && self.carrier_epoch == store.carrier_epoch()
+            && self.positive_members.contains(&handle)
     }
     pub fn members(&self) -> &BTreeSet<Handle> {
         &self.positive_members
@@ -334,6 +337,7 @@ impl OptimizedLinkStore {
                 coordinates,
                 positive_members,
                 store_instance_id: self.instance_id(),
+                carrier_epoch: self.carrier_epoch(),
                 source: snapshot.source,
                 content_sha256: snapshot.content_sha256,
             })
@@ -443,6 +447,19 @@ mod tests {
         // accidentally admit a coincidentally numbered physical Link in B.
         let b_member = *second.members().iter().next().unwrap();
         assert!(!first.is_member(&second_memory, b_member));
+
+        // Replacing a carrier in the SAME store can reuse numerical handles.
+        // An old membership receipt must not survive that generation change.
+        let mut replaced = OptimizedLinkStore::new();
+        let stale = replaced
+            .load_verified_semantic_anet(&snapshot, &verified)
+            .unwrap();
+        let stale_handle = *stale.members().iter().next().unwrap();
+        assert!(stale.is_member(&replaced, stale_handle));
+        replaced
+            .load_packed_duplets(&[(ROOT_HANDLE, ROOT_HANDLE)])
+            .unwrap();
+        assert!(!stale.is_member(&replaced, stale_handle));
 
         // Every negative must leave physical carrier + all indices unchanged.
         let reject = |value: &Value| {
