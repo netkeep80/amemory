@@ -13,7 +13,7 @@ use std::process::Command;
 /// Explicit finite allowlist; no public caller-provided digest, source path or
 /// transport provenance can mint a source-replay capability.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AcceptedV015Source {
+enum AcceptedV015Source {
     CompactAnd,
     TwoRoleMetaRule,
 }
@@ -122,7 +122,7 @@ impl SourceReplayVerified {
     /// Same private replay protocol for BOTH Author-approved sources.
     /// Trust is granted only after exact checkout, source hashes, upstream
     /// compiler/denotation, independent second-process replay and digest pin.
-    pub fn from_pinned_accepted_checkout(
+    fn from_pinned_accepted_checkout(
         upstream_checkout: &Path,
         source: AcceptedV015Source,
     ) -> Result<Self, SemanticLoadError> {
@@ -161,14 +161,16 @@ impl SourceReplayVerified {
             return Err(SemanticLoadError::UntrustedSource);
         }
 
-        // Repository-owned adapter calls only the pinned upstream compiler and
-        // source-backed verifier, never a second locally implemented compiler.
-        let bridge = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../a-circuit/upstream/v015-accepted-source-replay.mjs");
-        if !bridge.is_file() {
-            return Err(SemanticLoadError::UntrustedSource);
-        }
+        // Embed the repository-reviewed generic adapter in the Rust build:
+        // runtime lookup of a mutable source-tree script is not a trust boundary.
+        // The adapter only invokes the pinned upstream compiler/denotation.
         let private = PrivateReplayDir::new()?;
+        let bridge = private.0.join("v015-accepted-source-replay.mjs");
+        std::fs::write(
+            &bridge,
+            include_str!("../../a-circuit/upstream/v015-accepted-source-replay.mjs"),
+        )
+        .map_err(|_| SemanticLoadError::UntrustedSource)?;
         let file = private.0.join("semantic-anet.json");
         let producer = invoke_bridge(&bridge, &checkout, pin.id, "export", &file)?;
         let verifier = invoke_bridge(&bridge, &checkout, pin.id, "verify", &file)?;
