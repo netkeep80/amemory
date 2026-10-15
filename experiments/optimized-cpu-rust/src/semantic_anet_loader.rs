@@ -542,6 +542,109 @@ mod tests {
         println!("A1_COMPONENT_RUST_LOADER_P1_P5_N1_N8=PASS");
     }
 
+    /// CI runs this with the immutable upstream producer pinned by checkout.
+    /// No parser mock, no forged externally provided replay enters production.
+    #[test]
+    #[ignore = "needs immutable upstream anum_docs checkout and real Node replay"]
+    fn a1_g1_trusted_production_boundary_n1_n12() {
+        let checkout = std::path::PathBuf::from(
+            std::env::var("A1_TRUSTED_ANUM_CHECKOUT").expect("trusted checkout path"),
+        );
+        let input = std::fs::read_to_string(
+            std::env::var("MTS_V015_SNAPSHOT_INPUT").expect("upstream candidate"),
+        ).unwrap();
+        let original: Value = serde_json::from_str(&input).unwrap();
+        // N1: no trusted checkout, no opaque capability, no changes.
+        assert!(SourceReplayVerified::from_pinned_compact_and_checkout(
+            std::path::Path::new("/nonexistent/untrusted-checkout-g1")
+        ).is_err());
+        let verified = SourceReplayVerified::from_pinned_compact_and_checkout(&checkout)
+            .expect("independent trusted upstream verifier must execute");
+        assert_eq!(verified.source().bytes_sha256(), COMPACT_AND_SOURCE_SHA256);
+        let mut first_store = OptimizedLinkStore::new();
+        let first = first_store.load_verified_semantic_anet(&input, &verified).unwrap();
+        assert_eq!(first.members().len(), 4);
+        let mut second_store = OptimizedLinkStore::new();
+        let unrelated = second_store.ensure_pair(ROOT_HANDLE, ROOT_HANDLE).unwrap();
+        second_store.ensure_start_self_closed(unrelated).unwrap();
+        let second = second_store.load_verified_semantic_anet(&input, &verified).unwrap();
+        assert_ne!(first.physical_coordinates(), second.physical_coordinates());
+        let identity = |store: &OptimizedLinkStore, loaded: &LoadedSemanticAnet| {
+            loaded.members().iter().map(|&h| {
+                store.export_direct_recursive_wire(h).unwrap()
+            }).collect::<BTreeSet<_>>()
+        };
+        assert_eq!(identity(&first_store, &first), identity(&second_store, &second));
+        let physical_nonmember = first.physical_coordinates().iter()
+            .copied().find(|h| !first.members().contains(h)).unwrap();
+        assert!(!first.is_member(&first_store, physical_nonmember)); // positive only
+        let foreign_member = *second.members().iter().next().unwrap();
+        assert!(!first.is_member(&second_store, foreign_member)); // N9
+        let old_handle = *first.members().iter().next().unwrap();
+        first_store.load_packed_duplets(&[(ROOT_HANDLE, ROOT_HANDLE)]).unwrap();
+        assert!(!first.is_member(&first_store, old_handle)); // N10
+
+        let mut forged = original.clone();
+        let nonmember = (1..original["topology"]["links"].as_array().unwrap().len())
+            .find(|i| !original["members"].as_array().unwrap().contains(&json!(i)))
+            .unwrap();
+        forged["members"].as_array_mut().unwrap().push(json!(nonmember));
+        forged["members"].as_array_mut().unwrap()
+            .sort_by_key(|m| m.as_u64().unwrap());
+        forged["contentSha256"] = json!("a".repeat(64));
+        let fabricated = json!({
+            "status": "SOURCE_REPLAY_VERIFIED",
+            "members": forged["members"],
+            "topology": forged["topology"],
+            "source": forged["source"],
+            "contentSha256": forged["contentSha256"],
+        }).to_string();
+        // This would be accepted by the OLD self-declared private comparison,
+        // showing why that API must no longer be public.
+        let spoof = UpstreamReplayAnchor {
+            authenticated_transport_revision: TRANSPORT_IMPLEMENTATION_REVISION,
+            accepted_mts_revision: MTS_ACCEPTED_REVISION,
+            expected_source_sha256: COMPACT_AND_SOURCE_SHA256,
+            expected_content_sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            expected_source_path: "formal/v0.15/regression/compact-and.formal",
+            authenticated_replay_json: &fabricated,
+        };
+        assert!(SourceReplayVerified::authenticate(&fabricated, &spoof).is_ok());
+        let mut untouched_store = OptimizedLinkStore::new();
+        let pre = untouched_store.export_packed_duplets();
+        let pre_index = untouched_store.export_packed_incidence_index_image();
+        // N2/N3/N4: matching forged claim, positive membership and claimed
+        // digest do NOT work on the actual trusted-production entry.
+        assert!(untouched_store.load_verified_semantic_anet(
+            &forged.to_string(), &verified).is_err());
+        assert_eq!(pre, untouched_store.export_packed_duplets());
+        assert_eq!(pre_index, untouched_store.export_packed_incidence_index_image());
+        // N5/N6/N7/N8/N11: do not admit modified structure/source/version or
+        // a claimed host-owned legacy interpreter.
+        for field in ["topology", "source", "revision", "schema", "interpreter"] {
+            let mut candidate = original.clone();
+            match field {
+                "topology" => candidate["topology"]["links"][1] = json!([99999, 99999]),
+                "source" => candidate["source"]["bytesSha256"] = json!("0".repeat(64)),
+                "revision" => candidate["source"]["revision"] = json!("0".repeat(40)),
+                "schema" => candidate["schema"] = json!("mts-v015-semantic-anet-transport/v99"),
+                _ => candidate["interpreter"] = json!("host-selected-legacy"),
+            }
+            assert!(untouched_store.load_verified_semantic_anet(
+                &candidate.to_string(), &verified).is_err(), "{field}");
+            assert_eq!(pre, untouched_store.export_packed_duplets());
+            assert_eq!(pre_index, untouched_store.export_packed_incidence_index_image());
+        }
+        // N12: resource failure after partial physical preparation rolls back.
+        let mut bounded = OptimizedLinkStore::with_max_links(2);
+        let before = bounded.export_packed_duplets();
+        let index = bounded.export_packed_incidence_index_image();
+        assert!(bounded.load_verified_semantic_anet(&input, &verified).is_err());
+        assert_eq!(before, bounded.export_packed_duplets());
+        assert_eq!(index, bounded.export_packed_incidence_index_image());
+        println!("A1_G1_TRUSTED_PRODUCTION_N1_N12=PASS");
+    }
+
     #[test]
     fn a1_rejects_unauthenticated_semantic_claim_without_source_replay() {
         let untrusted = r#"{"schema":"mts-v015-semantic-anet-transport/v0.1","topology":{"schema":"mts-storage-topology/v0.1","root":0,"links":[[0,0]]},"members":[],"source":{},"contentSha256":"00"}"#;
