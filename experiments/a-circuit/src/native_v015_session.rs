@@ -262,10 +262,17 @@ mod tests {
         let report = a.inspect_role_bundles().unwrap();
         assert_eq!(report.candidates.len(), 1);
         assert!(report.ambiguous_members.is_empty());
-        eprintln!("A1_R2_STRUCTURAL_INSPECTOR_EVIDENCE={report:?}");
-        assert!(report.malformed_sequence_members.is_empty());
         let rule = &report.candidates[0];
         assert_eq!(rule.roles.len(), 2); // V->X and V->Y, not RoleX/RoleY names
+        // The inspector deliberately has no active Theory selector: it attempts
+        // structural classification of ALL positive members. A role Link may
+        // look like an incomplete foreign admission. Such a diagnostic MUST
+        // belong to one of the two known positive roles, not to a hidden
+        // third admission or a forged source member.
+        let mut role_shaped_nonadmissions = report.unclassified_positive_members.clone();
+        role_shaped_nonadmissions.extend(report.malformed_sequence_members.iter().cloned());
+        role_shaped_nonadmissions.sort_unstable();
+        assert_eq!(role_shaped_nonadmissions, rule.roles);
         assert_eq!(rule.output_templates.len(), 1);
         assert_eq!(
             original
