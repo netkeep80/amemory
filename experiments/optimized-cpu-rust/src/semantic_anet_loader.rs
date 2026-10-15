@@ -61,6 +61,9 @@ impl SourceReceipt {
     pub fn bytes_sha256(&self) -> &str {
         &self.bytes_sha256
     }
+    pub fn revision(&self) -> &str {
+        &self.revision
+    }
     pub fn native_source_sha256(&self) -> &str {
         &self.native_source_sha256
     }
@@ -272,11 +275,20 @@ pub struct LoadedSemanticAnet {
 }
 
 impl LoadedSemanticAnet {
-    /// A physical handle is valid only in the store that received the load.
-    pub fn is_member(&self, store: &OptimizedLinkStore, handle: Handle) -> bool {
+    /// Raw member handles alone do not establish live Store ownership.
+    pub fn belongs_to(&self, store: &OptimizedLinkStore) -> bool {
         self.store_instance_id == store.instance_id()
             && self.carrier_epoch == store.carrier_epoch()
-            && self.positive_members.contains(&handle)
+    }
+    pub fn store_instance_id(&self) -> u32 {
+        self.store_instance_id
+    }
+    pub fn carrier_epoch(&self) -> u64 {
+        self.carrier_epoch
+    }
+    /// A physical handle is valid only in the Store that received the load.
+    pub fn is_member(&self, store: &OptimizedLinkStore, handle: Handle) -> bool {
+        self.belongs_to(store) && self.positive_members.contains(&handle)
     }
     pub fn members(&self) -> &BTreeSet<Handle> {
         &self.positive_members
