@@ -183,7 +183,8 @@ jobs:
           set -euo pipefail
           rustfmt +1.98.1 --edition 2021 --check experiments/a-circuit/src/native_v015_role_bundle.rs
           rustfmt +1.98.1 --edition 2021 --check \
-            experiments/a-circuit/src/native_v015_session.rs
+            experiments/a-circuit/src/native_v015_session.rs \
+            experiments/a-circuit/src/native_v015_authority.rs
           A1_TRUSTED_ANUM_CHECKOUT="$PWD/upstream-anum-docs" \
             cargo +1.98.1 test --locked -p amemory-a-circuit \
               a1_g2_native_bound_session_real_g1_n1_n15 -- --ignored --nocapture
