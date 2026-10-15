@@ -46,6 +46,18 @@ jobs:
       - name: Install Rust formatting component
         run: rustup component add rustfmt --toolchain 1.98.1
 
+      # TEMPORARY A1-R2 formatting diagnostic. Remove after committing rustfmt output.
+      - name: A1-R2 rustfmt diagnostic (non-acceptance)
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustfmt +1.98.1 --edition 2021 \
+            experiments/optimized-cpu-rust/src/semantic_anet_trust.rs \
+            experiments/a-circuit/src/native_v015_session.rs
+          git diff -- experiments/optimized-cpu-rust/src/semantic_anet_trust.rs \
+            experiments/a-circuit/src/native_v015_session.rs
+          echo "A1_R2_FORMAT_ONLY_NOT_EXACT_HEAD=true"
+
       # Preserve parallel execution for the rest of the workspace; exercise
       # just the stateful scenario_web ABI tests as a serial/parallel control.
       - name: CI-UNBLOCK scenario_web isolation serial and repeated parallel regression
