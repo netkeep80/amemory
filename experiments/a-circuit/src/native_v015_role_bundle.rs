@@ -376,8 +376,17 @@ mod tests {
         let (b1, b2) = role_pair(&second, admission_b);
         assert!(a1 < a2);
         assert!(b1 > b2); // actual BTreeSet iteration of role handles flips
-        assert_ne!(members_a.iter().copied().collect::<Vec<_>>(),
-                   members_b.iter().copied().collect::<Vec<_>>());
+        let ordered_role_wires = |store: &OptimizedLinkStore,
+                                  members: &BTreeSet<Handle>, bundle: Handle| {
+            members.iter().copied()
+                .filter(|&h| poles(store, h).unwrap().0 == bundle)
+                .map(|h| wire(store, h).unwrap())
+                .collect::<Vec<_>>()
+        };
+        let bundle_a = poles(&first, poles(&first, admission_a).unwrap().1).unwrap().0;
+        let bundle_b = poles(&second, poles(&second, admission_b).unwrap().1).unwrap().0;
+        assert_ne!(ordered_role_wires(&first, &members_a, bundle_a),
+                   ordered_role_wires(&second, &members_b, bundle_b));
         assert_eq!(inspect(&first, &members_a).unwrap().candidates,
                    inspect(&second, &members_b).unwrap().candidates);
     }
