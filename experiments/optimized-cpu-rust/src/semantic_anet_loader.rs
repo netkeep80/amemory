@@ -1,9 +1,8 @@
 //! A1-1a: read-only v0.15 semantic ANet transport into the CPU Link substrate.
 //!
-//! SOURCE_REPLAY_VERIFIED is an upstream *independently authenticated* boundary,
-//! not a status that Rust derives from a caller-supplied hash. The caller must
-//! supply an attestation obtained from the pinned anum_docs source replay.
-//! This component neither interprets ANets nor changes Gamma.
+//! SOURCE_REPLAY_VERIFIED is not a caller assertion: only the native pinned
+//! upstream provider can mint an opaque admission capability after real source
+//! replay in a separate process. This module never interprets ANets or Gamma.
 
 use crate::{Handle, OptimizedLinkStore, StoreError, ROOT_HANDLE};
 use serde::Deserialize;
@@ -603,19 +602,14 @@ mod tests {
             .unwrap();
         assert!(!first.is_member(&first_store, old_handle)); // N10
 
-        let mut forged = original.clone();
-        let nonmember = (1..original["topology"]["links"].as_array().unwrap().len())
-            .find(|i| !original["members"].as_array().unwrap().contains(&json!(i)))
-            .unwrap();
-        forged["members"]
-            .as_array_mut()
-            .unwrap()
-            .push(json!(nonmember));
-        forged["members"]
-            .as_array_mut()
-            .unwrap()
-            .sort_by_key(|m| m.as_u64().unwrap());
-        forged["contentSha256"] = json!("a".repeat(64));
+        // This adversarial snapshot has a CORRECTLY RECOMPUTED v0.1 SHA256
+        // digest, generated independently by the real pinned upstream CI.
+        let forged: Value = serde_json::from_str(&std::fs::read_to_string(
+            std::env::var("MTS_V015_TAMPERED_SNAPSHOT_INPUT")
+                .expect("real upstream forged snapshot with recalculated digest"),
+        ).unwrap()).unwrap();
+        assert_ne!(forged["members"], original["members"]);
+        assert_ne!(forged["contentSha256"], original["contentSha256"]);
         let fabricated = json!({
             "status": "SOURCE_REPLAY_VERIFIED",
             "members": forged["members"],
@@ -630,8 +624,7 @@ mod tests {
             authenticated_transport_revision: TRANSPORT_IMPLEMENTATION_REVISION,
             accepted_mts_revision: MTS_ACCEPTED_REVISION,
             expected_source_sha256: COMPACT_AND_SOURCE_SHA256,
-            expected_content_sha256:
-                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            expected_content_sha256: forged["contentSha256"].as_str().unwrap(),
             expected_source_path: "formal/v0.15/regression/compact-and.formal",
             authenticated_replay_json: &fabricated,
         };
