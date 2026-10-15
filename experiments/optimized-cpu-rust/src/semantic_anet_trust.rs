@@ -3,9 +3,8 @@
 //! request controls ONLY the candidate snapshot. A hostile same-UID process or
 //! compromised toolchain/dependency registry is outside the supported boundary.
 use super::{
-    SemanticLoadError, SourceReplayVerified, UpstreamReplayAnchor,
-    COMPACT_AND_CONTENT_SHA256, COMPACT_AND_SOURCE_SHA256, MTS_ACCEPTED_REVISION,
-    TRANSPORT_IMPLEMENTATION_REVISION,
+    SemanticLoadError, SourceReplayVerified, UpstreamReplayAnchor, COMPACT_AND_CONTENT_SHA256,
+    COMPACT_AND_SOURCE_SHA256, MTS_ACCEPTED_REVISION, TRANSPORT_IMPLEMENTATION_REVISION,
 };
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -20,11 +19,14 @@ impl PrivateReplayDir {
             .map_err(|_| SemanticLoadError::UntrustedSource)?
             .as_nanos();
         let path = std::env::temp_dir().join(format!(
-            "amemory-trusted-v015-{}-{ticks}", std::process::id()
+            "amemory-trusted-v015-{}-{ticks}",
+            std::process::id()
         ));
         let mut builder = std::fs::DirBuilder::new();
         builder.mode(0o700);
-        builder.create(&path).map_err(|_| SemanticLoadError::UntrustedSource)?;
+        builder
+            .create(&path)
+            .map_err(|_| SemanticLoadError::UntrustedSource)?;
         Ok(Self(path))
     }
 }
@@ -34,7 +36,9 @@ impl Drop for PrivateReplayDir {
     }
 }
 fn checked(command: &mut Command) -> Result<String, SemanticLoadError> {
-    let result = command.output().map_err(|_| SemanticLoadError::UntrustedSource)?;
+    let result = command
+        .output()
+        .map_err(|_| SemanticLoadError::UntrustedSource)?;
     if !result.status.success() {
         return Err(SemanticLoadError::UntrustedSource);
     }
@@ -65,14 +69,24 @@ impl SourceReplayVerified {
         upstream_checkout: &Path,
     ) -> Result<Self, SemanticLoadError> {
         let checkout = upstream_checkout
-            .canonicalize().map_err(|_| SemanticLoadError::UntrustedSource)?;
-        let head = checked(Command::new("git").arg("-C").arg(&checkout)
-            .args(["rev-parse", "HEAD"]))?;
+            .canonicalize()
+            .map_err(|_| SemanticLoadError::UntrustedSource)?;
+        let head = checked(
+            Command::new("git")
+                .arg("-C")
+                .arg(&checkout)
+                .args(["rev-parse", "HEAD"]),
+        )?;
         if head.trim() != TRANSPORT_IMPLEMENTATION_REVISION {
             return Err(SemanticLoadError::UntrustedSource);
         }
-        let clean = || checked(Command::new("git").arg("-C").arg(&checkout)
-            .args(["status", "--porcelain", "--untracked-files=no"]));
+        let clean = || {
+            checked(Command::new("git").arg("-C").arg(&checkout).args([
+                "status",
+                "--porcelain",
+                "--untracked-files=no",
+            ]))
+        };
         if !clean()?.trim().is_empty() {
             return Err(SemanticLoadError::UntrustedSource);
         }
@@ -82,32 +96,43 @@ impl SourceReplayVerified {
             return Err(SemanticLoadError::UntrustedSource);
         }
         let ts = checkout.join("ts");
-        checked(Command::new("npm").args(["ci", "--ignore-scripts", "--prefix"]).arg(&ts))?;
-        checked(Command::new("npm").args(["run", "build", "--prefix"]).arg(&ts))?;
+        checked(
+            Command::new("npm")
+                .args(["ci", "--ignore-scripts", "--prefix"])
+                .arg(&ts),
+        )?;
+        checked(
+            Command::new("npm")
+                .args(["run", "build", "--prefix"])
+                .arg(&ts),
+        )?;
         if !clean()?.trim().is_empty() {
             return Err(SemanticLoadError::UntrustedSource);
         }
         let private = PrivateReplayDir::new()?;
         let file = private.0.join("semantic-anet.json");
         if !replay(&ts, "MTS_V015_SNAPSHOT_OUTPUT", &file)?
-            .contains("P3 RESTORE_AND_SOURCE_REPLAY=PASS") {
+            .contains("P3 RESTORE_AND_SOURCE_REPLAY=PASS")
+        {
             return Err(SemanticLoadError::UntrustedSource);
         }
         if !replay(&ts, "MTS_V015_SNAPSHOT_INPUT", &file)?
-            .contains("EXTERNAL_TRANSPORT_FILE_SOURCE_REPLAY=PASS") {
+            .contains("EXTERNAL_TRANSPORT_FILE_SOURCE_REPLAY=PASS")
+        {
             return Err(SemanticLoadError::UntrustedSource);
         }
-        let generated = std::fs::read_to_string(&file)
-            .map_err(|_| SemanticLoadError::UntrustedSource)?;
-        let snapshot: serde_json::Value = serde_json::from_str(&generated)
-            .map_err(|_| SemanticLoadError::UntrustedSource)?;
+        let generated =
+            std::fs::read_to_string(&file).map_err(|_| SemanticLoadError::UntrustedSource)?;
+        let snapshot: serde_json::Value =
+            serde_json::from_str(&generated).map_err(|_| SemanticLoadError::UntrustedSource)?;
         let receipt = serde_json::json!({
             "status": "SOURCE_REPLAY_VERIFIED",
             "topology": snapshot["topology"],
             "members": snapshot["members"],
             "source": snapshot["source"],
             "contentSha256": snapshot["contentSha256"]
-        }).to_string();
+        })
+        .to_string();
         let anchor = UpstreamReplayAnchor {
             authenticated_transport_revision: TRANSPORT_IMPLEMENTATION_REVISION,
             accepted_mts_revision: MTS_ACCEPTED_REVISION,
