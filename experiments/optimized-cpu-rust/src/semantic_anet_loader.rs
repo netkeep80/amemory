@@ -8,13 +8,15 @@
 use crate::{Handle, OptimizedLinkStore, StoreError, ROOT_HANDLE};
 use serde::Deserialize;
 use std::collections::BTreeSet;
+#[cfg(unix)]
+#[path = "semantic_anet_trust.rs"]
+mod trust;
 
 pub const SEMANTIC_ANET_SCHEMA: &str = "mts-v015-semantic-anet-transport/v0.1";
 pub const MTS_ACCEPTED_REVISION: &str = "813a1569300b241a3b70eb282eecd8231db15e4b";
 pub const TRANSPORT_IMPLEMENTATION_REVISION: &str = "63bd6624e0e030b26ca5a79bc676892ed1408594";
 pub const COMPACT_AND_SOURCE_SHA256: &str =
     "4a5bc92e661ee1d4e0c2c5d51769805b5406651bb491345200d088c9ad23e5f3";
-#[cfg(test)]
 const COMPACT_AND_CONTENT_SHA256: &str =
     "d332f148d42562e8585330493c78a9aa2db3f76641eb660e9804008e5276639c";
 const COMPILER: &str = "v015-direct-formal-json-source@813a1569300b241a3b70eb282eecd8231db15e4b";
@@ -93,58 +95,28 @@ struct ReplayEvidence {
     content_sha256: String,
 }
 
-/// Trust parameters supplied by an **external** independently verified upstream
-/// source replay. An unsigned JSON receipt or a self-reported digest is NOT
-/// proof of authenticity. The caller owns authentication of the source process,
-/// checkout, and protected attestation delivery; Rust only enforces exact replay
-/// equality and pins, and deliberately never compiles or denotes FORMAL/JSON.
-/// Never populate this anchor from the untrusted candidate snapshot.
-pub struct UpstreamReplayAnchor<'a> {
-    pub authenticated_transport_revision: &'a str,
-    pub accepted_mts_revision: &'a str,
-    pub expected_source_sha256: &'a str,
-    pub expected_content_sha256: &'a str,
-    pub expected_source_path: &'a str,
+/// Internal structural comparison parameters, never an authority grant.
+/// External callers cannot construct this anchor.
+pub(crate) struct UpstreamReplayAnchor<'a> {
+    pub(crate) authenticated_transport_revision: &'a str,
+    pub(crate) accepted_mts_revision: &'a str,
+    pub(crate) expected_source_sha256: &'a str,
+    pub(crate) expected_content_sha256: &'a str,
+    pub(crate) expected_source_path: &'a str,
     /// Entire independently authenticated SOURCE_REPLAY_VERIFIED evidence.
     /// A matching hash string alone cannot authorize altered topology/members.
-    pub authenticated_replay_json: &'a str,
+    pub(crate) authenticated_replay_json: &'a str,
 }
 
-/// A capability minted by a trusted caller using *independently authenticated*
-/// source-backed replay evidence. Not directly deserializable. The caller MUST
-/// authenticate upstream execution outside this crate before invoking this API.
+/// Opaque semantic replay capability: only the native pinned provider can mint
+/// it. A caller-supplied JSON status or private anchor is never authoritative.
 pub struct SourceReplayVerified {
     snapshot: TransportSnapshot,
 }
 
 impl SourceReplayVerified {
-    /// Admit a source replay attestation, previously authenticated by the caller.
-    ///
-    /// This is an **external trust boundary**, not a local signature check or
-    /// mathematical proof performed by Rust. The caller must not construct
-    /// `anchor.authenticated_replay_json` by copying the candidate snapshot or
-    /// its own claimed SOURCE_REPLAY_VERIFIED status. Matching digest strings
-    /// are insufficient: the complete authenticated replay is compared.
-    ///
-    /// This API is public so a real A-memory caller can import trusted upstream
-    /// evidence. It intentionally has no unverified/legacy fallback.
-    ///
-    /// ```no_run
-    /// use amemory_optimized_cpu_probe::{OptimizedLinkStore, semantic_anet_loader::*};
-    /// # fn run(store: &mut OptimizedLinkStore, candidate: &str, replay: &str,
-    /// # source_sha: &str, digest: &str, path: &str) -> Result<(), SemanticLoadError> {
-    /// let anchor = UpstreamReplayAnchor {
-    ///     authenticated_transport_revision: TRANSPORT_IMPLEMENTATION_REVISION,
-    ///     accepted_mts_revision: MTS_ACCEPTED_REVISION,
-    ///     expected_source_sha256: source_sha, expected_content_sha256: digest,
-    ///     expected_source_path: path, authenticated_replay_json: replay,
-    /// };
-    /// let verified = SourceReplayVerified::authenticate(replay, &anchor)?;
-    /// store.load_verified_semantic_anet(candidate, &verified)?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn authenticate(
+    /// INTERNAL comparison only. Caller-provided anchor cannot grant trust.
+    pub(crate) fn authenticate(
         evidence_json: &str,
         anchor: &UpstreamReplayAnchor<'_>,
     ) -> Result<Self, SemanticLoadError> {
