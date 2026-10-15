@@ -1,7 +1,8 @@
 //! A1-2 G2: ownership-bound, non-executable native v0.15 Session.
 //! Reuses existing SessionIdentityV1 and SessionStateV1, not the legacy
 //! OptimizedStructuralEngine. No semantic host inputs or Γ execution.
-//! Scope is accepted compact AND with G1's controlled Unix checkout.
+//! Scope: Author-approved compact AND (zero roles) and two-role meta-rule,
+//! both via the same pinned G1 trust boundary and deployment-owned checkout.
 //! Compile-fail external admission and semantic-control boundary:
 //! ```compile_fail
 //! let _ = amemory_optimized_cpu_probe::semantic_anet_loader::SourceReplayVerified::authenticate;
@@ -231,6 +232,72 @@ impl NativeV015Session {
 mod tests {
     use super::*;
     use amemory_optimized_cpu_probe::{OptimizedLinkStore, ROOT_HANDLE};
+
+    /// Public A1-R2 boundary: caller supplies only a transport candidate and
+    /// deployment-owned checkout, never pre-minted proof or host Theory/Context.
+    /// Consolidated CI runs this explicitly in both debug and release builds.
+    #[test]
+    #[ignore = "requires exact accepted two-role upstream FORMAL + independent replay"]
+    fn a1_r2_public_two_role_session_smoke() {
+        let checkout = std::path::PathBuf::from(
+            std::env::var("A1_TRUSTED_ANUM_CHECKOUT").expect("trusted checkout"),
+        );
+        let snapshot = std::fs::read_to_string(
+            std::env::var("MTS_V015_TWO_ROLE_SNAPSHOT_INPUT").expect("accepted two-role transport"),
+        )
+        .unwrap();
+
+        // An absent trusted upstream checkout must never admit a Session.
+        assert!(matches!(
+            NativeV015Session::open_trusted_two_role_meta_rule(
+                &snapshot,
+                Path::new("/missing-r2-trust-checkout")
+            ),
+            Err(NativeV015Error::TrustOrLoad(_))
+        ));
+
+        // This call is intentionally through the PUBLIC entrypoint, not the
+        // private from_verified path used by the allocation-order falsifiers.
+        let mut session =
+            NativeV015Session::open_trusted_two_role_meta_rule(&snapshot, &checkout).unwrap();
+        let observation = session.observe().unwrap();
+        assert_eq!(observation.state, "OPEN");
+        assert!(!observation.gamma_implemented);
+        assert_eq!(observation.positive_members.len(), 3);
+        assert_eq!(
+            observation.trusted_source_sha256,
+            amemory_optimized_cpu_probe::semantic_anet_loader::TWO_ROLE_SOURCE_SHA256
+        );
+        assert_eq!(
+            observation.semantic_content_sha256,
+            "554d9bf051f95b4eff9b9afe4575e8714e56fbdb5aac4cc4538c3310df91bada"
+        );
+        for member in observation.positive_members {
+            assert!(session.is_member(member).unwrap());
+        }
+        let inspection = session.inspect_role_bundles().unwrap();
+        assert_eq!(inspection.candidates.len(), 1);
+        assert_eq!(inspection.candidates[0].roles.len(), 2);
+
+        // Even the public constructor must reject a plausible-looking image
+        // whose positive semantic membership no longer matches source replay.
+        let mut forged: serde_json::Value = serde_json::from_str(&snapshot).unwrap();
+        forged["members"].as_array_mut().unwrap().pop().unwrap();
+        assert!(matches!(
+            NativeV015Session::open_trusted_two_role_meta_rule(&forged.to_string(), &checkout),
+            Err(NativeV015Error::TrustOrLoad(_))
+        ));
+        assert_eq!(session.step(), Err(NativeV015Error::GammaNotImplemented));
+        assert_eq!(session.run(), Err(NativeV015Error::GammaNotImplemented));
+        assert_eq!(
+            session.run_to_quiescence(),
+            Err(NativeV015Error::GammaNotImplemented)
+        );
+        session.close().unwrap();
+        assert!(session.is_closed());
+        assert!(matches!(session.observe(), Err(NativeV015Error::Closed)));
+        println!("A1_R2_PUBLIC_TWO_ROLE_SESSION_E2E=PASS");
+    }
 
     /// This test is run explicitly by consolidated CI against a transport
     /// produced AND independently replayed from accepted upstream bytes.
