@@ -139,6 +139,14 @@ jobs:
             'MTS_V015_TAMPERED_SNAPSHOT_INPUT=' + process.env.MTS_V015_SNAPSHOT_INPUT + '.forged' + '\n');
           NODE
 
+      - name: A1-R2 independent accepted two-role FORMAL/JSON transport probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          node experiments/a-circuit/upstream/v015-accepted-source-replay.mjs \
+            upstream-anum-docs two-role-meta-rule probe
+          echo "A1_R2_PROBE_ONLY=NOT_TRUSTED_ADMISSION"
+
       - name: A1-1a exact source-backed Rust CPU load + P1-P5 N1-N8
         run: |
           set -euo pipefail
