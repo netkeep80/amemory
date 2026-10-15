@@ -243,7 +243,8 @@ mod tests {
         let edge2 = pair(&mut s, e2, k2);
         let (zero, _) = rule(&mut s, &mut seed, theory1, false);
         let (two, roles) = rule(&mut s, &mut seed, theory1, true);
-        let foreign = pair(&mut s, theory2, poles(&s, two).unwrap().1);
+        let admitted_rule = poles(&s, two).unwrap().1;
+        let foreign = pair(&mut s, theory2, admitted_rule);
         let mut positive = BTreeSet::from([
             e1, e2, k1, k2, truth1, truth2, edge1, edge2,
             zero, two, foreign,
