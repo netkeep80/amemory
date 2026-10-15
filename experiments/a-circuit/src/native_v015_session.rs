@@ -33,8 +33,8 @@
 //! ```compile_fail
 //! let _ = amemory_a_circuit::native_v015_session::NativeV015Session::set_external_grounder;
 //! ```
-pub use super::native_v015_role_bundle::{RoleBundleCandidate, RoleBundleInspection};
 use super::native_v015_role_bundle::inspect as inspect_role_bundles_structurally;
+pub use super::native_v015_role_bundle::{RoleBundleCandidate, RoleBundleInspection};
 use super::runtime_session::{next_cpu_session_id, CpuMemoryInstance};
 use super::session_contract::{SessionIdentityV1, SessionStateV1};
 use amemory_optimized_cpu_probe::{
@@ -267,13 +267,17 @@ mod tests {
         assert!(first_roles.unclassified_positive_members.is_empty());
         assert!(first_roles.malformed_sequence_members.is_empty());
         assert!(first_roles.ambiguous_members.is_empty());
-        assert!(first_roles.candidates.iter().all(|r| {
-            r.roles.is_empty() && r.output_templates.len() == 1
-        }));
+        assert!(first_roles
+            .candidates
+            .iter()
+            .all(|r| { r.roles.is_empty() && r.output_templates.len() == 1 }));
         assert_eq!(
-            first_roles.candidates.iter()
+            first_roles
+                .candidates
+                .iter()
                 .map(|r| r.positive_admission.clone())
-                .collect::<std::collections::BTreeSet<_>>().len(),
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
             first.positive_members.len()
         );
         assert_ne!(first.session_id, second.session_id);
@@ -331,7 +335,10 @@ mod tests {
             .load_packed_duplets(&[(ROOT_HANDLE, ROOT_HANDLE)])
             .unwrap();
         assert_eq!(a.observe(), Err(NativeV015Error::InvalidBinding));
-        assert_eq!(a.inspect_role_bundles(), Err(NativeV015Error::InvalidBinding));
+        assert_eq!(
+            a.inspect_role_bundles(),
+            Err(NativeV015Error::InvalidBinding)
+        );
         assert_eq!(a.step(), Err(NativeV015Error::InvalidBinding));
         assert_eq!(a.run(), Err(NativeV015Error::InvalidBinding));
         // N9: failed admission never produces an observable Session.
