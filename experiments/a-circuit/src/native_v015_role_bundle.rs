@@ -145,7 +145,10 @@ mod tests {
         }
         current
     }
-    fn fixture(noisy: bool, reverse_roles: bool) -> (OptimizedLinkStore, BTreeSet<Handle>, Handle, Handle) {
+    fn fixture(
+        noisy: bool,
+        reverse_roles: bool,
+    ) -> (OptimizedLinkStore, BTreeSet<Handle>, Handle, Handle) {
         let mut s = OptimizedLinkStore::new();
         if noisy {
             let n = pair(&mut s, ROOT_HANDLE, ROOT_HANDLE);
@@ -190,7 +193,9 @@ mod tests {
         assert_eq!(report.candidates.len(), 1);
         assert_eq!(report.candidates[0].roles.len(), 2);
         assert_eq!(report.candidates[0].output_templates.len(), 2);
-        assert!(!report.candidates[0].roles.contains(&wire(&s, ambient).unwrap()));
+        assert!(!report.candidates[0]
+            .roles
+            .contains(&wire(&s, ambient).unwrap()));
         assert!(!report.candidates[0]
             .roles
             .contains(&wire(&s, poles(&s, ambient).unwrap().1).unwrap()));
@@ -224,7 +229,10 @@ mod tests {
             assert!(report.candidates[0].roles.is_empty());
             assert_eq!(
                 report.candidates[0].output_templates,
-                values.iter().map(|&h| wire(&s, h).unwrap()).collect::<Vec<_>>()
+                values
+                    .iter()
+                    .map(|&h| wire(&s, h).unwrap())
+                    .collect::<Vec<_>>()
             );
         }
         let bad = pair(&mut s, a, b); // not START(prev -> value)
@@ -277,7 +285,10 @@ mod tests {
             inspect(&first, &a_members).unwrap().candidates,
             inspect(&second, &b_members).unwrap().candidates
         );
-        assert_ne!(first.export_packed_duplets(), second.export_packed_duplets());
+        assert_ne!(
+            first.export_packed_duplets(),
+            second.export_packed_duplets()
+        );
     }
 
     #[test]
@@ -295,13 +306,22 @@ mod tests {
             with_names.insert(name_b);
             let original = inspect(&s, &members).unwrap().candidates;
             let enlarged = inspect(&s, &with_names).unwrap();
-            let candidate = enlarged.candidates.iter()
-                .find(|c| c.positive_admission == wire(&s, admission).unwrap()).unwrap();
+            let candidate = enlarged
+                .candidates
+                .iter()
+                .find(|c| c.positive_admission == wire(&s, admission).unwrap())
+                .unwrap();
             assert_eq!(candidate, &original[0]);
             assert_eq!(candidate.roles.len(), 2);
-            assert_eq!(candidate.roles, [role_a, role_b]
-                .map(|h| wire(&s, h).unwrap())
-                .into_iter().collect::<BTreeSet<_>>().into_iter().collect::<Vec<_>>());
+            assert_eq!(
+                candidate.roles,
+                [role_a, role_b]
+                    .map(|h| wire(&s, h).unwrap())
+                    .into_iter()
+                    .collect::<BTreeSet<_>>()
+                    .into_iter()
+                    .collect::<Vec<_>>()
+            );
             assert!(!candidate.roles.contains(&wire(&s, name_a).unwrap()));
             assert!(!candidate.roles.contains(&wire(&s, name_b).unwrap()));
         }
@@ -327,9 +347,10 @@ mod tests {
         // Explicit membership permits another *candidate*, not a selected
         // active Theory or authorization for execution.
         assert_eq!(expanded_report.candidates.len(), 2);
-        assert!(expanded_report.candidates.iter()
-            .any(|c| c.role_bundle_anchor == wire(&s, alternative).unwrap()
-                && c.roles.is_empty()));
+        assert!(expanded_report
+            .candidates
+            .iter()
+            .any(|c| c.role_bundle_anchor == wire(&s, alternative).unwrap() && c.roles.is_empty()));
     }
 
     #[test]
@@ -349,8 +370,10 @@ mod tests {
         for bad_admission in [invalid_rule_admission, invalid_body_admission] {
             let report = inspect(&s, &BTreeSet::from([bad_admission])).unwrap();
             assert!(report.candidates.is_empty());
-            assert_eq!(report.unclassified_positive_members,
-                vec![wire(&s, bad_admission).unwrap()]);
+            assert_eq!(
+                report.unclassified_positive_members,
+                vec![wire(&s, bad_admission).unwrap()]
+            );
         }
         // A merely physical disconnected Rule/Body has no membership grant.
         let detached_antecedent = pair(&mut s, ROOT_HANDLE, anchor);
@@ -361,8 +384,13 @@ mod tests {
         assert_eq!(inspect(&s, &members).unwrap().candidates.len(), 1);
         // This shape is structurally well-formed with empty ExactSequence:
         // no general normative prohibition can be invented from A9b.
-        assert_eq!(inspect(&s, &BTreeSet::from([detached_admission]))
-            .unwrap().candidates.len(), 1);
+        assert_eq!(
+            inspect(&s, &BTreeSet::from([detached_admission]))
+                .unwrap()
+                .candidates
+                .len(),
+            1
+        );
     }
 
     #[test]
@@ -379,19 +407,29 @@ mod tests {
         let (b1, b2) = role_pair(&second, admission_b);
         assert!(a1 < a2);
         assert!(b1 > b2); // actual BTreeSet iteration of role handles flips
-        let ordered_role_wires = |store: &OptimizedLinkStore,
-                                  members: &BTreeSet<Handle>, bundle: Handle| {
-            members.iter().copied()
-                .filter(|&h| poles(store, h).unwrap().0 == bundle)
-                .map(|h| wire(store, h).unwrap())
-                .collect::<Vec<_>>()
-        };
-        let bundle_a = poles(&first, poles(&first, admission_a).unwrap().1).unwrap().0;
-        let bundle_b = poles(&second, poles(&second, admission_b).unwrap().1).unwrap().0;
-        assert_ne!(ordered_role_wires(&first, &members_a, bundle_a),
-                   ordered_role_wires(&second, &members_b, bundle_b));
-        assert_eq!(inspect(&first, &members_a).unwrap().candidates,
-                   inspect(&second, &members_b).unwrap().candidates);
+        let ordered_role_wires =
+            |store: &OptimizedLinkStore, members: &BTreeSet<Handle>, bundle: Handle| {
+                members
+                    .iter()
+                    .copied()
+                    .filter(|&h| poles(store, h).unwrap().0 == bundle)
+                    .map(|h| wire(store, h).unwrap())
+                    .collect::<Vec<_>>()
+            };
+        let bundle_a = poles(&first, poles(&first, admission_a).unwrap().1)
+            .unwrap()
+            .0;
+        let bundle_b = poles(&second, poles(&second, admission_b).unwrap().1)
+            .unwrap()
+            .0;
+        assert_ne!(
+            ordered_role_wires(&first, &members_a, bundle_a),
+            ordered_role_wires(&second, &members_b, bundle_b)
+        );
+        assert_eq!(
+            inspect(&first, &members_a).unwrap().candidates,
+            inspect(&second, &members_b).unwrap().candidates
+        );
     }
 
     #[test]
