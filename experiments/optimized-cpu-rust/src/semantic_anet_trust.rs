@@ -76,7 +76,9 @@ impl Drop for PrivateReplayDir {
     }
 }
 fn checked(command: &mut Command) -> Result<String, SemanticLoadError> {
-    let result = command.output().map_err(|_| SemanticLoadError::UntrustedSource)?;
+    let result = command
+        .output()
+        .map_err(|_| SemanticLoadError::UntrustedSource)?;
     if !result.status.success() {
         return Err(SemanticLoadError::UntrustedSource);
     }
@@ -88,8 +90,12 @@ fn digest(path: &Path) -> Result<String, SemanticLoadError> {
 }
 fn clean(checkout: &Path) -> Result<bool, SemanticLoadError> {
     Ok(checked(Command::new("git").arg("-C").arg(checkout).args([
-        "status", "--porcelain", "--untracked-files=no",
-    ]))?.trim().is_empty())
+        "status",
+        "--porcelain",
+        "--untracked-files=no",
+    ]))?
+    .trim()
+    .is_empty())
 }
 fn invoke_bridge(
     bridge: &Path,
@@ -124,8 +130,12 @@ impl SourceReplayVerified {
         let checkout = upstream_checkout
             .canonicalize()
             .map_err(|_| SemanticLoadError::UntrustedSource)?;
-        let head = checked(Command::new("git").arg("-C").arg(&checkout)
-            .args(["rev-parse", "HEAD"]))?;
+        let head = checked(
+            Command::new("git")
+                .arg("-C")
+                .arg(&checkout)
+                .args(["rev-parse", "HEAD"]),
+        )?;
         if head.trim() != TRANSPORT_IMPLEMENTATION_REVISION || !clean(&checkout)? {
             return Err(SemanticLoadError::UntrustedSource);
         }
@@ -135,14 +145,18 @@ impl SourceReplayVerified {
             return Err(SemanticLoadError::UntrustedSource);
         }
         let ts = checkout.join("ts");
-        checked(Command::new("npm")
-            .env_remove("NODE_OPTIONS")
-            .args(["ci", "--ignore-scripts", "--prefix"])
-            .arg(&ts))?;
-        checked(Command::new("npm")
-            .env_remove("NODE_OPTIONS")
-            .args(["run", "build", "--prefix"])
-            .arg(&ts))?;
+        checked(
+            Command::new("npm")
+                .env_remove("NODE_OPTIONS")
+                .args(["ci", "--ignore-scripts", "--prefix"])
+                .arg(&ts),
+        )?;
+        checked(
+            Command::new("npm")
+                .env_remove("NODE_OPTIONS")
+                .args(["run", "build", "--prefix"])
+                .arg(&ts),
+        )?;
         if !clean(&checkout)? {
             return Err(SemanticLoadError::UntrustedSource);
         }
@@ -163,8 +177,8 @@ impl SourceReplayVerified {
         {
             return Err(SemanticLoadError::UntrustedSource);
         }
-        let generated = std::fs::read_to_string(&file)
-            .map_err(|_| SemanticLoadError::UntrustedSource)?;
+        let generated =
+            std::fs::read_to_string(&file).map_err(|_| SemanticLoadError::UntrustedSource)?;
         let snapshot: serde_json::Value =
             serde_json::from_str(&generated).map_err(|_| SemanticLoadError::UntrustedSource)?;
         let receipt = serde_json::json!({
@@ -173,7 +187,8 @@ impl SourceReplayVerified {
             "members": snapshot["members"],
             "source": snapshot["source"],
             "contentSha256": snapshot["contentSha256"],
-        }).to_string();
+        })
+        .to_string();
         let anchor = UpstreamReplayAnchor {
             authenticated_transport_revision: TRANSPORT_IMPLEMENTATION_REVISION,
             accepted_mts_revision: MTS_ACCEPTED_REVISION,
