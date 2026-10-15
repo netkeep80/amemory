@@ -19,7 +19,9 @@ pub enum NativeV015Error {
     GammaNotImplemented,
 }
 impl From<SemanticLoadError> for NativeV015Error {
-    fn from(error: SemanticLoadError) -> Self { Self::TrustOrLoad(error) }
+    fn from(error: SemanticLoadError) -> Self {
+        Self::TrustOrLoad(error)
+    }
 }
 
 /// Read-only: physical handles are diagnostics, NOT cross-store identities.
@@ -53,11 +55,11 @@ impl NativeV015Session {
     /// Deployment supplies checkout from its own trusted configuration.
     /// Never forward a checkout path controlled by the untrusted request.
     pub fn open_trusted_compact_and(
-        candidate: &str, deployment_owned_checkout: &Path,
+        candidate: &str,
+        deployment_owned_checkout: &Path,
     ) -> Result<Self, NativeV015Error> {
-        let verified = SourceReplayVerified::from_pinned_compact_and_checkout(
-            deployment_owned_checkout,
-        )?;
+        let verified =
+            SourceReplayVerified::from_pinned_compact_and_checkout(deployment_owned_checkout)?;
         Self::from_verified(CpuMemoryInstance::new(), candidate, &verified)
     }
 
@@ -67,7 +69,9 @@ impl NativeV015Session {
         candidate: &str,
         verified: &SourceReplayVerified,
     ) -> Result<Self, NativeV015Error> {
-        let loaded = memory.store.load_verified_semantic_anet(candidate, verified)?;
+        let loaded = memory
+            .store
+            .load_verified_semantic_anet(candidate, verified)?;
         Self::bind_loaded(memory, loaded)
     }
 
@@ -108,7 +112,9 @@ impl NativeV015Session {
                 return Err(NativeV015Error::InvalidBinding);
             }
             canonical_members.push(
-                self.memory.store.export_direct_recursive_wire(member)
+                self.memory
+                    .store
+                    .export_direct_recursive_wire(member)
                     .map_err(|_| NativeV015Error::InvalidBinding)?,
             );
             positive_members.push(member);
@@ -137,7 +143,9 @@ impl NativeV015Session {
         Ok(self.admitted.is_member(&self.memory.store, handle))
     }
 
-    pub fn is_closed(&self) -> bool { self.state == SessionStateV1::Closed }
+    pub fn is_closed(&self) -> bool {
+        self.state == SessionStateV1::Closed
+    }
 
     pub fn close(&mut self) -> Result<(), NativeV015Error> {
         self.require_binding()?;
@@ -173,14 +181,18 @@ mod tests {
         );
         let candidate = std::fs::read_to_string(
             std::env::var("MTS_V015_SNAPSHOT_INPUT").expect("accepted source"),
-        ).unwrap();
+        )
+        .unwrap();
         let forged = std::fs::read_to_string(
             std::env::var("MTS_V015_TAMPERED_SNAPSHOT_INPUT").expect("SHA-recomputed forgery"),
-        ).unwrap();
+        )
+        .unwrap();
         // N1: absence of G1 means no Session.
         assert!(matches!(
             NativeV015Session::open_trusted_compact_and(
-                &candidate, Path::new("/missing-g2-trust-checkout")),
+                &candidate,
+                Path::new("/missing-g2-trust-checkout")
+            ),
             Err(NativeV015Error::TrustOrLoad(_))
         ));
         let mut a = NativeV015Session::open_trusted_compact_and(&candidate, &checkout).unwrap();
@@ -205,11 +217,17 @@ mod tests {
         assert_ne!(first.store_instance_id, second.store_instance_id);
         assert_ne!(first.positive_members, second.positive_members);
         assert_eq!(first.canonical_members, second.canonical_members);
-        assert_eq!(first.semantic_content_sha256, second.semantic_content_sha256);
+        assert_eq!(
+            first.semantic_content_sha256,
+            second.semantic_content_sha256
+        );
         assert_eq!(first.trusted_source_sha256, second.trusted_source_sha256);
         // N4: the receipt belonging to A cannot be bound to B.
         let mut source = CpuMemoryInstance::new();
-        let foreign = source.store.load_verified_semantic_anet(&candidate, &verified).unwrap();
+        let foreign = source
+            .store
+            .load_verified_semantic_anet(&candidate, &verified)
+            .unwrap();
         assert!(matches!(
             NativeV015Session::bind_loaded(CpuMemoryInstance::new(), foreign),
             Err(NativeV015Error::InvalidBinding)
@@ -218,22 +236,36 @@ mod tests {
         let foreign_member = second.positive_members[0];
         assert!(!a.admitted.is_member(&b.memory.store, foreign_member));
         // N6: physical existence/closure is not semantic membership.
-        let nonmember = a.admitted.physical_coordinates().iter().copied()
-            .find(|h| !a.admitted.members().contains(h)).unwrap();
+        let nonmember = a
+            .admitted
+            .physical_coordinates()
+            .iter()
+            .copied()
+            .find(|h| !a.admitted.members().contains(h))
+            .unwrap();
         assert!(!a.is_member(nonmember).unwrap());
         // N10/N11/N12/N13: no Γ and no implicit legacy fallback or mutation.
         let carrier = a.memory.store.export_packed_duplets();
         let indices = a.memory.store.export_packed_incidence_index_image();
         assert_eq!(a.step(), Err(NativeV015Error::GammaNotImplemented));
         assert_eq!(a.run(), Err(NativeV015Error::GammaNotImplemented));
-        assert_eq!(a.run_to_quiescence(), Err(NativeV015Error::GammaNotImplemented));
+        assert_eq!(
+            a.run_to_quiescence(),
+            Err(NativeV015Error::GammaNotImplemented)
+        );
         assert_eq!(a.observe().unwrap(), first);
         assert_eq!(a.memory.store.export_packed_duplets(), carrier);
-        assert_eq!(a.memory.store.export_packed_incidence_index_image(), indices);
+        assert_eq!(
+            a.memory.store.export_packed_incidence_index_image(),
+            indices
+        );
         // N15 observation is read-only.
         assert_eq!(a.observe().unwrap(), a.observe().unwrap());
         // N7/N8: replacing carrier invalidates bound generation.
-        a.memory.store.load_packed_duplets(&[(ROOT_HANDLE, ROOT_HANDLE)]).unwrap();
+        a.memory
+            .store
+            .load_packed_duplets(&[(ROOT_HANDLE, ROOT_HANDLE)])
+            .unwrap();
         assert_eq!(a.observe(), Err(NativeV015Error::InvalidBinding));
         assert_eq!(a.step(), Err(NativeV015Error::InvalidBinding));
         assert_eq!(a.run(), Err(NativeV015Error::InvalidBinding));
