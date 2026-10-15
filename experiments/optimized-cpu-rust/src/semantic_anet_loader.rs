@@ -1,20 +1,21 @@
 //! A1-1a: read-only v0.15 semantic ANet transport into the CPU Link substrate.
 //!
-//! SOURCE_REPLAY_VERIFIED is an upstream *independently authenticated* boundary,
-//! not a status that Rust derives from a caller-supplied hash. The caller must
-//! supply an attestation obtained from the pinned anum_docs source replay.
-//! This component neither interprets ANets nor changes Gamma.
+//! SOURCE_REPLAY_VERIFIED is not a caller assertion: only the native pinned
+//! upstream provider can mint an opaque admission capability after real source
+//! replay in a separate process. This module never interprets ANets or Gamma.
 
 use crate::{Handle, OptimizedLinkStore, StoreError, ROOT_HANDLE};
 use serde::Deserialize;
 use std::collections::BTreeSet;
+#[cfg(unix)]
+#[path = "semantic_anet_trust.rs"]
+mod trust;
 
 pub const SEMANTIC_ANET_SCHEMA: &str = "mts-v015-semantic-anet-transport/v0.1";
 pub const MTS_ACCEPTED_REVISION: &str = "813a1569300b241a3b70eb282eecd8231db15e4b";
 pub const TRANSPORT_IMPLEMENTATION_REVISION: &str = "63bd6624e0e030b26ca5a79bc676892ed1408594";
 pub const COMPACT_AND_SOURCE_SHA256: &str =
     "4a5bc92e661ee1d4e0c2c5d51769805b5406651bb491345200d088c9ad23e5f3";
-#[cfg(test)]
 const COMPACT_AND_CONTENT_SHA256: &str =
     "d332f148d42562e8585330493c78a9aa2db3f76641eb660e9804008e5276639c";
 const COMPILER: &str = "v015-direct-formal-json-source@813a1569300b241a3b70eb282eecd8231db15e4b";
@@ -93,58 +94,28 @@ struct ReplayEvidence {
     content_sha256: String,
 }
 
-/// Trust parameters supplied by an **external** independently verified upstream
-/// source replay. An unsigned JSON receipt or a self-reported digest is NOT
-/// proof of authenticity. The caller owns authentication of the source process,
-/// checkout, and protected attestation delivery; Rust only enforces exact replay
-/// equality and pins, and deliberately never compiles or denotes FORMAL/JSON.
-/// Never populate this anchor from the untrusted candidate snapshot.
-pub struct UpstreamReplayAnchor<'a> {
-    pub authenticated_transport_revision: &'a str,
-    pub accepted_mts_revision: &'a str,
-    pub expected_source_sha256: &'a str,
-    pub expected_content_sha256: &'a str,
-    pub expected_source_path: &'a str,
+/// Internal structural comparison parameters, never an authority grant.
+/// External callers cannot construct this anchor.
+pub(crate) struct UpstreamReplayAnchor<'a> {
+    pub(crate) authenticated_transport_revision: &'a str,
+    pub(crate) accepted_mts_revision: &'a str,
+    pub(crate) expected_source_sha256: &'a str,
+    pub(crate) expected_content_sha256: &'a str,
+    pub(crate) expected_source_path: &'a str,
     /// Entire independently authenticated SOURCE_REPLAY_VERIFIED evidence.
     /// A matching hash string alone cannot authorize altered topology/members.
-    pub authenticated_replay_json: &'a str,
+    pub(crate) authenticated_replay_json: &'a str,
 }
 
-/// A capability minted by a trusted caller using *independently authenticated*
-/// source-backed replay evidence. Not directly deserializable. The caller MUST
-/// authenticate upstream execution outside this crate before invoking this API.
+/// Opaque semantic replay capability: only the native pinned provider can mint
+/// it. A caller-supplied JSON status or private anchor is never authoritative.
 pub struct SourceReplayVerified {
     snapshot: TransportSnapshot,
 }
 
 impl SourceReplayVerified {
-    /// Admit a source replay attestation, previously authenticated by the caller.
-    ///
-    /// This is an **external trust boundary**, not a local signature check or
-    /// mathematical proof performed by Rust. The caller must not construct
-    /// `anchor.authenticated_replay_json` by copying the candidate snapshot or
-    /// its own claimed SOURCE_REPLAY_VERIFIED status. Matching digest strings
-    /// are insufficient: the complete authenticated replay is compared.
-    ///
-    /// This API is public so a real A-memory caller can import trusted upstream
-    /// evidence. It intentionally has no unverified/legacy fallback.
-    ///
-    /// ```no_run
-    /// use amemory_optimized_cpu_probe::{OptimizedLinkStore, semantic_anet_loader::*};
-    /// # fn run(store: &mut OptimizedLinkStore, candidate: &str, replay: &str,
-    /// # source_sha: &str, digest: &str, path: &str) -> Result<(), SemanticLoadError> {
-    /// let anchor = UpstreamReplayAnchor {
-    ///     authenticated_transport_revision: TRANSPORT_IMPLEMENTATION_REVISION,
-    ///     accepted_mts_revision: MTS_ACCEPTED_REVISION,
-    ///     expected_source_sha256: source_sha, expected_content_sha256: digest,
-    ///     expected_source_path: path, authenticated_replay_json: replay,
-    /// };
-    /// let verified = SourceReplayVerified::authenticate(replay, &anchor)?;
-    /// store.load_verified_semantic_anet(candidate, &verified)?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn authenticate(
+    /// INTERNAL comparison only. Caller-provided anchor cannot grant trust.
+    pub(crate) fn authenticate(
         evidence_json: &str,
         anchor: &UpstreamReplayAnchor<'_>,
     ) -> Result<Self, SemanticLoadError> {
@@ -568,6 +539,146 @@ mod tests {
             limited.export_packed_incidence_index_image()
         );
         println!("A1_COMPONENT_RUST_LOADER_P1_P5_N1_N8=PASS");
+    }
+
+    /// CI runs this with the immutable upstream producer pinned by checkout.
+    /// No parser mock, no forged externally provided replay enters production.
+    #[test]
+    #[ignore = "needs immutable upstream anum_docs checkout and real Node replay"]
+    fn a1_g1_trusted_production_boundary_n1_n12() {
+        let checkout = std::path::PathBuf::from(
+            std::env::var("A1_TRUSTED_ANUM_CHECKOUT").expect("trusted checkout path"),
+        );
+        let input = std::fs::read_to_string(
+            std::env::var("MTS_V015_SNAPSHOT_INPUT").expect("upstream candidate"),
+        )
+        .unwrap();
+        let original: Value = serde_json::from_str(&input).unwrap();
+        // N1: no trusted checkout, no opaque capability, no changes.
+        assert!(
+            SourceReplayVerified::from_pinned_compact_and_checkout(std::path::Path::new(
+                "/nonexistent/untrusted-checkout-g1"
+            ))
+            .is_err()
+        );
+        let verified = SourceReplayVerified::from_pinned_compact_and_checkout(&checkout)
+            .expect("independent trusted upstream verifier must execute");
+        assert_eq!(verified.source().bytes_sha256(), COMPACT_AND_SOURCE_SHA256);
+        let mut first_store = OptimizedLinkStore::new();
+        let first = first_store
+            .load_verified_semantic_anet(&input, &verified)
+            .unwrap();
+        assert_eq!(first.members().len(), 4);
+        let mut second_store = OptimizedLinkStore::new();
+        let unrelated = second_store.ensure_pair(ROOT_HANDLE, ROOT_HANDLE).unwrap();
+        second_store.ensure_start_self_closed(unrelated).unwrap();
+        let second = second_store
+            .load_verified_semantic_anet(&input, &verified)
+            .unwrap();
+        assert_ne!(first.physical_coordinates(), second.physical_coordinates());
+        let identity = |store: &OptimizedLinkStore, loaded: &LoadedSemanticAnet| {
+            loaded
+                .members()
+                .iter()
+                .map(|&h| store.export_direct_recursive_wire(h).unwrap())
+                .collect::<BTreeSet<_>>()
+        };
+        assert_eq!(
+            identity(&first_store, &first),
+            identity(&second_store, &second)
+        );
+        let physical_nonmember = first
+            .physical_coordinates()
+            .iter()
+            .copied()
+            .find(|h| !first.members().contains(h))
+            .unwrap();
+        assert!(!first.is_member(&first_store, physical_nonmember)); // positive only
+        let foreign_member = *second.members().iter().next().unwrap();
+        assert!(!first.is_member(&second_store, foreign_member)); // N9
+        let old_handle = *first.members().iter().next().unwrap();
+        first_store
+            .load_packed_duplets(&[(ROOT_HANDLE, ROOT_HANDLE)])
+            .unwrap();
+        assert!(!first.is_member(&first_store, old_handle)); // N10
+
+        // This adversarial snapshot has a CORRECTLY RECOMPUTED v0.1 SHA256
+        // digest, generated independently by the real pinned upstream CI.
+        let forged: Value = serde_json::from_str(
+            &std::fs::read_to_string(
+                std::env::var("MTS_V015_TAMPERED_SNAPSHOT_INPUT")
+                    .expect("real upstream forged snapshot with recalculated digest"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_ne!(forged["members"], original["members"]);
+        assert_ne!(forged["contentSha256"], original["contentSha256"]);
+        let fabricated = json!({
+            "status": "SOURCE_REPLAY_VERIFIED",
+            "members": forged["members"],
+            "topology": forged["topology"],
+            "source": forged["source"],
+            "contentSha256": forged["contentSha256"],
+        })
+        .to_string();
+        // This would be accepted by the OLD self-declared private comparison,
+        // showing why that API must no longer be public.
+        let spoof = UpstreamReplayAnchor {
+            authenticated_transport_revision: TRANSPORT_IMPLEMENTATION_REVISION,
+            accepted_mts_revision: MTS_ACCEPTED_REVISION,
+            expected_source_sha256: COMPACT_AND_SOURCE_SHA256,
+            expected_content_sha256: forged["contentSha256"].as_str().unwrap(),
+            expected_source_path: "formal/v0.15/regression/compact-and.formal",
+            authenticated_replay_json: &fabricated,
+        };
+        assert!(SourceReplayVerified::authenticate(&fabricated, &spoof).is_ok());
+        let mut untouched_store = OptimizedLinkStore::new();
+        let pre = untouched_store.export_packed_duplets();
+        let pre_index = untouched_store.export_packed_incidence_index_image();
+        // N2/N3/N4: matching forged claim, positive membership and claimed
+        // digest do NOT work on the actual trusted-production entry.
+        assert!(untouched_store
+            .load_verified_semantic_anet(&forged.to_string(), &verified)
+            .is_err());
+        assert_eq!(pre, untouched_store.export_packed_duplets());
+        assert_eq!(
+            pre_index,
+            untouched_store.export_packed_incidence_index_image()
+        );
+        // N5/N6/N7/N8/N11: do not admit modified structure/source/version or
+        // a claimed host-owned legacy interpreter.
+        for field in ["topology", "source", "revision", "schema", "interpreter"] {
+            let mut candidate = original.clone();
+            match field {
+                "topology" => candidate["topology"]["links"][1] = json!([99999, 99999]),
+                "source" => candidate["source"]["bytesSha256"] = json!("0".repeat(64)),
+                "revision" => candidate["source"]["revision"] = json!("0".repeat(40)),
+                "schema" => candidate["schema"] = json!("mts-v015-semantic-anet-transport/v99"),
+                _ => candidate["interpreter"] = json!("host-selected-legacy"),
+            }
+            assert!(
+                untouched_store
+                    .load_verified_semantic_anet(&candidate.to_string(), &verified)
+                    .is_err(),
+                "{field}"
+            );
+            assert_eq!(pre, untouched_store.export_packed_duplets());
+            assert_eq!(
+                pre_index,
+                untouched_store.export_packed_incidence_index_image()
+            );
+        }
+        // N12: resource failure after partial physical preparation rolls back.
+        let mut bounded = OptimizedLinkStore::with_max_links(2);
+        let before = bounded.export_packed_duplets();
+        let index = bounded.export_packed_incidence_index_image();
+        assert!(bounded
+            .load_verified_semantic_anet(&input, &verified)
+            .is_err());
+        assert_eq!(before, bounded.export_packed_duplets());
+        assert_eq!(index, bounded.export_packed_incidence_index_image());
+        println!("A1_G1_TRUSTED_PRODUCTION_N1_N12=PASS");
     }
 
     #[test]
