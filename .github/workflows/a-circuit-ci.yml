@@ -46,6 +46,25 @@ jobs:
       - name: Install Rust formatting component
         run: rustup component add rustfmt --toolchain 1.98.1
 
+      # CI-UNBLOCK pre-fix diagnosis; removed after confirmed test-only fix.
+      - name: CI-UNBLOCK scenario_web serial and parallel diagnosis
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo +1.98.1 test -p amemory-a-circuit --lib scenario_web::tests:: -- --test-threads=1 --nocapture
+          cargo +1.98.1 test -p amemory-a-circuit --lib ci_unblock_cross_test_contamination_witness -- --test-threads=1 --nocapture
+          failures=0
+          for attempt in 1 2 3 4 5 6; do
+            if cargo +1.98.1 test -p amemory-a-circuit --lib scenario_web::tests:: -- --test-threads=8 > "/tmp/scenario-parallel-${attempt}.log" 2>&1; then
+              echo "CI_UNBLOCK_PARALLEL_ATTEMPT_${attempt}=PASS"
+            else
+              failures=$((failures + 1))
+              echo "CI_UNBLOCK_PARALLEL_ATTEMPT_${attempt}=FAIL"
+              tail -n 55 "/tmp/scenario-parallel-${attempt}.log"
+            fi
+          done
+          echo "CI_UNBLOCK_PARALLEL_FAILURE_COUNT=${failures}"
+
       - name: Checkout immutable accepted v0.15 transport producer
         uses: actions/checkout@v6
         with:

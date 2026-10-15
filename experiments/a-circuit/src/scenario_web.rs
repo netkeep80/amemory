@@ -1828,6 +1828,30 @@ mod tests {
     const MUX1_LIFECYCLE: &str =
         include_str!("../scenarios/mux1-lifecycle-v1.json");
 
+    // CI-UNBLOCK PRE-FIX WITNESS: two independent test transactions can
+    // interleave despite the individual process-global Mutex guards.
+    #[test]
+    fn ci_unblock_cross_test_contamination_witness() {
+        let (cleared_tx, cleared_rx) = std::sync::mpsc::channel();
+        let (written_tx, written_rx) = std::sync::mpsc::channel();
+        let observer = std::thread::spawn(move || {
+            clear_report_and_error();
+            cleared_tx.send(()).unwrap();
+            written_rx.recv().unwrap();
+            amemory_scenario_error_available()
+        });
+        cleared_rx.recv().unwrap();
+        store_error(ScenarioTransportErrorV1::Serialize {
+            schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
+            message: "concurrent test-owned error".to_owned(),
+        });
+        written_tx.send(()).unwrap();
+        let observed = observer.join().unwrap();
+        assert_eq!(observed, 1, "another test can poison a cleared error buffer");
+        println!("CI_UNBLOCK_CONCURRENT_BUFFER_CONTAMINATION=REPRODUCED");
+        clear_report_and_error();
+    }
+
     fn load_manifest(source: &str) {
         amemory_scenario_manifest_clear();
         for (index, byte) in source.bytes().enumerate() {
