@@ -46,6 +46,34 @@ jobs:
       - name: Install Rust formatting component
         run: rustup component add rustfmt --toolchain 1.98.1
 
+      # Preserve parallel execution for the rest of the workspace; exercise
+      # just the stateful scenario_web ABI tests as a serial/parallel control.
+      - name: CI-UNBLOCK scenario_web isolation serial and repeated parallel regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The existing production file predates rustfmt conformance. Format-check
+          # only this PR's extracted test-isolation block, without mass reformat.
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path("experiments/a-circuit/src/scenario_web.rs").read_text()
+          start = source.index("    // The Web ABI's shared buffers")
+          stop = source.index("    fn load_manifest(", start)
+          guard = source[start:stop].rstrip()
+          assert source.count("    #[test]") == 11, "unaccounted stateful scenario tests"
+          assert source.count("let _scenario_test_guard = isolate_scenario_web_test();") == 11
+          Path("/tmp/scenario-web-test-guard.rs").write_text(
+              "#[cfg(test)]\nmod isolated {\n    use std::sync::Mutex;\n"
+              + guard + "\n}\n")
+          PY
+          rustfmt +1.98.1 --edition 2021 --check /tmp/scenario-web-test-guard.rs
+          cargo +1.98.1 test -p amemory-a-circuit --lib scenario_web::tests:: -- --test-threads=1
+          for attempt in 1 2 3 4 5 6; do
+            cargo +1.98.1 test -p amemory-a-circuit --lib scenario_web::tests:: -- --test-threads=8
+            echo "SCENARIO_WEB_PARALLEL_ISOLATION_ATTEMPT_${attempt}=PASS"
+          done
+          echo "SCENARIO_WEB_TEST_ISOLATION=PASS"
+
       - name: Checkout immutable accepted v0.15 transport producer
         uses: actions/checkout@v6
         with:
