@@ -130,34 +130,19 @@ impl SourceReplayVerified {
     /// evidence. It intentionally has no unverified/legacy fallback.
     ///
     /// ```no_run
-    /// use amemory_optimized_cpu_probe::OptimizedLinkStore;
-    /// use amemory_optimized_cpu_probe::semantic_anet_loader::{
-    ///     SemanticLoadError, LoadedSemanticAnet, SourceReplayVerified,
-    ///     UpstreamReplayAnchor, MTS_ACCEPTED_REVISION, TRANSPORT_IMPLEMENTATION_REVISION,
+    /// use amemory_optimized_cpu_probe::{OptimizedLinkStore, semantic_anet_loader::*};
+    /// # fn run(store: &mut OptimizedLinkStore, candidate: &str, replay: &str,
+    /// # source_sha: &str, digest: &str, path: &str) -> Result<(), SemanticLoadError> {
+    /// let anchor = UpstreamReplayAnchor {
+    ///     authenticated_transport_revision: TRANSPORT_IMPLEMENTATION_REVISION,
+    ///     accepted_mts_revision: MTS_ACCEPTED_REVISION,
+    ///     expected_source_sha256: source_sha, expected_content_sha256: digest,
+    ///     expected_source_path: path, authenticated_replay_json: replay,
     /// };
-    /// fn load_from_protected_replay(
-    ///     store: &mut OptimizedLinkStore,
-    ///     candidate: &str,
-    ///     independently_authenticated_replay: &str,
-    ///     accepted_source_sha256: &str,
-    ///     accepted_transport_sha256: &str,
-    ///     source_path: &str,
-    /// ) -> Result<LoadedSemanticAnet, SemanticLoadError> {
-    ///     // Provenance of independently_authenticated_replay must already be
-    ///     // established by a trusted upstream verifier, outside this function.
-    ///     let anchor = UpstreamReplayAnchor {
-    ///         authenticated_transport_revision: TRANSPORT_IMPLEMENTATION_REVISION,
-    ///         accepted_mts_revision: MTS_ACCEPTED_REVISION,
-    ///         expected_source_sha256: accepted_source_sha256,
-    ///         expected_content_sha256: accepted_transport_sha256,
-    ///         expected_source_path: source_path,
-    ///         authenticated_replay_json: independently_authenticated_replay,
-    ///     };
-    ///     let verified = SourceReplayVerified::authenticate(
-    ///         independently_authenticated_replay, &anchor
-    ///     )?;
-    ///     store.load_verified_semantic_anet(candidate, &verified)
-    /// }
+    /// let verified = SourceReplayVerified::authenticate(replay, &anchor)?;
+    /// store.load_verified_semantic_anet(candidate, &verified)?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn authenticate(
         evidence_json: &str,
