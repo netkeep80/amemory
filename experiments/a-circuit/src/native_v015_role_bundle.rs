@@ -145,7 +145,7 @@ mod tests {
         }
         current
     }
-    fn fixture(noisy: bool) -> (OptimizedLinkStore, BTreeSet<Handle>, Handle, Handle) {
+    fn fixture(noisy: bool, reverse_roles: bool) -> (OptimizedLinkStore, BTreeSet<Handle>, Handle, Handle) {
         let mut s = OptimizedLinkStore::new();
         if noisy {
             let n = pair(&mut s, ROOT_HANDLE, ROOT_HANDLE);
@@ -156,8 +156,17 @@ mod tests {
         let bundle = fresh(&mut s, &mut cursor);
         let n1 = fresh(&mut s, &mut cursor);
         let n2 = fresh(&mut s, &mut cursor);
-        let r1 = pair(&mut s, bundle, n1);
-        let r2 = pair(&mut s, bundle, n2);
+        // N10: reverse the allocation order of the two real Role Links, not
+        // the insertion order of a BTreeSet (which always re-sorts itself).
+        let (r1, r2) = if reverse_roles {
+            let r2 = pair(&mut s, bundle, n2);
+            let r1 = pair(&mut s, bundle, n1);
+            (r1, r2)
+        } else {
+            let r1 = pair(&mut s, bundle, n1);
+            let r2 = pair(&mut s, bundle, n2);
+            (r1, r2)
+        };
         let antecedent = pair(&mut s, r1, r2);
         let output = pair(&mut s, r2, r1);
         let image = seq(&mut s, &[output, r1]);
@@ -171,13 +180,10 @@ mod tests {
 
     #[test]
     fn a1_3_component_two_roles_positive_membership_and_read_only() {
-        let (s, members, ambient, admission) = fixture(false);
+        let (s, members, ambient, admission) = fixture(false, false);
         let before = s.export_packed_duplets();
         let index = s.export_packed_incidence_index_image();
         let report = inspect(&s, &members).unwrap();
-        // N10: membership enumeration/insertion order cannot be semantic.
-        let reverse_order = BTreeSet::from_iter(members.iter().rev().copied());
-        assert_eq!(report, inspect(&s, &reverse_order).unwrap());
         assert_eq!(report.candidates.len(), 1);
         assert_eq!(report.candidates[0].roles.len(), 2);
         assert_eq!(report.candidates[0].output_templates.len(), 2);
@@ -195,7 +201,7 @@ mod tests {
 
     #[test]
     fn a1_3_component_empty_one_many_exact_sequence_and_corruption() {
-        let (mut s, _, _, _) = fixture(false);
+        let (mut s, _, _, _) = fixture(false, false);
         let mut cursor = ROOT_HANDLE;
         for _ in 0..20 {
             fresh(&mut s, &mut cursor);
@@ -229,7 +235,7 @@ mod tests {
 
     #[test]
     fn a1_3_component_nested_three_roles_and_absent_admission() {
-        let (mut s, _, _, _) = fixture(false);
+        let (mut s, _, _, _) = fixture(false, false);
         let mut cursor = ROOT_HANDLE;
         for _ in 0..40 {
             fresh(&mut s, &mut cursor);
@@ -262,13 +268,118 @@ mod tests {
 
     #[test]
     fn a1_3_component_portable_wires_across_noisy_memories() {
-        let (first, a_members, _, _) = fixture(false);
-        let (second, b_members, _, _) = fixture(true);
+        let (first, a_members, _, _) = fixture(false, false);
+        let (second, b_members, _, _) = fixture(true, false);
         assert_eq!(
             inspect(&first, &a_members).unwrap().candidates,
             inspect(&second, &b_members).unwrap().candidates
         );
         assert_ne!(first.export_packed_duplets(), second.export_packed_duplets());
+    }
+
+    #[test]
+    fn a1_3_n2_positive_role_names_are_not_role_links() {
+        for reverse in [false, true] {
+            let (s, members, _, admission) = fixture(false, reverse);
+            let rule = poles(&s, admission).unwrap().1;
+            let body = poles(&s, rule).unwrap().1;
+            let antecedent = poles(&s, body).unwrap().0;
+            let (role_a, role_b) = poles(&s, antecedent).unwrap();
+            let name_a = poles(&s, role_a).unwrap().1;
+            let name_b = poles(&s, role_b).unwrap().1;
+            let mut with_names = members.clone();
+            with_names.insert(name_a);
+            with_names.insert(name_b);
+            let original = inspect(&s, &members).unwrap().candidates;
+            let enlarged = inspect(&s, &with_names).unwrap();
+            let candidate = enlarged.candidates.iter()
+                .find(|c| c.positive_admission == wire(&s, admission).unwrap()).unwrap();
+            assert_eq!(candidate, &original[0]);
+            assert_eq!(candidate.roles.len(), 2);
+            assert_eq!(candidate.roles, [role_a, role_b]
+                .map(|h| wire(&s, h).unwrap())
+                .into_iter().collect::<BTreeSet<_>>().into_iter().collect::<Vec<_>>());
+            assert!(!candidate.roles.contains(&wire(&s, name_a).unwrap()));
+            assert!(!candidate.roles.contains(&wire(&s, name_b).unwrap()));
+        }
+    }
+
+    #[test]
+    fn a1_3_n3_anchor_substitution_does_not_inherit_positive_admission() {
+        let (mut s, members, _, admission) = fixture(false, false);
+        let rule = poles(&s, admission).unwrap().1;
+        let (bundle, body) = poles(&s, rule).unwrap();
+        let theory = poles(&s, admission).unwrap().0;
+        let baseline = inspect(&s, &members).unwrap().candidates;
+        let alternative = pair(&mut s, ROOT_HANDLE, bundle);
+        assert_ne!(alternative, bundle);
+        let substitute_rule = pair(&mut s, alternative, body);
+        let substitute_admission = pair(&mut s, theory, substitute_rule);
+        // Both impostors exist physically. Neither is in the positive ANet.
+        assert!(!members.contains(&substitute_admission));
+        assert_eq!(inspect(&s, &members).unwrap().candidates, baseline);
+        let mut expanded = members.clone();
+        expanded.insert(substitute_admission);
+        let expanded_report = inspect(&s, &expanded).unwrap();
+        // Explicit membership permits another *candidate*, not a selected
+        // active Theory or authorization for execution.
+        assert_eq!(expanded_report.candidates.len(), 2);
+        assert!(expanded_report.candidates.iter()
+            .any(|c| c.role_bundle_anchor == wire(&s, alternative).unwrap()
+                && c.roles.is_empty()));
+    }
+
+    #[test]
+    fn a1_3_n5_malformed_rule_and_body_are_not_candidates() {
+        let (mut s, members, _, admission) = fixture(false, false);
+        let theory = poles(&s, admission).unwrap().0;
+        let rule = poles(&s, admission).unwrap().1;
+        let body = poles(&s, rule).unwrap().1;
+        let anchor = poles(&s, rule).unwrap().0;
+        // Shape-invalid Rule: START(x) has its own handle as start pole.
+        let self_closed_rule = s.ensure_start_self_closed(rule).unwrap();
+        let invalid_rule_admission = pair(&mut s, theory, self_closed_rule);
+        // Shape-invalid Body: END(body) has its own handle as end pole.
+        let self_closed_body = s.ensure_end_self_closed(body).unwrap();
+        let malformed_rule = pair(&mut s, anchor, self_closed_body);
+        let invalid_body_admission = pair(&mut s, theory, malformed_rule);
+        for bad_admission in [invalid_rule_admission, invalid_body_admission] {
+            let report = inspect(&s, &BTreeSet::from([bad_admission])).unwrap();
+            assert!(report.candidates.is_empty());
+            assert_eq!(report.unclassified_positive_members,
+                vec![wire(&s, bad_admission).unwrap()]);
+        }
+        // A merely physical disconnected Rule/Body has no membership grant.
+        let detached_antecedent = pair(&mut s, ROOT_HANDLE, anchor);
+        let detached_body = pair(&mut s, detached_antecedent, ROOT_HANDLE);
+        let detached_rule = pair(&mut s, anchor, detached_body);
+        let detached_admission = pair(&mut s, theory, detached_rule);
+        assert!(!members.contains(&detached_admission));
+        assert_eq!(inspect(&s, &members).unwrap().candidates.len(), 1);
+        // This shape is structurally well-formed with empty ExactSequence:
+        // no general normative prohibition can be invented from A9b.
+        assert_eq!(inspect(&s, &BTreeSet::from([detached_admission]))
+            .unwrap().candidates.len(), 1);
+    }
+
+    #[test]
+    fn a1_3_n10_opposite_role_carrier_allocation_order() {
+        let (first, members_a, _, admission_a) = fixture(false, false);
+        let (second, members_b, _, admission_b) = fixture(false, true);
+        let role_pair = |s: &OptimizedLinkStore, admission: Handle| {
+            let rule = poles(s, admission).unwrap().1;
+            let body = poles(s, rule).unwrap().1;
+            let antecedent = poles(s, body).unwrap().0;
+            poles(s, antecedent).unwrap()
+        };
+        let (a1, a2) = role_pair(&first, admission_a);
+        let (b1, b2) = role_pair(&second, admission_b);
+        assert!(a1 < a2);
+        assert!(b1 > b2); // actual BTreeSet iteration of role handles flips
+        assert_ne!(members_a.iter().copied().collect::<Vec<_>>(),
+                   members_b.iter().copied().collect::<Vec<_>>());
+        assert_eq!(inspect(&first, &members_a).unwrap().candidates,
+                   inspect(&second, &members_b).unwrap().candidates);
     }
 
     #[test]
