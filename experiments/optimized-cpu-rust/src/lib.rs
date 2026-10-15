@@ -1,5 +1,6 @@
 pub mod orientation;
 pub mod structural;
+pub mod semantic_anet_loader;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -1313,6 +1314,9 @@ pub struct OptimizedLinkStore {
     // Non-semantic runtime identity used only to scope executor caches. It is
     // never exported as Link/Anum identity.
     instance_id: u32,
+    // Monotonic generation for in-place wholesale carrier replacement.
+    // Positive semantic membership from a prior generation must be invalid.
+    carrier_epoch: u64,
     // Dense SoA carrier. Every index >=1 and <len is a valid local Link handle;
     // no per-record Option/discriminant is needed because this prototype does
     // not delete physical records in place.
@@ -1334,6 +1338,7 @@ impl Clone for OptimizedLinkStore {
     fn clone(&self) -> Self {
         Self {
             instance_id: next_store_instance_id(),
+            carrier_epoch: self.carrier_epoch,
             starts: self.starts.clone(),
             ends: self.ends.clone(),
             canonical_by_pair: self.canonical_by_pair.clone(),
@@ -1367,6 +1372,7 @@ impl OptimizedLinkStore {
         assert!(max_links.map_or(true, |limit| limit >= 1));
         let mut store = Self {
             instance_id: next_store_instance_id(),
+            carrier_epoch: 0,
             starts: vec![NO_HANDLE, ROOT_HANDLE],
             ends: vec![NO_HANDLE, ROOT_HANDLE],
             canonical_by_pair: HashMap::new(),
@@ -1430,6 +1436,10 @@ impl OptimizedLinkStore {
 
     pub(crate) fn instance_id(&self) -> u32 {
         self.instance_id
+    }
+
+    pub(crate) fn carrier_epoch(&self) -> u64 {
+        self.carrier_epoch
     }
 
     /// Starts a lightweight transaction over the store's append-only mutation
@@ -1694,6 +1704,10 @@ impl OptimizedLinkStore {
         let max_links = self.max_links;
         let mut staging = Self::with_optional_limit(max_links);
         staging.instance_id = runtime_instance_id;
+        staging.carrier_epoch = self
+            .carrier_epoch
+            .checked_add(1)
+            .ok_or(StoreError::CapacityExceeded)?;
 
         for (offset, &(start, end)) in duplets.iter().enumerate().skip(1) {
             let handle = Handle::try_from(offset + 1)

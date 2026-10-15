@@ -36,9 +36,93 @@ jobs:
     steps:
       - name: Checkout A-memory
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Install pinned Rust toolchain once
         run: rustup toolchain install 1.98.1 --profile minimal
+
+
+      - name: Install Rust formatting component
+        run: rustup component add rustfmt --toolchain 1.98.1
+
+      - name: Checkout immutable accepted v0.15 transport producer
+        uses: actions/checkout@v6
+        with:
+          repository: netkeep80/anum_docs
+          ref: 63bd6624e0e030b26ca5a79bc676892ed1408594
+          path: upstream-anum-docs
+          persist-credentials: false
+
+      - name: Node for pinned upstream source replay
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Generate and independently replay accepted compact AND semantic ANet
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C upstream-anum-docs rev-parse HEAD)" = "63bd6624e0e030b26ca5a79bc676892ed1408594"
+          sha256sum upstream-anum-docs/formal/v0.15/regression/compact-and.formal |
+            grep -q '^4a5bc92e661ee1d4e0c2c5d51769805b5406651bb491345200d088c9ad23e5f3 '
+          npm ci --prefix upstream-anum-docs/ts
+          npm run build --prefix upstream-anum-docs/ts
+          (
+            cd upstream-anum-docs/ts
+            MTS_V015_SNAPSHOT_OUTPUT="$RUNNER_TEMP/a1-compact-and.json" \
+              node dist/test/v015-semantic-snapshot-transport.test.js
+            MTS_V015_SNAPSHOT_INPUT="$RUNNER_TEMP/a1-compact-and.json" \
+              node dist/test/v015-semantic-snapshot-transport.test.js
+          )
+          echo "UPSTREAM_SOURCE_BACKED_REPLAY=PASS"
+          MTS_V015_SNAPSHOT_INPUT="$RUNNER_TEMP/a1-compact-and.json" \
+          MTS_V015_VERIFIED_EVIDENCE="$RUNNER_TEMP/a1-verified.json" \
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync, appendFileSync } from 'node:fs';
+          import { createHash } from 'node:crypto';
+          const s = JSON.parse(readFileSync(process.env.MTS_V015_SNAPSHOT_INPUT, 'utf8'));
+          if (s.schema !== 'mts-v015-semantic-anet-transport/v0.1' ||
+              s.source.bytesSha256 !== '4a5bc92e661ee1d4e0c2c5d51769805b5406651bb491345200d088c9ad23e5f3' ||
+              s.source.revision !== '813a1569300b241a3b70eb282eecd8231db15e4b' ||
+              s.members.length !== 4) throw Error('unexpected independently verified compact AND');
+          const verified = {
+            status: 'SOURCE_REPLAY_VERIFIED',
+            members: s.members, topology: s.topology, source: s.source,
+            contentSha256: s.contentSha256,
+          };
+          writeFileSync(process.env.MTS_V015_VERIFIED_EVIDENCE, JSON.stringify(verified));
+          if (s.contentSha256 !== 'd332f148d42562e8585330493c78a9aa2db3f76641eb660e9804008e5276639c')
+            throw Error('unexpected independently pinned compact AND semantic digest');
+          const forged = JSON.parse(JSON.stringify(s));
+          const available = forged.topology.links.findIndex((_, i) => i > 0 && !forged.members.includes(i));
+          if (available < 0) throw Error('no physical nonmember to attack');
+          forged.members.push(available);
+          forged.members.sort((a,b) => a - b);
+          forged.contentSha256 = createHash('sha256').update(JSON.stringify({
+            schema: forged.schema, topology: forged.topology,
+            members: forged.members, source: forged.source,
+          })).digest('hex');
+          writeFileSync(process.env.MTS_V015_SNAPSHOT_INPUT + '.forged', JSON.stringify(forged));
+          appendFileSync(process.env.GITHUB_ENV,
+            'MTS_V015_SNAPSHOT_INPUT=' + process.env.MTS_V015_SNAPSHOT_INPUT + '\n' +
+            'MTS_V015_VERIFIED_EVIDENCE=' + process.env.MTS_V015_VERIFIED_EVIDENCE + '\n' +
+            'MTS_V015_EXPECTED_DIGEST=' + s.contentSha256 + '\n' +
+            'MTS_V015_TAMPERED_SNAPSHOT_INPUT=' + process.env.MTS_V015_SNAPSHOT_INPUT + '.forged' + '\n');
+          NODE
+
+      - name: A1-1a exact source-backed Rust CPU load + P1-P5 N1-N8
+        run: |
+          set -euo pipefail
+          rustfmt +1.98.1 --edition 2021 --check experiments/optimized-cpu-rust/src/semantic_anet_loader.rs
+          cargo +1.98.1 test --workspace --locked
+          cargo +1.98.1 test --release --locked \
+            -p amemory-optimized-cpu-probe a1_real_upstream_p1_p5_n1_n8 \
+            -- --ignored --nocapture
+          git diff --check origin/main...HEAD
+          git diff --check
+          git diff --exit-code -- experiments/optimized-cpu-rust/src/semantic_anet_loader.rs
+          echo "A1_COMPONENT_RUST_LOADER_P1_P5_N1_N8=PASS"
 
       - name: Verify exact LinksDB Doublets provenance
         shell: bash
