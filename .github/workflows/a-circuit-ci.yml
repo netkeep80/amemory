@@ -59,23 +59,6 @@ jobs:
           done
           echo "SCENARIO_WEB_TEST_ISOLATION=PASS"
 
-      # TEMP CI-UNBLOCK diagnostic: record the exact RepoGuard rule violation.
-      - name: Checkout pinned RepoGuard diagnostic
-        uses: actions/checkout@v6
-        with:
-          repository: netkeep80/repo-guard
-          ref: 756944656fa14de752f44bb404e1dca852f5fa6a
-          path: upstream-repo-guard
-          persist-credentials: false
-
-      - name: CI-UNBLOCK print blocking RepoGuard JSON report
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          npm install --prefix upstream-repo-guard --omit=dev --silent
-          node upstream-repo-guard/dist/repo-guard.mjs --repo-root "$PWD" --enforcement blocking check-pr --format json || true
-
       - name: Checkout immutable accepted v0.15 transport producer
         uses: actions/checkout@v6
         with:
