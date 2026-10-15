@@ -63,8 +63,8 @@ jobs:
           assert source.count("    #[test]") == 11, "unaccounted stateful scenario tests"
           assert source.count("let _scenario_test_guard = isolate_scenario_web_test();") == 11
           Path("/tmp/scenario-web-test-guard.rs").write_text(
-              "#[cfg(test)]\\nmod isolated {\\n    use std::sync::Mutex;\\n"
-              + guard + "\\n}\\n")
+              "#[cfg(test)]\nmod isolated {\n    use std::sync::Mutex;\n"
+              + guard + "\n}\n")
           PY
           rustfmt +1.98.1 --edition 2021 --check /tmp/scenario-web-test-guard.rs
           cargo +1.98.1 test -p amemory-a-circuit --lib scenario_web::tests:: -- --test-threads=1
