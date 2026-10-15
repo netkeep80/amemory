@@ -277,8 +277,7 @@ pub struct LoadedSemanticAnet {
 impl LoadedSemanticAnet {
     /// Raw member handles alone do not establish live Store ownership.
     pub fn belongs_to(&self, store: &OptimizedLinkStore) -> bool {
-        self.store_instance_id == store.instance_id()
-            && self.carrier_epoch == store.carrier_epoch()
+        self.store_instance_id == store.instance_id() && self.carrier_epoch == store.carrier_epoch()
     }
     pub fn store_instance_id(&self) -> u32 {
         self.store_instance_id
