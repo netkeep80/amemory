@@ -96,6 +96,17 @@ impl NativeV015Session {
         Self::from_verified(CpuMemoryInstance::new(), candidate, &verified)
     }
 
+    /// Identical trust/load/inspection boundary for the Author-approved
+    /// positive-arity Rule source; no alternate executor or host Theory.
+    pub fn open_trusted_two_role_meta_rule(
+        candidate: &str,
+        deployment_owned_checkout: &Path,
+    ) -> Result<Self, NativeV015Error> {
+        let verified =
+            SourceReplayVerified::from_pinned_two_role_meta_rule_checkout(deployment_owned_checkout)?;
+        Self::from_verified(CpuMemoryInstance::new(), candidate, &verified)
+    }
+
     // Private admission path, used by real-source replay tests with noisy Stores.
     fn from_verified(
         mut memory: CpuMemoryInstance,
@@ -219,6 +230,141 @@ impl NativeV015Session {
 mod tests {
     use super::*;
     use amemory_optimized_cpu_probe::{OptimizedLinkStore, ROOT_HANDLE};
+
+    /// This test is run explicitly by consolidated CI against a transport
+    /// produced AND independently replayed from accepted upstream bytes.
+    /// It intentionally never executes a Rule or chooses a current Context.
+    #[test]
+    #[ignore = "requires exact accepted two-role upstream FORMAL + independent replay"]
+    fn a1_r2_two_role_trusted_source_roles_admission_and_falsifiers() {
+        use serde_json::{json, Value};
+        use std::collections::BTreeSet;
+
+        let checkout = std::path::PathBuf::from(
+            std::env::var("A1_TRUSTED_ANUM_CHECKOUT").expect("trusted checkout"),
+        );
+        let snapshot = std::fs::read_to_string(
+            std::env::var("MTS_V015_TWO_ROLE_SNAPSHOT_INPUT").expect("accepted two-role transport"),
+        )
+        .unwrap();
+        let trusted =
+            SourceReplayVerified::from_pinned_two_role_meta_rule_checkout(&checkout).unwrap();
+        assert_eq!(
+            trusted.source().bytes_sha256(),
+            amemory_optimized_cpu_probe::semantic_anet_loader::TWO_ROLE_SOURCE_SHA256
+        );
+        let mut a = NativeV015Session::from_verified(
+            CpuMemoryInstance::new(), &snapshot, &trusted,
+        )
+        .unwrap();
+        let original = a.observe().unwrap();
+        assert_eq!(original.positive_members.len(), 3);
+        assert!(!original.gamma_implemented);
+        let report = a.inspect_role_bundles().unwrap();
+        assert_eq!(report.candidates.len(), 1);
+        assert!(report.ambiguous_members.is_empty());
+        assert!(report.malformed_sequence_members.is_empty());
+        let rule = &report.candidates[0];
+        assert_eq!(rule.roles.len(), 2); // V->X and V->Y, not RoleX/RoleY names
+        assert_eq!(rule.output_templates.len(), 1);
+        assert_eq!(
+            original.canonical_members.iter().cloned().collect::<BTreeSet<_>>(),
+            [rule.positive_admission.clone(), rule.roles[0].clone(), rule.roles[1].clone()]
+                .into_iter().collect::<BTreeSet<_>>()
+        );
+        // Actual, not just BTreeSet order: unrelated physical allocation before
+        // import produces different Handles with identical canonical witnesses.
+        let mut noisy = CpuMemoryInstance::new();
+        let noise = noisy.store.ensure_pair(ROOT_HANDLE, ROOT_HANDLE).unwrap();
+        noisy.store.ensure_start_self_closed(noise).unwrap();
+        let b = NativeV015Session::from_verified(noisy, &snapshot, &trusted).unwrap();
+        assert_eq!(a.inspect_role_bundles().unwrap(), b.inspect_role_bundles().unwrap());
+        let second = b.observe().unwrap();
+        assert_eq!(original.canonical_members, second.canonical_members);
+        assert_eq!(original.semantic_content_sha256, second.semantic_content_sha256);
+        assert_ne!(original.positive_members, second.positive_members);
+        assert_ne!(original.store_instance_id, second.store_instance_id);
+
+        // Ambient physical V->Z does not add a semantic role.
+        let anchor = a.admitted.physical_coordinates().iter().copied()
+            .find(|&h| a.memory.store.export_direct_recursive_wire(h).unwrap()
+                == rule.role_bundle_anchor).unwrap();
+        let a_noise = a.memory.store.ensure_pair(ROOT_HANDLE, ROOT_HANDLE).unwrap();
+        let z = a.memory.store.ensure_start_self_closed(a_noise).unwrap();
+        let ambient = a.memory.store.ensure_pair(anchor, z).unwrap();
+        assert!(!a.is_member(ambient).unwrap());
+        assert_eq!(a.inspect_role_bundles().unwrap(), report);
+
+        let parsed: Value = serde_json::from_str(&snapshot).unwrap();
+        let coordinates = a.admitted.physical_coordinates();
+        let find_coord = |wire: &str| -> usize {
+            coordinates.iter().position(|&h| {
+                a.memory.store.export_direct_recursive_wire(h).unwrap() == wire
+            }).unwrap()
+        };
+        let role_coord = find_coord(&rule.roles[0]);
+        let admission_coord = find_coord(&rule.positive_admission);
+        let baseline = a.memory.store.export_packed_duplets();
+        let baseline_index = a.memory.store.export_packed_incidence_index_image();
+        let reject = |modified: &Value| {
+            let mut memory = CpuMemoryInstance::new();
+            let before = memory.store.export_packed_duplets();
+            assert!(NativeV015Session::from_verified(
+                memory, &modified.to_string(), &trusted
+            ).is_err());
+            let mut store = a.memory.store.clone();
+            let carrier = store.export_packed_duplets();
+            let indexes = store.export_packed_incidence_index_image();
+            assert!(store.load_verified_semantic_anet(
+                &modified.to_string(), &trusted
+            ).is_err());
+            assert_eq!(carrier, store.export_packed_duplets());
+            assert_eq!(indexes, store.export_packed_incidence_index_image());
+            assert_eq!(before, CpuMemoryInstance::new().store.export_packed_duplets());
+        };
+        // Physical carrier stays intact while positive semantic membership is
+        // removed. Neither local digest nor existing link incidence can recover it.
+        let mut removed_role = parsed.clone();
+        removed_role["members"].as_array_mut().unwrap()
+            .retain(|c| c.as_u64() != Some(role_coord as u64));
+        reject(&removed_role);
+        let mut removed_admission = parsed.clone();
+        removed_admission["members"].as_array_mut().unwrap()
+            .retain(|c| c.as_u64() != Some(admission_coord as u64));
+        reject(&removed_admission);
+        // Even a syntactically valid checksum after tamper is not source replay.
+        let mut forged_revision = parsed.clone();
+        forged_revision["source"]["revision"] = json!("0".repeat(40));
+        forged_revision["contentSha256"] = json!("f".repeat(64));
+        reject(&forged_revision);
+        let mut changed_source = parsed.clone();
+        changed_source["source"]["bytesSha256"] = json!("f".repeat(64));
+        reject(&changed_source);
+        let mut anchor_swap = parsed.clone();
+        let rule_handle = a.admitted.physical_coordinates().iter().copied()
+            .find(|&h| a.memory.store.export_direct_recursive_wire(h).unwrap() == rule.rule)
+            .unwrap();
+        let rule_coord = coordinates.iter().position(|&h| h == rule_handle).unwrap();
+        anchor_swap["topology"]["links"][rule_coord][0] = json!(0);
+        reject(&anchor_swap);
+        let mut output_swap = parsed.clone();
+        let image_coord = find_coord(&rule.output_sequence_carrier);
+        output_swap["topology"]["links"][image_coord][1] = json!(0);
+        reject(&output_swap);
+        let mut self_incidence = parsed.clone();
+        self_incidence["topology"]["links"][rule_coord] =
+            json!([rule_coord, rule_coord]);
+        reject(&self_incidence);
+        assert_eq!(a.memory.store.export_packed_duplets(), baseline);
+        assert_eq!(a.memory.store.export_packed_incidence_index_image(), baseline_index);
+        // R3/R4 must still refuse execution; a RoleBundle candidate is not an
+        // applicable or executable Rule.
+        assert_eq!(a.step(), Err(NativeV015Error::GammaNotImplemented));
+        assert_eq!(a.run(), Err(NativeV015Error::GammaNotImplemented));
+        assert_eq!(a.run_to_quiescence(), Err(NativeV015Error::GammaNotImplemented));
+        println!("A1_R2_ACCEPTED_TWO_ROLE_TRUSTED_POSITIVE_ARITY=PASS");
+        println!("A1_R2_ROLE_BUNDLE_READ_ONLY_NOT_GAMMA=PASS");
+    }
 
     #[test]
     #[ignore = "real pinned upstream anum_docs source replay required"]
