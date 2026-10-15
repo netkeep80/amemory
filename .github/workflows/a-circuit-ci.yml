@@ -169,6 +169,22 @@ jobs:
           git diff --check
           echo "A1_G1_TRUSTED_PRODUCTION_N1_N12=PASS"
 
+      - name: A1-2 G2 real trusted native Session N1-N15
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustfmt +1.98.1 --edition 2021 --check \
+            experiments/a-circuit/src/native_v015_session.rs
+          A1_TRUSTED_ANUM_CHECKOUT="$PWD/upstream-anum-docs" \
+            cargo +1.98.1 test --locked -p amemory-a-circuit \
+              a1_g2_native_bound_session_real_g1_n1_n15 -- --ignored --nocapture
+          A1_TRUSTED_ANUM_CHECKOUT="$PWD/upstream-anum-docs" \
+            cargo +1.98.1 test --release --locked -p amemory-a-circuit \
+              a1_g2_native_bound_session_real_g1_n1_n15 -- --ignored --nocapture
+          git diff --check origin/main...HEAD
+          git diff --check
+          echo "A1_G2_NATIVE_SESSION_REAL_G1_N1_N15=PASS"
+
       - name: Verify exact LinksDB Doublets provenance
         shell: bash
         run: |

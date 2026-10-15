@@ -18,6 +18,11 @@ use std::sync::atomic::{AtomicU32, Ordering};
 static NEXT_CPU_MEMORY_ID: AtomicU32 = AtomicU32::new(1);
 static NEXT_CPU_SESSION_ID: AtomicU32 = AtomicU32::new(1);
 
+pub(crate) fn next_cpu_session_id() -> String {
+    let number = NEXT_CPU_SESSION_ID.fetch_add(1, Ordering::SeqCst);
+    format!("A-session#{}", number)
+}
+
 /// One physical optimized-CPU A-memory instance.
 ///
 /// Program/proof/scenario layers may load data into this instance, but they do
@@ -498,10 +503,8 @@ impl CpuRuntimeSession {
         engine: OptimizedStructuralEngine,
         base_link_count: usize,
     ) -> Self {
-        let session_number =
-            NEXT_CPU_SESSION_ID.fetch_add(1, Ordering::SeqCst);
         Self {
-            id: format!("A-session#{}", session_number),
+            id: next_cpu_session_id(),
             memory,
             engine,
             base_link_count,

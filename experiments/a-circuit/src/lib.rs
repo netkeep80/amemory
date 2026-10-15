@@ -23,6 +23,8 @@ mod mux_n;
 mod observability;
 mod session_contract;
 mod runtime_session;
+#[cfg(all(unix, not(target_family = "wasm")))]
+pub mod native_v015_session;
 mod linksdb_session;
 mod proof_n;
 mod scenario;
