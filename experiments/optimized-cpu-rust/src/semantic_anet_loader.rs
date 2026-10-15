@@ -604,10 +604,14 @@ mod tests {
 
         // This adversarial snapshot has a CORRECTLY RECOMPUTED v0.1 SHA256
         // digest, generated independently by the real pinned upstream CI.
-        let forged: Value = serde_json::from_str(&std::fs::read_to_string(
-            std::env::var("MTS_V015_TAMPERED_SNAPSHOT_INPUT")
-                .expect("real upstream forged snapshot with recalculated digest"),
-        ).unwrap()).unwrap();
+        let forged: Value = serde_json::from_str(
+            &std::fs::read_to_string(
+                std::env::var("MTS_V015_TAMPERED_SNAPSHOT_INPUT")
+                    .expect("real upstream forged snapshot with recalculated digest"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
         assert_ne!(forged["members"], original["members"]);
         assert_ne!(forged["contentSha256"], original["contentSha256"]);
         let fabricated = json!({
