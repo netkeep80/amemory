@@ -139,6 +139,14 @@ jobs:
             'MTS_V015_TAMPERED_SNAPSHOT_INPUT=' + process.env.MTS_V015_SNAPSHOT_INPUT + '.forged' + '\n');
           NODE
 
+      - name: A1-R2 independent accepted two-role FORMAL/JSON transport probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          node experiments/a-circuit/upstream/v015-accepted-source-replay.mjs \
+            upstream-anum-docs two-role-meta-rule probe
+          echo "A1_R2_PROBE_ONLY=NOT_TRUSTED_ADMISSION"
+
       - name: A1-1a exact source-backed Rust CPU load + P1-P5 N1-N8
         run: |
           set -euo pipefail
@@ -185,6 +193,26 @@ jobs:
           git diff --check origin/main...HEAD
           git diff --check
           echo "A1_G2_NATIVE_SESSION_REAL_G1_N1_N15=PASS"
+
+      - name: A1-R2 approved two-role trusted replay and native RoleBundle falsifiers
+        shell: bash
+        run: |
+          set -euo pipefail
+          node experiments/a-circuit/upstream/v015-accepted-source-replay.mjs \
+            upstream-anum-docs two-role-meta-rule export "$RUNNER_TEMP/a1-two-role.json"
+          node experiments/a-circuit/upstream/v015-accepted-source-replay.mjs \
+            upstream-anum-docs two-role-meta-rule verify "$RUNNER_TEMP/a1-two-role.json"
+          A1_TRUSTED_ANUM_CHECKOUT="$PWD/upstream-anum-docs" \
+          MTS_V015_TWO_ROLE_SNAPSHOT_INPUT="$RUNNER_TEMP/a1-two-role.json" \
+            cargo +1.98.1 test --locked -p amemory-a-circuit \
+              a1_r2_ \
+              -- --ignored --nocapture
+          A1_TRUSTED_ANUM_CHECKOUT="$PWD/upstream-anum-docs" \
+          MTS_V015_TWO_ROLE_SNAPSHOT_INPUT="$RUNNER_TEMP/a1-two-role.json" \
+            cargo +1.98.1 test --release --locked -p amemory-a-circuit \
+              a1_r2_ \
+              -- --ignored --nocapture
+          echo "A1_R2_RUST_TRUSTED_TWO_ROLE_AND_PUBLIC_SESSION_CI=PASS"
 
       - name: Verify exact LinksDB Doublets provenance
         shell: bash

@@ -18,6 +18,15 @@ pub const COMPACT_AND_SOURCE_SHA256: &str =
     "4a5bc92e661ee1d4e0c2c5d51769805b5406651bb491345200d088c9ad23e5f3";
 const COMPACT_AND_CONTENT_SHA256: &str =
     "d332f148d42562e8585330493c78a9aa2db3f76641eb660e9804008e5276639c";
+// Author-approved positive-arity source identity, independently pinned by bytes.
+// The transport content digest stays fail-closed until CI independently obtains
+// the canonical source-backed value; never trust a caller-supplied digest.
+pub const TWO_ROLE_SOURCE_SHA256: &str =
+    "f68e8629b5d476f49366f3f59e65ef64d523d5b5f8964dcf918283144ba292f9";
+pub const TWO_ROLE_JSON_SHA256: &str =
+    "7597ac64d98b6243b3ffdc1a9bb5b6022aacb5a30ad134399c8b06457b9adf56";
+const TWO_ROLE_CONTENT_SHA256: &str =
+    "554d9bf051f95b4eff9b9afe4575e8714e56fbdb5aac4cc4538c3310df91bada";
 const COMPILER: &str = "v015-direct-formal-json-source@813a1569300b241a3b70eb282eecd8231db15e4b";
 const DENOTATION: &str = "denoteV015ResolvedSourceAnet@813a1569300b241a3b70eb282eecd8231db15e4b";
 
