@@ -149,7 +149,10 @@ pub(crate) fn inspect(
             gauge_boundary: wire(store, boundary)?,
             environment: wire(store, env)?,
             context: wire(store, context)?,
-            ancestry: chain?.into_iter().map(|h| wire(store, h)).collect::<Result<_, _>>()?,
+            ancestry: chain?
+                .into_iter()
+                .map(|h| wire(store, h))
+                .collect::<Result<_, _>>()?,
             current_endpoint: wire(store, current)?,
             theory: theory_wire,
             positive_currentness_witness: wire(store, edge)?,
@@ -157,11 +160,14 @@ pub(crate) fn inspect(
         });
     }
     result.active_contexts.sort_by(|a, b| {
-        a.context.cmp(&b.context).then(a.positive_currentness_witness.cmp(&b.positive_currentness_witness))
+        a.context.cmp(&b.context).then(
+            a.positive_currentness_witness
+                .cmp(&b.positive_currentness_witness),
+        )
     });
-    result.rejected_currentness.sort_by(|a, b| {
-        a.witness.cmp(&b.witness).then(a.reason.cmp(b.reason))
-    });
+    result
+        .rejected_currentness
+        .sort_by(|a, b| a.witness.cmp(&b.witness).then(a.reason.cmp(b.reason)));
     Ok(result)
 }
 
@@ -247,17 +253,31 @@ mod tests {
         let admitted_rule = poles(&s, two).unwrap().1;
         let foreign = pair(&mut s, theory2, admitted_rule);
         let mut positive = BTreeSet::from([
-            e1, e2, k1, k2, truth1, truth2, edge1, edge2,
-            zero, two, foreign,
+            e1, e2, k1, k2, truth1, truth2, edge1, edge2, zero, two, foreign,
         ]);
         positive.extend(roles);
         Fixture {
-            store: s, positive, c, e1, e2, k1, k2, truth1,
-            edge1, zero, two, foreign, theory1, theory2,
+            store: s,
+            positive,
+            c,
+            e1,
+            e2,
+            k1,
+            k2,
+            truth1,
+            edge1,
+            zero,
+            two,
+            foreign,
+            theory1,
+            theory2,
         }
     }
     fn reason(report: &ContextAuthorityInspection, reason: &str) -> bool {
-        report.rejected_currentness.iter().any(|r| r.reason == reason)
+        report
+            .rejected_currentness
+            .iter()
+            .any(|r| r.reason == reason)
     }
 
     #[test]
@@ -269,25 +289,48 @@ mod tests {
         assert_eq!(first.gauge_boundary, Some(wire(&f.store, f.c).unwrap()));
         assert_eq!(first.active_contexts.len(), 2);
         assert!(first.rejected_currentness.is_empty());
-        let a = first.active_contexts.iter()
-            .find(|c| c.context == wire(&f.store, f.k1).unwrap()).unwrap();
+        let a = first
+            .active_contexts
+            .iter()
+            .find(|c| c.context == wire(&f.store, f.k1).unwrap())
+            .unwrap();
         assert_eq!(a.environment, wire(&f.store, f.e1).unwrap());
         assert_eq!(a.theory, wire(&f.store, f.theory1).unwrap());
         assert_eq!(a.current_endpoint, wire(&f.store, f.truth1).unwrap());
-        assert_eq!(a.positive_currentness_witness, wire(&f.store, f.edge1).unwrap());
-        assert_eq!(a.ancestry, vec![wire(&f.store, f.k1).unwrap(), wire(&f.store, f.e1).unwrap()]);
+        assert_eq!(
+            a.positive_currentness_witness,
+            wire(&f.store, f.edge1).unwrap()
+        );
+        assert_eq!(
+            a.ancestry,
+            vec![wire(&f.store, f.k1).unwrap(), wire(&f.store, f.e1).unwrap()]
+        );
         assert_eq!(a.authorized_rules.len(), 2);
-        assert!(a.authorized_rules.iter().any(|r| r.roles.is_empty()
-            && r.positive_admission == wire(&f.store, f.zero).unwrap()));
-        assert!(a.authorized_rules.iter().any(|r| r.roles.len() == 2
-            && r.positive_admission == wire(&f.store, f.two).unwrap()));
-        assert!(!a.authorized_rules.iter().any(|r| r.positive_admission
-            == wire(&f.store, f.foreign).unwrap()));
-        let b = first.active_contexts.iter()
-            .find(|c| c.context == wire(&f.store, f.k2).unwrap()).unwrap();
+        assert!(
+            a.authorized_rules
+                .iter()
+                .any(|r| r.roles.is_empty()
+                    && r.positive_admission == wire(&f.store, f.zero).unwrap())
+        );
+        assert!(a
+            .authorized_rules
+            .iter()
+            .any(|r| r.roles.len() == 2 && r.positive_admission == wire(&f.store, f.two).unwrap()));
+        assert!(!a
+            .authorized_rules
+            .iter()
+            .any(|r| r.positive_admission == wire(&f.store, f.foreign).unwrap()));
+        let b = first
+            .active_contexts
+            .iter()
+            .find(|c| c.context == wire(&f.store, f.k2).unwrap())
+            .unwrap();
         assert_eq!(b.theory, wire(&f.store, f.theory2).unwrap());
         assert_eq!(b.authorized_rules.len(), 1);
-        assert_eq!(b.authorized_rules[0].positive_admission, wire(&f.store, f.foreign).unwrap());
+        assert_eq!(
+            b.authorized_rules[0].positive_admission,
+            wire(&f.store, f.foreign).unwrap()
+        );
         assert_eq!(first, inspect(&f.store, &f.positive).unwrap());
         assert_eq!(before, f.store.export_packed_duplets());
         assert_eq!(index, f.store.export_packed_incidence_index_image());
@@ -317,10 +360,16 @@ mod tests {
         let out = inspect(&f.store, &no_edge).unwrap();
         assert_eq!(out.active_contexts.len(), 1);
         // Physical E->K remains, but is never promoted to authority.
-        assert!(!out.active_contexts.iter().any(|a| a.context == wire(&f.store, f.k1).unwrap()));
+        assert!(!out
+            .active_contexts
+            .iter()
+            .any(|a| a.context == wire(&f.store, f.k1).unwrap()));
         let mut clone = f.store.clone();
         let rogue = pair(&mut clone, f.e2, f.k1);
-        assert_eq!(inspect(&clone, &f.positive).unwrap(), inspect(&f.store, &f.positive).unwrap());
+        assert_eq!(
+            inspect(&clone, &f.positive).unwrap(),
+            inspect(&f.store, &f.positive).unwrap()
+        );
         let mut pos = f.positive.clone();
         pos.insert(rogue);
         let conflict = inspect(&clone, &pos).unwrap();
@@ -357,8 +406,10 @@ mod tests {
         assert_eq!(inspect(&s, &before_snapshot).unwrap(), initial);
         // Replacing a RoleBundle anchor gives a different Rule Link, and
         // its physical admission cannot inherit authority from the original.
-        assert!(!initial.active_contexts[0].authorized_rules.iter().any(|r|
-            r.positive_admission == wire(&s, physical_only).unwrap()));
+        assert!(!initial.active_contexts[0]
+            .authorized_rules
+            .iter()
+            .any(|r| r.positive_admission == wire(&s, physical_only).unwrap()));
         // Nested Context ancestry, with only leaf K current, is permitted.
         let mut nested_members = f.positive.clone();
         nested_members.remove(&f.edge1);
@@ -367,8 +418,11 @@ mod tests {
         let nested_edge = pair(&mut s, f.e1, nested_k);
         nested_members.extend([nested_truth, nested_k, nested_edge]);
         let nested = inspect(&s, &nested_members).unwrap();
-        let leaf = nested.active_contexts.iter()
-            .find(|a| a.context == wire(&s, nested_k).unwrap()).unwrap();
+        let leaf = nested
+            .active_contexts
+            .iter()
+            .find(|a| a.context == wire(&s, nested_k).unwrap())
+            .unwrap();
         assert_eq!(leaf.ancestry.len(), 3);
         assert_eq!(leaf.ancestry[2], wire(&s, f.e1).unwrap());
         let packed = s.export_packed_duplets();
@@ -377,8 +431,10 @@ mod tests {
         // Component-only carrier restore: independent semantic member set is
         // retained in this test; not a new production current-pointer format.
         assert_ne!(s.instance_id(), resumed.instance_id());
-        assert_eq!(inspect(&s, &nested_members).unwrap(),
-            inspect(&resumed, &nested_members).unwrap());
+        assert_eq!(
+            inspect(&s, &nested_members).unwrap(),
+            inspect(&resumed, &nested_members).unwrap()
+        );
         println!("A1_R3_COMPONENT_SNAPSHOT_AND_FREEZE_PORTABILITY=PASS");
     }
 }
