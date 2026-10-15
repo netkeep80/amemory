@@ -263,7 +263,8 @@ mod tests {
         assert_eq!(report.candidates.len(), 1);
         assert!(report.ambiguous_members.is_empty());
         let rule = &report.candidates[0];
-        assert_eq!(rule.roles.len(), 2); // V->X and V->Y, not RoleX/RoleY names
+        // V->X and V->Y, not RoleX/RoleY presentation names.
+        assert_eq!(rule.roles.len(), 2);
         // The inspector deliberately has no active Theory selector: it attempts
         // structural classification of ALL positive members. A role Link may
         // look like an incomplete foreign admission. Such a diagnostic MUST
