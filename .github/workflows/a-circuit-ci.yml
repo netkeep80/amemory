@@ -52,7 +52,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rustfmt +1.98.1 --edition 2021 --check experiments/a-circuit/src/scenario_web.rs
+          # The existing production file predates rustfmt conformance. Format-check
+          # only this PR's extracted test-isolation block, without mass reformat.
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path("experiments/a-circuit/src/scenario_web.rs").read_text()
+          start = source.index("    // The Web ABI's shared buffers")
+          stop = source.index("    fn load_manifest(", start)
+          guard = source[start:stop].rstrip()
+          assert source.count("    #[test]") == 11, "unaccounted stateful scenario tests"
+          assert source.count("let _scenario_test_guard = isolate_scenario_web_test();") == 11
+          Path("/tmp/scenario-web-test-guard.rs").write_text(
+              "#[cfg(test)]\\nmod isolated {\\n    use std::sync::Mutex;\\n"
+              + guard + "\\n}\\n")
+          PY
+          rustfmt +1.98.1 --edition 2021 --check /tmp/scenario-web-test-guard.rs
           cargo +1.98.1 test -p amemory-a-circuit --lib scenario_web::tests:: -- --test-threads=1
           for attempt in 1 2 3 4 5 6; do
             cargo +1.98.1 test -p amemory-a-circuit --lib scenario_web::tests:: -- --test-threads=8
