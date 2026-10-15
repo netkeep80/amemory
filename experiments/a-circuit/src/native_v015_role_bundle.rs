@@ -154,6 +154,9 @@ mod tests {
         let mut cursor = ROOT_HANDLE;
         let theory = fresh(&mut s, &mut cursor);
         let bundle = fresh(&mut s, &mut cursor);
+        // The names must not themselves be V->value. Otherwise positive
+        // membership would correctly make such a name a *third* role Link.
+        let _spacer = fresh(&mut s, &mut cursor);
         let n1 = fresh(&mut s, &mut cursor);
         let n2 = fresh(&mut s, &mut cursor);
         // N10: reverse the allocation order of the two real Role Links, not
