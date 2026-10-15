@@ -205,7 +205,9 @@ impl NativeV015Session {
 
     /// A1-R3: read-only authority discovery from bound positive semantic ANet.
     /// Never selects Theory/Context, never claims Rule applicability or Γ.
-    pub fn inspect_execution_authority(&self) -> Result<ContextAuthorityInspection, NativeV015Error> {
+    pub fn inspect_execution_authority(
+        &self,
+    ) -> Result<ContextAuthorityInspection, NativeV015Error> {
         self.require_binding()?;
         for &member in self.admitted.members() {
             if !self.admitted.is_member(&self.memory.store, member) {
@@ -297,7 +299,11 @@ mod tests {
         assert_eq!(inspection.candidates.len(), 1);
         // Accepted R2 source has no complete positive Context/currentness;
         // no production authority may be inferred from its Rule admission.
-        assert!(session.inspect_execution_authority().unwrap().active_contexts.is_empty());
+        assert!(session
+            .inspect_execution_authority()
+            .unwrap()
+            .active_contexts
+            .is_empty());
         assert_eq!(inspection.candidates[0].roles.len(), 2);
 
         // Even the public constructor must reject a plausible-looking image
