@@ -2,6 +2,58 @@
 //! Reuses existing SessionIdentityV1 and SessionStateV1, not the legacy
 //! OptimizedStructuralEngine. No semantic host inputs or Γ execution.
 //! Scope is accepted compact AND with G1's controlled Unix checkout.
+//!
+//! External Rust callers cannot mint a self-declared G1 replay:
+//! ```compile_fail
+//! use amemory_optimized_cpu_probe::semantic_anet_loader::SourceReplayVerified;
+//! let _ = SourceReplayVerified::authenticate;
+//! ```
+//!
+//! Nor can they construct an upstream anchor:
+//! ```compile_fail
+//! use amemory_optimized_cpu_probe::semantic_anet_loader::UpstreamReplayAnchor;
+//! ```
+//!
+//! ```compile_fail
+//! use amemory_a_circuit::native_v015_session::NativeV015Session;
+//! let _ = NativeV015Session::set_interpreter;
+//! ```
+//!
+//! ```compile_fail
+//! use amemory_a_circuit::native_v015_session::NativeV015Session;
+//! let _ = NativeV015Session::set_theory;
+//! ```
+//!
+//! ```compile_fail
+//! use amemory_a_circuit::native_v015_session::NativeV015Session;
+//! let _ = NativeV015Session::set_context;
+//! ```
+//!
+//! ```compile_fail
+//! use amemory_a_circuit::native_v015_session::NativeV015Session;
+//! let _ = NativeV015Session::set_current;
+//! ```
+//!
+//! ```compile_fail
+//! use amemory_a_circuit::native_v015_session::NativeV015Session;
+//! let _ = NativeV015Session::set_semantic_current;
+//! ```
+//!
+//! ```compile_fail
+//! use amemory_a_circuit::native_v015_session::NativeV015Session;
+//! let _ = NativeV015Session::set_semantic_scope;
+//! ```
+//!
+//! ```compile_fail
+//! use amemory_a_circuit::native_v015_session::NativeV015Session;
+//! let _ = NativeV015Session::dispatch_rule_kind;
+//! ```
+//!
+//! ```compile_fail
+//! use amemory_a_circuit::native_v015_session::NativeV015Session;
+//! let _ = NativeV015Session::set_external_grounder;
+//! ```
+
 
 use super::runtime_session::{next_cpu_session_id, CpuMemoryInstance};
 use super::session_contract::{SessionIdentityV1, SessionStateV1};
