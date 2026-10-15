@@ -34,6 +34,10 @@
 //! ```compile_fail
 //! let _ = amemory_a_circuit::native_v015_session::NativeV015Session::set_external_grounder;
 //! ```
+use super::native_v015_authority::inspect as inspect_execution_authority_structurally;
+pub use super::native_v015_authority::{
+    ActiveContextAuthority, ContextAuthorityInspection, RejectedCurrentness,
+};
 use super::native_v015_role_bundle::inspect as inspect_role_bundles_structurally;
 pub use super::native_v015_role_bundle::{RoleBundleCandidate, RoleBundleInspection};
 use super::runtime_session::{next_cpu_session_id, CpuMemoryInstance};
@@ -49,6 +53,7 @@ pub enum NativeV015Error {
     TrustOrLoad(SemanticLoadError),
     InvalidBinding,
     InvalidRoleBundleTopology,
+    InvalidContextAuthorityTopology,
     Closed,
     GammaNotImplemented,
 }
@@ -198,6 +203,19 @@ impl NativeV015Session {
             .map_err(|_| NativeV015Error::InvalidRoleBundleTopology)
     }
 
+    /// A1-R3: read-only authority discovery from bound positive semantic ANet.
+    /// Never selects Theory/Context, never claims Rule applicability or Γ.
+    pub fn inspect_execution_authority(&self) -> Result<ContextAuthorityInspection, NativeV015Error> {
+        self.require_binding()?;
+        for &member in self.admitted.members() {
+            if !self.admitted.is_member(&self.memory.store, member) {
+                return Err(NativeV015Error::InvalidBinding);
+            }
+        }
+        inspect_execution_authority_structurally(&self.memory.store, self.admitted.members())
+            .map_err(|_| NativeV015Error::InvalidContextAuthorityTopology)
+    }
+
     pub fn is_member(&self, handle: Handle) -> Result<bool, NativeV015Error> {
         self.require_binding()?;
         Ok(self.admitted.is_member(&self.memory.store, handle))
@@ -277,6 +295,9 @@ mod tests {
         }
         let inspection = session.inspect_role_bundles().unwrap();
         assert_eq!(inspection.candidates.len(), 1);
+        // Accepted R2 source has no complete positive Context/currentness;
+        // no production authority may be inferred from its Rule admission.
+        assert!(session.inspect_execution_authority().unwrap().active_contexts.is_empty());
         assert_eq!(inspection.candidates[0].roles.len(), 2);
 
         // Even the public constructor must reject a plausible-looking image
