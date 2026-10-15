@@ -110,7 +110,8 @@ function compile(f, source) {
   };
 }
 const trusted = (source) => ({ ...fixture(), source, expectedSourceSha256: pin[source.format + "Sha"] });
-const a = compile(fixture(), formal), b = compile(fixture(), json);
+const firstMemory = fixture();
+const a = compile(firstMemory, formal), b = compile(firstMemory, json);
 const eq = (x, y) => JSON.stringify(x) === JSON.stringify(y);
 require_(a.sourceAnet === b.sourceAnet, "FORMAL/JSON native source parity");
 require_(eq(a.snapshot.topology, b.snapshot.topology) &&
