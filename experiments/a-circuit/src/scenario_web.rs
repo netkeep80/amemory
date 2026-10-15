@@ -1828,28 +1828,15 @@ mod tests {
     const MUX1_LIFECYCLE: &str =
         include_str!("../scenarios/mux1-lifecycle-v1.json");
 
-    // CI-UNBLOCK PRE-FIX WITNESS: two independent test transactions can
-    // interleave despite the individual process-global Mutex guards.
-    #[test]
-    fn ci_unblock_cross_test_contamination_witness() {
-        let (cleared_tx, cleared_rx) = std::sync::mpsc::channel();
-        let (written_tx, written_rx) = std::sync::mpsc::channel();
-        let observer = std::thread::spawn(move || {
-            clear_report_and_error();
-            cleared_tx.send(()).unwrap();
-            written_rx.recv().unwrap();
-            amemory_scenario_error_available()
-        });
-        cleared_rx.recv().unwrap();
-        store_error(ScenarioTransportErrorV1::Serialize {
-            schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
-            message: "concurrent test-owned error".to_owned(),
-        });
-        written_tx.send(()).unwrap();
-        let observed = observer.join().unwrap();
-        assert_eq!(observed, 1, "another test can poison a cleared error buffer");
-        println!("CI_UNBLOCK_CONCURRENT_BUFFER_CONTAMINATION=REPRODUCED");
-        clear_report_and_error();
+    // The Web ABI's shared buffers are process-global. A test needs exclusive
+    // ownership for its entire clear -> invoke -> inspect sequence, not merely
+    // the lock held by each individual public ABI call. Production is untouched.
+    static SCENARIO_WEB_TEST_TRANSACTION: Mutex<()> = Mutex::new(());
+
+    fn isolate_scenario_web_test() -> std::sync::MutexGuard<'static, ()> {
+        SCENARIO_WEB_TEST_TRANSACTION
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     fn load_manifest(source: &str) {
@@ -1877,6 +1864,7 @@ mod tests {
 
     #[test]
     fn preset_registry_transport_derives_summary_and_exact_manifest() {
+        let _scenario_test_guard = isolate_scenario_web_test();
         clear_preset_buffers();
         clear_report_and_error();
 
@@ -1974,6 +1962,7 @@ mod tests {
 
     #[test]
     fn transport_limits_json_matches_bounded_latest_policy() {
+        let _scenario_test_guard = isolate_scenario_web_test();
         let limits: ScenarioTransportLimitsV1 =
             serde_json::from_str(SCENARIO_LIMITS_JSON).unwrap();
         assert_eq!(limits.schema_version, SCENARIO_TRANSPORT_SCHEMA_VERSION);
@@ -2027,6 +2016,7 @@ mod tests {
 
     #[test]
     fn live_history_policy_codes_and_bounds_are_explicit() {
+        let _scenario_test_guard = isolate_scenario_web_test();
         assert_eq!(
             live_retention_mode_from_code(0),
             Some(LiveRetentionModeV1::Latest)
@@ -2085,6 +2075,7 @@ mod tests {
 
     #[test]
     fn live_history_latest_and_ring_own_complete_reports_once() {
+        let _scenario_test_guard = isolate_scenario_web_test();
         let (mut history, reports) = live_history_fixture();
 
         history.set_policy(
@@ -2155,6 +2146,7 @@ mod tests {
 
     #[test]
     fn live_history_explicit_export_moves_latest_without_duplicate_owner() {
+        let _scenario_test_guard = isolate_scenario_web_test();
         let (mut history, reports) = live_history_fixture();
         history.record_run(&reports[0]).unwrap();
         history.record_run(&reports[1]).unwrap();
@@ -2212,6 +2204,7 @@ mod tests {
 
     #[test]
     fn bounded_report_overflow_is_explicit_and_never_partially_stored() {
+        let _scenario_test_guard = isolate_scenario_web_test();
         load_manifest(MUX1_LIFECYCLE);
         let report = execute_manifest_bytes(
             MUX1_LIFECYCLE.len() as u32,
@@ -2242,6 +2235,7 @@ mod tests {
 
     #[test]
     fn oversized_error_is_replaced_by_small_structured_error_limit() {
+        let _scenario_test_guard = isolate_scenario_web_test();
         clear_report_and_error();
         store_error(ScenarioTransportErrorV1::Serialize {
             schema_version: SCENARIO_TRANSPORT_SCHEMA_VERSION,
@@ -2264,6 +2258,7 @@ mod tests {
 
     #[test]
     fn output_clear_preserves_manifest_for_semantically_equal_rerun() {
+        let _scenario_test_guard = isolate_scenario_web_test();
         load_manifest(MUX1_LIFECYCLE);
         assert_eq!(
             amemory_scenario_execute_json(
@@ -2327,6 +2322,7 @@ mod tests {
 
     #[test]
     fn browser_transport_exports_real_persistent_scenario_report() {
+        let _scenario_test_guard = isolate_scenario_web_test();
         load_manifest(MUX1_LIFECYCLE);
 
         assert_eq!(
@@ -2377,6 +2373,7 @@ mod tests {
 
     #[test]
     fn browser_transport_reports_unsupported_backend_without_fallback() {
+        let _scenario_test_guard = isolate_scenario_web_test();
         load_manifest(MUX1_LIFECYCLE);
 
         assert_eq!(
@@ -2409,6 +2406,7 @@ mod tests {
 
     #[test]
     fn browser_transport_rejects_invalid_backend_code_and_manifest_length() {
+        let _scenario_test_guard = isolate_scenario_web_test();
         load_manifest(MUX1_LIFECYCLE);
         assert_eq!(
             amemory_scenario_execute_json(
