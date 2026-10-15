@@ -173,6 +173,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          rustfmt +1.98.1 --edition 2021 --check experiments/a-circuit/src/native_v015_role_bundle.rs
           rustfmt +1.98.1 --edition 2021 --check \
             experiments/a-circuit/src/native_v015_session.rs
           A1_TRUSTED_ANUM_CHECKOUT="$PWD/upstream-anum-docs" \

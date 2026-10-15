@@ -33,6 +33,8 @@
 //! ```compile_fail
 //! let _ = amemory_a_circuit::native_v015_session::NativeV015Session::set_external_grounder;
 //! ```
+use super::native_v015_role_bundle::inspect as inspect_role_bundles_structurally;
+pub use super::native_v015_role_bundle::{RoleBundleCandidate, RoleBundleInspection};
 use super::runtime_session::{next_cpu_session_id, CpuMemoryInstance};
 use super::session_contract::{SessionIdentityV1, SessionStateV1};
 use amemory_optimized_cpu_probe::{
@@ -45,6 +47,7 @@ use std::path::Path;
 pub enum NativeV015Error {
     TrustOrLoad(SemanticLoadError),
     InvalidBinding,
+    InvalidRoleBundleTopology,
     Closed,
     GammaNotImplemented,
 }
@@ -168,6 +171,20 @@ impl NativeV015Session {
         })
     }
 
+    /// Source-backed, read-only STRUCTURAL candidates only. No active Theory
+    /// or executable Rule authority is selected; A9b is research-only.
+    /// Returns canonical structural wires, never transferable physical handles.
+    pub fn inspect_role_bundles(&self) -> Result<RoleBundleInspection, NativeV015Error> {
+        self.require_binding()?;
+        for &member in self.admitted.members() {
+            if !self.admitted.is_member(&self.memory.store, member) {
+                return Err(NativeV015Error::InvalidBinding);
+            }
+        }
+        inspect_role_bundles_structurally(&self.memory.store, self.admitted.members())
+            .map_err(|_| NativeV015Error::InvalidRoleBundleTopology)
+    }
+
     pub fn is_member(&self, handle: Handle) -> Result<bool, NativeV015Error> {
         self.require_binding()?;
         Ok(self.admitted.is_member(&self.memory.store, handle))
@@ -242,6 +259,27 @@ mod tests {
         noisy.store.ensure_start_self_closed(noise).unwrap();
         let mut b = NativeV015Session::from_verified(noisy, &candidate, &verified).unwrap();
         let second = b.observe().unwrap();
+        // A1-3 G1: source-backed compact AND; zero RoleBundle arity only.
+        let first_roles = a.inspect_role_bundles().unwrap();
+        let second_roles = b.inspect_role_bundles().unwrap();
+        assert_eq!(first_roles, second_roles); // canonical wires, not u32
+        assert_eq!(first_roles.candidates.len(), 4);
+        assert!(first_roles.unclassified_positive_members.is_empty());
+        assert!(first_roles.malformed_sequence_members.is_empty());
+        assert!(first_roles.ambiguous_members.is_empty());
+        assert!(first_roles
+            .candidates
+            .iter()
+            .all(|r| { r.roles.is_empty() && r.output_templates.len() == 1 }));
+        assert_eq!(
+            first_roles
+                .candidates
+                .iter()
+                .map(|r| r.positive_admission.clone())
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            first.positive_members.len()
+        );
         assert_ne!(first.session_id, second.session_id);
         assert_ne!(first.memory_id, second.memory_id);
         assert_ne!(first.store_instance_id, second.store_instance_id);
@@ -297,6 +335,10 @@ mod tests {
             .load_packed_duplets(&[(ROOT_HANDLE, ROOT_HANDLE)])
             .unwrap();
         assert_eq!(a.observe(), Err(NativeV015Error::InvalidBinding));
+        assert_eq!(
+            a.inspect_role_bundles(),
+            Err(NativeV015Error::InvalidBinding)
+        );
         assert_eq!(a.step(), Err(NativeV015Error::InvalidBinding));
         assert_eq!(a.run(), Err(NativeV015Error::InvalidBinding));
         // N9: failed admission never produces an observable Session.
@@ -310,6 +352,7 @@ mod tests {
         b.close().unwrap();
         assert!(b.is_closed());
         assert_eq!(b.observe(), Err(NativeV015Error::Closed));
+        assert_eq!(b.inspect_role_bundles(), Err(NativeV015Error::Closed));
         assert_eq!(b.step(), Err(NativeV015Error::Closed));
         assert_eq!(b.run(), Err(NativeV015Error::Closed));
         assert_eq!(b.close(), Err(NativeV015Error::Closed));
