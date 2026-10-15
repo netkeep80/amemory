@@ -168,6 +168,7 @@ pub(crate) fn inspect(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use amemory_optimized_cpu_probe::structural::StructuralStoreV1;
 
     fn pair(s: &mut OptimizedLinkStore, a: Handle, b: Handle) -> Handle {
         s.ensure_pair(a, b).unwrap()
