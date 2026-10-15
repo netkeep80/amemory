@@ -262,6 +262,7 @@ mod tests {
         let report = a.inspect_role_bundles().unwrap();
         assert_eq!(report.candidates.len(), 1);
         assert!(report.ambiguous_members.is_empty());
+        eprintln!("A1_R2_STRUCTURAL_INSPECTOR_EVIDENCE={report:?}");
         assert!(report.malformed_sequence_members.is_empty());
         let rule = &report.candidates[0];
         assert_eq!(rule.roles.len(), 2); // V->X and V->Y, not RoleX/RoleY names
