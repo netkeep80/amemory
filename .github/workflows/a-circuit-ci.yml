@@ -183,7 +183,8 @@ jobs:
           set -euo pipefail
           rustfmt +1.98.1 --edition 2021 --check experiments/a-circuit/src/native_v015_role_bundle.rs
           rustfmt +1.98.1 --edition 2021 --check \
-            experiments/a-circuit/src/native_v015_session.rs
+            experiments/a-circuit/src/native_v015_session.rs \
+            experiments/a-circuit/src/native_v015_authority.rs
           A1_TRUSTED_ANUM_CHECKOUT="$PWD/upstream-anum-docs" \
             cargo +1.98.1 test --locked -p amemory-a-circuit \
               a1_g2_native_bound_session_real_g1_n1_n15 -- --ignored --nocapture
@@ -193,6 +194,18 @@ jobs:
           git diff --check origin/main...HEAD
           git diff --check
           echo "A1_G2_NATIVE_SESSION_REAL_G1_N1_N15=PASS"
+
+      - name: A1-R3 component authority discovery (debug and release, no trusted E2E)
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustfmt +1.98.1 --edition 2021 --check \
+            experiments/a-circuit/src/native_v015_authority.rs \
+            experiments/a-circuit/src/native_v015_session.rs
+          cargo +1.98.1 test --locked -p amemory-a-circuit a1_r3_component_ -- --nocapture
+          cargo +1.98.1 test --release --locked -p amemory-a-circuit a1_r3_component_ -- --nocapture
+          echo "A1_R3_COMPONENT_INSPECTION=PASS"
+          echo "A1_R3_TRUSTED_CONTEXT_E2E=BLOCKED_AUTHOR_SOURCE_APPROVAL"
 
       - name: A1-R2 approved two-role trusted replay and native RoleBundle falsifiers
         shell: bash
