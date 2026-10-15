@@ -152,6 +152,23 @@ jobs:
           git diff --exit-code -- experiments/optimized-cpu-rust/src/semantic_anet_loader.rs
           echo "A1_COMPONENT_RUST_LOADER_P1_P5_N1_N8=PASS"
 
+      - name: A1-2 G1 real trusted upstream replay + production admission N1-N12
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustfmt +1.98.1 --edition 2021 --check \
+            experiments/optimized-cpu-rust/src/semantic_anet_loader.rs \
+            experiments/optimized-cpu-rust/src/semantic_anet_trust.rs
+          A1_TRUSTED_ANUM_CHECKOUT="$PWD/upstream-anum-docs" \
+          cargo +1.98.1 test --locked -p amemory-optimized-cpu-probe \
+            a1_g1_trusted_production_boundary_n1_n12 -- --ignored --nocapture
+          A1_TRUSTED_ANUM_CHECKOUT="$PWD/upstream-anum-docs" \
+          cargo +1.98.1 test --release --locked -p amemory-optimized-cpu-probe \
+            a1_g1_trusted_production_boundary_n1_n12 -- --ignored --nocapture
+          git diff --check origin/main...HEAD
+          git diff --check
+          echo "A1_G1_TRUSTED_PRODUCTION_N1_N12=PASS"
+
       - name: Verify exact LinksDB Doublets provenance
         shell: bash
         run: |
